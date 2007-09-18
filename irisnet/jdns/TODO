@@ -1,0 +1,6 @@
+(nothing)
+
+but, this stuff couldn't hurt:
+  support for other DNS record types (SOA, NSPTR)
+  detect CNAME loops, rather than looping max times in order to fail
+  don't follow CNAME for SRV (or so I'm told?)
