@@ -12,7 +12,7 @@ HEADERS += \
 	$$PWD/irisnetplugin.h \
 	$$PWD/irisnetglobal.h \
 	$$PWD/irisnetglobal_p.h \
-	$$PWD/processquit.h \
+	#$$PWD/processquit.h \
 	$$PWD/netinterface.h \
 	$$PWD/netnames.h
 
@@ -20,7 +20,7 @@ SOURCES += \
 	$$PWD/jdnsshared.cpp \
 	$$PWD/irisnetplugin.cpp \
 	$$PWD/irisnetglobal.cpp \
-	$$PWD/processquit.cpp \
+	#$$PWD/processquit.cpp \
 	$$PWD/netinterface.cpp \
 	$$PWD/netnames.cpp
 

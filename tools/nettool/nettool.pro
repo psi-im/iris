@@ -4,8 +4,7 @@ QT -= gui
 QT += network
 DESTDIR = ../../bin
 
-#DEFINES += IRISNET_STATIC
 INCLUDEPATH += ../../include
-include(../../src/irisnet/irisnet.pri)
+include(../../src/irisnet/noncore/noncore.pri)
 
 SOURCES += main.cpp
