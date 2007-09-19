@@ -21,7 +21,7 @@
 #ifndef JDNSSHARED_H
 #define JDNSSHARED_H
 
-#include "jdns/qjdns.h"
+#include "qjdns.h"
 
 class JDnsShared;
 class JDnsSharedPrivate;

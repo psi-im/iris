@@ -8,8 +8,4 @@ windows:DLLDESTDIR = $$IRIS_BASE/bin
 
 VERSION = 1.0.0
 
-HEADERS += \
-	jdnsshared.h
-
-SOURCES += \
-	jdnsshared.cpp
+include(corelib.pri)
