@@ -5,9 +5,7 @@ QT += network
 DESTDIR = ../../bin
 
 #DEFINES += IRISNET_STATIC
-#include(irisnet.pri)
-
-INCLUDEPATH += ../../src/irisnet/corelib
-LIBS += -L../../lib -lirisnetcore
+INCLUDEPATH += ../../include
+include(../../src/irisnet/irisnet.pri)
 
 SOURCES += main.cpp
