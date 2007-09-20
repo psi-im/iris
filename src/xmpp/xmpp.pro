@@ -8,4 +8,6 @@ CONFIG  += staticlib create_prl
 
 VERSION = 1.0.0
 
+CONFIG += crypto
+
 include(xmpp.pri)

@@ -2,7 +2,6 @@ IRIS_BASE = $PWD/../..
 include(../../build.pri)
 
 QT *= xml network qt3support
-CONFIG *= crypto
 
 INCLUDEPATH += $$PWD/../irisnet/corelib $$PWD/../irisnet/noncore $$PWD/../irisnet/noncore/legacy
 iris_bundle:{
