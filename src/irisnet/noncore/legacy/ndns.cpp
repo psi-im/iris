@@ -99,9 +99,9 @@ void NDns::stop()
 //!
 //! Returns the IP address as a 32-bit integer in host-byte-order.  This will be 0 if the lookup failed.
 //! \sa resultsReady()
-uint NDns::result() const
+QHostAddress NDns::result() const
 {
-	return addr.toIPv4Address();
+	return addr;
 }
 
 //!

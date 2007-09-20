@@ -1,6 +1,8 @@
 IRIS_BASE = $PWD/../..
 include(../../build.pri)
 
+QT *= xml network qt3support
+
 INCLUDEPATH += $$PWD/../irisnet/corelib $$PWD/../irisnet/noncore
 iris_bundle:{
 	include(../irisnet/noncore/noncore.pri)
