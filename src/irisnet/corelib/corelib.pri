@@ -1,3 +1,5 @@
+include(../../../build.pri)
+
 QT *= network
 
 # libidn
@@ -30,4 +32,4 @@ SOURCES += \
 
 #include(legacy/legacy.pri)
 
-include(../appledns/appledns.pri)
+appledns:appledns_bundle:include(../appledns/appledns.pri)

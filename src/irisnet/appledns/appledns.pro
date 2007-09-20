@@ -7,4 +7,5 @@ DESTDIR = $$IRIS_BASE/plugins
 
 VERSION = 1.0.0
 
+INCLUDEPATH *= $$PWD/../corelib
 include(appledns.pri)
