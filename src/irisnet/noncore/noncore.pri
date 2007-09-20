@@ -1,6 +1,7 @@
 IRIS_BASE = $$PWD/../../..
-
 include(../../../build.pri)
+
+QT *= network
 
 DEFINES += IRISNET_STATIC
 

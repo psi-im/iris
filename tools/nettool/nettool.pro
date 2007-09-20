@@ -1,4 +1,5 @@
 IRIS_BASE = ../..
+include(../../build.pri)
 
 CONFIG += console
 CONFIG -= app_bundle
@@ -6,15 +7,13 @@ QT -= gui
 QT += network
 DESTDIR = ../../bin
 
-INCLUDEPATH += ../../include
+INCLUDEPATH += ../../include ../../include/iris
 
-# bundle just irisnet
-#include(../../src/irisnet/noncore/noncore.pri)
-
-# link against just irisnet
-#LIBS += -L$$IRIS_BASE/lib -lirisnet
-
-# bundle all of iris
-include(../../iris.pri)
+iris_bundle:{
+	include(../../src/irisnet/noncore/noncore.pri)
+}
+else {
+	LIBS += -L$$IRIS_BASE/lib -lirisnet
+}
 
 SOURCES += main.cpp
