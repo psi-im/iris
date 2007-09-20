@@ -40,7 +40,7 @@ HEADERS += \
 	$$PWD/xmpp-im/xmpp_ibb.h \
 	$$PWD/xmpp-im/filetransfer.h \
 	$$PWD/xmpp-core/xmpp.h \
-	$$PWD/xmpp-core/jid.h \
+	$$PWD/xmpp-core/xmpp_jid.h \
 	$$PWD/xmpp-im/xmpp_url.h \
 	$$PWD/xmpp-im/xmpp_chatstate.h \
 	$$PWD/xmpp-im/xmpp_client.h \
