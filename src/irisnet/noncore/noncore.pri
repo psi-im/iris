@@ -19,3 +19,5 @@ HEADERS += \
 
 SOURCES += \
 	$$PWD/processquit.cpp
+
+include(legacy/legacy.pri)

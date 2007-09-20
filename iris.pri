@@ -1,2 +1,11 @@
-include(src/irisnet/noncore/noncore.pri)
-include(src/xmpp/xmpp.pri)
+IRIS_BASE = $$PWD
+include(build.pri)
+
+INCLUDEPATH += $$IRIS_BASE/include $$IRIS_BASE/include/iris
+
+iris_bundle:{
+	include(src/xmpp/xmpp.pri)
+}
+else {
+	LIBS += -L$$IRIS_BASE/lib -liris
+}
