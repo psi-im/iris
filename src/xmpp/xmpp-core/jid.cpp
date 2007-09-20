@@ -20,10 +20,10 @@
 
 #include "jid.h"
 
-#include <QCoreApplication>
+#include <QApplication>
 #include <QByteArray>
 #include <QHash>
-//#include <libidn/stringprep.h>
+#include <libidn/stringprep.h>
 
 
 using namespace XMPP;
@@ -36,10 +36,7 @@ class StringPrepCache : public QObject
 public:
 	static bool nameprep(const QString &in, int maxbytes, QString *out)
 	{
-		Q_UNUSED(maxbytes);
-		*out = in;
-		return true;
-		/*if(in.isEmpty())
+		if(in.isEmpty())
 		{
 			if(out)
 				*out = QString();
@@ -70,15 +67,12 @@ public:
 		that->nameprep_table.insert(in, new Result(norm));
 		if(out)
 			*out = norm;
-		return true;*/
+		return true;
 	}
 
 	static bool nodeprep(const QString &in, int maxbytes, QString *out)
 	{
-		Q_UNUSED(maxbytes);
-		*out = in;
-		return true;
-		/*if(in.isEmpty())
+		if(in.isEmpty())
 		{
 			if(out)
 				*out = QString();
@@ -109,15 +103,12 @@ public:
 		that->nodeprep_table.insert(in, new Result(norm));
 		if(out)
 			*out = norm;
-		return true;*/
+		return true;
 	}
 
 	static bool resourceprep(const QString &in, int maxbytes, QString *out)
 	{
-		Q_UNUSED(maxbytes);
-		*out = in;
-		return true;
-		/*if(in.isEmpty())
+		if(in.isEmpty())
 		{
 			if(out)
 				*out = QString();
@@ -148,7 +139,7 @@ public:
 		that->resourceprep_table.insert(in, new Result(norm));
 		if(out)
 			*out = norm;
-		return true;*/
+		return true;
 	}
 
 private:
@@ -185,7 +176,7 @@ private:
 	}
 
 	StringPrepCache()
-		: QObject(QCoreApplication::instance())
+		: QObject(qApp)
 	{
 	}
 
