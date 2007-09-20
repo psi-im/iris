@@ -1,7 +1,7 @@
 IRIS_BASE = ../..
 
 TEMPLATE = lib
-QT      -= gui
+#QT      -= gui
 TARGET   = iris
 DESTDIR  = $$IRIS_BASE/lib
 CONFIG  += staticlib create_prl

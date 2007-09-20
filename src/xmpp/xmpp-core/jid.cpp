@@ -18,7 +18,7 @@
  *
  */
 
-#include "jid.h"
+#include "xmpp_jid.h"
 
 #include <QApplication>
 #include <QByteArray>
