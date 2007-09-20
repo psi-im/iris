@@ -1,9 +1,16 @@
 IRIS_BASE = $$PWD/../../..
 
+include(../../../build.pri)
+
 DEFINES += IRISNET_STATIC
 
-#LIBS += -L$$IRIS_BASE/lib -lirisnetcore
-include(../corelib/corelib.pri)
+irisnetcore_bundle:{
+	include(../corelib/corelib.pri)
+}
+else {
+	LIBS += -L$$IRIS_BASE/lib -lirisnetcore
+}
+
 INCLUDEPATH += $$PWD/../corelib
 
 HEADERS += \

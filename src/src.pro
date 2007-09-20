@@ -1,2 +1,6 @@
 TEMPLATE = subdirs
-SUBDIRS = irisnet
+
+include(../build.pri)
+
+SUBDIRS += irisnet
+!iris_bundle:SUBDIRS += xmpp
