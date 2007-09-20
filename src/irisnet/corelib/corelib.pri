@@ -29,3 +29,5 @@ SOURCES += \
 	$$PWD/netnames_jdns.cpp
 
 #include(legacy/legacy.pri)
+
+include(../appledns/appledns.pri)
