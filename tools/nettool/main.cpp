@@ -19,9 +19,9 @@
  */
 
 #include <stdio.h>
-#include "processquit.h"
-#include "netinterface.h"
-#include "netnames.h"
+#include <iris/processquit.h>
+#include <iris/netinterface.h>
+#include <iris/netnames.h>
 
 using namespace XMPP;
 
