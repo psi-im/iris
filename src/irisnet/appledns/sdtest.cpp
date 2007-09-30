@@ -1,4 +1,5 @@
 #include <QtCore>
+#include <QtNetwork>
 #include "qdnssd.h"
 
 class Command
@@ -35,6 +36,29 @@ static QString nameToString(const QByteArray &in)
 		at += len;
 	}
 	return parts.join(".");
+}
+
+static QString recordToDesc(const QDnsSd::Record &rec)
+{
+	QString desc;
+
+	if(rec.rrtype == 1)
+	{
+		quint32 *p = (quint32 *)rec.rdata.data();
+		desc = QHostAddress(*p).toString();
+	}
+	else if(rec.rrtype == 28)
+	{
+		desc = QHostAddress((quint8 *)rec.rdata.data()).toString();
+	}
+	else if(rec.rrtype == 12)
+	{
+		desc = QString("[%1]").arg(nameToString(rec.rdata));
+	}
+	else
+		desc = QString("%1 bytes").arg(rec.rdata.size());
+
+	return desc;
 }
 
 class App : public QObject
@@ -110,27 +134,10 @@ private slots:
 			return;
 		}
 
-		QString desc;
-		if(rec.rrtype == 1)
-		{
-			quint32 *p = (quint32 *)rec.rdata.data();
-			desc = QHostAddress(*p).toString();
-		}
-		else if(rec.rrtype == 28)
-		{
-			desc = QHostAddress((quint8 *)rec.rdata.data()).toString();
-		}
-		else if(rec.rrtype == 12)
-		{
-			desc = QString("[%1]").arg(nameToString(rec.rdata));
-		}
-		else
-			desc = QString("%1 bytes").arg(rec.rdata.size());
-
 		foreach(const QDnsSd::Record &rec, result.added)
-			printf("%2d: added:   %s, ttl=%d\n", c.id, qPrintable(desc), rec.ttl);
+			printf("%2d: added:   %s, ttl=%d\n", c.id, qPrintable(recordToDesc(rec)), rec.ttl);
 		foreach(const QDnsSd::Record &rec, result.removed)
-			printf("%2d: removed: %s, ttl=%d\n", c.id, qPrintable(desc), rec.ttl);
+			printf("%2d: removed: %s, ttl=%d\n", c.id, qPrintable(recordToDesc(rec)), rec.ttl);
 	}
 
 	void dns_browseResult(int id, const QDnsSd::BrowseResult &result)
@@ -173,7 +180,7 @@ private slots:
 		if(!result.success)
 		{
 			QString errstr;
-			if(c.errorCode == QDnsSd::RegResult::ErrorConflict)
+			if(result.errorCode == QDnsSd::RegResult::ErrorConflict)
 				errstr = "conflict";
 			else
 				errstr = "generic";
@@ -185,7 +192,7 @@ private slots:
 	}
 };
 
-#include "main.moc"
+#include "sdtest.moc"
 
 void usage()
 {
