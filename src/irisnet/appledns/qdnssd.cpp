@@ -396,7 +396,7 @@ public:
 		req->_sdref = new DSReference;
 
 		DNSServiceErrorType err = DNSServiceRegister(
-			req->_sdref->data(), 0, kDNSServiceFlagsNoAutoRename,
+			req->_sdref->data(), kDNSServiceFlagsNoAutoRename, 0,
 			serviceName.constData(), serviceType.constData(),
 			domain.constData(), NULL, sport, txtRecord.size(),
 			txtRecord.data(), cb_regReply, req);
