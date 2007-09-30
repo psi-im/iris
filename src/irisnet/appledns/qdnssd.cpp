@@ -234,14 +234,14 @@ public:
 	int regIdForRecId(int rec_id) const
 	{
 		QHashIterator<int,Request*> it(_requestsById);
-		while(i.hasNext())
+		while(it.hasNext())
 		{
-			i.next();
-			Request *req = i.value();
+			it.next();
+			Request *req = it.value();
 			foreach(const SubRecord *srec, req->_subRecords)
 			{
 				if(srec->_id == rec_id)
-					return i.key();
+					return it.key();
 			}
 		}
 		return -1;
@@ -395,7 +395,7 @@ public:
 
 		req->_sdref = new DSReference;
 
-		DNSServiceErrorType err = DNSServiceResolve(
+		DNSServiceErrorType err = DNSServiceRegister(
 			req->_sdref->data(), 0, kDNSServiceFlagsNoAutoRename,
 			serviceName.constData(), serviceType.constData(),
 			domain.constData(), NULL, sport, txtRecord.size(),
@@ -432,7 +432,7 @@ public:
 
 	int recordAdd(int reg_id, const Record &rec)
 	{
-		Request *req = _requestsById.value(id);
+		Request *req = _requestsById.value(reg_id);
 		if(!req)
 			return -1;
 
@@ -461,7 +461,7 @@ public:
 	{
 		// FIXME: optimize...
 
-		Request *req = _requestsById(reg_id);
+		Request *req = _requestsById.value(reg_id);
 		if(!req)
 			return false;
 
@@ -499,7 +499,7 @@ public:
 			return;
 
 		// this can't fail
-		Request *req = _requestsById(reg_id);
+		Request *req = _requestsById.value(reg_id);
 
 		// this can't fail either
 		int at = -1;
@@ -772,11 +772,12 @@ private:
 		const char *txtRecord, void *context)
 	{
 		Q_UNUSED(ref);
+		Q_UNUSED(flags);
 		Q_UNUSED(interfaceIndex);
 
 		Request *req = static_cast<Request *>(context);
-		req->_self->handle_resolveReply(req, flags, errorCode,
-			fullname, hosttarget, port, txtLen, txtRecord);
+		req->_self->handle_resolveReply(req, errorCode, fullname,
+			hosttarget, port, txtLen, txtRecord);
 	}
 
 	static void cb_regReply(DNSServiceRef ref,
@@ -844,10 +845,9 @@ private:
 			req->_doSignal = true;
 	}
 
-	void handle_resolveReply(Request *req, DNSServiceFlags flags,
-		DNSServiceErrorType errorCode, const char *fullname,
-		const char *hosttarget, uint16_t port, uint16_t txtLen,
-		const char *txtRecord)
+	void handle_resolveReply(Request *req, DNSServiceErrorType errorCode,
+		const char *fullname, const char *hosttarget, uint16_t port,
+		uint16_t txtLen, const char *txtRecord)
 	{
 		if(errorCode != kDNSServiceErr_NoError)
 		{
@@ -889,7 +889,7 @@ private:
 			return;
 		}
 
-		req->_domain = QByteArray(domain);
+		req->_regDomain = QByteArray(domain);
 		req->_doSignal = true;
 	}
 };
