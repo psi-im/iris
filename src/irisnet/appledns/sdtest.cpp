@@ -2,6 +2,13 @@
 #include <QtNetwork>
 #include "qdnssd.h"
 
+// for ntohl
+#ifdef Q_OS_WIN
+# include <windows.h>
+#else
+# include <netinet/in.h>
+#endif
+
 class Command
 {
 public:
@@ -45,7 +52,7 @@ static QString recordToDesc(const QDnsSd::Record &rec)
 	if(rec.rrtype == 1)
 	{
 		quint32 *p = (quint32 *)rec.rdata.data();
-		desc = QHostAddress(*p).toString();
+		desc = QHostAddress(ntohl(*p)).toString();
 	}
 	else if(rec.rrtype == 28)
 	{
