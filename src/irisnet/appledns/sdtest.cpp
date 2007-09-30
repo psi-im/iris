@@ -118,7 +118,7 @@ public slots:
 			}
 			else if(c.type == Command::Browse)
 			{
-				c.dnsId = dns->browse(c.name.toLatin1(), c.domain.toLatin1());
+				c.dnsId = dns->browse(c.stype.toLatin1(), c.domain.toLatin1());
 			}
 			else if(c.type == Command::Resolve)
 			{
@@ -227,7 +227,7 @@ void usage()
 	printf(" options: --txt=str0,...,strn\n");
 	printf("\n");
 	printf(" q=name,type#                   query for a record\n");
-	printf(" b=type(,domain)                browse for a service type\n");
+	printf(" b=type(,domain)                browse for services\n");
 	printf(" r=name,type(,domain)           resolve a service\n");
 	printf(" e=name,type,port(,domain)      register a service\n");
 	printf("\n");
