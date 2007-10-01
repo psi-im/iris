@@ -126,7 +126,11 @@ public slots:
 			}
 			else if(c.type == Command::Reg)
 			{
-				QByteArray txtRecord = QDnsSd::createTxtRecord(c.txt);
+				QList<QByteArray> strings;
+				foreach(const QString &str, c.txt)
+					strings += str.toUtf8();
+
+				QByteArray txtRecord = QDnsSd::createTxtRecord(strings);
 				if(txtRecord.isEmpty())
 				{
 					// TODO: error?
