@@ -1020,7 +1020,7 @@ QList<QByteArray> QDnsSd::parseTxtRecord(const QByteArray &txtRecord)
 	{
 		QByteArray keyBuf(256, 0);
 		uint8_t valueLen;
-		void *value;
+		const void *value;
 		DNSServiceErrorType err = TXTRecordGetItemAtIndex(
 			txtRecord.size(), txtRecord.data(), n, keyBuf.size(),
 			keyBuf.data(), &valueLen, &value);
