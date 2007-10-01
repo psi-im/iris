@@ -112,6 +112,14 @@ public:
 
 	void stop(int id);
 
+	// return empty array on error
+	static QByteArray createTxtRecord(const QList<QByteArray> &strings);
+
+	// return empty list on error (note that it is possible to have a
+	//   txt record with no entries, but in that case txtRecord will be
+	//   empty and so you shouldn't call this function)
+	static QList<QByteArray> parseTxtRecord(const QByteArray &txtRecord);
+
 signals:
 	void queryResult(int id, const QDnsSd::QueryResult &result);
 	void browseResult(int id, const QDnsSd::BrowseResult &result);

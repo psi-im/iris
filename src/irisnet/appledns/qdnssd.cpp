@@ -958,4 +958,86 @@ void QDnsSd::stop(int id)
 	d->stop(id);
 }
 
+QByteArray QDnsSd::createTxtRecord(const QList<QByteArray> &strings)
+{
+	// split into var/val and validate
+	QList<QByteArray> vars;
+	QList<QByteArray> vals; // null = no value, empty = empty value
+	foreach(const QByteArray &i, strings)
+	{
+		QByteArray var;
+		QByteArray val;
+		int n = i.indexOf('=');
+		if(n != -1)
+		{
+			var = i.mid(0, n);
+			val = i.mid(n + 1);
+		}
+		else
+			var = i;
+
+		for(int n = 0; n < var.size(); ++n)
+		{
+			unsigned char c = var[n];
+			if(c < 0x20 || c > 0x7e)
+				return QByteArray();
+		}
+
+		vars += var;
+		vals += val;
+	}
+
+	TXTRecordRef ref;
+	QByteArray buf(256, 0);
+	TXTRecordCreate(&ref, buf.size(), buf.data());
+	for(int n = 0; n < vars.count(); ++n)
+	{
+		int valueSize = vals[n].size();
+		char *value;
+		if(!vals[n].isNull())
+			value = vals[n].data();
+		else
+			value = 0;
+
+		DNSServiceErrorType err = TXTRecordSetValue(&ref,
+			vars[n].data(), valueSize, value);
+		if(err != kDNSServiceErr_NoError)
+		{
+			TXTRecordDeallocate(&ref);
+			return QByteArray();
+		}
+	}
+	QByteArray out((const char *)TXTRecordGetBytesPtr(&ref), TXTRecordGetLength(&ref));
+	TXTRecordDeallocate(&ref);
+	return out;
+}
+
+QList<QByteArray> QDnsSd::parseTxtRecord(const QByteArray &txtRecord)
+{
+	QList<QByteArray> out;
+	int count = TXTRecordGetCount(txtRecord.size(), txtRecord.data());
+	for(int n = 0; n < count; ++n)
+	{
+		QByteArray keyBuf(256, 0);
+		uint8_t valueLen;
+		void *value;
+		DNSServiceErrorType err = TXTRecordGetItemAtIndex(
+			txtRecord.size(), txtRecord.data(), n, keyBuf.size(),
+			keyBuf.data(), &valueLen, &value);
+		if(err != kDNSServiceErr_NoError)
+			return QList<QByteArray>();
+
+		keyBuf.resize(qstrlen(keyBuf.data()));
+
+		QByteArray entry = keyBuf;
+		if(value)
+		{
+			entry += '=';
+			entry += QByteArray((const char *)value, valueLen);
+		}
+		out += entry;
+	}
+	return out;
+}
+
 #include "qdnssd.moc"

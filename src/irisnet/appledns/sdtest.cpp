@@ -126,9 +126,12 @@ public slots:
 			}
 			else if(c.type == Command::Reg)
 			{
-				QByteArray txtRecord;
+				QByteArray txtRecord = QDnsSd::createTxtRecord(c.txt);
+				if(txtRecord.isEmpty())
+				{
+					// TODO: error?
+				}
 
-				// TODO: calculate txtRecord from c.txt
 				c.dnsId = dns->reg(c.name.toLatin1(), c.stype.toLatin1(), c.domain.toLatin1(), c.port, txtRecord);
 			}
 		}
@@ -195,8 +198,27 @@ private slots:
 			return;
 		}
 
-		// TODO: print out the txt
-		printf("%2d: host=[%s] port=%d (%d bytes txt)\n", c.id, result.hostTarget.data(), result.port, result.txtRecord.size());
+		QList<QByteArray> txtEntries;
+
+		printf("%2d: host=[%s] port=%d", c.id, result.hostTarget.data(), result.port);
+		if(!txtRecord.isEmpty())
+		{
+			txtEntries = QDnsSd::parseTxtRecord(result.txtRecord);
+			if(txtEntries.isEmpty())
+				printf(" (txt error)");
+		}
+		else
+			printf(" (empty txt)");
+		printf("\n");
+
+		if(!txtEntries.isEmpty())
+		{
+			foreach(const QByteArray &entry, txtEntries)
+			{
+				QString str = QString::fromUtf8(entry);
+				printf("   %s\n", qPrintable(str));
+			}
+		}
 	}
 
 	void dns_regResult(int id, const QDnsSd::RegResult &result)
