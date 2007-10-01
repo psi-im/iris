@@ -205,7 +205,7 @@ private slots:
 		QList<QByteArray> txtEntries;
 
 		printf("%2d: host=[%s] port=%d", c.id, result.hostTarget.data(), result.port);
-		if(!txtRecord.isEmpty())
+		if(!result.txtRecord.isEmpty())
 		{
 			txtEntries = QDnsSd::parseTxtRecord(result.txtRecord);
 			if(txtEntries.isEmpty())
