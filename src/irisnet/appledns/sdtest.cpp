@@ -19,7 +19,7 @@
  */
 
 #include <QtCore>
-#include <QtNetwork>
+#include <QHostAddress>
 #include "qdnssd.h"
 
 // for ntohl
@@ -41,15 +41,22 @@ public:
 	};
 
 	Type type;
-	QString name;
-	int rtype;
-	QString stype;
-	QString domain;
-	int port;
-	QStringList txt;
+
+	QString name; // query, resolve, reg
+	int rtype; // query
+	QString stype; // browse, resolve, reg
+	QString domain; // browse, resolve, reg
+	int port; // reg
+	QByteArray txtRecord; // reg
 
 	int id;
 	int dnsId;
+	bool error;
+
+	Command() :
+		error(false)
+	{
+	}
 };
 
 static QString nameToString(const QByteArray &in)
@@ -69,16 +76,16 @@ static QString recordToDesc(const QDnsSd::Record &rec)
 {
 	QString desc;
 
-	if(rec.rrtype == 1)
+	if(rec.rrtype == 1) // A
 	{
 		quint32 *p = (quint32 *)rec.rdata.data();
 		desc = QHostAddress(ntohl(*p)).toString();
 	}
-	else if(rec.rrtype == 28)
+	else if(rec.rrtype == 28) // AAAA
 	{
 		desc = QHostAddress((quint8 *)rec.rdata.data()).toString();
 	}
-	else if(rec.rrtype == 12)
+	else if(rec.rrtype == 12) // PTR
 	{
 		desc = QString("[%1]").arg(nameToString(rec.rdata));
 	}
@@ -86,6 +93,30 @@ static QString recordToDesc(const QDnsSd::Record &rec)
 		desc = QString("%1 bytes").arg(rec.rdata.size());
 
 	return desc;
+}
+
+static QStringList txtRecordToStringList(const QByteArray &rdata)
+{
+	QList<QByteArray> txtEntries = QDnsSd::parseTxtRecord(rdata);
+	if(txtEntries.isEmpty())
+		return QStringList();
+
+	QStringList out;
+	foreach(const QByteArray &entry, txtEntries)
+		out += QString::fromUtf8(entry);
+	return out;
+}
+
+static void printIndentedTxt(const QByteArray &txtRecord)
+{
+	QStringList list = txtRecordToStringList(txtRecord);
+	if(!list.isEmpty())
+	{
+		foreach(const QString &s, list)
+			printf("   %s\n", qPrintable(s));
+	}
+	else
+		printf("   (TXT parsing error)\n");
 }
 
 class App : public QObject
@@ -114,29 +145,29 @@ public slots:
 			c.id = n;
 			if(c.type == Command::Query)
 			{
-				c.dnsId = dns->query(c.name.toLatin1(), c.rtype);
+				printf("%02d: Query name=[%s], type=%d ...\n", c.id, qPrintable(c.name), c.rtype);
+				c.dnsId = dns->query(c.name.toUtf8(), c.rtype);
 			}
 			else if(c.type == Command::Browse)
 			{
+				printf("%02d: Browse type=[%s]", c.id, qPrintable(c.stype));
+				if(!c.domain.isEmpty())
+					printf(", domain=[%s]", qPrintable(c.domain));
+				printf(" ...\n");
 				c.dnsId = dns->browse(c.stype.toLatin1(), c.domain.toLatin1());
 			}
 			else if(c.type == Command::Resolve)
 			{
+				printf("%02d: Resolve name=[%s], type=[%s], domain=[%s] ...\n", c.id, qPrintable(c.name), qPrintable(c.stype), qPrintable(c.domain));
 				c.dnsId = dns->resolve(c.name.toLatin1(), c.stype.toLatin1(), c.domain.toLatin1());
 			}
 			else if(c.type == Command::Reg)
 			{
-				QList<QByteArray> strings;
-				foreach(const QString &str, c.txt)
-					strings += str.toUtf8();
+				printf("%02d: Register name=[%s], type=[%s], domain=[%s], port=%d ...\n", c.id, qPrintable(c.name), qPrintable(c.stype), qPrintable(c.domain), c.port);
+				if(!c.txtRecord.isEmpty())
+					printIndentedTxt(c.txtRecord);
 
-				QByteArray txtRecord = QDnsSd::createTxtRecord(strings);
-				if(txtRecord.isEmpty())
-				{
-					// TODO: error?
-				}
-
-				c.dnsId = dns->reg(c.name.toLatin1(), c.stype.toLatin1(), c.domain.toLatin1(), c.port, txtRecord);
+				c.dnsId = dns->reg(c.name.toLatin1(), c.stype.toLatin1(), c.domain.toLatin1(), c.port, c.txtRecord);
 			}
 		}
 	}
@@ -145,7 +176,18 @@ signals:
 	void quit();
 
 private:
-	int dnsIdToCommandIndex(int dnsId)
+	int cmdIdToCmdIndex(int cmdId)
+	{
+		for(int n = 0; n < commands.count(); ++n)
+		{
+			const Command &c = commands[n];
+			if(c.id == cmdId)
+				return n;
+		}
+		return -1;
+	}
+
+	int dnsIdToCmdIndex(int dnsId)
 	{
 		for(int n = 0; n < commands.count(); ++n)
 		{
@@ -156,92 +198,102 @@ private:
 		return -1;
 	}
 
+	void tryQuit()
+	{
+		bool allError = true;
+		foreach(const Command &c, commands)
+		{
+			if(!c.error)
+			{
+				allError = false;
+				break;
+			}
+		}
+
+		if(allError)
+			emit quit();
+	}
+
 private slots:
 	void dns_queryResult(int id, const QDnsSd::QueryResult &result)
 	{
-		int at = dnsIdToCommandIndex(id);
+		int at = dnsIdToCmdIndex(id);
 		Command &c = commands[at];
 
 		if(!result.success)
 		{
-			printf("%2d: error.\n", c.id);
+			printf("%2d: Error.\n", c.id);
+			c.error = true;
+			tryQuit();
 			return;
 		}
 
 		foreach(const QDnsSd::Record &rec, result.added)
-			printf("%2d: added:   %s, ttl=%d\n", c.id, qPrintable(recordToDesc(rec)), rec.ttl);
+		{
+			printf("%2d: Added:   %s, ttl=%d\n", c.id, qPrintable(recordToDesc(rec)), rec.ttl);
+			if(rec.rrtype == 16)
+				printIndentedTxt(rec.rdata);
+		}
 		foreach(const QDnsSd::Record &rec, result.removed)
-			printf("%2d: removed: %s, ttl=%d\n", c.id, qPrintable(recordToDesc(rec)), rec.ttl);
+			printf("%2d: Removed: %s, ttl=%d\n", c.id, qPrintable(recordToDesc(rec)), rec.ttl);
 	}
 
 	void dns_browseResult(int id, const QDnsSd::BrowseResult &result)
 	{
-		int at = dnsIdToCommandIndex(id);
+		int at = dnsIdToCmdIndex(id);
 		Command &c = commands[at];
 
 		if(!result.success)
 		{
-			printf("%2d: error.\n", c.id);
+			printf("%2d: Error.\n", c.id);
+			c.error = true;
+			tryQuit();
 			return;
 		}
 
 		foreach(const QDnsSd::BrowseEntry &e, result.added)
-			printf("%2d: added:   [%s] [%s] [%s]\n", c.id, e.serviceName.data(), e.serviceType.data(), e.replyDomain.data());
+			printf("%2d: Added:   [%s] [%s] [%s]\n", c.id, e.serviceName.data(), e.serviceType.data(), e.replyDomain.data());
 		foreach(const QDnsSd::BrowseEntry &e, result.removed)
-			printf("%2d: removed: [%s]\n", c.id, e.serviceName.data());
+			printf("%2d: Removed: [%s]\n", c.id, e.serviceName.data());
 	}
 
 	void dns_resolveResult(int id, const QDnsSd::ResolveResult &result)
 	{
-		int at = dnsIdToCommandIndex(id);
+		int at = dnsIdToCmdIndex(id);
 		Command &c = commands[at];
 
 		if(!result.success)
 		{
-			printf("%2d: error.\n", c.id);
+			printf("%2d: Error.\n", c.id);
+			c.error = true;
+			tryQuit();
 			return;
 		}
 
-		QList<QByteArray> txtEntries;
-
-		printf("%2d: host=[%s] port=%d", c.id, result.hostTarget.data(), result.port);
+		printf("%2d: Result: host=[%s] port=%d\n", c.id, result.hostTarget.data(), result.port);
 		if(!result.txtRecord.isEmpty())
-		{
-			txtEntries = QDnsSd::parseTxtRecord(result.txtRecord);
-			if(txtEntries.isEmpty())
-				printf(" (txt error)");
-		}
-		else
-			printf(" (empty txt)");
-		printf("\n");
-
-		if(!txtEntries.isEmpty())
-		{
-			foreach(const QByteArray &entry, txtEntries)
-			{
-				QString str = QString::fromUtf8(entry);
-				printf("   %s\n", qPrintable(str));
-			}
-		}
+			printIndentedTxt(result.txtRecord);
 	}
 
 	void dns_regResult(int id, const QDnsSd::RegResult &result)
 	{
-		int at = dnsIdToCommandIndex(id);
+		int at = dnsIdToCmdIndex(id);
 		Command &c = commands[at];
 
 		if(!result.success)
 		{
 			QString errstr;
 			if(result.errorCode == QDnsSd::RegResult::ErrorConflict)
-				errstr = "conflict";
+				errstr = "Conflict";
 			else
-				errstr = "generic";
-			printf("%2d: error (%s).\n", c.id, qPrintable(errstr));
+				errstr = "Generic";
+			printf("%2d: Error (%s).\n", c.id, qPrintable(errstr));
+			c.error = true;
+			tryQuit();
 			return;
 		}
 
-		printf("%2d: registered.  domain=[%s]\n", c.id, result.domain.data());
+		printf("%2d: Registered: domain=[%s]\n", c.id, result.domain.data());
 	}
 };
 
@@ -254,7 +306,7 @@ void usage()
 	printf("\n");
 	printf(" q=name,type#                   query for a record\n");
 	printf(" b=type(,domain)                browse for services\n");
-	printf(" r=name,type(,domain)           resolve a service\n");
+	printf(" r=name,type,domain             resolve a service\n");
 	printf(" e=name,type,port(,domain)      register a service\n");
 	printf("\n");
 }
@@ -357,7 +409,7 @@ int main(int argc, char **argv)
 		}
 		else if(type == "r")
 		{
-			if(parts.count() < 2)
+			if(parts.count() < 3)
 			{
 				usage();
 				return 1;
@@ -367,8 +419,7 @@ int main(int argc, char **argv)
 			c.type = Command::Resolve;
 			c.name = parts[0];
 			c.stype = parts[1];
-			if(parts.count() >= 3)
-				c.domain = parts[2];
+			c.domain = parts[2];
 			commands += c;
 		}
 		else if(type == "e")
@@ -386,7 +437,23 @@ int main(int argc, char **argv)
 			c.port = parts[2].toInt();
 			if(parts.count() >= 4)
 				c.domain = parts[3];
-			c.txt = txt;
+
+			if(!txt.isEmpty())
+			{
+				QList<QByteArray> strings;
+				foreach(const QString &str, txt)
+					strings += str.toUtf8();
+
+				QByteArray txtRecord = QDnsSd::createTxtRecord(strings);
+				if(txtRecord.isEmpty())
+				{
+					printf("Error: failed to create TXT record, input too large or invalid\n");
+					return 1;
+				}
+
+				c.txtRecord = txtRecord;
+			}
+
 			commands += c;
 		}
 		else
