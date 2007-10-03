@@ -107,7 +107,7 @@ public:
 	// return -1 on error, else a record id
 	int recordAdd(int reg_id, const Record &rec);
 
-	bool recordUpdate(int rec_id, const Record &rec);
+	bool recordUpdate(int rec_id, const Record &rec, quint32 ttl);
 	bool recordUpdateTxt(int reg_id, const QByteArray &txtRecord);
 	void recordRemove(int rec_id);
 

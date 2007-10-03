@@ -927,12 +927,12 @@ bool QDnsSd::recordUpdate(int rec_id, const Record &rec)
 	return d->recordUpdate(reg_id, rec_id, rec);
 }
 
-bool QDnsSd::recordUpdateTxt(int reg_id, const QByteArray &txtRecord)
+bool QDnsSd::recordUpdateTxt(int reg_id, const QByteArray &txtRecord, quint32 ttl)
 {
 	Record rec;
 	rec.rrtype = kDNSServiceType_TXT;
 	rec.rdata = txtRecord;
-	rec.ttl = 4500;
+	rec.ttl = ttl;
 	return d->recordUpdate(reg_id, -1, rec);
 }
 
