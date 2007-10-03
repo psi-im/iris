@@ -33,6 +33,8 @@ public:
 	class Record
 	{
 	public:
+		bool added; // only used by QueryResult
+
 		QByteArray name;
 		int rrtype;
 		QByteArray rdata;
@@ -42,6 +44,7 @@ public:
 	class BrowseEntry
 	{
 	public:
+		bool added;
 		QByteArray serviceName;
 
 		// these may be different from request, see dns_sd docs
@@ -53,16 +56,14 @@ public:
 	{
 	public:
 		bool success;
-		QList<Record> added;
-		QList<Record> removed;
+		QList<Record> records;
 	};
 
 	class BrowseResult
 	{
 	public:
 		bool success;
-		QList<BrowseEntry> added;
-		QList<BrowseEntry> removed;
+		QList<BrowseEntry> entries;
 	};
 
 	class ResolveResult

@@ -155,10 +155,8 @@ public:
 
 		bool _doSignal;
 		bool _callbackError;
-		QList<Record> _recordsAdd;
-		QList<Record> _recordsRemove;
-		QList<BrowseEntry> _browseAdd;
-		QList<BrowseEntry> _browseRemove;
+		QList<Record> _queryRecords;
+		QList<BrowseEntry> _browseEntries;
 		QByteArray _resolveFullName;
 		QByteArray _resolveHost;
 		int _resolvePort;
@@ -562,10 +560,8 @@ private slots:
 
 				QDnsSd::QueryResult r;
 				r.success = true;
-				r.added = req->_recordsAdd;
-				r.removed = req->_recordsRemove;
-				req->_recordsAdd.clear();
-				req->_recordsRemove.clear();
+				r.records = req->_queryRecords;
+				req->_queryRecords.clear();
 				req->_doSignal = false;
 
 				emit q->queryResult(id, r);
@@ -602,10 +598,8 @@ private slots:
 
 				QDnsSd::BrowseResult r;
 				r.success = true;
-				r.added = req->_browseAdd;
-				r.removed = req->_browseRemove;
-				req->_browseAdd.clear();
-				req->_browseRemove.clear();
+				r.entries = req->_browseEntries;
+				req->_browseEntries.clear();
 				req->_doSignal = false;
 
 				emit q->browseResult(id, r);
@@ -806,15 +800,12 @@ private:
 		}
 
 		QDnsSd::Record rec;
+		rec.added = (flags & kDNSServiceFlagsAdd) ? true: false;
 		rec.name = QByteArray(fullname);
 		rec.rrtype = rrtype;
 		rec.rdata = QByteArray(rdata, rdlen);
 		rec.ttl = ttl;
-
-		if(flags & kDNSServiceFlagsAdd)
-			req->_recordsAdd += rec;
-		else
-			req->_recordsRemove += rec;
+		req->_queryRecords += rec;
 
 		if(!(flags & kDNSServiceFlagsMoreComing))
 			req->_doSignal = true;
@@ -832,14 +823,11 @@ private:
 		}
 
 		QDnsSd::BrowseEntry e;
+		e.added = (flags & kDNSServiceFlagsAdd) ? true: false;
 		e.serviceName = QByteArray(serviceName);
 		e.serviceType = QByteArray(regtype);
 		e.replyDomain = QByteArray(replyDomain);
-
-		if(flags & kDNSServiceFlagsAdd)
-			req->_browseAdd += e;
-		else
-			req->_browseRemove += e;
+		req->_browseEntries += e;
 
 		if(!(flags & kDNSServiceFlagsMoreComing))
 			req->_doSignal = true;

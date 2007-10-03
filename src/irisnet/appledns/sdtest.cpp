@@ -145,12 +145,12 @@ public slots:
 			c.id = n;
 			if(c.type == Command::Query)
 			{
-				printf("%02d: Query name=[%s], type=%d ...\n", c.id, qPrintable(c.name), c.rtype);
+				printf("%2d: Query name=[%s], type=%d ...\n", c.id, qPrintable(c.name), c.rtype);
 				c.dnsId = dns->query(c.name.toUtf8(), c.rtype);
 			}
 			else if(c.type == Command::Browse)
 			{
-				printf("%02d: Browse type=[%s]", c.id, qPrintable(c.stype));
+				printf("%2d: Browse type=[%s]", c.id, qPrintable(c.stype));
 				if(!c.domain.isEmpty())
 					printf(", domain=[%s]", qPrintable(c.domain));
 				printf(" ...\n");
@@ -158,12 +158,12 @@ public slots:
 			}
 			else if(c.type == Command::Resolve)
 			{
-				printf("%02d: Resolve name=[%s], type=[%s], domain=[%s] ...\n", c.id, qPrintable(c.name), qPrintable(c.stype), qPrintable(c.domain));
+				printf("%2d: Resolve name=[%s], type=[%s], domain=[%s] ...\n", c.id, qPrintable(c.name), qPrintable(c.stype), qPrintable(c.domain));
 				c.dnsId = dns->resolve(c.name.toLatin1(), c.stype.toLatin1(), c.domain.toLatin1());
 			}
 			else if(c.type == Command::Reg)
 			{
-				printf("%02d: Register name=[%s], type=[%s], domain=[%s], port=%d ...\n", c.id, qPrintable(c.name), qPrintable(c.stype), qPrintable(c.domain), c.port);
+				printf("%2d: Register name=[%s], type=[%s], domain=[%s], port=%d ...\n", c.id, qPrintable(c.name), qPrintable(c.stype), qPrintable(c.domain), c.port);
 				if(!c.txtRecord.isEmpty())
 					printIndentedTxt(c.txtRecord);
 
@@ -228,14 +228,17 @@ private slots:
 			return;
 		}
 
-		foreach(const QDnsSd::Record &rec, result.added)
+		foreach(const QDnsSd::Record &rec, result.records)
 		{
-			printf("%2d: Added:   %s, ttl=%d\n", c.id, qPrintable(recordToDesc(rec)), rec.ttl);
-			if(rec.rrtype == 16)
-				printIndentedTxt(rec.rdata);
+			if(rec.added)
+			{
+				printf("%2d: Added:   %s, ttl=%d\n", c.id, qPrintable(recordToDesc(rec)), rec.ttl);
+				if(rec.rrtype == 16)
+					printIndentedTxt(rec.rdata);
+			}
+			else
+				printf("%2d: Removed: %s, ttl=%d\n", c.id, qPrintable(recordToDesc(rec)), rec.ttl);
 		}
-		foreach(const QDnsSd::Record &rec, result.removed)
-			printf("%2d: Removed: %s, ttl=%d\n", c.id, qPrintable(recordToDesc(rec)), rec.ttl);
 	}
 
 	void dns_browseResult(int id, const QDnsSd::BrowseResult &result)
@@ -251,10 +254,13 @@ private slots:
 			return;
 		}
 
-		foreach(const QDnsSd::BrowseEntry &e, result.added)
-			printf("%2d: Added:   [%s] [%s] [%s]\n", c.id, e.serviceName.data(), e.serviceType.data(), e.replyDomain.data());
-		foreach(const QDnsSd::BrowseEntry &e, result.removed)
-			printf("%2d: Removed: [%s]\n", c.id, e.serviceName.data());
+		foreach(const QDnsSd::BrowseEntry &e, result.entries)
+		{
+			if(e.added)
+				printf("%2d: Added:   [%s] [%s] [%s]\n", c.id, e.serviceName.data(), e.serviceType.data(), e.replyDomain.data());
+			else
+				printf("%2d: Removed: [%s]\n", c.id, e.serviceName.data());
+		}
 	}
 
 	void dns_resolveResult(int id, const QDnsSd::ResolveResult &result)
