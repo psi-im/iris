@@ -209,7 +209,6 @@ public:
 			_sn_read(0),
 			_errorTrigger(0),
 			_doSignal(false),
-			_callbackError(false)
 		{
 		}
 
@@ -413,7 +412,7 @@ public:
 
 		if(port < 1 || port > 0xffff)
 		{
-			setDelayedError(req);
+			setDelayedError(req, LowLevelError());
 			return id;
 		}
 
