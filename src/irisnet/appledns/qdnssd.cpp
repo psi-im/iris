@@ -78,7 +78,7 @@ private:
 	DNSRecordRef *_p;
 
 public:
-	RecordRef() :
+	RecordRef()
 	{
 		_p = (DNSRecordRef *)malloc(sizeof(DNSRecordRef));
 	}
@@ -521,7 +521,7 @@ public:
 	{
 		Request *req = _requestsByRecId.value(rec_id);
 		if(!req)
-			return false;
+			return;
 
 		// this can't fail
 		int at = req->subRecordIndexById(rec_id);
