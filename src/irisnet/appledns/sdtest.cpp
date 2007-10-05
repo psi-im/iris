@@ -163,7 +163,10 @@ public slots:
 			}
 			else if(c.type == Command::Reg)
 			{
-				printf("%2d: Register name=[%s], type=[%s], domain=[%s], port=%d ...\n", c.id, qPrintable(c.name), qPrintable(c.stype), qPrintable(c.domain), c.port);
+				printf("%2d: Register name=[%s], type=[%s]", c.id, qPrintable(c.name), qPrintable(c.stype));
+				if(!c.domain.isEmpty())
+					printf(", domain=[%s]", qPrintable(c.domain));
+				printf(", port=%d ...\n", c.port);
 				if(!c.txtRecord.isEmpty())
 					printIndentedTxt(c.txtRecord);
 
