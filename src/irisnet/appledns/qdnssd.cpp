@@ -208,7 +208,7 @@ public:
 			_sockfd(-1),
 			_sn_read(0),
 			_errorTrigger(0),
-			_doSignal(false),
+			_doSignal(false)
 		{
 		}
 
