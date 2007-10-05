@@ -222,7 +222,10 @@ private slots:
 
 		if(!result.success)
 		{
-			printf("%2d: Error.\n", c.id);
+			printf("%2d: Error.", c.id);
+			if(!result.lowLevelError.func.isEmpty())
+				printf(" (%s, %d)", qPrintable(result.lowLevelError.func), result.lowLevelError.code);
+			printf("\n");
 			c.error = true;
 			tryQuit();
 			return;
@@ -248,7 +251,10 @@ private slots:
 
 		if(!result.success)
 		{
-			printf("%2d: Error.\n", c.id);
+			printf("%2d: Error.", c.id);
+			if(!result.lowLevelError.func.isEmpty())
+				printf(" (%s, %d)", qPrintable(result.lowLevelError.func), result.lowLevelError.code);
+			printf("\n");
 			c.error = true;
 			tryQuit();
 			return;
@@ -270,7 +276,10 @@ private slots:
 
 		if(!result.success)
 		{
-			printf("%2d: Error.\n", c.id);
+			printf("%2d: Error.", c.id);
+			if(!result.lowLevelError.func.isEmpty())
+				printf(" (%s, %d)", qPrintable(result.lowLevelError.func), result.lowLevelError.code);
+			printf("\n");
 			c.error = true;
 			tryQuit();
 			return;
@@ -293,7 +302,10 @@ private slots:
 				errstr = "Conflict";
 			else
 				errstr = "Generic";
-			printf("%2d: Error (%s).\n", c.id, qPrintable(errstr));
+			printf("%2d: Error (%s).", c.id, qPrintable(errstr));
+			if(!result.lowLevelError.func.isEmpty())
+				printf(" (%s, %d)", qPrintable(result.lowLevelError.func), result.lowLevelError.code);
+			printf("\n");
 			c.error = true;
 			tryQuit();
 			return;
