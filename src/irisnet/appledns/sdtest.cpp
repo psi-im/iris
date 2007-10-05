@@ -52,9 +52,11 @@ public:
 	int id;
 	int dnsId;
 	bool error;
+	bool done; // for resolve
 
 	Command() :
-		error(false)
+		error(false),
+		done(false)
 	{
 	}
 };
@@ -203,17 +205,18 @@ private:
 
 	void tryQuit()
 	{
-		bool allError = true;
+		// quit if there are nothing but errors or completed resolves
+		bool doQuit = true;
 		foreach(const Command &c, commands)
 		{
-			if(!c.error)
-			{
-				allError = false;
-				break;
-			}
+			if(c.error || (c.type == Command::Resolve && c.done))
+				continue;
+
+			doQuit = false;
+			break;
 		}
 
-		if(allError)
+		if(doQuit)
 			emit quit();
 	}
 
@@ -291,6 +294,9 @@ private slots:
 		printf("%2d: Result: host=[%s] port=%d\n", c.id, result.hostTarget.data(), result.port);
 		if(!result.txtRecord.isEmpty())
 			printIndentedTxt(result.txtRecord);
+
+		c.done = true;
+		tryQuit();
 	}
 
 	void dns_regResult(int id, const QDnsSd::RegResult &result)
