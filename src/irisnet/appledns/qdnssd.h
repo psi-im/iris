@@ -30,6 +30,24 @@ class QDnsSd : public QObject
 {
 	Q_OBJECT
 public:
+	class LowLevelError
+	{
+	public:
+		QString func;
+		int code;
+
+		LowLevelError() :
+			code(0)
+		{
+		}
+
+		LowLevelError(const QString &_func, int _code) :
+			func(_func),
+			code(_code)
+		{
+		}
+	};
+
 	class Record
 	{
 	public:
@@ -56,6 +74,8 @@ public:
 	{
 	public:
 		bool success;
+		LowLevelError lowLevelError;
+
 		QList<Record> records;
 	};
 
@@ -63,6 +83,8 @@ public:
 	{
 	public:
 		bool success;
+		LowLevelError lowLevelError;
+
 		QList<BrowseEntry> entries;
 	};
 
@@ -70,6 +92,8 @@ public:
 	{
 	public:
 		bool success;
+		LowLevelError lowLevelError;
+
 		QByteArray fullName;
 		QByteArray hostTarget;
 		int port; // host byte-order
@@ -87,6 +111,7 @@ public:
 
 		bool success;
 		Error errorCode;
+		LowLevelError lowLevelError;
 
 		QByteArray domain;
 	};
@@ -105,10 +130,10 @@ public:
 	int reg(const QByteArray &serviceName, const QByteArray &serviceType, const QByteArray &domain, int port, const QByteArray &txtRecord);
 
 	// return -1 on error, else a record id
-	int recordAdd(int reg_id, const Record &rec);
+	int recordAdd(int reg_id, const Record &rec, LowLevelError *lowLevelError = 0);
 
-	bool recordUpdate(int rec_id, const Record &rec);
-	bool recordUpdateTxt(int reg_id, const QByteArray &txtRecord, quint32 ttl);
+	bool recordUpdate(int rec_id, const Record &rec, LowLevelError *lowLevelError = 0);
+	bool recordUpdateTxt(int reg_id, const QByteArray &txtRecord, quint32 ttl, LowLevelError *lowLevelError = 0);
 	void recordRemove(int rec_id);
 
 	void stop(int id);
