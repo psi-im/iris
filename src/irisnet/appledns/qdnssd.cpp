@@ -41,21 +41,20 @@ namespace {
 //   to maintain a pointer which /can/ be copied.  Also, we'll keep
 //   a flag to indicate whether the allocated DNSServiceRef has been
 //   initialized yet.
-class DSReference
+class ServiceRef
 {
 private:
 	DNSServiceRef *_p;
 	bool _initialized;
 
 public:
-	DSReference() :
-		_p(0),
+	ServiceRef() :
 		_initialized(false)
 	{
 		_p = (DNSServiceRef *)malloc(sizeof(DNSServiceRef));
 	}
 
-	~DSReference()
+	~ServiceRef()
 	{
 		if(_initialized)
 			DNSServiceRefDeallocate(*_p);
@@ -73,24 +72,19 @@ public:
 	}
 };
 
-class RecReference
+class RecordRef
 {
 private:
 	DNSRecordRef *_p;
-	bool _initialized;
 
 public:
-	RecReference() :
-		_p(0),
-		_initialized(false)
+	RecordRef() :
 	{
 		_p = (DNSRecordRef *)malloc(sizeof(DNSRecordRef));
 	}
 
-	~RecReference()
+	~RecordRef()
 	{
-		//if(_initialized)
-		//	DNSServiceRefDeallocate(*_p);
 		free(_p);
 	}
 
@@ -98,11 +92,48 @@ public:
 	{
 		return _p;
 	}
+};
 
-	/*void setInitialized()
+class IdManager
+{
+private:
+	QSet<int> set;
+	int at;
+
+	inline void bump_at()
 	{
-		_initialized = true;
-	}*/
+		if(at == 0x7fffffff)
+			at = 0;
+		else
+			++at;
+	}
+
+public:
+	IdManager() :
+		at(0)
+	{
+	}
+
+	int reserveId()
+	{
+		while(1)
+		{
+			if(!set.contains(at))
+			{
+				int id = at;
+				set.insert(id);
+				bump_at();
+				return id;
+			}
+
+			bump_at();
+		}
+	}
+
+	void releaseId(int id)
+	{
+		set.remove(id);
+	}
 };
 
 }
@@ -115,14 +146,17 @@ class QDnsSd::Private : public QObject
 	Q_OBJECT
 public:
 	QDnsSd *q;
+	IdManager idManager;
 
 	class SubRecord
 	{
 	public:
+		Private *_self;
 		int _id;
-		RecReference *_sdref;
+		RecordRef *_sdref;
 
-		SubRecord() :
+		SubRecord(Private *self) :
+			_self(self),
 			_id(-1),
 			_sdref(0)
 		{
@@ -131,6 +165,7 @@ public:
 		~SubRecord()
 		{
 			delete _sdref;
+			_self->idManager.releaseId(_id);
 		}
 	};
 
@@ -148,7 +183,7 @@ public:
 		Private *_self;
 		int _type;
 		int _id;
-		DSReference *_sdref;
+		ServiceRef *_sdref;
 		int _sockfd;
 		QSocketNotifier *_sn_read;
 		QTimer *_errorTrigger;
@@ -185,19 +220,29 @@ public:
 			delete _errorTrigger;
 			delete _sn_read;
 			delete _sdref;
+			_self->idManager.releaseId(_id);
+		}
+
+		int subRecordIndexById(int rec_id) const
+		{
+			for(int n = 0; n < _subRecords.count(); ++n)
+			{
+				if(_subRecords[n]->_id == rec_id)
+					return n;
+			}
+			return -1;
 		}
 	};
 
 	QHash<int,Request*> _requestsById;
 	QHash<QSocketNotifier*,Request*> _requestsBySocket;
 	QHash<QTimer*,Request*> _requestsByTimer;
-	int _next_id;
+	QHash<int,Request*> _requestsByRecId;
 
 	Private(QDnsSd *_q) :
 		QObject(_q),
 		q(_q)
 	{
-		_next_id = 0;
 	}
 
 	~Private()
@@ -216,6 +261,8 @@ public:
 
 	void removeRequest(Request *req)
 	{
+		foreach(const SubRecord *srec, req->_subRecords)
+			_requestsByRecId.remove(srec->_id);
 		if(req->_errorTrigger)
 			_requestsByTimer.remove(req->_errorTrigger);
 		if(req->_sn_read)
@@ -224,35 +271,22 @@ public:
 		delete req;
 	}
 
-	int nextId()
-	{
-		return _next_id++;
-	}
-
 	int regIdForRecId(int rec_id) const
 	{
-		QHashIterator<int,Request*> it(_requestsById);
-		while(it.hasNext())
-		{
-			it.next();
-			Request *req = it.value();
-			foreach(const SubRecord *srec, req->_subRecords)
-			{
-				if(srec->_id == rec_id)
-					return it.key();
-			}
-		}
+		Request *req = _requestsByRecId.value(rec_id);
+		if(req)
+			return req->_id;
 		return -1;
 	}
 
 	int query(const QByteArray &name, int qType)
 	{
-		int id = nextId();
+		int id = idManager.reserveId();
 
 		Request *req = new Request(this);
 		req->_type = Request::Query;
 		req->_id = id;
-		req->_sdref = new DSReference;
+		req->_sdref = new ServiceRef;
 
 		DNSServiceErrorType err = DNSServiceQueryRecord(
 			req->_sdref->data(), kDNSServiceFlagsLongLivedQuery,
@@ -290,12 +324,12 @@ public:
 
 	int browse(const QByteArray &serviceType, const QByteArray &domain)
 	{
-		int id = nextId();
+		int id = idManager.reserveId();
 
 		Request *req = new Request(this);
 		req->_type = Request::Browse;
 		req->_id = id;
-		req->_sdref = new DSReference;
+		req->_sdref = new ServiceRef;
 
 		DNSServiceErrorType err = DNSServiceBrowse(
 			req->_sdref->data(), 0, 0, serviceType.constData(),
@@ -333,12 +367,12 @@ public:
 
 	int resolve(const QByteArray &serviceName, const QByteArray &serviceType, const QByteArray &domain)
 	{
-		int id = nextId();
+		int id = idManager.reserveId();
 
 		Request *req = new Request(this);
 		req->_type = Request::Resolve;
 		req->_id = id;
-		req->_sdref = new DSReference;
+		req->_sdref = new ServiceRef;
 
 		DNSServiceErrorType err = DNSServiceResolve(
 			req->_sdref->data(), 0, 0, serviceName.constData(),
@@ -376,7 +410,7 @@ public:
 
 	int reg(const QByteArray &serviceName, const QByteArray &serviceType, const QByteArray &domain, int port, const QByteArray &txtRecord)
 	{
-		int id = nextId();
+		int id = idManager.reserveId();
 
 		Request *req = new Request(this);
 		req->_type = Request::Reg;
@@ -391,7 +425,7 @@ public:
 		uint16_t sport = port;
 		sport = htons(sport);
 
-		req->_sdref = new DSReference;
+		req->_sdref = new ServiceRef;
 
 		DNSServiceErrorType err = DNSServiceRegister(
 			req->_sdref->data(), kDNSServiceFlagsNoAutoRename, 0,
@@ -434,7 +468,7 @@ public:
 		if(!req)
 			return -1;
 
-		RecReference *recordRef = new RecReference;
+		RecordRef *recordRef = new RecordRef;
 
 		DNSServiceErrorType err = DNSServiceAddRecord(
 			*(req->_sdref->data()), recordRef->data(), 0,
@@ -446,39 +480,34 @@ public:
 			return -1;
 		}
 
-		int id = nextId();
-		SubRecord *srec = new SubRecord;
+		int id = idManager.reserveId();
+		SubRecord *srec = new SubRecord(this);
 		srec->_id = id;
 		srec->_sdref = recordRef;
 		req->_subRecords += srec;
+		_requestsByRecId.insert(id, req);
 
 		return id;
 	}
 
 	bool recordUpdate(int reg_id, int rec_id, const Record &rec)
 	{
-		// FIXME: optimize...
-
 		Request *req = _requestsById.value(reg_id);
 		if(!req)
 			return false;
 
-		int at = -1;
-		for(int n = 0; n < req->_subRecords.count(); ++n)
+		SubRecord *srec = 0;
+		if(rec_id != -1)
 		{
-			if(req->_subRecords[n]->_id == rec_id)
-			{
-				at = n;
-				break;
-			}
+			int at = req->subRecordIndexById(rec_id);
+			if(at == -1)
+				return false;
+			srec = req->_subRecords[at];
 		}
 
-		if(at == -1)
-			return false;
-
-		SubRecord *srec = req->_subRecords[at];
 		DNSServiceErrorType err = DNSServiceUpdateRecord(
-			*(req->_sdref->data()), *(srec->_sdref->data()), 0,
+			*(req->_sdref->data()),
+			srec ? *(srec->_sdref->data()) : NULL, 0,
 			rec.rdata.size(), rec.rdata.data(), rec.ttl);
 		if(err != kDNSServiceErr_NoError)
 		{
@@ -490,28 +519,18 @@ public:
 
 	void recordRemove(int rec_id)
 	{
-		// FIXME: optimize...
-
-		int reg_id = regIdForRecId(rec_id);
-		if(reg_id == -1)
-			return;
+		Request *req = _requestsByRecId.value(rec_id);
+		if(!req)
+			return false;
 
 		// this can't fail
-		Request *req = _requestsById.value(reg_id);
-
-		// this can't fail either
-		int at = -1;
-		for(int n = 0; n < req->_subRecords.count(); ++n)
-		{
-			if(req->_subRecords[n]->_id == rec_id)
-			{
-				at = n;
-				break;
-			}
-		}
+		int at = req->subRecordIndexById(rec_id);
 
 		SubRecord *srec = req->_subRecords[at];
 		DNSServiceRemoveRecord(*(req->_sdref->data()), *(srec->_sdref->data()), 0);
+		_requestsByRecId.remove(srec->_id);
+		req->_subRecords.removeAt(at);
+		delete srec;
 	}
 
 	void stop(int id)
@@ -848,13 +867,6 @@ private:
 		req->_resolveHost = QByteArray(hosttarget);
 		req->_resolvePort = ntohs(port);
 		req->_resolveTxtRecord = QByteArray(txtRecord, txtLen);
-
-		// note: we do this after the callback
-		// cancel connection
-		//delete req->_sn_read;
-		//req->_sn_read = 0;
-		//delete req->_sdref;
-		//req->_sdref = 0;
 
 		req->_doSignal = true;
 	}
