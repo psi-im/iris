@@ -68,7 +68,7 @@ static QString nameToString(const QByteArray &in)
 	while(at < in.size())
 	{
 		int len = in[at++];
-		parts += QString::fromLatin1(in.mid(at, len));
+		parts += QString::fromUtf8(in.mid(at, len));
 		at += len;
 	}
 	return parts.join(".");
@@ -156,12 +156,12 @@ public slots:
 				if(!c.domain.isEmpty())
 					printf(", domain=[%s]", qPrintable(c.domain));
 				printf(" ...\n");
-				c.dnsId = dns->browse(c.stype.toLatin1(), c.domain.toLatin1());
+				c.dnsId = dns->browse(c.stype.toUtf8(), c.domain.toUtf8());
 			}
 			else if(c.type == Command::Resolve)
 			{
 				printf("%2d: Resolve name=[%s], type=[%s], domain=[%s] ...\n", c.id, qPrintable(c.name), qPrintable(c.stype), qPrintable(c.domain));
-				c.dnsId = dns->resolve(c.name.toLatin1(), c.stype.toLatin1(), c.domain.toLatin1());
+				c.dnsId = dns->resolve(c.name.toUtf8(), c.stype.toUtf8(), c.domain.toUtf8());
 			}
 			else if(c.type == Command::Reg)
 			{
@@ -172,7 +172,7 @@ public slots:
 				if(!c.txtRecord.isEmpty())
 					printIndentedTxt(c.txtRecord);
 
-				c.dnsId = dns->reg(c.name.toLatin1(), c.stype.toLatin1(), c.domain.toLatin1(), c.port, c.txtRecord);
+				c.dnsId = dns->reg(c.name.toUtf8(), c.stype.toUtf8(), c.domain.toUtf8(), c.port, c.txtRecord);
 			}
 		}
 	}
