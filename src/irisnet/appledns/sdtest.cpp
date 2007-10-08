@@ -269,9 +269,9 @@ private slots:
 		foreach(const QDnsSd::BrowseEntry &e, result.entries)
 		{
 			if(e.added)
-				printf("%2d: Added:   [%s] [%s] [%s]\n", c.id, e.serviceName.data(), e.serviceType.data(), e.replyDomain.data());
+				printf("%2d: Added:   [%s] [%s] [%s]\n", c.id, qPrintable(QString::fromUtf8(e.serviceName)), qPrintable(QString::fromUtf8(e.serviceType)), qPrintable(QString::fromUtf8(e.replyDomain)));
 			else
-				printf("%2d: Removed: [%s]\n", c.id, e.serviceName.data());
+				printf("%2d: Removed: [%s]\n", c.id, qPrintable(QString::fromUtf8(e.serviceName)));
 		}
 	}
 
@@ -291,7 +291,7 @@ private slots:
 			return;
 		}
 
-		printf("%2d: Result: host=[%s] port=%d\n", c.id, result.hostTarget.data(), result.port);
+		printf("%2d: Result: host=[%s] port=%d\n", c.id, qPrintable(QString::fromUtf8(result.hostTarget)), result.port);
 		if(!result.txtRecord.isEmpty())
 			printIndentedTxt(result.txtRecord);
 
@@ -320,7 +320,7 @@ private slots:
 			return;
 		}
 
-		printf("%2d: Registered: domain=[%s]\n", c.id, result.domain.data());
+		printf("%2d: Registered: domain=[%s]\n", c.id, qPrintable(QString::fromUtf8(result.domain)));
 	}
 };
 
