@@ -35,8 +35,6 @@ class IRISNET_EXPORT IrisNetProvider : public QObject
 {
 	Q_OBJECT
 public:
-	virtual ~IrisNetProvider();
-
 	virtual NetInterfaceProvider *createNetInterfaceProvider();
 	virtual NameProvider *createNameProviderInternet();
 	virtual NameProvider *createNameProviderLocal();
@@ -73,12 +71,15 @@ class IRISNET_EXPORT NameProvider : public QObject
 public:
 	NameProvider(QObject *parent = 0) : QObject(parent) {}
 
+	virtual bool supportsSingle() const;
+	virtual bool supportsLongLived() const;
+
 	virtual int resolve_start(const QByteArray &name, int qType, bool longLived) = 0;
 	virtual void resolve_stop(int id) = 0;
 
 	// transfer from local back to internet
-	virtual void resolve_localResultsReady(int id, const QList<XMPP::NameRecord> &results) = 0;
-	virtual void resolve_localError(int id, XMPP::NameResolver::Error e) = 0;
+	virtual void resolve_localResultsReady(int id, const QList<XMPP::NameRecord> &results);
+	virtual void resolve_localError(int id, XMPP::NameResolver::Error e);
 
 signals:
 	void resolve_resultsReady(int id, const QList<XMPP::NameRecord> &results);

@@ -1,3 +1,4 @@
 QT *= network
 
-SOURCES += $$PWD/appledns.cpp
+HEADERS += $$PWD/qdnssd.h
+SOURCES += $$PWD/qdnssd.cpp $$PWD/appledns.cpp

@@ -20,6 +20,62 @@
 
 #include "irisnetplugin.h"
 
+#include <QtCore>
+#include "qdnssd.h"
+
+class AppleNameProvider;
+
+static QString nameToString(const QByteArray &in)
+{
+	QStringList parts;
+	int at = 0;
+	while(at < in.size())
+	{
+		int len = in[at++];
+		parts += QString::fromUtf8(in.mid(at, len));
+		at += len;
+	}
+	return parts.join(".");
+}
+
+static XMPP::NameRecord importQDnsSdRecord(const QDnsSd::Record &in)
+{
+	NameRecord out;
+	switch(in.rrtype)
+	{
+		case 1: // A
+			quint32 *p = (quint32 *)in.rdata.data();
+			out.setAddress(QHostAddress(ntohl(*p)));
+			break;
+
+		case 28: // AAAA
+			out.setAddress(QHostAddress((quint8 *)in.rdata.data()));
+			break;
+
+		case 12: // PTR
+			out.setPtr(nameToString(in.rdata));
+			break;
+
+		case 10: // NULL
+			out.setNull(in.rdata);
+			break;
+
+		case 16: // TXT
+			QList<QByteArray> txtEntries = QDnsSd::parseTxtRecord(in.rdata);
+			if(txtEntries.isEmpty())
+				return out;
+			out.setTxt(txtEntries);
+			break;
+
+		default: // unsupported
+			return out;
+	}
+
+	out.setOwner(in.name);
+	out.setTTL(in.ttl);
+	return out;
+}
+
 //----------------------------------------------------------------------------
 // AppleProvider
 //----------------------------------------------------------------------------
@@ -28,7 +84,119 @@ class AppleProvider : public XMPP::IrisNetProvider
 	Q_OBJECT
 	Q_INTERFACES(XMPP::IrisNetProvider);
 public:
-	AppleProvider()
+	QDnsSd dns;
+	QHash<int,AppleNameProvider*> nameProviderById;
+
+	AppleProvider() :
+		dns(this)
+	{
+		connect(&dns, SIGNAL(queryResult(int, const QDnsSd::QueryResult &)), SLOT(dns_queryResult(int, const QDnsSd::QueryResult &)));
+	}
+
+	virtual NameProvider *createNameProviderInternet();
+	virtual NameProvider *createNameProviderLocal();
+
+	int query(AppleNameProvider *p, const QByteArray &name, int qType);
+	void stop(int id);
+
+private slots:
+	void dns_queryResult(int id, const QDnsSd::QueryResult &result);
+};
+
+//----------------------------------------------------------------------------
+// AppleNameProvider
+//----------------------------------------------------------------------------
+class AppleNameProvider : public QObject
+{
+	Q_OBJECT
+public:
+	AppleProvider *global;
+
+	AppleNameProvider(AppleProvider *parent) :
+		NameProvider(parent),
+		global(parent)
 	{
 	}
+
+	bool supportsSingle() const
+	{
+		return false;
+	}
+
+	bool supportsLongLived() const
+	{
+		return true;
+	}
+
+	virtual int resolve_start(const QByteArray &name, int qType, bool longLived)
+	{
+		Q_UNUSED(longLived); // query is always long lived
+		return global->dns.query(name, qType);
+	}
+
+	virtual void resolve_stop(int id)
+	{
+		global->dns.stop(id);
+	}
+
+	// called by AppleProvider
+
+	void dns_queryResult(int id, const QDnsSd::QueryResult &result)
+	{
+		if(!result.success)
+		{
+			emit resolve_error(id, ErrorGeneric);
+			return;
+		}
+
+		QList<XMPP::NameRecord> results;
+		foreach(const QDnsSd::Record &rec, result.records)
+		{
+			XMPP::NameRecord nr = importQDnsSdRecord(rec);
+
+			// unsupported type
+			if(nr.isNull())
+				continue;
+
+			// if removed, ensure ttl is 0
+			if(!rec.added)
+				nr.setTtl(0);
+
+			results += nr;
+		}
+
+		emit resolve_resultsReady(id, results);
+	}
 };
+
+// AppleProvider
+NameProvider *AppleProvider::createNameProviderInternet()
+{
+	return new AppleNameProvider(this);
+}
+
+NameProvider *AppleProvider::createNameProviderLocal()
+{
+	return new AppleNameProvider(this);
+}
+
+int AppleProvider::query(AppleNameProvider *p, const QByteArray &name, int qType)
+{
+	int id = dns.query(name, qType);
+	nameProviderById[id] = p;
+	return id;
+}
+
+void AppleProvider::stop(int id)
+{
+	nameProviderById.remove(id);
+}
+
+void AppleProvider::dns_queryResult(int id, const QDnsSd::QueryResult &result)
+{
+	nameProviderById[id]->dns_queryResult(id, result);
+}
+
+#include "appledns.moc"
+
+Q_EXPORT_PLUGIN2(appledns, AppleProvider)
