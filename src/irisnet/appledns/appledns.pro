@@ -9,9 +9,6 @@ DESTDIR = $$IRIS_BASE/plugins
 VERSION = 1.0.0
 
 INCLUDEPATH *= $$PWD/../corelib
-
-!appledns_bundle:{
-        LIBS += -L$$IRIS_BASE/lib -lirisnetcore
-}
+LIBS += -L$$IRIS_BASE/lib -lirisnetcore
 
 include(appledns.pri)

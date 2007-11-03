@@ -32,4 +32,7 @@ SOURCES += \
 
 #include(legacy/legacy.pri)
 
-appledns:appledns_bundle:include(../appledns/appledns.pri)
+appledns:appledns_bundle:{
+	DEFINES += APPLEDNS_STATIC
+	include(../appledns/appledns.pri)
+}

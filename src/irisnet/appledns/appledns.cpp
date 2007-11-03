@@ -199,4 +199,11 @@ void AppleProvider::dns_queryResult(int id, const QDnsSd::QueryResult &result)
 
 #include "appledns.moc"
 
+#ifdef APPLEDNS_STATIC
+IrisNetProvider *irisnet_createAppleProvider()
+{
+        return new AppleProvider;
+}
+#else
 Q_EXPORT_PLUGIN2(appledns, AppleProvider)
+#endif

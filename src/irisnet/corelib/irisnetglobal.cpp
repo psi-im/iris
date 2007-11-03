@@ -27,6 +27,9 @@ namespace XMPP {
 // built-in providers
 extern IrisNetProvider *irisnet_createUnixNetProvider();
 extern IrisNetProvider *irisnet_createJDnsProvider();
+#ifdef APPLEDNS_STATIC
+extern IrisNetProvider *irisnet_createAppleProvider();
+#endif
 
 //----------------------------------------------------------------------------
 // internal
