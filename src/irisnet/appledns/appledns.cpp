@@ -26,17 +26,19 @@
 
 class AppleNameProvider;
 
-static QString nameToString(const QByteArray &in)
+static QByteArray nameToDottedString(const QByteArray &in)
 {
-	QStringList parts;
+	QByteArray out;
 	int at = 0;
 	while(at < in.size())
 	{
 		int len = in[at++];
-		parts += QString::fromUtf8(in.mid(at, len));
+		if(len > 0)
+			out += in.mid(at, len);
+		out += '.';
 		at += len;
 	}
-	return parts.join(".");
+	return out;
 }
 
 static XMPP::NameRecord importQDnsSdRecord(const QDnsSd::Record &in)
@@ -59,7 +61,7 @@ static XMPP::NameRecord importQDnsSdRecord(const QDnsSd::Record &in)
 
 		case 12: // PTR
 		{
-			out.setPtr(nameToString(in.rdata));
+			out.setPtr(nameToDottedString(in.rdata));
 		}
 		break;
 
@@ -85,7 +87,7 @@ static XMPP::NameRecord importQDnsSdRecord(const QDnsSd::Record &in)
 	}
 
 	out.setOwner(in.name);
-	out.setTTL(in.ttl);
+	out.setTtl(in.ttl);
 	return out;
 }
 
