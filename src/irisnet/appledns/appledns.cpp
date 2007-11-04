@@ -41,35 +41,47 @@ static QString nameToString(const QByteArray &in)
 
 static XMPP::NameRecord importQDnsSdRecord(const QDnsSd::Record &in)
 {
-	NameRecord out;
+	XMPP::NameRecord out;
 	switch(in.rrtype)
 	{
 		case 1: // A
+		{
 			quint32 *p = (quint32 *)in.rdata.data();
 			out.setAddress(QHostAddress(ntohl(*p)));
-			break;
+		}
+		break;
 
 		case 28: // AAAA
+		{
 			out.setAddress(QHostAddress((quint8 *)in.rdata.data()));
-			break;
+		}
+		break;
 
 		case 12: // PTR
+		{
 			out.setPtr(nameToString(in.rdata));
-			break;
+		}
+		break;
 
 		case 10: // NULL
+		{
 			out.setNull(in.rdata);
-			break;
+		}
+		break;
 
 		case 16: // TXT
+		{
 			QList<QByteArray> txtEntries = QDnsSd::parseTxtRecord(in.rdata);
 			if(txtEntries.isEmpty())
 				return out;
 			out.setTxt(txtEntries);
-			break;
+		}
+		break;
 
 		default: // unsupported
+		{
 			return out;
+		}
 	}
 
 	out.setOwner(in.name);
@@ -107,14 +119,14 @@ private slots:
 //----------------------------------------------------------------------------
 // AppleNameProvider
 //----------------------------------------------------------------------------
-class AppleNameProvider : public QObject
+class AppleNameProvider : public XMPP::NameProvider
 {
 	Q_OBJECT
 public:
 	AppleProvider *global;
 
 	AppleNameProvider(AppleProvider *parent) :
-		XMPP::NameProvider(parent),
+		NameProvider(parent),
 		global(parent)
 	{
 	}
@@ -146,7 +158,7 @@ public:
 	{
 		if(!result.success)
 		{
-			emit resolve_error(id, ErrorGeneric);
+			emit resolve_error(id, XMPP::NameResolver::ErrorGeneric);
 			return;
 		}
 
@@ -171,12 +183,12 @@ public:
 };
 
 // AppleProvider
-NameProvider *AppleProvider::createNameProviderInternet()
+XMPP::NameProvider *AppleProvider::createNameProviderInternet()
 {
 	return new AppleNameProvider(this);
 }
 
-NameProvider *AppleProvider::createNameProviderLocal()
+XMPP::NameProvider *AppleProvider::createNameProviderLocal()
 {
 	return new AppleNameProvider(this);
 }
