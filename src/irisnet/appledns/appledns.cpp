@@ -21,6 +21,7 @@
 #include "irisnetplugin.h"
 
 #include <QtCore>
+#include "netnames.h"
 #include "qdnssd.h"
 
 class AppleNameProvider;
@@ -93,8 +94,8 @@ public:
 		connect(&dns, SIGNAL(queryResult(int, const QDnsSd::QueryResult &)), SLOT(dns_queryResult(int, const QDnsSd::QueryResult &)));
 	}
 
-	virtual NameProvider *createNameProviderInternet();
-	virtual NameProvider *createNameProviderLocal();
+	virtual XMPP::NameProvider *createNameProviderInternet();
+	virtual XMPP::NameProvider *createNameProviderLocal();
 
 	int query(AppleNameProvider *p, const QByteArray &name, int qType);
 	void stop(int id);
@@ -113,7 +114,7 @@ public:
 	AppleProvider *global;
 
 	AppleNameProvider(AppleProvider *parent) :
-		NameProvider(parent),
+		XMPP::NameProvider(parent),
 		global(parent)
 	{
 	}
