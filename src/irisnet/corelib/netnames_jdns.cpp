@@ -43,7 +43,7 @@ NameRecord importJDNSRecord(const QJDns::Record &in)
 			return out;
 	}
 	out.setOwner(in.owner);
-	out.setTTL(in.ttl);
+	out.setTtl(in.ttl);
 	return out;
 }
 
