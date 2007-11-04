@@ -55,7 +55,7 @@ NameRecord::NameRecord(const QByteArray &owner, int ttl)
 {
 	d = 0;
 	setOwner(owner);
-	setTTL(ttl);
+	setTtl(ttl);
 }
 
 NameRecord::NameRecord(const NameRecord &from)
@@ -157,7 +157,7 @@ void NameRecord::setOwner(const QByteArray &name)
 	d->owner = name;
 }
 
-void NameRecord::setTTL(int seconds)
+void NameRecord::setTtl(int seconds)
 {
 	ENSURE_D
 	d->ttl = seconds;

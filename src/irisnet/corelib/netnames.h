@@ -68,7 +68,7 @@ if(record.type() == NameRecord::A)
 
    Getting the data out of a NameRecord involves calling the right retrieval functions, depending on the type.  Many types share retrieval functions.  For example, the "AAAA" type holds an IPv6 address, which is accessed the same way as the "A" type, by calling address().  See the NameRecord::Type enum for further information about which retrieval functions should be called for each type.
 
-   To create a NameRecord, use setOwner() and setTTL() as necessary, and then call one of the set<em>X</em> functions (where <em>X</em> is the desired type).  For example, to set an A or AAAA record, use setAddress() like this:
+   To create a NameRecord, use setOwner() and setTtl() as necessary, and then call one of the set<em>X</em> functions (where <em>X</em> is the desired type).  For example, to set an A or AAAA record, use setAddress() like this:
 
 \code
 // make example.com the owner, with 1 hour TTL
@@ -155,7 +155,7 @@ public:
 
 	   As a special exception, a TTL of 0 when performing a long-lived lookup indicates that a record is no longer available.
 
-	   \sa setTTL
+	   \sa setTtl
 	*/
 	int ttl() const;
 
@@ -239,7 +239,7 @@ public:
 
 	   \sa ttl
 	*/
-	void setTTL(int seconds);
+	void setTtl(int seconds);
 
 	/**
 	   \brief Set as A or AAAA record, with data \a a
