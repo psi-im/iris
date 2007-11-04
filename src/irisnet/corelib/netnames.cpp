@@ -20,7 +20,7 @@
 
 #include "netnames.h"
 
-#include <idna.h>
+//#include <idna.h>
 #include "irisnetplugin.h"
 #include "irisnetglobal_p.h"
 
