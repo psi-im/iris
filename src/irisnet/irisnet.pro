@@ -2,6 +2,6 @@ TEMPLATE = subdirs
 
 include(../../build.pri)
 
-appledns:!appledns_bundle:SUBDIRS += appledns
 !irisnetcore_bundle:SUBDIRS += corelib
+appledns:!appledns_bundle:SUBDIRS += appledns
 !iris_bundle:SUBDIRS += noncore
