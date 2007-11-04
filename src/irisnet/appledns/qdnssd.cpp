@@ -744,7 +744,12 @@ private:
 		DNSServiceFlags flags, uint32_t interfaceIndex,
 		DNSServiceErrorType errorCode, const char *fullname,
 		const char *hosttarget, uint16_t port, uint16_t txtLen,
-		const char *txtRecord, void *context)
+#if _DNS_SD_H+0 >= 1610100
+		const unsigned char *txtRecord,
+#else
+		const char *txtRecord,
+#endif
+		void *context)
 	{
 		Q_UNUSED(ref);
 		Q_UNUSED(flags);
@@ -752,7 +757,8 @@ private:
 
 		Request *req = static_cast<Request *>(context);
 		req->_self->handle_resolveReply(req, errorCode, fullname,
-			hosttarget, port, txtLen, txtRecord);
+			hosttarget, port, txtLen,
+			(const unsigned char *)txtRecord);
 	}
 
 	static void cb_regReply(DNSServiceRef ref,
@@ -816,7 +822,7 @@ private:
 
 	void handle_resolveReply(Request *req, DNSServiceErrorType errorCode,
 		const char *fullname, const char *hosttarget, uint16_t port,
-		uint16_t txtLen, const char *txtRecord)
+		uint16_t txtLen, const unsigned char *txtRecord)
 	{
 		if(errorCode != kDNSServiceErr_NoError)
 		{
@@ -828,7 +834,7 @@ private:
 		req->_resolveFullName = QByteArray(fullname);
 		req->_resolveHost = QByteArray(hosttarget);
 		req->_resolvePort = ntohs(port);
-		req->_resolveTxtRecord = QByteArray(txtRecord, txtLen);
+		req->_resolveTxtRecord = QByteArray((const char *)txtRecord, txtLen);
 
 		req->_doSignal = true;
 	}
