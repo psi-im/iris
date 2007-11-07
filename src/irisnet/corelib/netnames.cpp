@@ -566,7 +566,7 @@ public:
 			qRegisterMetaType<XMPP::ServiceInstance>("XMPP::ServiceInstance");
 			connect(p_serv, SIGNAL(browse_instanceAvailable(int, const XMPP::ServiceInstance &)), SLOT(provider_browse_instanceAvailable(int, const XMPP::ServiceInstance &)), Qt::QueuedConnection);
 			connect(p_serv, SIGNAL(browse_instanceUnavailable(int, const XMPP::ServiceInstance &)), SLOT(provider_browse_instanceUnavailable(int, const XMPP::ServiceInstance &)), Qt::QueuedConnection);
-			connect(p_serv, SIGNAL(browse_error(int)), SLOT(provider_browse_error(int)), Qt::QueuedConnection);
+			connect(p_serv, SIGNAL(browse_error(int, XMPP::ServiceBrowser::Error)), SLOT(provider_browse_error(int, XMPP::ServiceBrowser::Error)), Qt::QueuedConnection);
 		}
 
 		/*np->id = */
@@ -729,8 +729,9 @@ private slots:
 		emit np->q->instanceUnavailable(i);
 	}
 
-	void provider_browse_error(int id)
+	void provider_browse_error(int id, XMPP::ServiceBrowser::Error e)
 	{
+		Q_UNUSED(e);
 		ServiceBrowser::Private *np = br_instances.value(id);
 		// TODO
 		emit np->q->error();

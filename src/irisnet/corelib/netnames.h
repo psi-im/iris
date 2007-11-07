@@ -456,6 +456,11 @@ class IRISNET_EXPORT ServiceBrowser : public QObject
 {
 	Q_OBJECT
 public:
+	enum Error
+	{
+		ErrorGeneric
+	};
+
 	ServiceBrowser(QObject *parent = 0);
 	~ServiceBrowser();
 
@@ -479,6 +484,11 @@ class IRISNET_EXPORT ServiceResolver : public QObject
 {
 	Q_OBJECT
 public:
+	enum Error
+	{
+		ErrorGeneric
+	};
+
 	ServiceResolver(QObject *parent = 0);
 	~ServiceResolver();
 
