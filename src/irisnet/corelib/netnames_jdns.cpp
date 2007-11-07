@@ -960,14 +960,14 @@ public:
 		return 1;
 	}
 
-	virtual int publish_update(const QMap<QString,QByteArray> &attributes)
+	virtual void publish_update(int id, const QMap<QString,QByteArray> &attributes)
 	{
 		// TODO
+		Q_UNUSED(id);
 		Q_UNUSED(attributes);
-		return 0;
 	}
 
-	virtual void publish_cancel(int id)
+	virtual void publish_stop(int id)
 	{
 		// TODO
 		Q_UNUSED(id);
@@ -992,15 +992,14 @@ public:
 		return 2;
 	}
 
-	virtual int publish_extra_update(int id, const NameRecord &name)
+	virtual void publish_extra_update(int id, const NameRecord &name)
 	{
 		// TODO
 		Q_UNUSED(id);
 		Q_UNUSED(name);
-		return 0;
 	}
 
-	virtual void publish_extra_cancel(int id)
+	virtual void publish_extra_stop(int id)
 	{
 		// TODO
 		Q_UNUSED(id);

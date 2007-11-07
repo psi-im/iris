@@ -100,11 +100,11 @@ public:
 	virtual int resolve_start(const QByteArray &name) = 0;
 	virtual void resolve_stop(int id) = 0;
 	virtual int publish_start(const QString &instance, const QString &type, int port, const QMap<QString,QByteArray> &attributes) = 0;
-	virtual int publish_update(const QMap<QString,QByteArray> &attributes) = 0;
-	virtual void publish_cancel(int id) = 0;
+	virtual void publish_update(int id, const QMap<QString,QByteArray> &attributes) = 0;
+	virtual void publish_stop(int id) = 0;
 	virtual int publish_extra_start(int pub_id, const NameRecord &name) = 0;
-	virtual int publish_extra_update(int id, const NameRecord &name) = 0;
-	virtual void publish_extra_cancel(int id) = 0;
+	virtual void publish_extra_update(int id, const NameRecord &name) = 0;
+	virtual void publish_extra_stop(int id) = 0;
 
 signals:
 	void browse_instanceAvailable(int id, const XMPP::ServiceInstance &instance);
@@ -112,9 +112,9 @@ signals:
 	void browse_error(int id);
 	void resolve_resultsReady(int id, const QHostAddress &address, int port);
 	void resolve_error(int id);
-	void publish_published(int id);
+	void publish_published(int id); // for start or update
 	void publish_error(int id, XMPP::ServiceLocalPublisher::Error e);
-	void publish_extra_published(int id);
+	void publish_extra_published(int id); // for start or update
 	void publish_extra_error(int id, XMPP::ServiceLocalPublisher::Error e);
 };
 
