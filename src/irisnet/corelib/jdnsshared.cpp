@@ -133,11 +133,11 @@ public:
 	}
 };
 
-}
-
 inline uint qHash(const Handle &key)
 {
 	return ((uint)key.jdns) ^ key.id;
+}
+
 }
 
 //----------------------------------------------------------------------------
