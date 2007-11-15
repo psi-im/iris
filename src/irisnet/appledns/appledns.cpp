@@ -21,8 +21,15 @@
 #include "irisnetplugin.h"
 
 #include <QtCore>
-#include "netnames.h"
+#include <QtNetwork>
 #include "qdnssd.h"
+
+// for ntohl
+#ifdef Q_OS_WIN
+# include <windows.h>
+#else
+# include <netinet/in.h>
+#endif
 
 class AppleNameProvider;
 
@@ -215,7 +222,7 @@ void AppleProvider::dns_queryResult(int id, const QDnsSd::QueryResult &result)
 #include "appledns.moc"
 
 #ifdef APPLEDNS_STATIC
-IrisNetProvider *irisnet_createAppleProvider()
+XMPP::IrisNetProvider *irisnet_createAppleProvider()
 {
         return new AppleProvider;
 }
