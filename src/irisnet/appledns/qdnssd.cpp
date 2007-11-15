@@ -375,7 +375,7 @@ public:
 		DNSServiceErrorType err = DNSServiceResolve(
 			req->_sdref->data(), 0, 0, serviceName.constData(),
 			serviceType.constData(), domain.constData(),
-			cb_resolveReply, req);
+			(DNSServiceResolveReply)cb_resolveReply, req);
 		if(err != kDNSServiceErr_NoError)
 		{
 			setDelayedError(req, LowLevelError(
@@ -744,12 +744,7 @@ private:
 		DNSServiceFlags flags, uint32_t interfaceIndex,
 		DNSServiceErrorType errorCode, const char *fullname,
 		const char *hosttarget, uint16_t port, uint16_t txtLen,
-#if _DNS_SD_H+0 >= 1610100
-		const unsigned char *txtRecord,
-#else
-		const char *txtRecord,
-#endif
-		void *context)
+		const unsigned char *txtRecord, void *context)
 	{
 		Q_UNUSED(ref);
 		Q_UNUSED(flags);
@@ -757,8 +752,7 @@ private:
 
 		Request *req = static_cast<Request *>(context);
 		req->_self->handle_resolveReply(req, errorCode, fullname,
-			hosttarget, port, txtLen,
-			(const unsigned char *)txtRecord);
+			hosttarget, port, txtLen, txtRecord);
 	}
 
 	static void cb_regReply(DNSServiceRef ref,
