@@ -55,111 +55,11 @@
 //----------------------------------------------------------------------------
 // SocksUDP
 //----------------------------------------------------------------------------
-static QByteArray sp_create_udp(const QString &host, Q_UINT16 port, const QByteArray &buf)
-{
-	// detect for IP addresses
-	//QHostAddress addr;
-	//if(addr.setAddress(host))
-	//	return sp_set_request(addr, port, cmd1);
-
-	QByteArray h = host.utf8();
-	h.truncate(255);
-	h = QString::fromUtf8(h).utf8(); // delete any partial characters?
-	int hlen = h.length();
-
-	int at = 0;
-	QByteArray a(4);
-	a[at++] = 0x00; // reserved
-	a[at++] = 0x00; // reserved
-	a[at++] = 0x00; // frag
-	a[at++] = 0x03; // address type = domain
-
-	// host
-	a.resize(at+hlen+1);
-	a[at++] = hlen;
-	memcpy(a.data() + at, h.data(), hlen);
-	at += hlen;
-
-	// port
-	a.resize(at+2);
-	unsigned short p = htons(port);
-	memcpy(a.data() + at, &p, 2);
-	at += 2;
-
-	a.resize(at+buf.size());
-	memcpy(a.data() + at, buf.data(), buf.size());
-
-	return a;
-}
-
-struct SPS_UDP
-{
-	QString host;
-	Q_UINT16 port;
-	QByteArray data;
-};
-
-static int sp_read_udp(QByteArray *from, SPS_UDP *s)
-{
-	int full_len = 4;
-	if((int)from->size() < full_len)
-		return 0;
-
-	QString host;
-	QHostAddress addr;
-	unsigned char atype = from->at(3);
-
-	if(atype == 0x01) {
-		full_len += 4;
-		if((int)from->size() < full_len)
-			return 0;
-		Q_UINT32 ip4;
-		memcpy(&ip4, from->data() + 4, 4);
-		addr.setAddress(ntohl(ip4));
-		host = addr.toString();
-	}
-	else if(atype == 0x03) {
-		++full_len;
-		if((int)from->size() < full_len)
-			return 0;
-		unsigned char host_len = from->at(4);
-		full_len += host_len;
-		if((int)from->size() < full_len)
-			return 0;
-		QByteArray cs(host_len+1);
-		memcpy(cs.data(), from->data() + 5, host_len);
-		host = QString::fromLatin1(cs);
-	}
-	else if(atype == 0x04) {
-		full_len += 16;
-		if((int)from->size() < full_len)
-			return 0;
-		Q_UINT8 a6[16];
-		memcpy(a6, from->data() + 4, 16);
-		addr.setAddress(a6);
-		host = addr.toString();
-	}
-
-	full_len += 2;
-	if((int)from->size() < full_len)
-		return 0;
-
-	Q_UINT16 p;
-	memcpy(&p, from->data() + full_len - 2, 2);
-
-	s->host = host;
-	s->port = ntohs(p);
-	s->data.resize(from->size() - full_len);
-	memcpy(s->data.data(), from->data() + full_len, s->data.size());
-
-	return 1;
-}
 
 class SocksUDP::Private
 {
 public:
-	Q3SocketDevice *sd;
-	QSocketNotifier *sn;
+	QUdpSocket *sd;
 	SocksClient *sc;
 	QHostAddress routeAddr;
 	int routePort;
@@ -172,10 +72,8 @@ SocksUDP::SocksUDP(SocksClient *sc, const QString &host, int port, const QHostAd
 {
 	d = new Private;
 	d->sc = sc;
-	d->sd = new Q3SocketDevice(Q3SocketDevice::Datagram);
-	d->sd->setBlocking(false);
-	d->sn = new QSocketNotifier(d->sd->socket(), QSocketNotifier::Read);
-	connect(d->sn, SIGNAL(activated(int)), SLOT(sn_activated(int)));
+	d->sd = new QUdpSocket();
+	connect(d->sd, SIGNAL(readyRead()), SLOT(sd_readyRead()));
 	d->host = host;
 	d->port = port;
 	d->routeAddr = routeAddr;
@@ -184,7 +82,6 @@ SocksUDP::SocksUDP(SocksClient *sc, const QString &host, int port, const QHostAd
 
 SocksUDP::~SocksUDP()
 {
-	delete d->sn;
 	delete d->sd;
 	delete d;
 }
@@ -197,18 +94,17 @@ void SocksUDP::change(const QString &host, int port)
 
 void SocksUDP::write(const QByteArray &data)
 {
-	QByteArray buf = sp_create_udp(d->host, d->port, data);
-	d->sd->setBlocking(true);
-	d->sd->writeBlock(buf.data(), buf.size(), d->routeAddr, d->routePort);
-	d->sd->setBlocking(false);
+	d->sd->writeDatagram(data.data(), data.size(), d->routeAddr, d->routePort);
 }
 
-void SocksUDP::sn_activated(int)
+void SocksUDP::sd_activated()
 {
-	QByteArray buf(8192);
-	int actual = d->sd->readBlock(buf.data(), buf.size());
-	buf.resize(actual);
-	packetReady(buf);
+  while (d->sd->hasPendingDatagrams()) {
+    QByteArray datagram;
+    datagram.resize(d->sd->pendingDatagramSize());
+    d->sd->readDatagram(datagram.data(), datagram.size());
+    packetReady(datagram);
+  }
 }
 
 //----------------------------------------------------------------------------
@@ -1104,8 +1000,7 @@ public:
 
 	ServSock serv;
 	QList<SocksClient*> incomingConns;
-	Q3SocketDevice *sd;
-	QSocketNotifier *sn;
+	QUdpSocket *sd;
 };
 
 SocksServer::SocksServer(QObject *parent)
@@ -1113,7 +1008,6 @@ SocksServer::SocksServer(QObject *parent)
 {
 	d = new Private;
 	d->sd = 0;
-	d->sn = 0;
 	connect(&d->serv, SIGNAL(connectionReady(int)), SLOT(connectionReady(int)));
 }
 
@@ -1137,27 +1031,20 @@ bool SocksServer::listen(Q_UINT16 port, bool udp)
 	if(!d->serv.listen(port))
 		return false;
 	if(udp) {
-		d->sd = new Q3SocketDevice(Q3SocketDevice::Datagram);
-#ifdef Q_OS_UNIX
-		::fcntl(d->sd->socket(), F_SETFD, FD_CLOEXEC);
-#endif
-		d->sd->setBlocking(false);
-		if(!d->sd->bind(QHostAddress(), port)) {
+		d->sd = new QUdpSocket();
+		if(!d->sd->bind(QHostAddress::LocalHost, port)) {
 			delete d->sd;
 			d->sd = 0;
 			d->serv.stop();
 			return false;
 		}
-		d->sn = new QSocketNotifier(d->sd->socket(), QSocketNotifier::Read);
-		connect(d->sn, SIGNAL(activated(int)), SLOT(sn_activated(int)));
+		connect(d->sd, SIGNAL(readyRead()), SLOT(sd_activated()));
 	}
 	return true;
 }
 
 void SocksServer::stop()
 {
-	delete d->sn;
-	d->sn = 0;
 	delete d->sd;
 	d->sd = 0;
 	d->serv.stop();
@@ -1192,9 +1079,7 @@ SocksClient *SocksServer::takeIncoming()
 void SocksServer::writeUDP(const QHostAddress &addr, int port, const QByteArray &data)
 {
 	if(d->sd) {
-		d->sd->setBlocking(true);
-		d->sd->writeBlock(data.data(), data.size(), addr, port);
-		d->sd->setBlocking(false);
+		d->sd->writeDatagram(data.data(), data.size(), addr, port);
 	}
 }
 
@@ -1213,18 +1098,16 @@ void SocksServer::connectionError()
 	c->deleteLater();
 }
 
-void SocksServer::sn_activated(int)
+void SocksServer::sd_activated()
 {
-	QByteArray buf(8192);
-	int actual = d->sd->readBlock(buf.data(), buf.size());
-	buf.resize(actual);
-	QHostAddress pa = d->sd->peerAddress();
-	int pp = d->sd->peerPort();
-	SPS_UDP s;
-	int r = sp_read_udp(&buf, &s);
-	if(r != 1)
-		return;
-	incomingUDP(s.host, s.port, pa, pp, s.data);
+  while (d->sd->hasPendingDatagrams()) {
+    QByteArray datagram;
+    QHostAddress sender;
+    quint16 senderPort;
+    datagram.resize(d->sd->pendingDatagramSize());
+    d->sd->readDatagram(datagram.data(), datagram.size(), &sender, &senderPort);
+    incomingUDP(sender.toString(), senderPort, d->sd->peerAddress(), d->sd->peerPort(), datagram);
+  }
 }
 
 // CS_NAMESPACE_END

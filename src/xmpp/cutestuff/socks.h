@@ -42,7 +42,7 @@ signals:
 	void packetReady(const QByteArray &data);
 
 private slots:
-	void sn_activated(int);
+	void sd_activated();
 
 private:
 	class Private;
@@ -148,7 +148,7 @@ signals:
 private slots:
 	void connectionReady(int);
 	void connectionError();
-	void sn_activated(int);
+	void sd_activated();
 
 private:
 	class Private;
