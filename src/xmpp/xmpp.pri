@@ -11,17 +11,14 @@ else {
 	LIBS += -L$$IRIS_BASE/lib -lirisnet
 }
 
-# libidn
-LIBIDN_BASE = $$PWD/../libidn
-CONFIG += libidn
 include($$PWD/../libidn/libidn.pri)
-
-INCLUDEPATH += $$PWD/cutestuff
-include(cutestuff/cutestuff.pri)
+include($$PWD/cutestuff/cutestuff.pri)
 
 DEFINES += XMPP_TEST
 
-INCLUDEPATH += $$PWD/xmpp-core $$PWD/xmpp-im
+INCLUDEPATH += \
+  $$PWD/xmpp-core \
+  $$PWD/xmpp-im
 
 HEADERS += \
 	$$PWD/xmpp-core/securestream.h \
