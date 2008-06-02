@@ -27,8 +27,7 @@
 #include <qpointer.h>
 #include <q3socketdevice.h>
 #include <qsocketnotifier.h>
-//Added by qt3to4:
-#include <Q3CString>
+#include <QByteArray>
 
 #ifdef Q_OS_UNIX
 #include <sys/types.h>
@@ -63,7 +62,7 @@ static QByteArray sp_create_udp(const QString &host, Q_UINT16 port, const QByteA
 	//if(addr.setAddress(host))
 	//	return sp_set_request(addr, port, cmd1);
 
-	Q3CString h = host.utf8();
+	QByteArray h = host.utf8();
 	h.truncate(255);
 	h = QString::fromUtf8(h).utf8(); // delete any partial characters?
 	int hlen = h.length();
@@ -127,7 +126,7 @@ static int sp_read_udp(QByteArray *from, SPS_UDP *s)
 		full_len += host_len;
 		if((int)from->size() < full_len)
 			return 0;
-		Q3CString cs(host_len+1);
+		QByteArray cs(host_len+1);
 		memcpy(cs.data(), from->data() + 5, host_len);
 		host = QString::fromLatin1(cs);
 	}
@@ -290,7 +289,7 @@ static int sps_get_version(QByteArray *from, SPSS_VERSION *s)
 }
 
 // authUsername
-static QByteArray spc_set_authUsername(const Q3CString &user, const Q3CString &pass)
+static QByteArray spc_set_authUsername(const QByteArray &user, const QByteArray &pass)
 {
 	int len1 = user.length();
 	int len2 = pass.length();
@@ -337,7 +336,7 @@ static int spc_get_authUsername(QByteArray *from, SPCS_AUTHUSERNAME *s)
 		return 0;
 	QByteArray a = ByteStream::takeArray(from, ulen + plen + 3);
 
-	Q3CString user, pass;
+	QByteArray user, pass;
 	user.resize(ulen+1);
 	pass.resize(plen+1);
 	memcpy(user.data(), a.data()+2, ulen);
@@ -410,7 +409,7 @@ static QByteArray sp_set_request(const QString &host, Q_UINT16 port, unsigned ch
 	if(addr.setAddress(host))
 		return sp_set_request(addr, port, cmd1);
 
-	Q3CString h = host.utf8();
+	QByteArray h = host.utf8();
 	h.truncate(255);
 	h = QString::fromUtf8(h).utf8(); // delete any partial characters?
 	int hlen = h.length();
@@ -472,7 +471,7 @@ static int sp_get_request(QByteArray *from, SPS_CONNREQ *s)
 		full_len += host_len;
 		if((int)from->size() < full_len)
 			return 0;
-		Q3CString cs(host_len+1);
+		QByteArray cs(host_len+1);
 		memcpy(cs.data(), from->data() + 5, host_len);
 		host = QString::fromLatin1(cs);
 	}
@@ -1104,7 +1103,7 @@ public:
 	Private() {}
 
 	ServSock serv;
-	Q3PtrList<SocksClient> incomingConns;
+	QList<SocksClient*> incomingConns;
 	Q3SocketDevice *sd;
 	QSocketNotifier *sn;
 };
@@ -1121,8 +1120,9 @@ SocksServer::SocksServer(QObject *parent)
 SocksServer::~SocksServer()
 {
 	stop();
-	d->incomingConns.setAutoDelete(true);
-	d->incomingConns.clear();
+  while (d->incomingConns.count()) {
+    delete d->incomingConns.takeFirst();
+  }
 	delete d;
 }
 
@@ -1178,8 +1178,7 @@ SocksClient *SocksServer::takeIncoming()
 	if(d->incomingConns.isEmpty())
 		return 0;
 
-	SocksClient *c = d->incomingConns.getFirst();
-	d->incomingConns.removeRef(c);
+	SocksClient *c = d->incomingConns.takeFirst();
 
 	// we don't care about errors anymore
 	disconnect(c, SIGNAL(error(int)), this, SLOT(connectionError()));
@@ -1210,7 +1209,7 @@ void SocksServer::connectionReady(int s)
 void SocksServer::connectionError()
 {
 	SocksClient *c = (SocksClient *)sender();
-	d->incomingConns.removeRef(c);
+	d->incomingConns.remove(c);
 	c->deleteLater();
 }
 

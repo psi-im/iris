@@ -21,8 +21,7 @@
 #include "httpconnect.h"
 
 #include <qstringlist.h>
-//Added by qt3to4:
-#include <Q3CString>
+#include <QByteArray>
 #include "bsocket.h"
 #include <QtCrypto>
 
@@ -203,9 +202,7 @@ void HttpConnect::sock_connected()
 	s += "Pragma: no-cache\r\n";
 	s += "\r\n";
 
-	Q3CString cs = s.utf8();
-	QByteArray block(cs.length());
-	memcpy(block.data(), cs.data(), block.size());
+	QByteArray block = s.utf8();
 	d->toWrite = block.size();
 	d->sock.write(block);
 }

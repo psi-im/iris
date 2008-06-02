@@ -21,8 +21,8 @@
 #ifndef CS_BYTESTREAM_H
 #define CS_BYTESTREAM_H
 
-#include <qobject.h>
-#include <q3cstring.h>
+#include <QObject>
+#include <QByteArray>
 
 // CS_NAMESPACE_BEGIN
 
@@ -41,8 +41,6 @@ public:
 	virtual QByteArray read(int bytes=0);
 	virtual int bytesAvailable() const;
 	virtual int bytesToWrite() const;
-
-	void write(const Q3CString &);
 
 	static void appendArray(QByteArray *a, const QByteArray &b);
 	static QByteArray takeArray(QByteArray *from, int size=0, bool del=true);
