@@ -22,10 +22,8 @@
 
 #include <qhostaddress.h>
 #include <qstringlist.h>
-#include <q3ptrlist.h>
 #include <qtimer.h>
 #include <qpointer.h>
-#include <q3socketdevice.h>
 #include <qsocketnotifier.h>
 #include <QByteArray>
 
@@ -126,7 +124,8 @@ void SocksUDP::sd_activated()
 // Version
 static QByteArray spc_set_version()
 {
-	QByteArray ver(4);
+	QByteArray ver;
+  ver.resize(4);
 	ver[0] = 0x05; // socks version 5
 	ver[1] = 0x02; // number of methods
 	ver[2] = 0x00; // no-auth
@@ -136,7 +135,8 @@ static QByteArray spc_set_version()
 
 static QByteArray sps_set_version(int method)
 {
-	QByteArray ver(2);
+	QByteArray ver;
+  ver.resize(2);
 	ver[0] = 0x05;
 	ver[1] = method;
 	return ver;
@@ -193,7 +193,8 @@ static QByteArray spc_set_authUsername(const QByteArray &user, const QByteArray 
 		len1 = 255;
 	if(len2 > 255)
 		len2 = 255;
-	QByteArray a(1+1+len1+1+len2);
+	QByteArray a;
+  a.resize(1+1+len1+1+len2);
 	a[0] = 0x01; // username auth version 1
 	a[1] = len1;
 	memcpy(a.data() + 2, user.data(), len1);
@@ -204,7 +205,8 @@ static QByteArray spc_set_authUsername(const QByteArray &user, const QByteArray 
 
 static QByteArray sps_set_authUsername(bool success)
 {
-	QByteArray a(2);
+	QByteArray a;
+  a.resize(2);
 	a[0] = 0x01;
 	a[1] = success ? 0x00 : 0xff;
 	return a;
@@ -262,23 +264,24 @@ static int sps_get_authUsername(QByteArray *from, SPSS_AUTHUSERNAME *s)
 static QByteArray sp_set_request(const QHostAddress &addr, unsigned short port, unsigned char cmd1)
 {
 	int at = 0;
-	QByteArray a(4);
+	QByteArray a;
+  a.resize(4);
 	a[at++] = 0x05; // socks version 5
 	a[at++] = cmd1;
 	a[at++] = 0x00; // reserved
-	if(addr.isIp4Addr()) {
+	if(addr.protocol() == QAbstractSocket::IPv4Protocol || addr.protocol() == QAbstractSocket::UnknownNetworkLayerProtocol) {
 		a[at++] = 0x01; // address type = ipv4
-		Q_UINT32 ip4 = htonl(addr.ip4Addr());
+		quint32 ip4 = htonl(addr.toIPv4Address());
 		a.resize(at+4);
 		memcpy(a.data() + at, &ip4, 4);
 		at += 4;
 	}
 	else {
 		a[at++] = 0x04;
-		Q_UINT8 a6[16];
-		QStringList s6 = QStringList::split(':', addr.toString(), true);
+		quint8 a6[16];
+		QStringList s6 = addr.toString().split(':');
 		int at = 0;
-		Q_UINT16 c;
+		quint16 c;
 		bool ok;
 		for(QStringList::ConstIterator it = s6.begin(); it != s6.end(); ++it) {
 			c = (*it).toInt(&ok, 16);
@@ -298,20 +301,21 @@ static QByteArray sp_set_request(const QHostAddress &addr, unsigned short port, 
 	return a;
 }
 
-static QByteArray sp_set_request(const QString &host, Q_UINT16 port, unsigned char cmd1)
+static QByteArray sp_set_request(const QString &host, quint16 port, unsigned char cmd1)
 {
 	// detect for IP addresses
 	QHostAddress addr;
 	if(addr.setAddress(host))
 		return sp_set_request(addr, port, cmd1);
 
-	QByteArray h = host.utf8();
+	QByteArray h = host.toUtf8();
 	h.truncate(255);
-	h = QString::fromUtf8(h).utf8(); // delete any partial characters?
+	h = QString::fromUtf8(h).toUtf8(); // delete any partial characters?
 	int hlen = h.length();
 
 	int at = 0;
-	QByteArray a(4);
+	QByteArray a;
+  a.resize(4);
 	a[at++] = 0x05; // socks version 5
 	a[at++] = cmd1;
 	a[at++] = 0x00; // reserved
@@ -338,7 +342,7 @@ struct SPS_CONNREQ
 	int address_type;
 	QString host;
 	QHostAddress addr;
-	Q_UINT16 port;
+	quint16 port;
 };
 
 static int sp_get_request(QByteArray *from, SPS_CONNREQ *s)
@@ -355,7 +359,7 @@ static int sp_get_request(QByteArray *from, SPS_CONNREQ *s)
 		full_len += 4;
 		if((int)from->size() < full_len)
 			return 0;
-		Q_UINT32 ip4;
+		quint32 ip4;
 		memcpy(&ip4, from->data() + 4, 4);
 		addr.setAddress(ntohl(ip4));
 	}
@@ -367,7 +371,8 @@ static int sp_get_request(QByteArray *from, SPS_CONNREQ *s)
 		full_len += host_len;
 		if((int)from->size() < full_len)
 			return 0;
-		QByteArray cs(host_len+1);
+		QByteArray cs;
+    cs.resize(host_len+1);
 		memcpy(cs.data(), from->data() + 5, host_len);
 		host = QString::fromLatin1(cs);
 	}
@@ -375,7 +380,7 @@ static int sp_get_request(QByteArray *from, SPS_CONNREQ *s)
 		full_len += 16;
 		if((int)from->size() < full_len)
 			return 0;
-		Q_UINT8 a6[16];
+		quint8 a6[16];
 		memcpy(a6, from->data() + 4, 16);
 		addr.setAddress(a6);
 	}
@@ -386,7 +391,7 @@ static int sp_get_request(QByteArray *from, SPS_CONNREQ *s)
 
 	QByteArray a = ByteStream::takeArray(from, full_len);
 
-	Q_UINT16 p;
+	quint16 p;
 	memcpy(&p, a.data() + full_len - 2, 2);
 
 	s->version = a[0];
@@ -501,11 +506,11 @@ void SocksClient::connectToHost(const QString &proxyHost, int proxyPort, const Q
 	d->udp = udpMode;
 
 #ifdef PROX_DEBUG
-	fprintf(stderr, "SocksClient: Connecting to %s:%d", proxyHost.latin1(), proxyPort);
+	fprintf(stderr, "SocksClient: Connecting to %s:%d", proxyHost.toLatin1(), proxyPort);
 	if(d->user.isEmpty())
 		fprintf(stderr, "\n");
 	else
-		fprintf(stderr, ", auth {%s,%s}\n", d->user.latin1(), d->pass.latin1());
+		fprintf(stderr, ", auth {%s,%s}\n", d->user.toLatin1(), d->pass.toLatin1());
 #endif
 	d->sock.connectToHost(d->host, d->port);
 }
@@ -655,7 +660,7 @@ void SocksClient::processOutgoing(const QByteArray &block)
 #ifdef PROX_DEBUG
 				fprintf(stderr, "SocksClient: Authenticating [Username] ...\n");
 #endif
-				writeData(spc_set_authUsername(d->user.latin1(), d->pass.latin1()));
+				writeData(spc_set_authUsername(d->user.toLatin1(), d->pass.toLatin1()));
 			}
 		}
 	}
@@ -970,7 +975,7 @@ QHostAddress SocksClient::peerAddress() const
 	return d->sock.peerAddress();
 }
 
-Q_UINT16 SocksClient::peerPort() const
+quint16 SocksClient::peerPort() const
 {
 	return d->sock.peerPort();
 }
@@ -980,7 +985,7 @@ QString SocksClient::udpAddress() const
 	return d->udpAddr;
 }
 
-Q_UINT16 SocksClient::udpPort() const
+quint16 SocksClient::udpPort() const
 {
 	return d->udpPort;
 }
@@ -1025,7 +1030,7 @@ bool SocksServer::isActive() const
 	return d->serv.isActive();
 }
 
-bool SocksServer::listen(Q_UINT16 port, bool udp)
+bool SocksServer::listen(quint16 port, bool udp)
 {
 	stop();
 	if(!d->serv.listen(port))
@@ -1094,7 +1099,7 @@ void SocksServer::connectionReady(int s)
 void SocksServer::connectionError()
 {
 	SocksClient *c = (SocksClient *)sender();
-	d->incomingConns.remove(c);
+	d->incomingConns.removeAll(c);
 	c->deleteLater();
 }
 

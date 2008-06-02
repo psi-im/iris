@@ -39,7 +39,8 @@
 
 static QByteArray randomArray(int size)
 {
-	QByteArray a(size);
+	QByteArray a;
+  a.resize(size);
 	for(int n = 0; n < size; ++n)
 		a[n] = (char)(256.0*rand()/(RAND_MAX+1.0));
 	return a;
@@ -89,6 +90,7 @@ HttpPoll::HttpPoll(QObject *parent)
 
 	d->polltime = 30;
 	d->t = new QTimer;
+  d->t->setSingleShot(true);
 	connect(d->t, SIGNAL(timeout()), SLOT(do_sync()));
 
 	connect(&d->http, SIGNAL(result()), SLOT(http_result()));
@@ -142,7 +144,7 @@ void HttpPoll::connectToHost(const QString &proxyHost, int proxyPort, const QStr
 	else {
 		QUrl u = url;
 		d->host = u.host();
-		if(u.hasPort())
+		if(u.port() != -1)
 			d->port = u.port();
 		else
 			d->port = 80;
@@ -186,7 +188,8 @@ QByteArray HttpPoll::makePacket(const QString &ident, const QString &key, const 
 	QByteArray cs = str.toLatin1();
 	int len = cs.length();
 
-	QByteArray a(len + block.size());
+	QByteArray a;
+  a.resize(len + block.size());
 	memcpy(a.data(), cs.data(), len);
 	memcpy(a.data() + len, block.data(), block.size());
 	return a;
@@ -229,14 +232,14 @@ void HttpPoll::http_result()
 	// get id and packet
 	QString id;
 	QString cookie = d->http.getHeader("Set-Cookie");
-	int n = cookie.find("ID=");
+	int n = cookie.indexOf("ID=");
 	if(n == -1) {
 		reset();
 		error(ErrRead);
 		return;
 	}
 	n += 3;
-	int n2 = cookie.find(';', n);
+	int n2 = cookie.indexOf(';', n);
 	if(n2 != -1)
 		id = cookie.mid(n, n2-n);
 	else
@@ -265,8 +268,9 @@ void HttpPoll::http_result()
 	}
 
 	// sync up again soon
-	if(bytesToWrite() > 0 || !d->closing)
-		d->t->start(d->polltime * 1000, true);
+	if(bytesToWrite() > 0 || !d->closing) {
+		d->t->start(d->polltime * 1000);
+  }
 
 	// connecting
 	if(justNowConnected) {
@@ -406,13 +410,13 @@ static QString extractLine(QByteArray *buf, bool *found)
 
 static bool extractMainHeader(const QString &line, QString *proto, int *code, QString *msg)
 {
-	int n = line.find(' ');
+	int n = line.indexOf(' ');
 	if(n == -1)
 		return false;
 	if(proto)
 		*proto = line.mid(0, n);
 	++n;
-	int n2 = line.find(' ', n);
+	int n2 = line.indexOf(' ', n);
 	if(n2 == -1)
 		return false;
 	if(code)
@@ -508,7 +512,7 @@ QString HttpProxyPost::getHeader(const QString &var) const
 {
 	for(QStringList::ConstIterator it = d->headerLines.begin(); it != d->headerLines.end(); ++it) {
 		const QString &s = *it;
-		int n = s.find(": ");
+		int n = s.indexOf(": ");
 		if(n == -1)
 			continue;
 		QString v = s.mid(0, n);
@@ -547,7 +551,7 @@ void HttpProxyPost::sock_connected()
 	s += "\r\n";
 
 	// write request
-	d->sock.write(s.utf8());
+	d->sock.write(s.toUtf8());
 
 	// write postdata
 	d->sock.write(d->postdata);
@@ -582,7 +586,7 @@ void HttpProxyPost::sock_readyRead()
 		// done with grabbing the header?
 		if(!d->inHeader) {
 			QString str = d->headerLines.first();
-			d->headerLines.remove(d->headerLines.begin());
+			d->headerLines.takeFirst();
 
 			QString proto;
 			int code;
@@ -750,7 +754,7 @@ QString HttpProxyGetStream::getHeader(const QString &var) const
 {
 	for(QStringList::ConstIterator it = d->headerLines.begin(); it != d->headerLines.end(); ++it) {
 		const QString &s = *it;
-		int n = s.find(": ");
+		int n = s.indexOf(": ");
 		if(n == -1)
 			continue;
 		QString v = s.mid(0, n);
@@ -801,9 +805,9 @@ void HttpProxyGetStream::sock_connected()
 
 	// write request
 	if(d->use_ssl)
-		d->tls->write(s.utf8());
+		d->tls->write(s.toUtf8());
 	else
-		d->sock.write(s.utf8());
+		d->sock.write(s.toUtf8());
 }
 
 void HttpProxyGetStream::sock_connectionClosed()
@@ -852,7 +856,7 @@ void HttpProxyGetStream::processData(const QByteArray &block)
 		// done with grabbing the header?
 		if(!d->inHeader) {
 			QString str = d->headerLines.first();
-			d->headerLines.remove(d->headerLines.begin());
+			d->headerLines.takeFirst();
 
 			QString proto;
 			int code;

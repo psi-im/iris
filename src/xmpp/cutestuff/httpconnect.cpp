@@ -54,13 +54,13 @@ static QString extractLine(QByteArray *buf, bool *found)
 
 static bool extractMainHeader(const QString &line, QString *proto, int *code, QString *msg)
 {
-	int n = line.find(' ');
+	int n = line.indexOf(' ');
 	if(n == -1)
 		return false;
 	if(proto)
 		*proto = line.mid(0, n);
 	++n;
-	int n2 = line.find(' ', n);
+	int n2 = line.indexOf(' ', n);
 	if(n2 == -1)
 		return false;
 	if(code)
@@ -202,7 +202,7 @@ void HttpConnect::sock_connected()
 	s += "Pragma: no-cache\r\n";
 	s += "\r\n";
 
-	QByteArray block = s.utf8();
+	QByteArray block = s.toUtf8();
 	d->toWrite = block.size();
 	d->sock.write(block);
 }
@@ -250,7 +250,7 @@ void HttpConnect::sock_readyRead()
 			// done with grabbing the header?
 			if(!d->inHeader) {
 				QString str = d->headerLines.first();
-				d->headerLines.remove(d->headerLines.begin());
+				d->headerLines.takeFirst();
 
 				QString proto;
 				int code;

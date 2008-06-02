@@ -86,11 +86,11 @@ public:
 
 	// remote address
 	QHostAddress peerAddress() const;
-	Q_UINT16 peerPort() const;
+	quint16 peerPort() const;
 
 	// udp
 	QString udpAddress() const;
-	Q_UINT16 udpPort() const;
+	quint16 udpPort() const;
 	SocksUDP *createUDP(const QString &host, int port, const QHostAddress &routeAddr, int routePort);
 
 signals:
@@ -133,7 +133,7 @@ public:
 	~SocksServer();
 
 	bool isActive() const;
-	bool listen(Q_UINT16 port, bool udp=false);
+	bool listen(quint16 port, bool udp=false);
 	void stop();
 	int port() const;
 	QHostAddress address() const;
