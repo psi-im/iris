@@ -29,10 +29,64 @@
 #include <qstringlist.h>
 #include <qcolor.h>
 
-bool stamp2TS(const QString &ts, QDateTime *d)
+//----------------------------------------------------------------------------
+// XDomNodeList
+//----------------------------------------------------------------------------
+XDomNodeList::XDomNodeList()
+{
+}
+
+XDomNodeList::XDomNodeList(const XDomNodeList &from) :
+	list(from.list)
+{
+}
+
+XDomNodeList::XDomNodeList(const QDomNodeList &from)
+{
+	for(int n = 0; n < from.count(); ++n)
+		list += from.item(n);
+}
+
+XDomNodeList::~XDomNodeList()
+{
+}
+
+XDomNodeList & XDomNodeList::operator=(const XDomNodeList &from)
+{
+	list = from.list;
+	return *this;
+}
+
+bool XDomNodeList::isEmpty() const
+{
+	return list.isEmpty();
+}
+
+QDomNode XDomNodeList::item(int index) const
+{
+	return list.value(index);
+}
+
+uint XDomNodeList::length() const
+{
+	return (uint)list.count();
+}
+
+bool XDomNodeList::operator==(const XDomNodeList &a) const
+{
+	return (list == a.list);
+}
+
+void XDomNodeList::append(const QDomNode &i)
+{
+	list += i;
+}
+
+
+QDateTime stamp2TS(const QString &ts)
 {
 	if(ts.length() != 17)
-		return false;
+		return QDateTime();
 
 	int year  = ts.mid(0,4).toInt();
 	int month = ts.mid(4,2).toInt();
@@ -45,15 +99,23 @@ bool stamp2TS(const QString &ts, QDateTime *d)
 	QDate xd;
 	xd.setYMD(year, month, day);
 	if(!xd.isValid())
-		return false;
+		return QDateTime();
 
 	QTime xt;
 	xt.setHMS(hour, min, sec);
 	if(!xt.isValid())
+		return QDateTime();
+
+	return QDateTime(xd, xt);
+}
+
+bool stamp2TS(const QString &ts, QDateTime *d)
+{
+	QDateTime dateTime = stamp2TS(ts);
+	if (dateTime.isNull())
 		return false;
 
-	d->setDate(xd);
-	d->setTime(xt);
+	*d = dateTime;
 
 	return true;
 }
@@ -123,6 +185,38 @@ QDomElement findSubTag(const QDomElement &e, const QString &name, bool *found)
 	return tmp;
 }
 
+
+/**
+ * \brief obtain direct child elements of a certain kind.  unlike
+ *        elementsByTagNameNS, this function does not descend beyond the first
+ *        level of children.
+ * \param e parent element
+ * \param nsURI namespace of the elements to find
+ * \param localName local name of the elements to find
+ * \return the node list of found elements (empty list if none are found)
+ */
+XDomNodeList childElementsByTagNameNS(const QDomElement &e, const QString &nsURI, const QString &localName)
+{
+	XDomNodeList out;
+	for(QDomNode n = e.firstChild(); !n.isNull(); n = n.nextSibling()) {
+		if(!n.isElement())
+			continue;
+		QDomElement i = n.toElement();
+		if(i.namespaceURI() == nsURI && i.localName() == localName)
+			out.append(i);
+	}
+	return out;
+}
+
+
+/**
+ * \brief create a new IQ stanza
+ * \param doc 
+ * \param type 
+ * \param to destination jid
+ * \param id stanza id
+ * \return the created stanza
+*/
 QDomElement createIQ(QDomDocument *doc, const QString &type, const QString &to, const QString &id)
 {
 	QDomElement iq = doc->createElement("iq");

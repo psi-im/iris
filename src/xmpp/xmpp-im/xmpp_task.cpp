@@ -18,7 +18,6 @@
  */
 
 #include <QTimer>
-#include <qplatformdefs.h>
 
 #include "safedelete.h"
 #include "xmpp_task.h"
@@ -114,7 +113,15 @@ void Task::go(bool autoDelete)
 {
 	d->autoDelete = autoDelete;
 
-	onGo();
+	if (!client() || !&client()->stream()) {
+		qWarning("Task::go(): attempted to send a task over the broken connection.");
+		if (autoDelete) {
+			deleteLater();
+		}
+	}
+	else {
+		onGo();
+	}
 }
 
 bool Task::take(const QDomElement &x)
@@ -220,26 +227,11 @@ void Task::clientDisconnected()
 
 void Task::debug(const char *fmt, ...)
 {
-	char *buf;
+	va_list ap;
+	va_start(ap, fmt);
 	QString str;
-	int size = 1024;
-	int r;
-
-	do {
-		buf = new char[size];
-		va_list ap;
-		va_start(ap, fmt);
-		r = QT_VSNPRINTF(buf, size, fmt, ap);
-		va_end(ap);
-
-		if(r != -1)
-			str = QString(buf);
-
-		delete [] buf;
-
-		size *= 2;
-	} while(r == -1);
-
+	str.vsprintf(fmt, ap);
+	va_end(ap);
 	debug(str);
 }
 
@@ -247,6 +239,21 @@ void Task::debug(const QString &str)
 {
 	client()->debug(QString("%1: ").arg(metaObject()->className()) + str);
 }
+
+
+/**
+ * \brief verifiys a stanza is a IQ reply for this task
+ *
+ * it checks that the stanze is form the jid the request was send to and the id and the namespace (if given) match.
+ *
+ * it further checks that the sender jid is not empty (except if \a to is our server), it's not from
+ * our bare jid (except if send to one of our resources or our server)
+ * \param x the stanza to test
+ * \param to the Jid this task send a IQ to
+ * \param id the id of the send IQ
+ * \param xmlns the expected namespace if the reply (if non empty)
+ * \return true if it's a valid reply
+*/
 
 bool Task::iqVerify(const QDomElement &x, const Jid &to, const QString &id, const QString &xmlns)
 {

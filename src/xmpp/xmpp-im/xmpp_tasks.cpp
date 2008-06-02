@@ -605,6 +605,13 @@ void JT_Presence::pres(const Status &s)
 			}
 			tag.appendChild(m);
 		}
+
+		if(s.hasPhotoHash()) {
+			QDomElement m = doc()->createElement("x");
+			m.setAttribute("xmlns", "vcard-temp:x:update");
+			m.appendChild(textTag(doc(), "photo", s.photoHash()));
+			tag.appendChild(m);
+		}
 	}
 }
 
@@ -972,7 +979,7 @@ void JT_VCard::get(const Jid &_jid)
 {
 	type = 0;
 	d->jid = _jid;
-	d->iq = createIQ(doc(), "get", d->jid.full(), id());
+	d->iq = createIQ(doc(), "get", type == 1 ? Jid().full() : d->jid.full(), id());
 	QDomElement v = doc()->createElement("vCard");
 	v.setAttribute("xmlns", "vcard-temp");
 	v.setAttribute("version", "2.0");
@@ -990,12 +997,12 @@ const VCard & JT_VCard::vcard() const
 	return d->vcard;
 }
 
-void JT_VCard::set(const VCard &card)
+void JT_VCard::set(const Jid &j, const VCard &card)
 {
 	type = 1;
 	d->vcard = card;
-	d->jid = "";
-	d->iq = createIQ(doc(), "set", d->jid.full(), id());
+	d->jid = j;
+	d->iq = createIQ(doc(), "set", "", id());
 	d->iq.appendChild(card.toXml(doc()) );
 }
 
