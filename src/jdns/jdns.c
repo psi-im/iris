@@ -2303,14 +2303,22 @@ int _process_response(jdns_session_t *s, jdns_response_t *r, int nxdomain, query
 		}
 
 		new_q = _get_query(s, r->answerRecords[0]->data.name, q->qtype, 1);
+
+		// is the current query a child query? (has a parent)
 		if(q->cname_parent)
 		{
+			// if so, then set new_q as the new child
 			new_q->cname_chain_count = q->cname_chain_count + 1;
 			new_q->cname_parent = q->cname_parent;
 			new_q->cname_parent->cname_child = new_q;
+
+			// and delete the current query
+			return 1;
 		}
 		else
 		{
+			// otherwise, the current query becomes a parent, with
+			//   new_q set as the child
 			new_q->cname_chain_count = q->cname_chain_count + 1;
 			new_q->cname_parent = q;
 			q->cname_child = new_q;
