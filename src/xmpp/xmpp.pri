@@ -1,5 +1,5 @@
 IRIS_BASE = $PWD/../..
-include(../../build.pri)
+include(../../common.pri)
 
 QT *= xml network qt3support
 
