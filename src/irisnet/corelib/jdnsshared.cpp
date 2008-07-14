@@ -133,9 +133,12 @@ public:
 	}
 };
 
-inline uint qHash(const Handle &key)
+// adapted from qHash<QPair>
+static inline uint qHash(const Handle &key)
 {
-	return ((uint)key.jdns) ^ key.id;
+	uint h1 = ::qHash(key.jdns);
+	uint h2 = ::qHash(key.id);
+	return ((h1 << 16) | (h1 >> 16)) ^ h2;
 }
 
 }
