@@ -1,5 +1,5 @@
 IRIS_BASE = $$PWD
-include(build.pri)
+include(common.pri)
 
 INCLUDEPATH += $$IRIS_BASE/include $$IRIS_BASE/include/iris
 

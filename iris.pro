@@ -1,6 +1,6 @@
 TEMPLATE = subdirs
 
-include(build.pri)
+include(common.pri)
 
 # do we have a reason to enter the src dir?
 appledns:!appledns_bundle:CONFIG *= build_src
