@@ -34,6 +34,82 @@
 
 namespace {
 
+// safeobj stuff, from qca
+
+void releaseAndDeleteLater(QObject *owner, QObject *obj)
+{
+	obj->disconnect(owner);
+	obj->setParent(0);
+	obj->deleteLater();
+}
+
+class SafeTimer : public QObject
+{
+	Q_OBJECT
+public:
+	SafeTimer(QObject *parent = 0) :
+		QObject(parent)
+	{
+		t = new QTimer(this);
+		connect(t, SIGNAL(timeout()), SIGNAL(timeout()));
+	}
+
+	~SafeTimer()
+	{
+		releaseAndDeleteLater(this, t);
+	}
+
+	int interval() const                { return t->interval(); }
+	bool isActive() const               { return t->isActive(); }
+	bool isSingleShot() const           { return t->isSingleShot(); }
+	void setInterval(int msec)          { t->setInterval(msec); }
+	void setSingleShot(bool singleShot) { t->setSingleShot(singleShot); }
+	int timerId() const                 { return t->timerId(); }
+
+public slots:
+	void start(int msec)                { t->start(msec); }
+	void start()                        { t->start(); }
+	void stop()                         { t->stop(); }
+
+signals:
+	void timeout();
+
+private:
+	QTimer *t;
+};
+
+class SafeSocketNotifier : public QObject
+{
+	Q_OBJECT
+public:
+	SafeSocketNotifier(int socket, QSocketNotifier::Type type,
+		QObject *parent = 0) :
+		QObject(parent)
+	{
+		sn = new QSocketNotifier(socket, type, this);
+		connect(sn, SIGNAL(activated(int)), SIGNAL(activated(int)));
+	}
+
+	~SafeSocketNotifier()
+	{
+		sn->setEnabled(false);
+		releaseAndDeleteLater(this, sn);
+	}
+
+	bool isEnabled() const             { return sn->isEnabled(); }
+	int socket() const                 { return sn->socket(); }
+	QSocketNotifier::Type type() const { return sn->type(); }
+
+public slots:
+	void setEnabled(bool enable)       { sn->setEnabled(enable); }
+
+signals:
+	void activated(int socket);
+
+private:
+	QSocketNotifier *sn;
+};
+
 // DNSServiceRef must be allocated by the user and initialized by the
 //   API.  Additionally, it is unclear from the API whether or not
 //   DNSServiceRef can be copied (it is an opaque data structure).
@@ -185,8 +261,8 @@ public:
 		int _id;
 		ServiceRef *_sdref;
 		int _sockfd;
-		QSocketNotifier *_sn_read;
-		QTimer *_errorTrigger;
+		SafeSocketNotifier *_sn_read;
+		SafeTimer *_errorTrigger;
 
 		bool _doSignal;
 		LowLevelError _lowLevelError;
@@ -234,8 +310,8 @@ public:
 	};
 
 	QHash<int,Request*> _requestsById;
-	QHash<QSocketNotifier*,Request*> _requestsBySocket;
-	QHash<QTimer*,Request*> _requestsByTimer;
+	QHash<SafeSocketNotifier*,Request*> _requestsBySocket;
+	QHash<SafeTimer*,Request*> _requestsByTimer;
 	QHash<int,Request*> _requestsByRecId;
 
 	Private(QDnsSd *_q) :
@@ -256,7 +332,7 @@ public:
 
 		req->_lowLevelError = lowLevelError;
 
-		req->_errorTrigger = new QTimer(this);
+		req->_errorTrigger = new SafeTimer(this);
 		connect(req->_errorTrigger, SIGNAL(timeout()), SLOT(doError()));
 		req->_errorTrigger->setSingleShot(true);
 
@@ -316,7 +392,7 @@ public:
 		}
 
 		req->_sockfd = sockfd;
-		req->_sn_read = new QSocketNotifier(sockfd, QSocketNotifier::Read, this);
+		req->_sn_read = new SafeSocketNotifier(sockfd, QSocketNotifier::Read, this);
 		connect(req->_sn_read, SIGNAL(activated(int)), SLOT(sn_activated()));
 		_requestsById.insert(id, req);
 		_requestsBySocket.insert(req->_sn_read, req);
@@ -355,7 +431,7 @@ public:
 		}
 
 		req->_sockfd = sockfd;
-		req->_sn_read = new QSocketNotifier(sockfd, QSocketNotifier::Read, this);
+		req->_sn_read = new SafeSocketNotifier(sockfd, QSocketNotifier::Read, this);
 		connect(req->_sn_read, SIGNAL(activated(int)), SLOT(sn_activated()));
 		_requestsById.insert(id, req);
 		_requestsBySocket.insert(req->_sn_read, req);
@@ -394,7 +470,7 @@ public:
 		}
 
 		req->_sockfd = sockfd;
-		req->_sn_read = new QSocketNotifier(sockfd, QSocketNotifier::Read, this);
+		req->_sn_read = new SafeSocketNotifier(sockfd, QSocketNotifier::Read, this);
 		connect(req->_sn_read, SIGNAL(activated(int)), SLOT(sn_activated()));
 		_requestsById.insert(id, req);
 		_requestsBySocket.insert(req->_sn_read, req);
@@ -444,7 +520,7 @@ public:
 		}
 
 		req->_sockfd = sockfd;
-		req->_sn_read = new QSocketNotifier(sockfd, QSocketNotifier::Read, this);
+		req->_sn_read = new SafeSocketNotifier(sockfd, QSocketNotifier::Read, this);
 		connect(req->_sn_read, SIGNAL(activated(int)), SLOT(sn_activated()));
 		_requestsById.insert(id, req);
 		_requestsBySocket.insert(req->_sn_read, req);
@@ -549,7 +625,7 @@ public:
 private slots:
 	void sn_activated()
 	{
-		QSocketNotifier *sn_read = (QSocketNotifier *)sender();
+		SafeSocketNotifier *sn_read = (SafeSocketNotifier *)sender();
 		Request *req = _requestsBySocket.value(sn_read);
 		if(!req)
 			return;
@@ -671,7 +747,7 @@ private slots:
 
 	void doError()
 	{
-		QTimer *t = (QTimer *)sender();
+		SafeTimer *t = (SafeTimer *)sender();
 		Request *req = _requestsByTimer.value(t);
 		if(!req)
 			return;
