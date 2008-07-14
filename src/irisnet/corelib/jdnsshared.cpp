@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006,2007  Justin Karneges
+ * Copyright (C) 2006-2008  Justin Karneges
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -36,6 +36,52 @@
 #include "jdnsshared.h"
 
 namespace {
+
+// safeobj stuff, from qca
+
+void releaseAndDeleteLater(QObject *owner, QObject *obj)
+{
+	obj->disconnect(owner);
+	obj->setParent(0);
+	obj->deleteLater();
+}
+
+class SafeTimer : public QObject
+{
+	Q_OBJECT
+public:
+	SafeTimer(QObject *parent = 0) :
+		QObject(parent)
+	{
+		t = new QTimer(this);
+		connect(t, SIGNAL(timeout()), SIGNAL(timeout()));
+	}
+
+	~SafeTimer()
+	{
+		releaseAndDeleteLater(this, t);
+	}
+
+	int interval() const                { return t->interval(); }
+	bool isActive() const               { return t->isActive(); }
+	bool isSingleShot() const           { return t->isSingleShot(); }
+	void setInterval(int msec)          { t->setInterval(msec); }
+	void setSingleShot(bool singleShot) { t->setSingleShot(singleShot); }
+	int timerId() const                 { return t->timerId(); }
+
+public slots:
+	void start(int msec)                { t->start(msec); }
+	void start()                        { t->start(); }
+	void stop()                         { t->stop(); }
+
+signals:
+	void timeout();
+
+private:
+	QTimer *t;
+};
+
+// for caching system info
 
 class SystemInfoCache
 {
@@ -473,7 +519,7 @@ public:
 	bool success;
 	JDnsSharedRequest::Error error;
 	QList<QJDns::Record> results;
-	QTimer lateTimer;
+	SafeTimer lateTimer;
 
 	JDnsSharedRequestPrivate(JDnsSharedRequest *_q) : QObject(_q), q(_q), lateTimer(this)
 	{
