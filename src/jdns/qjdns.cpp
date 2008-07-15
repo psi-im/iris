@@ -27,6 +27,54 @@
 #include "qjdns_sock.h"
 #include "jdns.h"
 
+namespace {
+
+// safeobj stuff, from qca
+
+void releaseAndDeleteLater(QObject *owner, QObject *obj)
+{
+	obj->disconnect(owner);
+	obj->setParent(0);
+	obj->deleteLater();
+}
+
+class SafeTimer : public QObject
+{
+	Q_OBJECT
+public:
+	SafeTimer(QObject *parent = 0) :
+		QObject(parent)
+	{
+		t = new QTimer(this);
+		connect(t, SIGNAL(timeout()), SIGNAL(timeout()));
+	}
+
+	~SafeTimer()
+	{
+		releaseAndDeleteLater(this, t);
+	}
+
+	int interval() const                { return t->interval(); }
+	bool isActive() const               { return t->isActive(); }
+	bool isSingleShot() const           { return t->isSingleShot(); }
+	void setInterval(int msec)          { t->setInterval(msec); }
+	void setSingleShot(bool singleShot) { t->setSingleShot(singleShot); }
+	int timerId() const                 { return t->timerId(); }
+
+public slots:
+	void start(int msec)                { t->start(msec); }
+	void start()                        { t->start(); }
+	void stop()                         { t->stop(); }
+
+signals:
+	void timeout();
+
+private:
+	QTimer *t;
+};
+
+}
+
 static jdns_string_t *qt2str(const QByteArray &in)
 {
 	jdns_string_t *out = jdns_string_new();
@@ -255,8 +303,8 @@ public:
 	QJDns::Mode mode;
 	jdns_session_t *sess;
 	bool shutting_down;
-	QTimer stepTrigger, debugTrigger;
-	QTimer stepTimeout;
+	SafeTimer stepTrigger, debugTrigger;
+	SafeTimer stepTimeout;
 	QTime clock;
 	QStringList debug_strings;
 	bool new_debug_strings;
@@ -302,11 +350,17 @@ public:
 			jdns_session_delete(sess);
 			sess = 0;
 		}
+
 		shutting_down = false;
 		pending = 0;
+
+		// it is safe to delete the QUdpSocket objects here without
+		//   deleteLater, since this code path never occurs when
+		//   a signal from those objects is on the stack
 		qDeleteAll(socketForHandle);
 		socketForHandle.clear();
 		handleForSocket.clear();
+
 		stepTrigger.stop();
 		stepTimeout.stop();
 		need_handle = 0;
