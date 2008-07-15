@@ -112,9 +112,13 @@ signals:
 	void browse_error(int id, XMPP::ServiceBrowser::Error e);
 	void resolve_resultsReady(int id, const QHostAddress &address, int port);
 	void resolve_error(int id, XMPP::ServiceResolver::Error e);
-	void publish_published(int id); // for start or update
+
+	// for start or update
+	void publish_published(int id);
 	void publish_error(int id, XMPP::ServiceLocalPublisher::Error e);
-	void publish_extra_published(int id); // for start or update
+
+	// for start or update
+	void publish_extra_published(int id);
 	void publish_extra_error(int id, XMPP::ServiceLocalPublisher::Error e);
 };
 
