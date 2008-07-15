@@ -748,13 +748,13 @@ private slots:
 
 		//printf("Lookup starting\n");
 		JDnsBrowseLookup *bl = new JDnsBrowseLookup(jdns);
-		connect(bl, SIGNAL(resultsReady()), SLOT(bl_resultsReady()));
+		connect(bl, SIGNAL(finished()), SLOT(bl_finished()));
 		lookups += bl;
 		bl->instance = instance;
 		bl->start(name);
 	}
 
-	void bl_resultsReady()
+	void bl_finished()
 	{
 		JDnsBrowseLookup *bl = (JDnsBrowseLookup *)sender();
 
@@ -1053,7 +1053,11 @@ private slots:
 		QHostAddress addr = bl->addr;
 		int port = bl->srvport;
 		delete bl;
-		emit resolve_resultsReady(1, addr, port);
+
+		ResolveResult r;
+		r.address = addr;
+		r.port = port;
+		emit resolve_resultsReady(1, QList<ResolveResult>() << r);
 	}
 
 		//connect(&jdns, SIGNAL(published(int)), SLOT(jdns_published(int)));
