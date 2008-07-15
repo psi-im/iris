@@ -788,7 +788,7 @@ public:
 
 	virtual int browse_start(const QString &type, const QString &domain)
 	{
-		Browse *b = new Browse;
+		Browse *b = new Browse(this);
 		b->id = idManager.reserveId();
 		b->browse = new AppleBrowse(global, this);
 		connect(b->browse, SIGNAL(available(const XMPP::ServiceInstance &)), SLOT(browse_available(const XMPP::ServiceInstance &)));
@@ -819,7 +819,7 @@ public:
 			Q_ASSERT(0);
 		}
 
-		Resolve *r = new Resolve;
+		Resolve *r = new Resolve(this);
 		r->id = idManager.reserveId();
 		r->resolve = new AppleBrowseLookup(global, this);
 		connect(r->resolve, SIGNAL(finished(const QList<QHostAddress> &)), SLOT(resolve_finished(const QList<QHostAddress> &)));
@@ -959,8 +959,16 @@ private slots:
 		int id = r->id;
 		delete r;
 
-		// TODO: use multiple results
-		emit resolve_resultsReady(id, addrs[0], port);
+		QList<ResolveResult> results;
+		foreach(const QHostAddress &addr, addrs)
+		{
+			ResolveResult r;
+			r.address = addr;
+			r.port = port;
+			results += r;
+		}
+
+		emit resolve_resultsReady(id, results);
 	}
 
 	void resolve_error()
@@ -975,7 +983,7 @@ private slots:
 
 		// FIXME: this looks weird, we should probably rename our
 		//   local function
-		emit ServiceProvider::resolve_error(id, XMPP::ServiceBrowser::ErrorGeneric);
+		emit ServiceProvider::resolve_error(id, XMPP::ServiceResolver::ErrorGeneric);
 	}
 };
 
