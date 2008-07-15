@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005,2006  Justin Karneges
+ * Copyright (C) 2005-2008  Justin Karneges
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the
@@ -1237,9 +1237,30 @@ int jdns_query(jdns_session_t *s, const unsigned char *name, int rtype)
 		return _multicast_query(s, name, rtype);
 }
 
+static void _remove_events(jdns_session_t *s, int event_type, int id)
+{
+	int n;
+	for(n = 0; n < s->events->count; ++n)
+	{
+		event_t *e = (event_t *)s->events->item[n];
+		if(e->event->type == event_type && e->event->id == id)
+		{
+			list_remove(s->events, e);
+			--n; // adjust position
+		}
+	}
+}
+
 void jdns_cancel_query(jdns_session_t *s, int id)
 {
 	int n;
+
+	// remove any events associated with the query.  this avoids any
+	//   possibility that stale events from one query are mistaken to be
+	//   events resulting from a later query that happened to reuse the
+	//   id.  it also means we don't deliver events for cancelled queries,
+	//   which can simplify application logic.
+	_remove_events(s, JDNS_EVENT_RESPONSE, id);
 
 	// multicast
 	if(s->mode == 1)
@@ -1291,6 +1312,8 @@ void jdns_update_publish(jdns_session_t *s, int id, const jdns_rr_t *rr)
 
 void jdns_cancel_publish(jdns_session_t *s, int id)
 {
+	_remove_events(s, JDNS_EVENT_PUBLISH, id);
+
 	_multicast_cancel_publish(s, id);
 }
 

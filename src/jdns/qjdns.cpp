@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005,2006  Justin Karneges
+ * Copyright (C) 2005-2008  Justin Karneges
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the
@@ -315,9 +315,23 @@ public:
 	int pending;
 	bool pending_wait;
 	bool complete_shutdown;
-	QList<LateError> lateErrors;
 
-	Private(QJDns *_q) : QObject(_q), q(_q), stepTrigger(this), debugTrigger(this), stepTimeout(this)
+	// pointers that will point to things we are currently signalling
+	//   about.  when a query or publish is cancelled, we can use these
+	//   pointers to extract anything we shouldn't signal.
+	QList<LateError> *pErrors;
+	QList<int> *pPublished;
+	QList<LateResponse> *pResponses;
+
+	Private(QJDns *_q) :
+		QObject(_q),
+		q(_q),
+		stepTrigger(this),
+		debugTrigger(this),
+		stepTimeout(this),
+		pErrors(0),
+		pPublished(0),
+		pResponses(0)
 	{
 		sess = 0;
 		shutting_down = false;
@@ -458,6 +472,10 @@ public:
 		QList<LateResponse> responses;
 		bool finish_shutdown = false;
 
+		pErrors = &errors;
+		pPublished = &published;
+		pResponses = &responses;
+
 		while(1)
 		{
 			jdns_event_t *e = jdns_next_event(sess);
@@ -525,23 +543,29 @@ public:
 
 		need_handle = (ret & JDNS_STEP_HANDLE);
 
-		for(int n = 0; n < errors.count(); ++n)
+		// read the lists safely enough so that items can be deleted
+		//   behind our back
+
+		while(!errors.isEmpty())
 		{
-			emit q->error(errors[n].id, errors[n].error);
+			LateError i = errors.takeFirst();
+			emit q->error(i.id, i.error);
 			if(!self)
 				return;
 		}
 
-		for(int n = 0; n < published.count(); ++n)
+		while(!published.isEmpty())
 		{
-			emit q->published(published[n]);
+			int i = published.takeFirst();
+			emit q->published(i);
 			if(!self)
 				return;
 		}
 
-		for(int n = 0; n < responses.count(); ++n)
+		while(!responses.isEmpty())
 		{
-			emit q->resultsReady(responses[n].id, responses[n].response);
+			LateResponse i = responses.takeFirst();
+			emit q->resultsReady(i.id, i.response);
 			if(!self)
 				return;
 		}
@@ -557,6 +581,49 @@ public:
 			{
 				complete_shutdown = true;
 				process();
+			}
+		}
+
+		pErrors = 0;
+		pPublished = 0;
+		pResponses = 0;
+	}
+
+	void removeCancelled(int id)
+	{
+		if(pErrors)
+		{
+			for(int n = 0; n < pErrors->count(); ++n)
+			{
+				if(pErrors->at(n).id == id)
+				{
+					pErrors->removeAt(n);
+					--n; // adjust position
+				}
+			}
+		}
+
+		if(pPublished)
+		{
+			for(int n = 0; n < pPublished->count(); ++n)
+			{
+				if(pPublished->at(n) == id)
+				{
+					pPublished->removeAt(n);
+					--n; // adjust position
+				}
+			}
+		}
+
+		if(pResponses)
+		{
+			for(int n = 0; n < pResponses->count(); ++n)
+			{
+				if(pResponses->at(n).id == id)
+				{
+					pResponses->removeAt(n);
+					--n; // adjust position
+				}
 			}
 		}
 	}
@@ -925,6 +992,7 @@ int QJDns::queryStart(const QByteArray &name, int type)
 void QJDns::queryCancel(int id)
 {
 	jdns_cancel_query(d->sess, id);
+	d->removeCancelled(id);
 	d->process();
 }
 
@@ -956,6 +1024,7 @@ void QJDns::publishUpdate(int id, const Record &record)
 void QJDns::publishCancel(int id)
 {
 	jdns_cancel_publish(d->sess, id);
+	d->removeCancelled(id);
 	d->process();
 }
 
