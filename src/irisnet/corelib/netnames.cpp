@@ -564,6 +564,8 @@ public:
 
 			// use queued connections
 			qRegisterMetaType<XMPP::ServiceInstance>("XMPP::ServiceInstance");
+			qRegisterMetaType<XMPP::ServiceBrowser::Error>("XMPP::ServiceBrowser::Error");
+
 			connect(p_serv, SIGNAL(browse_instanceAvailable(int, const XMPP::ServiceInstance &)), SLOT(provider_browse_instanceAvailable(int, const XMPP::ServiceInstance &)), Qt::QueuedConnection);
 			connect(p_serv, SIGNAL(browse_instanceUnavailable(int, const XMPP::ServiceInstance &)), SLOT(provider_browse_instanceUnavailable(int, const XMPP::ServiceInstance &)), Qt::QueuedConnection);
 			connect(p_serv, SIGNAL(browse_error(int, XMPP::ServiceBrowser::Error)), SLOT(provider_browse_error(int, XMPP::ServiceBrowser::Error)), Qt::QueuedConnection);
@@ -596,7 +598,8 @@ public:
 
 			// use queued connections
 			qRegisterMetaType<QHostAddress>("QHostAddress");
-			connect(p_serv, SIGNAL(resolve_resultsReady(int, const QHostAddress &, int)), SLOT(provider_resolve_resultsReady(int, const QHostAddress &, int)), Qt::QueuedConnection);
+			qRegisterMetaType<XMPP::ServiceProvider::ResolveResult>("QList<XMPP::ServiceProvider::ResolveResult");
+			connect(p_serv, SIGNAL(resolve_resultsReady(int, const QList<XMPP::ServiceProvider::ResolveResult> &)), SLOT(provider_resolve_resultsReady(int, const QList<XMPP::ServiceProvider::ResolveResult> &)), Qt::QueuedConnection);
 		}
 
 		/*np->id = */
@@ -737,10 +740,10 @@ private slots:
 		emit np->q->error();
 	}
 
-	void provider_resolve_resultsReady(int id, const QHostAddress &addr, int port)
+	void provider_resolve_resultsReady(int id, const QList<XMPP::ServiceProvider::ResolveResult> &results)
 	{
 		ServiceResolver::Private *np = sres_instances.value(id);
-		emit np->q->resultsReady(addr, port);
+		emit np->q->resultsReady(results[0].address, results[0].port);
 	}
 
 	void provider_publish_published(int id)

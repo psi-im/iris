@@ -103,6 +103,14 @@ class IRISNET_EXPORT ServiceProvider : public QObject
 	Q_OBJECT
 
 public:
+	class ResolveResult
+	{
+	public:
+		QHostAddress address;
+		int port;
+		QByteArray hostName; // optional
+	};
+
 	ServiceProvider(QObject *parent = 0) :
 		QObject(parent)
 	{
@@ -123,7 +131,7 @@ signals:
 	void browse_instanceAvailable(int id, const XMPP::ServiceInstance &instance);
 	void browse_instanceUnavailable(int id, const XMPP::ServiceInstance &instance);
 	void browse_error(int id, XMPP::ServiceBrowser::Error e);
-	void resolve_resultsReady(int id, const QHostAddress &address, int port);
+	void resolve_resultsReady(int id, const QList<XMPP::ServiceProvider::ResolveResult> &results);
 	void resolve_error(int id, XMPP::ServiceResolver::Error e);
 
 	// for start or update
