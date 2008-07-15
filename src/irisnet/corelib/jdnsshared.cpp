@@ -1055,6 +1055,7 @@ void JDnsSharedPrivate::jdns_resultsReady(int id, const QJDns::Response &results
 {
 	QJDns *jdns = (QJDns *)sender();
 	JDnsSharedRequest *obj = findRequest(jdns, id);
+	Q_ASSERT(obj);
 
 	obj->d->success = true;
 	obj->d->results = results.answerRecords;
@@ -1135,6 +1136,7 @@ void JDnsSharedPrivate::jdns_published(int id)
 {
 	QJDns *jdns = (QJDns *)sender();
 	JDnsSharedRequest *obj = findRequest(jdns, id);
+	Q_ASSERT(obj);
 
 	// find handle
 	Handle handle;
@@ -1168,6 +1170,7 @@ void JDnsSharedPrivate::jdns_error(int id, QJDns::Error e)
 {
 	QJDns *jdns = (QJDns *)sender();
 	JDnsSharedRequest *obj = findRequest(jdns, id);
+	Q_ASSERT(obj);
 
 	// "cancel" it
 	for(int n = 0; n < obj->d->handles.count(); ++n)
