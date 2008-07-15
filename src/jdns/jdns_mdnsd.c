@@ -781,6 +781,13 @@ void mdnsd_in(mdnsd d, const jdns_packet_t *m, const jdns_response_t *resp, cons
         if((r = _r_next(d,0,(char *)an->owner,an->type)) != 0 && r->unique && _a_match(an,&r->rr) == 0) _conflict(d,r);
         _cache(d,an);
     }
+
+    // cache additional records
+    for(i=0;i<resp->additionalCount;i++)
+    {
+        jdns_rr_t *an = resp->additionalRecords[i];
+        _cache(d,an);
+    }
 }
 
 int mdnsd_out(mdnsd d, jdns_packet_t **_m, jdns_address_t **addr, unsigned short int *port)
