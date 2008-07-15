@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006  Justin Karneges
+ * Copyright (C) 2006,2008  Justin Karneges
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -34,6 +34,7 @@ class ServiceProvider;
 class IRISNET_EXPORT IrisNetProvider : public QObject
 {
 	Q_OBJECT
+
 public:
 	virtual NetInterfaceProvider *createNetInterfaceProvider();
 	virtual NameProvider *createNameProviderInternet();
@@ -44,6 +45,7 @@ public:
 class IRISNET_EXPORT NetInterfaceProvider : public QObject
 {
 	Q_OBJECT
+
 public:
 	class Info
 	{
@@ -54,7 +56,10 @@ public:
 		QHostAddress gateway;
 	};
 
-	NetInterfaceProvider(QObject *parent = 0) : QObject(parent) {}
+	NetInterfaceProvider(QObject *parent = 0) :
+		QObject(parent)
+	{
+	}
 
 	// calling start should populate an initial list that can be
 	//   immediately fetched.  do not signal updated() for this.
@@ -68,8 +73,12 @@ signals:
 class IRISNET_EXPORT NameProvider : public QObject
 {
 	Q_OBJECT
+
 public:
-	NameProvider(QObject *parent = 0) : QObject(parent) {}
+	NameProvider(QObject *parent = 0) :
+		QObject(parent)
+	{
+	}
 
 	virtual bool supportsSingle() const;
 	virtual bool supportsLongLived() const;
@@ -92,8 +101,12 @@ signals:
 class IRISNET_EXPORT ServiceProvider : public QObject
 {
 	Q_OBJECT
+
 public:
-	ServiceProvider(QObject *parent = 0) : QObject(parent) {}
+	ServiceProvider(QObject *parent = 0) :
+		QObject(parent)
+	{
+	}
 
 	virtual int browse_start(const QString &type, const QString &domain) = 0;
 	virtual void browse_stop(int id) = 0;
