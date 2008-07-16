@@ -699,7 +699,10 @@ bool JDnsSharedPrivate::addInterface(const QHostAddress &addr)
 		if(mode == JDnsShared::UnicastLocal)
 		{
 			QJDns::NameServer host;
-			host.address = QHostAddress("224.0.0.251");
+			if(addr.protocol() == QAbstractSocket::IPv6Protocol)
+				host.address = QHostAddress("FF02::FB");
+			else
+				host.address = QHostAddress("224.0.0.251");
 			host.port = 5353;
 			jdns->setNameServers(QList<QJDns::NameServer>() << host);
 		}
