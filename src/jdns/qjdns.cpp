@@ -288,6 +288,7 @@ public:
 	class LateError
 	{
 	public:
+		int source_type; // 0 for query, 1 for publish
 		int id;
 		Error error;
 	};
@@ -297,6 +298,7 @@ public:
 	public:
 		int id;
 		QJDns::Response response;
+		bool do_cancel;
 	};
 
 	QJDns *q;
@@ -394,6 +396,7 @@ public:
 		callbacks.udp_read = cb_udp_read;
 		callbacks.udp_write = cb_udp_write;
 		sess = jdns_session_new(&callbacks);
+		jdns_set_hold_ids_enabled(sess, 1);
 		next_handle = 1;
 		need_handle = false;
 
@@ -496,6 +499,7 @@ public:
 					else
 						error = QJDns::ErrorGeneric;
 					LateError le;
+					le.source_type = 1;
 					le.id = e->id;
 					le.error = error;
 					errors += le;
@@ -517,6 +521,7 @@ public:
 					else
 						error = QJDns::ErrorGeneric;
 					LateError le;
+					le.source_type = 0;
 					le.id = e->id;
 					le.error = error;
 					errors += le;
@@ -529,6 +534,10 @@ public:
 					LateResponse lr;
 					lr.id = e->id;
 					lr.response = out_response;
+					if(mode == Unicast)
+						lr.do_cancel = true;
+					else
+						lr.do_cancel = false;
 					responses += lr;
 				}
 			}
@@ -549,6 +558,10 @@ public:
 		while(!errors.isEmpty())
 		{
 			LateError i = errors.takeFirst();
+			if(i.source_type == 0)
+				jdns_cancel_query(sess, i.id);
+			else
+				jdns_cancel_publish(sess, i.id);
 			emit q->error(i.id, i.error);
 			if(!self)
 				return;
@@ -565,6 +578,8 @@ public:
 		while(!responses.isEmpty())
 		{
 			LateResponse i = responses.takeFirst();
+			if(i.do_cancel)
+				jdns_cancel_query(sess, i.id);
 			emit q->resultsReady(i.id, i.response);
 			if(!self)
 				return;
