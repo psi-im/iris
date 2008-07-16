@@ -921,6 +921,11 @@ struct jdns_session
 	list_t *events;
 	list_t *cache;
 
+	// for blocking req_ids from reuse until user explicitly releases
+	int do_hold_req_ids;
+	int held_req_ids_count;
+	int *held_req_ids;
+
 	// mdns
 	mdnsd mdns;
 	list_t *published;
@@ -948,6 +953,10 @@ jdns_session_t *jdns_session_new(jdns_callbacks_t *callbacks)
 	s->events = list_new();
 	s->cache = list_new();
 
+	s->do_hold_req_ids = 0;
+	s->held_req_ids_count = 0;
+	s->held_req_ids = 0;
+
 	s->mdns = 0;
 	s->published = list_new();
 	s->maddr = 0;
@@ -967,6 +976,9 @@ void jdns_session_delete(jdns_session_t *s)
 	list_delete(s->events);
 	list_delete(s->cache);
 
+	if(s->held_req_ids)
+		free(s->held_req_ids);
+
 	if(s->mdns)
 		mdnsd_free(s->mdns);
 
@@ -981,6 +993,7 @@ static int _callback_time_now(mdnsd d, void *arg);
 static int _callback_rand_int(mdnsd d, void *arg);
 
 static void _append_event(jdns_session_t *s, jdns_event_t *event);
+static void _append_event_and_hold_id(jdns_session_t *s, jdns_event_t *event);
 static void _remove_name_server_datagrams(jdns_session_t *s, int ns_id);
 static void _remove_query_datagrams(jdns_session_t *s, const query_t *q);
 
@@ -995,6 +1008,44 @@ static void _multicast_flush(jdns_session_t *s);
 
 static int jdns_step_unicast(jdns_session_t *s, int now);
 static int jdns_step_multicast(jdns_session_t *s, int now);
+
+static void _hold_req_id(jdns_session_t *s, int req_id)
+{
+	int pos;
+
+	// make sure we don't hold an id twice
+	pos = _intarray_indexOf(s->held_req_ids, s->held_req_ids_count, req_id);
+	if(pos != -1)
+		return;
+
+	_intarray_add(&s->held_req_ids, &s->held_req_ids_count, req_id);
+}
+
+static void _unhold_req_id(jdns_session_t *s, int req_id)
+{
+	int pos;
+
+	pos = _intarray_indexOf(s->held_req_ids, s->held_req_ids_count, req_id);
+	if(pos != -1)
+		_intarray_remove(&s->held_req_ids, &s->held_req_ids_count, pos);
+}
+
+static void _set_hold_ids_enabled(jdns_session_t *s, int enabled)
+{
+	if(enabled && !s->do_hold_req_ids)
+	{
+		s->do_hold_req_ids = 1;
+	}
+	else if(!enabled && s->do_hold_req_ids)
+	{
+		s->do_hold_req_ids = 0;
+
+		if(s->held_req_ids)
+			free(s->held_req_ids);
+		s->held_req_ids = 0;
+		s->held_req_ids_count = 0;
+	}
+}
 
 static int _int_wrap(int *src, int start)
 {
@@ -1054,6 +1105,19 @@ static int get_next_req_id(jdns_session_t *s)
 		for(n = 0; n < s->published->count; ++n)
 		{
 			if(((published_item_t *)s->published->item[n])->id == id)
+			{
+				id = -1;
+				break;
+			}
+		}
+
+		// successful unicast queries or any kind of error result in
+		//   events for actions that are no longer active.  we need
+		//   to make sure ids for these actions are not reassigned
+		//   until the user explicitly releases them
+		for(n = 0; n < s->held_req_ids_count; ++n)
+		{
+			if(s->held_req_ids[n] == id)
 			{
 				id = -1;
 				break;
@@ -1208,7 +1272,7 @@ void jdns_set_nameservers(jdns_session_t *s, const jdns_nameserverlist_t *nslist
 				event->type = JDNS_EVENT_RESPONSE;
 				event->id = q->req_ids[k];
 				event->status = JDNS_STATUS_TIMEOUT;
-				_append_event(s, event);
+				_append_event_and_hold_id(s, event);
 			}
 
 			// this line is probably redundant, but just for
@@ -1255,6 +1319,8 @@ void jdns_cancel_query(jdns_session_t *s, int id)
 {
 	int n;
 
+	_unhold_req_id(s, id);
+
 	// remove any events associated with the query.  this avoids any
 	//   possibility that stale events from one query are mistaken to be
 	//   events resulting from a later query that happened to reuse the
@@ -1277,7 +1343,7 @@ void jdns_cancel_query(jdns_session_t *s, int id)
 		{
 			query_remove_req_id(q, id);
 
-			// note: calling _cancel_query might remove an item
+			// note: calling _unicast_cancel might remove an item
 			//  from s->queries, thereby screwing up our iterator
 			//  position, but that's ok because we just break
 			//  anyway.
@@ -1312,6 +1378,8 @@ void jdns_update_publish(jdns_session_t *s, int id, const jdns_rr_t *rr)
 
 void jdns_cancel_publish(jdns_session_t *s, int id)
 {
+	_unhold_req_id(s, id);
+
 	_remove_events(s, JDNS_EVENT_PUBLISH, id);
 
 	_multicast_cancel_publish(s, id);
@@ -1370,6 +1438,11 @@ jdns_event_t *jdns_next_event(jdns_session_t *s)
 	return event;
 }
 
+void jdns_set_hold_ids_enabled(jdns_session_t *s, int enabled)
+{
+	_set_hold_ids_enabled(s, enabled);
+}
+
 //----------------------------------------------------------------------------
 // jdns - internal functions
 //----------------------------------------------------------------------------
@@ -1409,6 +1482,13 @@ void _append_event(jdns_session_t *s, jdns_event_t *event)
 	event_t *e = event_new();
 	e->event = event;
 	list_insert(s->events, e, -1);
+}
+
+void _append_event_and_hold_id(jdns_session_t *s, jdns_event_t *event)
+{
+	if(s->do_hold_req_ids)
+		_hold_req_id(s, event->id);
+	_append_event(s, event);
 }
 
 void _remove_name_server_datagrams(jdns_session_t *s, int ns_id)
@@ -1794,7 +1874,7 @@ int _unicast_do_writes(jdns_session_t *s, int now)
 				event->type = JDNS_EVENT_RESPONSE;
 				event->id = q->req_ids[k];
 				event->status = JDNS_STATUS_TIMEOUT;
-				_append_event(s, event);
+				_append_event_and_hold_id(s, event);
 			}
 
 			_remove_query_datagrams(s, q);
@@ -2233,7 +2313,7 @@ int _process_response(jdns_session_t *s, jdns_response_t *r, int nxdomain, query
 			event->type = JDNS_EVENT_RESPONSE;
 			event->id = q->req_ids[k];
 			event->status = JDNS_STATUS_ERROR;
-			_append_event(s, event);
+			_append_event_and_hold_id(s, event);
 		}
 
 		// report error to parent
@@ -2247,7 +2327,7 @@ int _process_response(jdns_session_t *s, jdns_response_t *r, int nxdomain, query
 				event->type = JDNS_EVENT_RESPONSE;
 				event->id = cq->req_ids[k];
 				event->status = JDNS_STATUS_ERROR;
-				_append_event(s, event);
+				_append_event_and_hold_id(s, event);
 			}
 			list_remove(s->queries, cq);
 		}
@@ -2264,7 +2344,7 @@ int _process_response(jdns_session_t *s, jdns_response_t *r, int nxdomain, query
 			event->type = JDNS_EVENT_RESPONSE;
 			event->id = q->req_ids[k];
 			event->status = JDNS_STATUS_NXDOMAIN;
-			_append_event(s, event);
+			_append_event_and_hold_id(s, event);
 		}
 
 		// report error to parent
@@ -2278,7 +2358,7 @@ int _process_response(jdns_session_t *s, jdns_response_t *r, int nxdomain, query
 				event->type = JDNS_EVENT_RESPONSE;
 				event->id = cq->req_ids[k];
 				event->status = JDNS_STATUS_ERROR;
-				_append_event(s, event);
+				_append_event_and_hold_id(s, event);
 			}
 			list_remove(s->queries, cq);
 		}
@@ -2303,7 +2383,7 @@ int _process_response(jdns_session_t *s, jdns_response_t *r, int nxdomain, query
 				event->type = JDNS_EVENT_RESPONSE;
 				event->id = q->req_ids[k];
 				event->status = JDNS_STATUS_ERROR;
-				_append_event(s, event);
+				_append_event_and_hold_id(s, event);
 			}
 
 			// report error to parent
@@ -2317,7 +2397,7 @@ int _process_response(jdns_session_t *s, jdns_response_t *r, int nxdomain, query
 					event->type = JDNS_EVENT_RESPONSE;
 					event->id = cq->req_ids[k];
 					event->status = JDNS_STATUS_ERROR;
-					_append_event(s, event);
+					_append_event_and_hold_id(s, event);
 				}
 				list_remove(s->queries, cq);
 			}
@@ -2362,7 +2442,7 @@ int _process_response(jdns_session_t *s, jdns_response_t *r, int nxdomain, query
 		event->id = q->req_ids[k];
 		event->status = JDNS_STATUS_SUCCESS;
 		event->response = jdns_response_copy(r);
-		_append_event(s, event);
+		_append_event_and_hold_id(s, event);
 	}
 
 	// report to parent
@@ -2377,7 +2457,7 @@ int _process_response(jdns_session_t *s, jdns_response_t *r, int nxdomain, query
 			event->id = cq->req_ids[k];
 			event->status = JDNS_STATUS_SUCCESS;
 			event->response = jdns_response_copy(r);
-			_append_event(s, event);
+			_append_event_and_hold_id(s, event);
 		}
 		list_remove(s->queries, cq);
 	}
@@ -2776,7 +2856,7 @@ void _multicast_pubresult(int result, char *name, int type, void *arg)
 		event->type = JDNS_EVENT_PUBLISH;
 		event->id = pub->id;
 		event->status = JDNS_STATUS_CONFLICT;
-		_append_event(s, event);
+		_append_event_and_hold_id(s, event);
 
 		// remove the item
 		list_remove(s->published, pub);
@@ -2977,7 +3057,7 @@ error:
 	event->type = JDNS_EVENT_PUBLISH;
 	event->id = next_id;
 	event->status = JDNS_STATUS_ERROR;
-	_append_event(s, event);
+	_append_event_and_hold_id(s, event);
 
 	return next_id;
 }

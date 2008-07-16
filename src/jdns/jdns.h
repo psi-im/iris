@@ -483,6 +483,21 @@ jdns_event_t *jdns_next_event(jdns_session_t *s);
 //   return: newly allocated dnsparams from the system
 jdns_dnsparams_t *jdns_system_dnsparams();
 
+// jdns_set_hold_ids_enabled
+//   s: session
+//   enabled: whether to enable id holding.  default is 0 (disabled)
+//   return: nothing
+// normally, when a unicast query completes or any kind of query or publish
+//   operation results in an error, the operation is automatically "canceled".
+//   when id holding is enabled, the operation still stops internally, but the
+//   id value used by that operation is "held" until the application
+//   explicitly calls jdns_cancel_query() or jdns_cancel_publish() to release
+//   it.  this allows the application to ensure there is no ambiguity when
+//   determining which operation a particular event belongs to.  it is disabled
+//   be default so as to not introduce memory leaks in existing applications,
+//   however new applications really should use it.
+void jdns_set_hold_ids_enabled(jdns_session_t *s, int enabled);
+
 #ifdef __cplusplus
 }
 #endif
