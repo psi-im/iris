@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005,2006  Justin Karneges
+ * Copyright (C) 2005-2008  Justin Karneges
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the
@@ -59,6 +59,12 @@ void jdns_free(void *p);
 char *jdns_strdup(const char *s);
 unsigned char *jdns_copy_array(const unsigned char *src, int size);
 int jdns_domain_cmp(const unsigned char *a, const unsigned char *b);
+
+int jdns_sprintf_s(char *str, int n, const char *format, ...);
+int jdns_vsprintf_s(char *str, int n, const char *format, va_list ap);
+FILE *jdns_fopen(const char *path, const char *mode);
+jdns_string_t *jdns_getenv(const char *name);
+char *jdns_strcpy(char *dst, const char *src);
 
 int jdns_string_indexOf(const jdns_string_t *s, unsigned char c, int pos);
 jdns_stringlist_t *jdns_string_split(const jdns_string_t *s, unsigned char sep);

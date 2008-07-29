@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005,2006  Justin Karneges
+ * Copyright (C) 2005-2008  Justin Karneges
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the
@@ -280,7 +280,7 @@ static jdns_dnshostlist_t *read_hosts_file(const char *path)
 
 	out = jdns_dnshostlist_new();
 
-	f = fopen(path, "r");
+	f = jdns_fopen(path, "r");
 	if(!f)
 		return out;
 	while(1)
@@ -558,18 +558,20 @@ static jdns_dnsparams_t *dnsparams_get_winsys()
 
 static void apply_win_hosts_file(jdns_dnsparams_t *a)
 {
-	char *p, *str;
+	jdns_string_t *p;
+	char *str;
 	int len;
 
-	p = getenv("WINDIR");
+	p = jdns_getenv("WINDIR");
 	if(!p)
 		return;
-	len = strlen(p);
+	len = strlen((char *)p->data);
 	str = (char *)jdns_alloc(len + 100); // should be enough
-	memcpy(str, p, len);
-	strcpy(str + len, "\\system32\\drivers\\etc\\hosts"); // winnt+
+	memcpy(str, p->data, len);
+	jdns_string_delete(p);
+	jdns_strcpy(str + len, "\\system32\\drivers\\etc\\hosts"); // winnt+
 	apply_hosts_file(a, str);
-	strcpy(str + len, "\\hosts"); // win9x
+	jdns_strcpy(str + len, "\\hosts"); // win9x
 	apply_hosts_file(a, str);
 	jdns_free(str);
 }
@@ -621,7 +623,7 @@ static jdns_dnsparams_t *dnsparams_get_unixfiles()
 
 	params = jdns_dnsparams_new();
 
-	f = fopen("/etc/resolv.conf", "r");
+	f = jdns_fopen("/etc/resolv.conf", "r");
 	if(!f)
 		return params;
 	while(1)

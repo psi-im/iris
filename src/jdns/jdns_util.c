@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005,2006  Justin Karneges
+ * Copyright (C) 2005-2008  Justin Karneges
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the
@@ -80,6 +80,87 @@ int jdns_domain_cmp(const unsigned char *a, const unsigned char *b)
 			return 0;
 	}
 	return 1;
+}
+
+int jdns_sprintf_s(char *str, int n, const char *format, ...)
+{
+	int ret;
+	va_list ap;
+	va_start(ap, format);
+	ret = jdns_vsprintf_s(str, n, format, ap);
+	va_end(ap);
+	return ret;
+}
+
+int jdns_vsprintf_s(char *str, int n, const char *format, va_list ap)
+{
+#if defined(_MSC_VER) && _MSC_VER >= 1400
+	return vsprintf_s(str, n, format, ap);
+#else
+	(void)n;
+	return vsprintf(str, format, ap);
+#endif
+}
+
+FILE *jdns_fopen(const char *path, const char *mode)
+{
+#if defined(_MSC_VER) && _MSC_VER >= 1400
+	FILE *fp;
+	if(fopen_s(&fp, path, mode) != 0)
+		return 0;
+	return fp;
+#else
+	return fopen(path, mode);
+#endif
+}
+
+jdns_string_t *jdns_getenv(const char *name)
+{
+#if defined(_MSC_VER) && _MSC_VER >= 1400
+	jdns_string_t *out;
+	char *dest;
+	size_t size;
+	int sizei;
+	errno_t ret;
+	ret = getenv_s(&size, 0, 0, name);
+	if(ret != 0 || size == 0)
+		return 0;
+	sizei = (int)size;
+	dest = (char *)jdns_alloc(sizei);
+	ret = getenv_s(&size, dest, size, name);
+	if(ret != 0)
+	{
+		free(dest);
+		return 0;
+	}
+	out = jdns_string_new();
+	out->size = sizei - 1;
+	out->data = dest; // must be zero-terminated, which it is
+	return out;
+#else
+	jdns_string_t *out;
+	char *val;
+	val = getenv(name);
+	if(!val)
+		return 0;
+	out = jdns_string_new();
+	jdns_string_set_cstr(out, val);
+	return out;
+#endif
+}
+
+char *jdns_strcpy(char *dst, const char *src)
+{
+#if defined(_MSC_VER) && _MSC_VER >= 1400
+	int len;
+	// deliberately unsafe
+	len = strlen(src);
+	if(strcpy_s(dst, len + 1, src) != 0)
+		return 0;
+	return dst;
+#else
+	return strcpy(dst, src);
+#endif
 }
 
 //----------------------------------------------------------------------------
@@ -394,7 +475,7 @@ void jdns_address_set_ipv4(jdns_address_t *a, unsigned long int ipv4)
 	a->isIpv6 = 0;
 	a->addr.v4 = ipv4;
 	a->c_str = (char *)jdns_alloc(16); // max size (3 * 4 + 3 + 1)
-	sprintf(a->c_str, "%d.%d.%d.%d",
+	jdns_sprintf_s(a->c_str, 16, "%d.%d.%d.%d",
 		(unsigned char)((ipv4 >> 24) & 0xff),
 		(unsigned char)((ipv4 >> 16) & 0xff),
 		(unsigned char)((ipv4 >>  8) & 0xff),
@@ -417,7 +498,7 @@ void jdns_address_set_ipv6(jdns_address_t *a, const unsigned char *ipv6)
 	// each word in a 16-byte ipv6 address is network byte order
 	for(n = 0; n < 8; ++n)
 		word[n] = ((unsigned short)(p[n * 2]) << 8) + (unsigned short)(p[n * 2 + 1]);
-	sprintf(a->c_str, "%04X:%04X:%04X:%04X:%04X:%04X:%04X:%04X", word[0], word[1], word[2], word[3], word[4], word[5], word[6], word[7]);
+	jdns_sprintf_s(a->c_str, 40, "%04X:%04X:%04X:%04X:%04X:%04X:%04X:%04X", word[0], word[1], word[2], word[3], word[4], word[5], word[6], word[7]);
 }
 
 int jdns_address_set_cstr(jdns_address_t *a, const char *str)

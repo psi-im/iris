@@ -1456,7 +1456,7 @@ void _debug_line(jdns_session_t *s, const char *format, ...)
 	char *buf = (char *)malloc(2048);
 	va_list ap;
 	va_start(ap, format);
-	vsprintf(buf, format, ap);
+	jdns_vsprintf_s(buf, 2048, format, ap);
 	va_end(ap);
 	s->cb.debug_line(s, s->cb.app, buf);
 	free(buf);
