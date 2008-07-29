@@ -1004,7 +1004,7 @@ XMPP::ServiceProvider *AppleProvider::createServiceProvider()
 }
 
 #ifdef APPLEDNS_STATIC
-IrisNetProvider *irisnet_createAppleProvider()
+XMPP::IrisNetProvider *irisnet_createAppleProvider()
 {
         return new AppleProvider;
 }
