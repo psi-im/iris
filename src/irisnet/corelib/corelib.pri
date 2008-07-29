@@ -26,8 +26,12 @@ SOURCES += \
 	$$PWD/netinterface.cpp \
 	$$PWD/netnames.cpp
 
+unix {
+	SOURCES += \
+		$$PWD/netinterface_unix.cpp
+}
+
 SOURCES += \
-	$$PWD/netinterface_unix.cpp \
 	$$PWD/netnames_jdns.cpp
 
 #include(legacy/legacy.pri)
