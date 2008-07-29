@@ -46,7 +46,7 @@
 
 #ifndef QT_NO_IPV6
 # define HAVE_IPV6
-# ifndef IPPROTO_IPV6
+# ifndef s6_addr
 #  define IPPROTO_IPV6 41
    struct in6_addr
    {
