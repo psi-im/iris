@@ -14,5 +14,5 @@ include(build.pri)
 	CONFIG += irisnetcore_bundle
 
 	# don't build iris, app will include iris.pri
-	CONFIG += iris_bundle
+	#CONFIG += iris_bundle
 }
