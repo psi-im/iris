@@ -16,6 +16,15 @@ psi-zip {
 	INCLUDEPATH += $$PWD/../src/tools/zip/minizip/win32
 }
 
+mac {
+	# Universal binaries
+	qc_universal:contains(QT_CONFIG,x86):contains(QT_CONFIG,ppc) {
+		CONFIG += x86 ppc
+		QMAKE_MAC_SDK=/Developer/SDKs/MacOSX10.4u.sdk
+		QMAKE_MACOSX_DEPLOYMENT_TARGET = 10.4
+	}
+}
+
 # default build configuration
 !iris_build_pri {
 	# build appledns on mac
