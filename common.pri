@@ -16,6 +16,8 @@ psi-zip {
 	INCLUDEPATH += $$PWD/../src/tools/zip/minizip/win32
 }
 
+# HACK: this should not be in common.pri, since it means the user of iris gets
+#  this code as well
 mac {
 	# Universal binaries
 	qc_universal:contains(QT_CONFIG,x86):contains(QT_CONFIG,ppc) {
