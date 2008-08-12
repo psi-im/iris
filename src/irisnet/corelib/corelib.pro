@@ -9,3 +9,7 @@ windows:DLLDESTDIR = $$IRIS_BASE/bin
 VERSION = 1.0.0
 
 include(corelib.pri)
+
+CONFIG += create_prl
+windows:!staticlib:DEFINES += IRISNET_MAKEDLL
+staticlib:PRL_EXPORT_DEFINES += IRISNET_STATIC
