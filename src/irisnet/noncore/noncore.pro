@@ -9,3 +9,6 @@ CONFIG  += staticlib create_prl
 VERSION = 1.0.0
 
 include(noncore.pri)
+
+windows:!staticlib:DEFINES += IRISNET_MAKEDLL
+staticlib:PRL_EXPORT_DEFINES += IRISNET_STATIC

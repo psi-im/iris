@@ -6,9 +6,6 @@ include(build.pri)
 unix:include(../conf.pri)
 windows:include(../conf_windows.pri)
 
-# we need this, but I'm not sure if it goes in this file
-CONFIG += link_prl
-
 # HACK: use qca from psi if necessary
 qca-static {
 	INCLUDEPATH += $$PWD/../third-party/qca/qca/include/QtCrypto

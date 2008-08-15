@@ -3,8 +3,6 @@ include(../../../common.pri)
 
 QT *= network
 
-DEFINES += IRISNET_STATIC
-
 irisnetcore_bundle:{
 	include(../corelib/corelib.pri)
 }
