@@ -26,7 +26,7 @@
 #include <QList>
 
 #include "xmpp.h"
-#include "xmpp_jid.h"
+#include "xmpp/jid/jid.h"
 #include "xmpp_muc.h"
 #include "xmpp_message.h"
 #include "xmpp_chatstate.h"

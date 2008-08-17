@@ -22,7 +22,7 @@
 
 #include <QString>
 
-#include "xmpp_jid.h"
+#include "xmpp/jid/jid.h"
 
 class QDomElement;
 

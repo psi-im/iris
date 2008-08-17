@@ -20,7 +20,7 @@
 
 #include "xmpp_xdata.h"
 #include "xmpp_xmlcommon.h"
-#include "xmpp_jid.h"
+#include "xmpp/jid/jid.h"
 
 #include <QList>
 #include <QSharedDataPointer>

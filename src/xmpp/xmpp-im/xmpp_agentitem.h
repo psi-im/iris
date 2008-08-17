@@ -23,7 +23,7 @@
 
 #include <QString>
 
-#include "xmpp_jid.h"
+#include "xmpp/jid/jid.h"
 #include "xmpp_features.h"
 
 namespace XMPP {

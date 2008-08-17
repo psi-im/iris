@@ -24,7 +24,7 @@
 #include <QDomElement>
 #include <QString>
 
-#include "xmpp_jid.h"
+#include "xmpp/jid/jid.h"
 
 namespace XMPP
 {

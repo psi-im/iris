@@ -28,7 +28,7 @@
 #include <QHostAddress>
 
 #include "bytestream.h"
-#include "xmpp_jid.h"
+#include "xmpp/jid/jid.h"
 #include "xmpp_task.h"
 
 class SocksClient;

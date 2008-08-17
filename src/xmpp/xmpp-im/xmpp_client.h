@@ -23,7 +23,7 @@
 #include <QObject>
 #include <QStringList>
 
-#include "xmpp_jid.h"
+#include "xmpp/jid/jid.h"
 #include "xmpp_status.h"
 #include "xmpp_discoitem.h"
 

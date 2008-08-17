@@ -21,7 +21,7 @@
 #include <QString>
 
 #include "xmpp_task.h"
-#include "xmpp_jid.h"
+#include "xmpp/jid/jid.h"
 #include "xmpp_discoitem.h"
 #include "xmpp_discoinfotask.h"
 #include "xmpp_xmlcommon.h"
