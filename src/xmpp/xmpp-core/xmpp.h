@@ -30,7 +30,7 @@
 #include <qxml.h>
 #include <qdom.h>
 
-#include "xmpp_jid.h"
+#include "xmpp/jid/jid.h"
 #include "xmpp_stanza.h"
 #include "xmpp_stream.h"
 #include "xmpp_clientstream.h"

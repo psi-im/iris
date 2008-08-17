@@ -13,10 +13,13 @@ else {
 
 include($$PWD/../libidn/libidn.pri)
 include($$PWD/cutestuff/cutestuff.pri)
+include($$PWD/jid/jid.pri)
 
 DEFINES += XMPP_TEST
 
 INCLUDEPATH += \
+	$$PWD/ \
+	$$PWD/.. \
   $$PWD/xmpp-core \
   $$PWD/xmpp-im
 
@@ -36,7 +39,6 @@ HEADERS += \
 	$$PWD/xmpp-im/xmpp_ibb.h \
 	$$PWD/xmpp-im/filetransfer.h \
 	$$PWD/xmpp-core/xmpp.h \
-	$$PWD/xmpp-core/xmpp_jid.h \
 	$$PWD/xmpp-im/xmpp_url.h \
 	$$PWD/xmpp-im/xmpp_chatstate.h \
 	$$PWD/xmpp-im/xmpp_receipts.h \
@@ -68,7 +70,6 @@ HEADERS += \
 SOURCES += \
 	$$PWD/xmpp-core/connector.cpp \
 	$$PWD/xmpp-core/tlshandler.cpp \
-	$$PWD/xmpp-core/jid.cpp \
 	$$PWD/xmpp-core/securestream.cpp \
 	$$PWD/xmpp-core/parser.cpp \
 	$$PWD/xmpp-core/xmlprotocol.cpp \
