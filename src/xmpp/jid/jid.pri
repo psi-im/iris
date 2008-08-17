@@ -1,3 +1,6 @@
+INCLUDEPATH *= $$PWD/../..
+DEPENDPATH *= $$PWD/../..
+
 HEADERS += \
 	$$PWD/jid.h
 
