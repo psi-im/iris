@@ -1,7 +1,7 @@
 IRIS_BASE = $$PWD
 include(common.pri)
 
-INCLUDEPATH += $$IRIS_BASE/include $$IRIS_BASE/include/iris
+INCLUDEPATH += $$IRIS_BASE/include $$IRIS_BASE/include/iris $$IRIS_BASE/src
 
 iris_bundle:{
 	include(src/xmpp/xmpp.pri)

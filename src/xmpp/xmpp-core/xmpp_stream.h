@@ -25,7 +25,7 @@
 #include <QObject>
 
 #include "xmpp_stanza.h"
-#include "xmpp_jid.h"
+#include "xmpp/jid/jid.h"
 
 class QDomDocument;
 
