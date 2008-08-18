@@ -366,8 +366,9 @@ namespace XMPP
 
 		~ParserHandler()
 		{
-			eventList.setAutoDelete(true);
-			eventList.clear();
+			while (!eventList.isEmpty()) {
+				delete eventList.takeFirst();
+			}
 		}
 
 		bool startDocument()
@@ -518,8 +519,8 @@ namespace XMPP
 				needMore = false;
 
 				// there should have been a pending event
-				Parser::Event *e = eventList.getFirst();
-				if(e) {
+				if (!eventList.isEmpty()) {
+					Parser::Event *e = eventList.first();
 					e->setActualString(e->actualString() + '>');
 					in->resetLastData();
 				}
@@ -533,8 +534,7 @@ namespace XMPP
 			if(eventList.isEmpty())
 				return 0;
 
-			Parser::Event *e = eventList.getFirst();
-			eventList.removeRef(e);
+			Parser::Event *e = eventList.takeFirst();
 			in->pause(false);
 			return e;
 		}
@@ -544,7 +544,7 @@ namespace XMPP
 		int depth;
 		QStringList nsnames, nsvalues;
 		QDomElement elem, current;
-		Q3PtrList<Parser::Event> eventList;
+		QList<Parser::Event*> eventList;
 		bool needMore;
 	};
 };

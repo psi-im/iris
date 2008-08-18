@@ -20,8 +20,8 @@
 
 #include "filetransfer.h"
 
+#include <QList>
 #include <qtimer.h>
-#include <q3ptrlist.h>
 #include <qpointer.h>
 #include <qfileinfo.h>
 #include "xmpp_xmlcommon.h"
@@ -346,7 +346,7 @@ class FileTransferManager::Private
 {
 public:
 	Client *client;
-	Q3PtrList<FileTransfer> list, incoming;
+	QList<FileTransfer*> list, incoming;
 	JT_PushFT *pft;
 };
 
@@ -362,8 +362,9 @@ FileTransferManager::FileTransferManager(Client *client)
 
 FileTransferManager::~FileTransferManager()
 {
-	d->incoming.setAutoDelete(true);
-	d->incoming.clear();
+	while (!d->incoming.isEmpty()) {
+		delete d->incoming.takeFirst();
+	}
 	delete d->pft;
 	delete d;
 }
@@ -384,8 +385,7 @@ FileTransfer *FileTransferManager::takeIncoming()
 	if(d->incoming.isEmpty())
 		return 0;
 
-	FileTransfer *ft = d->incoming.getFirst();
-	d->incoming.removeRef(ft);
+	FileTransfer *ft = d->incoming.takeFirst();
 
 	// move to active list
 	d->list.append(ft);
@@ -394,7 +394,7 @@ FileTransfer *FileTransferManager::takeIncoming()
 
 bool FileTransferManager::isActive(const FileTransfer *ft) const
 {
-	return d->list.contains(ft) > 0;
+	return d->list.contains(const_cast<FileTransfer*>(ft)) > 0;
 }
 
 void FileTransferManager::pft_incoming(const FTRequest &req)
@@ -423,9 +423,8 @@ void FileTransferManager::pft_incoming(const FTRequest &req)
 
 void FileTransferManager::s5b_incomingReady(S5BConnection *c)
 {
-	Q3PtrListIterator<FileTransfer> it(d->list);
 	FileTransfer *ft = 0;
-	for(FileTransfer *i; (i = it.current()); ++it) {
+	foreach(FileTransfer* i, d->list) {
 		if(i->d->needStream && i->d->peer.compare(c->peer()) && i->d->id == c->sid()) {
 			ft = i;
 			break;
@@ -458,7 +457,7 @@ void FileTransferManager::con_reject(FileTransfer *ft)
 
 void FileTransferManager::unlink(FileTransfer *ft)
 {
-	d->list.removeRef(ft);
+	d->list.remove(ft);
 }
 
 //----------------------------------------------------------------------------

@@ -359,8 +359,9 @@ IBBManager::IBBManager(Client *parent)
 
 IBBManager::~IBBManager()
 {
-	d->incomingConns.setAutoDelete(true);
-	d->incomingConns.clear();
+	while (!d->incomingConns.isEmpty()) {
+		delete d->incomingConns.takeFirst();
+	}
 	delete d->ibb;
 	delete d;
 }
@@ -375,8 +376,7 @@ IBBConnection *IBBManager::takeIncoming()
 	if(d->incomingConns.isEmpty())
 		return 0;
 
-	IBBConnection *c = d->incomingConns.getFirst();
-	d->incomingConns.removeRef(c);
+	IBBConnection *c = d->incomingConns.takeFirst();
 	return c;
 }
 
@@ -440,13 +440,12 @@ void IBBManager::link(IBBConnection *c)
 
 void IBBManager::unlink(IBBConnection *c)
 {
-	d->activeConns.removeRef(c);
+	d->activeConns.remove(c);
 }
 
 IBBConnection *IBBManager::findConnection(const QString &sid, const Jid &peer) const
 {
-	IBBConnectionListIt it(d->activeConns);
-	for(IBBConnection *c; (c = it.current()); ++it) {
+	foreach(IBBConnection* c, d->activeConns) {
 		if(c->streamid() == sid && (peer.isEmpty() || c->peer().compare(peer)) )
 			return c;
 	}
