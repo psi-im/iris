@@ -48,8 +48,7 @@
 #include <qpointer.h>
 #include <qtimer.h>
 #include <QList>
-#include <Q3CString>
-#include <Q3PtrList>
+#include <QByteArray>
 #include <stdlib.h>
 #include "bytestream.h"
 #include <QtCrypto>
@@ -148,7 +147,6 @@ public:
 		tlsHandler = 0;
 		tls = 0;
 		sasl = 0;
-		in.setAutoDelete(true);
 
 		oldOnly = false;
 		allowPlain = NoAllowPlain;
@@ -215,7 +213,7 @@ public:
 	QString errText;
 	QDomElement errAppSpec;
 
-	Q3PtrList<Stanza> in;
+	QList<Stanza*> in;
 
 	QTimer noopTimer;
 	int noop_time;
@@ -316,8 +314,11 @@ void ClientStream::reset(bool all)
 		d->srv.reset();
 	}
 
-	if(all)
-		d->in.clear();
+	if(all) {
+		while (!d->in.isEmpty()) {
+			delete d->in.takeFirst();
+		}
+	}
 }
 
 Jid ClientStream::jid() const
@@ -538,9 +539,9 @@ Stanza ClientStream::read()
 	if(d->in.isEmpty())
 		return Stanza();
 	else {
-		Stanza *sp = d->in.getFirst();
+		Stanza *sp = d->in.takeFirst();
 		Stanza s = *sp;
-		d->in.removeRef(sp);
+		delete sp;
 		return s;
 	}
 }
@@ -628,8 +629,7 @@ void ClientStream::ss_readyRead()
 	QByteArray a = d->ss->read();
 
 #ifdef XMPP_DEBUG
-	Q3CString cs(a.data(), a.size()+1);
-	fprintf(stderr, "ClientStream: recv: %d [%s]\n", a.size(), cs.data());
+	fprintf(stderr, "ClientStream: recv: %d [%s]\n", a.size(), a.data());
 #endif
 
 	if(d->mode == Client)
@@ -815,8 +815,7 @@ void ClientStream::srvProcessNext()
 			else if(need == CoreProtocol::NSASLNext) {
 				printf("Need SASL Next Step\n");
 				QByteArray a = d->srv.saslStep();
-				Q3CString cs(a.data(), a.size()+1);
-				printf("[%s]\n", cs.data());
+				printf("[%s]\n", a.data());
 				d->sasl->putStep(a);
 			}
 			else if(need == CoreProtocol::NSASLLayer) {
@@ -842,9 +841,7 @@ void ClientStream::srvProcessNext()
 			}
 			case CoreProtocol::ESend: {
 				QByteArray a = d->srv.takeOutgoingData();
-				Q3CString cs(a.size()+1);
-				memcpy(cs.data(), a.data(), a.size());
-				printf("Need Send: {%s}\n", cs.data());
+				printf("Need Send: {%s}\n", a.data());
 				d->ss->write(a);
 				break;
 			}
@@ -852,7 +849,7 @@ void ClientStream::srvProcessNext()
 				printf("Break (RecvOpen)\n");
 
 				// calculate key
-				Q3CString str = QCA::Hash("sha1").hashToString("secret").utf8();
+				QByteArray str = QCA::Hash("sha1").hashToString("secret").utf8();
 				str = QCA::Hash("sha1").hashToString(str + "im.pyxa.org").utf8();
 				str = QCA::Hash("sha1").hashToString(str + d->srv.id.utf8()).utf8();
 				d->srv.setDialbackKey(str);
@@ -956,9 +953,7 @@ void ClientStream::processNext()
 			case CoreProtocol::ESend: {
 				QByteArray a = d->client.takeOutgoingData();
 #ifdef XMPP_DEBUG
-				Q3CString cs(a.size()+1);
-				memcpy(cs.data(), a.data(), a.size());
-				printf("Need Send: {%s}\n", cs.data());
+				printf("Need Send: {%s}\n", a.data());
 #endif
 				d->ss->write(a);
 				break;

@@ -24,7 +24,7 @@
 //Added by qt3to4:
 #include <QList>
 #include <QTextStream>
-#include <Q3CString>
+#include <QByteArray>
 #include <QApplication>
 
 using namespace XMPP;
@@ -553,10 +553,7 @@ int XmlProtocol::internalWriteData(const QByteArray &a, TrackItem::Type t, int i
 int XmlProtocol::internalWriteString(const QString &s, TrackItem::Type t, int id)
 {
 	QString out=sanitizeForStream(s);
-	Q3CString cs = s.utf8();
-	QByteArray a(cs.length());
-	memcpy(a.data(), cs.data(), a.size());
-	return internalWriteData(a, t, id);
+	return internalWriteData(s.utf8(), t, id);
 }
 
 void XmlProtocol::sendTagOpen()

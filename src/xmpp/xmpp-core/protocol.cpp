@@ -26,9 +26,8 @@
 #include "protocol.h"
 
 #include <qca.h>
-//Added by qt3to4:
 #include <QList>
-#include <Q3CString>
+#include <QByteArray>
 #include <QtCrypto>
 
 #ifdef XMPP_TEST
@@ -1236,7 +1235,7 @@ bool CoreProtocol::normalStep(const QDomElement &e)
 			//	QCA::insertProvider(createProviderHash());
 
 			p = doc.createElement("digest");
-			Q3CString cs = id.utf8() + password.utf8();
+			QByteArray cs = id.utf8() + password.utf8();
 			p.appendChild(doc.createTextNode(QCA::Hash("sha1").hashToString(cs)));
 		}
 		else {

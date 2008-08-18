@@ -22,10 +22,9 @@
 
 #include <qhostaddress.h>
 #include <qstringlist.h>
-#include <q3ptrlist.h>
 #include <QList>
 #include <qca.h>
-#include <Q3CString>
+#include <QByteArray>
 #include <stdlib.h>
 #include <QtCrypto>
 #include <QDebug>
@@ -35,7 +34,7 @@
 namespace XMPP {
 struct Prop
 {
-	Q3CString var, val;
+	QByteArray var, val;
 };
 
 class PropList : public QList<Prop>
@@ -45,7 +44,7 @@ public:
 	{
 	}
 
-	void set(const Q3CString &var, const Q3CString &val)
+	void set(const QByteArray &var, const QByteArray &val)
 	{
 		Prop p;
 		p.var = var;
@@ -53,18 +52,18 @@ public:
 		append(p);
 	}
 
-	Q3CString get(const Q3CString &var)
+	QByteArray get(const QByteArray &var)
 	{
 		for(ConstIterator it = begin(); it != end(); ++it) {
 			if((*it).var == var)
 				return (*it).val;
 		}
-		return Q3CString();
+		return QByteArray();
 	}
 
-	Q3CString toString() const
+	QByteArray toString() const
 	{
-		Q3CString str;
+		QByteArray str;
 		bool first = true;
 		for(ConstIterator it = begin(); it != end(); ++it) {
 			if(!first)
@@ -88,7 +87,7 @@ public:
 			int n = str.find('=', at);
 			if(n == -1)
 				break;
-			Q3CString var, val;
+			QByteArray var, val;
 			var = str.mid(at, n-at);
 			at = n + 1;
 			if(str[at] == '\"') {
@@ -141,7 +140,7 @@ public:
 		return true;
 	}
 
-	int varCount(const Q3CString &var)
+	int varCount(const QByteArray &var)
 	{
 		int n = 0;
 		for(ConstIterator it = begin(); it != end(); ++it) {
@@ -151,7 +150,7 @@ public:
 		return n;
 	}
 
-	QStringList getValues(const Q3CString &var)
+	QStringList getValues(const QByteArray &var)
 	{
 		QStringList list;
 		for(ConstIterator it = begin(); it != end(); ++it) {
@@ -368,18 +367,18 @@ public:
 			QByteArray a(32);
 			for(int n = 0; n < (int)a.size(); ++n)
 				a[n] = (char)(256.0*rand()/(RAND_MAX+1.0));
-			Q3CString cnonce = QCA::Base64().arrayToString(a).latin1();
+			QByteArray cnonce = QCA::Base64().arrayToString(a).latin1();
 
 			// make other variables
 			if (realm.isEmpty())
 				realm = QString::fromUtf8(in.get("realm"));
-			Q3CString nonce = in.get("nonce");
-			Q3CString nc = "00000001";
-			Q3CString uri = service.utf8() + '/' + host.utf8();
-			Q3CString qop = "auth";
+			QByteArray nonce = in.get("nonce");
+			QByteArray nc = "00000001";
+			QByteArray uri = service.utf8() + '/' + host.utf8();
+			QByteArray qop = "auth";
 
 			// build 'response'
-			Q3CString X = user.utf8() + ':' + realm.utf8() + ':' + Q3CString(pass.toByteArray());
+			QByteArray X = user.utf8() + ':' + realm.utf8() + ':' + QByteArray(pass.toByteArray());
 			QByteArray Y = QCA::Hash("md5").hash(X).toByteArray();
 			QByteArray tmp = ':' + nonce + ':' + cnonce;
 			if (!authz.isEmpty())
@@ -388,10 +387,10 @@ public:
 
 			QByteArray A1(Y + tmp);
 			QByteArray A2 = QByteArray("AUTHENTICATE:") + uri;
-			Q3CString HA1 = QCA::Hash("md5").hashToString(A1).latin1();
-			Q3CString HA2 = QCA::Hash("md5").hashToString(A2).latin1();
-			Q3CString KD = HA1 + ':' + nonce + ':' + nc + ':' + cnonce + ':' + qop + ':' + HA2;
-			Q3CString Z = QCA::Hash("md5").hashToString(KD).latin1();
+			QByteArray HA1 = QCA::Hash("md5").hashToString(A1).latin1();
+			QByteArray HA2 = QCA::Hash("md5").hashToString(A2).latin1();
+			QByteArray KD = HA1 + ':' + nonce + ':' + nc + ':' + cnonce + ':' + qop + ':' + HA2;
+			QByteArray Z = QCA::Hash("md5").hashToString(KD).latin1();
 			
 			//qDebug() << (QString("simplesasl.cpp: A1 = %1").arg(QString(A1)).toAscii());
 			//qDebug() << (QString("simplesasl.cpp: A2 = %1").arg(QString(A2)).toAscii());
