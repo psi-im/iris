@@ -23,7 +23,6 @@
 
 #include <qstring.h>
 #include <qstringlist.h>
-#include <q3cstring.h>
 
 #include <QList>
 #include <qdom.h>
