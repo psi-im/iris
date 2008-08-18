@@ -20,7 +20,8 @@ else {
 #   except that in 4.3 or earlier the link_prl feature is too aggressive and
 #   pulls in unnecessary deps.  so, for 4.3 and earlier, we'll just explicitly
 #   specify the stuff the prl should have given us.
-contains($$list($$[QT_VERSION]), 4.0.*|4.1.*|4.2.*|4.3.*) {
+# also, mingw seems to have broken prl support??
+win32-g++|contains($$list($$[QT_VERSION]), 4.0.*|4.1.*|4.2.*|4.3.*) {
 	DEFINES += IRISNET_STATIC             # from irisnet
 	windows:LIBS += -lWs2_32 -lAdvapi32   # from jdns
 }
