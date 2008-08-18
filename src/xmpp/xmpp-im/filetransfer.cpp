@@ -457,7 +457,7 @@ void FileTransferManager::con_reject(FileTransfer *ft)
 
 void FileTransferManager::unlink(FileTransfer *ft)
 {
-	d->list.remove(ft);
+	d->list.removeAll(ft);
 }
 
 //----------------------------------------------------------------------------

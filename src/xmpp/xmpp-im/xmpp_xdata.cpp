@@ -207,7 +207,7 @@ void XData::Field::fromXml(const QDomElement &e)
 		if ( tag == "required" )
 			_required = true;
 		else if ( tag == "desc" )
-			_desc = i.text().simplifyWhiteSpace();
+			_desc = i.text().trimmed();
 		else if ( tag == "option" ) {
 			Option o;
 			bool found;

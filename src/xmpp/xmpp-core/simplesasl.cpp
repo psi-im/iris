@@ -84,7 +84,7 @@ public:
 		while(1) {
 			while (at < str.length() && (str[at] == ',' || str[at] == ' ' || str[at] == '\t'))
 				  ++at;
-			int n = str.find('=', at);
+			int n = str.indexOf('=', at);
 			if(n == -1)
 				break;
 			QByteArray var, val;
@@ -92,7 +92,7 @@ public:
 			at = n + 1;
 			if(str[at] == '\"') {
 				++at;
-				n = str.find('\"', at);
+				n = str.indexOf('\"', at);
 				if(n == -1)
 					break;
 				val = str.mid(at, n-at);
@@ -321,7 +321,7 @@ public:
 				// Continue with authentication
 				QByteArray plain;
 				if (!authz.isEmpty())
-					plain += authz.utf8();
+					plain += authz.toUtf8();
 			   	plain += '\0' + user.toUtf8() + '\0' + pass.toByteArray();
 				out_buf.resize(plain.length());
 				memcpy(out_buf.data(), plain.data(), out_buf.size());
@@ -364,33 +364,34 @@ public:
 			//qDebug() << (QString("simplesasl.cpp: IN: %1").arg(QString(in.toString())));
 
 			// make a cnonce
-			QByteArray a(32);
+			QByteArray a;
+			a.resize(32);
 			for(int n = 0; n < (int)a.size(); ++n)
 				a[n] = (char)(256.0*rand()/(RAND_MAX+1.0));
-			QByteArray cnonce = QCA::Base64().arrayToString(a).latin1();
+			QByteArray cnonce = QCA::Base64().arrayToString(a).toLatin1();
 
 			// make other variables
 			if (realm.isEmpty())
 				realm = QString::fromUtf8(in.get("realm"));
 			QByteArray nonce = in.get("nonce");
 			QByteArray nc = "00000001";
-			QByteArray uri = service.utf8() + '/' + host.utf8();
+			QByteArray uri = service.toUtf8() + '/' + host.toUtf8();
 			QByteArray qop = "auth";
 
 			// build 'response'
-			QByteArray X = user.utf8() + ':' + realm.utf8() + ':' + QByteArray(pass.toByteArray());
+			QByteArray X = user.toUtf8() + ':' + realm.toUtf8() + ':' + QByteArray(pass.toByteArray());
 			QByteArray Y = QCA::Hash("md5").hash(X).toByteArray();
 			QByteArray tmp = ':' + nonce + ':' + cnonce;
 			if (!authz.isEmpty())
-				tmp += ':' + authz.utf8();
+				tmp += ':' + authz.toUtf8();
 			//qDebug() << (QString(tmp));
 
 			QByteArray A1(Y + tmp);
 			QByteArray A2 = QByteArray("AUTHENTICATE:") + uri;
-			QByteArray HA1 = QCA::Hash("md5").hashToString(A1).latin1();
-			QByteArray HA2 = QCA::Hash("md5").hashToString(A2).latin1();
+			QByteArray HA1 = QCA::Hash("md5").hashToString(A1).toLatin1();
+			QByteArray HA2 = QCA::Hash("md5").hashToString(A2).toLatin1();
 			QByteArray KD = HA1 + ':' + nonce + ':' + nc + ':' + cnonce + ':' + qop + ':' + HA2;
-			QByteArray Z = QCA::Hash("md5").hashToString(KD).latin1();
+			QByteArray Z = QCA::Hash("md5").hashToString(KD).toLatin1();
 			
 			//qDebug() << (QString("simplesasl.cpp: A1 = %1").arg(QString(A1)).toAscii());
 			//qDebug() << (QString("simplesasl.cpp: A2 = %1").arg(QString(A2)).toAscii());
@@ -398,20 +399,20 @@ public:
 
 			// build output
 			PropList out;
-			out.set("username", user.utf8());
+			out.set("username", user.toUtf8());
 			if (!realm.isEmpty())
-				out.set("realm", realm.utf8());
+				out.set("realm", realm.toUtf8());
 			out.set("nonce", nonce);
 			out.set("cnonce", cnonce);
 			out.set("nc", nc);
-			//out.set("serv-type", service.utf8());
-			//out.set("host", host.utf8());
+			//out.set("serv-type", service.toUtf8());
+			//out.set("host", host.toUtf8());
 			out.set("digest-uri", uri);
 			out.set("qop", qop);
 			out.set("response", Z);
 			out.set("charset", "utf-8");
 			if (!authz.isEmpty())
-				out.set("authzid", authz.utf8());
+				out.set("authzid", authz.toUtf8());
 			QByteArray s(out.toString());
 			//qDebug() << (QString("OUT: %1").arg(QString(out.toString())));
 

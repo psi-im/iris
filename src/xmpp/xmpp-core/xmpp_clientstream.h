@@ -124,7 +124,7 @@ namespace XMPP
 		void setSSFRange(int low, int high);
 		void setOldOnly(bool);
 		void setSASLMechanism(const QString &s);
-		void setLocalAddr(const QHostAddress &addr, Q_UINT16 port);
+		void setLocalAddr(const QHostAddress &addr, quint16 port);
 
 		// Compression
 		void setCompress(bool);

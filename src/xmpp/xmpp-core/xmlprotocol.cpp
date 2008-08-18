@@ -103,7 +103,7 @@ static QString xmlToString(const QDomElement &e, const QString &fakeNS, const QS
 	}
 	// 'clip' means to remove any unwanted (and unneeded) characters, such as a trailing newline
 	if(clip) {
-		int n = out.findRev('>');
+		int n = out.lastIndexOf('>');
 		out.truncate(n+1);
 	}
 	return out;
@@ -133,12 +133,12 @@ static void createRootXmlTags(const QDomElement &root, QString *xmlHeader, QStri
 	}
 
 	// parse the tags out
-	int n = str.find('<');
-	int n2 = str.find('>', n);
+	int n = str.indexOf('<');
+	int n2 = str.indexOf('>', n);
 	++n2;
 	*tagOpen = str.mid(n, n2-n);
-	n2 = str.findRev('>');
-	n = str.findRev('<');
+	n2 = str.lastIndexOf('>');
+	n = str.lastIndexOf('<');
 	++n2;
 	*tagClose = str.mid(n, n2-n);
 
@@ -319,7 +319,7 @@ void XmlProtocol::outgoingDataWritten(int bytes)
 		int id = i.id;
 		int size = i.size;
 		bytes -= i.size;
-		it = trackQueue.remove(it);
+		it = trackQueue.erase(it);
 
 		if(type == TrackItem::Raw) {
 			// do nothing
@@ -430,7 +430,7 @@ QString XmlProtocol::elementToString(const QDomElement &e, bool clip)
 		for(n = 0; n < al.count(); ++n) {
 			QDomAttr a = al.item(n).toAttr();
 			QString s = a.name();
-			int x = s.find(':');
+			int x = s.indexOf(':');
 			if(x != -1)
 				s = s.mid(x+1);
 			else
@@ -553,7 +553,7 @@ int XmlProtocol::internalWriteData(const QByteArray &a, TrackItem::Type t, int i
 int XmlProtocol::internalWriteString(const QString &s, TrackItem::Type t, int id)
 {
 	QString out=sanitizeForStream(s);
-	return internalWriteData(s.utf8(), t, id);
+	return internalWriteData(s.toUtf8(), t, id);
 }
 
 void XmlProtocol::sendTagOpen()

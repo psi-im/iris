@@ -1418,7 +1418,7 @@ Stanza Message::toStanza(Stream *stream) const
 
 	StringMap::ConstIterator it;
 	for(it = d->subject.begin(); it != d->subject.end(); ++it) {
-		const QString &str = it.data();
+		const QString &str = (*it);
 		if(!str.isEmpty()) {
 			QDomElement e = s.createTextElement(s.baseNS(), "subject", str);
 			if(!it.key().isEmpty())
@@ -1427,7 +1427,7 @@ Stanza Message::toStanza(Stream *stream) const
 		}
 	}
 	for(it = d->body.begin(); it != d->body.end(); ++it) {
-		const QString &str = it.data();
+		const QString &str = (*it);
 		if(!str.isEmpty()) {
 			QDomElement e = s.createTextElement(s.baseNS(), "body", str);
 			if(!it.key().isEmpty())
@@ -2598,7 +2598,7 @@ bool RosterItem::removeGroup(const QString &g)
 {
 	for(QStringList::Iterator it = v_groups.begin(); it != v_groups.end(); ++it) {
 		if(*it == g) {
-			v_groups.remove(it);
+			v_groups.erase(it);
 			return true;
 		}
 	}

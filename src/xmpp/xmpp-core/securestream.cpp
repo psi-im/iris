@@ -102,7 +102,7 @@ int LayerTracker::finished(int encoded)
 
 		encoded -= i.encoded;
 		plain += i.plain;
-		it = list.remove(it);
+		it = list.erase(it);
 	}
 	return plain;
 }

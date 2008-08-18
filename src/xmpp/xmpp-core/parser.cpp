@@ -50,7 +50,6 @@
 #include "parser.h"
 
 #include <qtextcodec.h>
-#include <q3ptrlist.h>
 #include <string.h>
 
 using namespace XMPP;
@@ -160,7 +159,8 @@ public:
 
 	QByteArray unprocessed() const
 	{
-		QByteArray a(in.size() - at);
+		QByteArray a;
+		a.resize(in.size() - at);
 		memcpy(a.data(), in.data() + at, a.size());
 		return a;
 	}
@@ -232,17 +232,17 @@ private:
 
 		if(mightChangeEncoding) {
 			while(1) {
-				int n = out.find('<');
+				int n = out.indexOf('<');
 				if(n != -1) {
 					// we need a closing bracket
-					int n2 = out.find('>', n);
+					int n2 = out.indexOf('>', n);
 					if(n2 != -1) {
 						++n2;
 						QString h = out.mid(n, n2-n);
 						QString enc = processXmlHeader(h);
 						QTextCodec *codec = 0;
 						if(!enc.isEmpty())
-							codec = QTextCodec::codecForName(enc.latin1());
+							codec = QTextCodec::codecForName(enc.toLatin1());
 
 						// changing codecs
 						if(codec) {
@@ -278,8 +278,8 @@ private:
 		if(h.left(5) != "<?xml")
 			return "";
 
-		int endPos = h.find(">");
-		int startPos = h.find("encoding");
+		int endPos = h.indexOf(">");
+		int startPos = h.indexOf("encoding");
 		if(startPos < endPos && startPos != -1) {
 			QString encoding;
 			do {
@@ -335,7 +335,7 @@ private:
 
 	bool checkForBadChars(const QString &s)
 	{
-		int len = s.find('<');
+		int len = s.indexOf('<');
 		if(len == -1)
 			len = s.length();
 		else

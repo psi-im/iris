@@ -45,7 +45,7 @@ namespace XMPP {
 static QString makeKey(const QString &sid, const Jid &initiator, const Jid &target)
 {
 	QString str = sid + initiator.full() + target.full();
-	return QCA::Hash("sha1").hashToString(str.utf8());
+	return QCA::Hash("sha1").hashToString(str.toUtf8());
 }
 
 static bool haveHost(const StreamHostList &list, const Jid &j)
@@ -253,7 +253,7 @@ void S5BConnection::connectToJid(const Jid &peer, const QString &sid, Mode m)
 	d->state = Requesting;
 	d->mode = m;
 #ifdef S5B_DEBUG
-	printf("S5BConnection[%d]: connecting %s [%s]\n", d->id, d->peer.full().latin1(), d->sid.latin1());
+	printf("S5BConnection[%d]: connecting %s [%s]\n", d->id, d->peer.full().toLatin1(), d->sid.toLatin1());
 #endif
 	d->m->con_connect(this);
 }
@@ -265,7 +265,7 @@ void S5BConnection::accept()
 
 	d->state = Connecting;
 #ifdef S5B_DEBUG
-	printf("S5BConnection[%d]: accepting %s [%s]\n", d->id, d->peer.full().latin1(), d->sid.latin1());
+	printf("S5BConnection[%d]: accepting %s [%s]\n", d->id, d->peer.full().toLatin1(), d->sid.toLatin1());
 #endif
 	d->m->con_accept(this);
 }
@@ -280,7 +280,7 @@ void S5BConnection::close()
 	else if(d->state == Active)
 		d->sc->close();
 #ifdef S5B_DEBUG
-	printf("S5BConnection[%d]: closing %s [%s]\n", d->id, d->peer.full().latin1(), d->sid.latin1());
+	printf("S5BConnection[%d]: closing %s [%s]\n", d->id, d->peer.full().toLatin1(), d->sid.toLatin1());
 #endif
 	reset();
 }
@@ -350,7 +350,8 @@ int S5BConnection::bytesToWrite() const
 
 void S5BConnection::writeDatagram(const S5BDatagram &i)
 {
-	QByteArray buf(i.data().size() + 4);
+	QByteArray buf;
+	buf.resize(i.data().size() + 4);
 	ushort ssp = htons(i.sourcePort());
 	ushort sdp = htons(i.destPort());
 	QByteArray data = i.data();
@@ -401,7 +402,7 @@ void S5BConnection::man_clientReady(SocksClient *sc, SocksUDP *sc_udp)
 
 	d->state = Active;
 #ifdef S5B_DEBUG
-	printf("S5BConnection[%d]: %s [%s] <<< success >>>\n", d->id, d->peer.full().latin1(), d->sid.latin1());
+	printf("S5BConnection[%d]: %s [%s] <<< success >>>\n", d->id, d->peer.full().toLatin1(), d->sid.toLatin1());
 #endif
 
 	// bytes already in the stream?
@@ -514,7 +515,8 @@ void S5BConnection::handleUDP(const QByteArray &buf)
 	memcpy(&sdp, buf.data() + 2, 2);
 	int source = ntohs(ssp);
 	int dest = ntohs(sdp);
-	QByteArray data(buf.size() - 4);
+	QByteArray data;
+	data.resize(buf.size() - 4);
 	memcpy(data.data(), buf.data() + 4, data.size());
 	d->dglist.append(new S5BDatagram(source, dest, data));
 
@@ -644,7 +646,7 @@ S5BConnection *S5BManager::takeIncoming()
 void S5BManager::ps_incoming(const S5BRequest &req)
 {
 #ifdef S5B_DEBUG
-	printf("S5BManager: incoming from %s\n", req.from.full().latin1());
+	printf("S5BManager: incoming from %s\n", req.from.full().toLatin1());
 #endif
 
 	bool ok = false;
@@ -920,7 +922,7 @@ void S5BManager::con_unlink(S5BConnection *c)
 	if(e->i && e->i->conn)
 		d->ps->respondError(e->i->peer, e->i->out_id, 406, "Not acceptable");
 	delete e->i;
-	d->activeList.remove(e);
+	d->activeList.removeAll(e);
 	delete e;
 }
 
@@ -1021,7 +1023,7 @@ void S5BManager::queryProxy(Entry *e)
 		return;
 
 #ifdef S5B_DEBUG
-	printf("querying proxy: [%s]\n", e->c->d->proxy.full().latin1());
+	printf("querying proxy: [%s]\n", e->c->d->proxy.full().toLatin1());
 #endif
 	e->query = new JT_S5B(d->client->rootTask());
 	connect(e->query, SIGNAL(finished()), SLOT(query_finished()));
@@ -1051,7 +1053,7 @@ void S5BManager::query_finished()
 	if(query->success()) {
 		e->proxyInfo = query->proxyInfo();
 #ifdef S5B_DEBUG
-		printf("host/ip=[%s] port=[%d]\n", e->proxyInfo.host().latin1(), e->proxyInfo.port());
+		printf("host/ip=[%s] port=[%d]\n", e->proxyInfo.host().toLatin1(), e->proxyInfo.port());
 #endif
 	}
 	else {
@@ -1159,7 +1161,7 @@ void S5BManager::Item::startInitiator(const QString &_sid, const Jid &_self, con
 	udp = _udp;
 
 #ifdef S5B_DEBUG
-	printf("S5BManager::Item initiating request %s [%s]\n", peer.full().latin1(), sid.latin1());
+	printf("S5BManager::Item initiating request %s [%s]\n", peer.full().toLatin1(), sid.toLatin1());
 #endif
 	state = Initiator;
 	doOutgoing();
@@ -1178,7 +1180,7 @@ void S5BManager::Item::startTarget(const QString &_sid, const Jid &_self, const 
 	udp = _udp;
 
 #ifdef S5B_DEBUG
-	printf("S5BManager::Item incoming request %s [%s]\n", peer.full().latin1(), sid.latin1());
+	printf("S5BManager::Item incoming request %s [%s]\n", peer.full().toLatin1(), sid.toLatin1());
 #endif
 	state = Target;
 	if(fast)
@@ -1293,7 +1295,7 @@ void S5BManager::Item::doIncoming()
 void S5BManager::Item::setIncomingClient(SocksClient *sc)
 {
 #ifdef S5B_DEBUG
-	printf("S5BManager::Item: %s [%s] successful incoming connection\n", peer.full().latin1(), sid.latin1());
+	printf("S5BManager::Item: %s [%s] successful incoming connection\n", peer.full().toLatin1(), sid.toLatin1());
 #endif
 
 	connect(sc, SIGNAL(readyRead()), SLOT(sc_readyRead()));
@@ -1359,7 +1361,7 @@ void S5BManager::Item::jt_finished()
 			}
 			else {
 #ifdef S5B_DEBUG
-				printf("S5BManager::Item %s claims to have connected to us, but we don't see this\n", peer.full().latin1());
+				printf("S5BManager::Item %s claims to have connected to us, but we don't see this\n", peer.full().toLatin1());
 #endif
 				reset();
 				error(ErrWrongHost);
@@ -1389,7 +1391,7 @@ void S5BManager::Item::jt_finished()
 		}
 		else {
 #ifdef S5B_DEBUG
-			printf("S5BManager::Item %s claims to have connected to a streamhost we never offered\n", peer.full().latin1());
+			printf("S5BManager::Item %s claims to have connected to a streamhost we never offered\n", peer.full().toLatin1());
 #endif
 			reset();
 			error(ErrWrongHost);
@@ -1397,7 +1399,7 @@ void S5BManager::Item::jt_finished()
 	}
 	else {
 #ifdef S5B_DEBUG
-		printf("S5BManager::Item %s [%s] error\n", peer.full().latin1(), sid.latin1());
+		printf("S5BManager::Item %s [%s] error\n", peer.full().toLatin1(), sid.toLatin1());
 #endif
 		remoteFailed = true;
 		statusCode = j->statusCode();
@@ -1427,7 +1429,7 @@ void S5BManager::Item::conn_result(bool b)
 		connSuccess = true;
 
 #ifdef S5B_DEBUG
-		printf("S5BManager::Item: %s [%s] successful outgoing connection\n", peer.full().latin1(), sid.latin1());
+		printf("S5BManager::Item: %s [%s] successful outgoing connection\n", peer.full().toLatin1(), sid.toLatin1());
 #endif
 
 		connect(sc, SIGNAL(readyRead()), SLOT(sc_readyRead()));
@@ -1597,7 +1599,8 @@ void S5BManager::Item::tryActivation()
 			printf("sending extra CR\n");
 #endif
 			// must send [CR] to activate target streamhost
-			QByteArray a(1);
+			QByteArray a;
+			a.resize(1);
 			a[0] = '\r';
 			client->write(a);
 		}
@@ -1619,7 +1622,7 @@ void S5BManager::Item::checkForActivation()
 			bool ok = false;
 			if(udp) {
 				if((sc == client_out && activatedStream.compare(self)) || (sc == client && !activatedStream.compare(self))) {
-					clientList.remove(sc);
+					clientList.removeAll(sc);
 					ok = true;
 				}
 			}
@@ -1628,7 +1631,7 @@ void S5BManager::Item::checkForActivation()
 				printf("need CR\n");
 #endif
 				if(sc->bytesAvailable() >= 1) {
-					clientList.remove(sc);
+					clientList.removeAll(sc);
 					QByteArray a = sc->read(1);
 					if(a[0] != '\r') {
 						delete sc;
@@ -1669,7 +1672,7 @@ void S5BManager::Item::checkForActivation()
 #ifdef S5B_DEBUG
 			printf("not fast mode, no need to wait for anything\n");
 #endif
-			clientList.remove(sc);
+			clientList.removeAll(sc);
 			sc->disconnect(this);
 			while (!clientList.isEmpty()) {
 				delete clientList.takeFirst();
@@ -1727,7 +1730,7 @@ void S5BManager::Item::finished()
 	client->disconnect(this);
 	state = Active;
 #ifdef S5B_DEBUG
-	printf("S5BManager::Item %s [%s] linked successfully\n", peer.full().latin1(), sid.latin1());
+	printf("S5BManager::Item %s [%s] linked successfully\n", peer.full().toLatin1(), sid.toLatin1());
 #endif
 	connected();
 }
@@ -1800,7 +1803,7 @@ private slots:
 	void sc_error(int)
 	{
 #ifdef S5B_DEBUG
-		printf("S5BConnector[%s]: error\n", host.host().latin1());
+		printf("S5BConnector[%s]: error\n", host.host().toLatin1());
 #endif
 		cleanup();
 		result(false);
@@ -1816,7 +1819,7 @@ private slots:
 		}
 
 		// send initialization with our JID
-		QByteArray a(jid.full().utf8());
+		QByteArray a(jid.full().toUtf8());
 		client_udp->write(a);
 		++udp_tries;
 	}
@@ -1833,7 +1836,7 @@ private:
 	void success()
 	{
 #ifdef S5B_DEBUG
-		printf("S5BConnector[%s]: success\n", host.host().latin1());
+		printf("S5BConnector[%s]: success\n", host.host().toLatin1());
 #endif
 		client->disconnect(this);
 		result(true);
@@ -1932,7 +1935,7 @@ void S5BConnector::item_result(bool b)
 		result(true);
 	}
 	else {
-		d->itemList.remove(i);
+		d->itemList.removeAll(i);
 		delete i;
 		if(d->itemList.isEmpty()) {
 			d->t.stop();
@@ -2091,7 +2094,7 @@ void S5BServer::ss_incomingReady()
 {
 	Item *i = new Item(d->serv.takeIncoming());
 #ifdef S5B_DEBUG
-	printf("S5BServer: incoming connection from %s:%d\n", i->client->peerAddress().toString().latin1(), i->client->peerPort());
+	printf("S5BServer: incoming connection from %s:%d\n", i->client->peerAddress().toString().toLatin1(), i->client->peerPort());
 #endif
 	connect(i, SIGNAL(result(bool)), SLOT(item_result(bool)));
 	d->itemList.append(i);
@@ -2117,7 +2120,7 @@ void S5BServer::item_result(bool b)
 	printf("S5BServer item result: %d\n", b);
 #endif
 	if(!b) {
-		d->itemList.remove(i);
+		d->itemList.removeAll(i);
 		delete i;
 		return;
 	}
@@ -2125,7 +2128,7 @@ void S5BServer::item_result(bool b)
 	SocksClient *c = i->client;
 	i->client = 0;
 	QString key = i->host;
-	d->itemList.remove(i);
+	d->itemList.removeAll(i);
 	delete i;
 
 	// find the appropriate manager for this incoming connection
@@ -2147,7 +2150,7 @@ void S5BServer::link(S5BManager *m)
 
 void S5BServer::unlink(S5BManager *m)
 {
-	d->manList.remove(m);
+	d->manList.removeAll(m);
 }
 
 void S5BServer::unlinkAll()
@@ -2259,8 +2262,10 @@ void JT_S5B::requestActivation(const Jid &to, const QString &sid, const Jid &tar
 
 void JT_S5B::onGo()
 {
-	if(d->mode == 1)
-		d->t.start(15000, true);
+	if(d->mode == 1) {
+		d->t.setSingleShot(true);
+		d->t.start(15000);
+	}
 	send(d->iq);
 }
 

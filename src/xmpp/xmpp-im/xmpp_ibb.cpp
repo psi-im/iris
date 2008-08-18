@@ -106,7 +106,7 @@ void IBBConnection::connectToJid(const Jid &peer, const QDomElement &comment)
 	d->peer = peer;
 	d->comment = comment;
 
-	QString dstr; dstr.sprintf("IBBConnection[%d]: initiating request to %s\n", d->id, peer.full().latin1());
+	QString dstr; dstr.sprintf("IBBConnection[%d]: initiating request to %s\n", d->id, peer.full().toLatin1().data());
 	d->m->client()->debug(dstr);
 
 	d->j = new JT_IBB(d->m->client()->rootTask());
@@ -120,7 +120,7 @@ void IBBConnection::accept()
 	if(d->state != WaitingForAccept)
 		return;
 
-	QString dstr; dstr.sprintf("IBBConnection[%d]: accepting %s [%s]\n", d->id, d->peer.full().latin1(), d->sid.latin1());
+	QString dstr; dstr.sprintf("IBBConnection[%d]: accepting %s [%s]\n", d->id, d->peer.full().toLatin1().data(), d->sid.toLatin1().data());
 	d->m->client()->debug(dstr);
 
 	d->m->doAccept(this, d->iq_id);
@@ -254,7 +254,7 @@ void IBBConnection::ibb_finished()
 		if(j->mode() == JT_IBB::ModeRequest) {
 			d->sid = j->streamid();
 
-			QString dstr; dstr.sprintf("IBBConnection[%d]: %s [%s] accepted.\n", d->id, d->peer.full().latin1(), d->sid.latin1());
+			QString dstr; dstr.sprintf("IBBConnection[%d]: %s [%s] accepted.\n", d->id, d->peer.full().toLatin1().data(), d->sid.toLatin1().data());
 			d->m->client()->debug(dstr);
 
 			d->state = Active;
@@ -275,7 +275,7 @@ void IBBConnection::ibb_finished()
 	}
 	else {
 		if(j->mode() == JT_IBB::ModeRequest) {
-			QString dstr; dstr.sprintf("IBBConnection[%d]: %s refused.\n", d->id, d->peer.full().latin1());
+			QString dstr; dstr.sprintf("IBBConnection[%d]: %s refused.\n", d->id, d->peer.full().toLatin1().data());
 			d->m->client()->debug(dstr);
 
 			reset(true);
@@ -440,7 +440,7 @@ void IBBManager::link(IBBConnection *c)
 
 void IBBManager::unlink(IBBConnection *c)
 {
-	d->activeConns.remove(c);
+	d->activeConns.removeAll(c);
 }
 
 IBBConnection *IBBManager::findConnection(const QString &sid, const Jid &peer) const
