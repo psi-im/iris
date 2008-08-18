@@ -25,9 +25,7 @@
 #include "bsocket.h"
 
 //#include "safedelete.h"
-#ifndef NO_NDNS
 #include "ndns.h"
-#endif
 #include "srvresolver.h"
 
 //#define BS_DEBUG
@@ -109,9 +107,7 @@ public:
 	QTcpSocketSignalRelay *qsock_relay;
 	int state;
 
-#ifndef NO_NDNS
 	NDns ndns;
-#endif
 	SrvResolver srv;
 	QString host;
 	int port;
@@ -122,9 +118,7 @@ BSocket::BSocket(QObject *parent)
 :ByteStream(parent)
 {
 	d = new Private;
-#ifndef NO_NDNS
 	connect(&d->ndns, SIGNAL(resultsReady()), SLOT(ndns_done()));
-#endif
 	connect(&d->srv, SIGNAL(resultsReady()), SLOT(srv_done()));
 
 	reset();
@@ -162,10 +156,8 @@ void BSocket::reset(bool clear)
 
 	if(d->srv.isBusy())
 		d->srv.stop();
-#ifndef NO_NDNS
 	if(d->ndns.isBusy())
 		d->ndns.stop();
-#endif
 	d->state = Idle;
 }
 
@@ -191,13 +183,8 @@ void BSocket::connectToHost(const QString &host, quint16 port)
 	reset(true);
 	d->host = host;
 	d->port = port;
-#ifdef NO_NDNS
-	d->state = Connecting;
-	do_connect();
-#else
 	d->state = HostLookup;
 	d->ndns.resolve(d->host);
-#endif
 }
 
 void BSocket::connectToServer(const QString &srv, const QString &type)
@@ -349,7 +336,6 @@ void BSocket::srv_done()
 
 void BSocket::ndns_done()
 {
-#ifndef NO_NDNS
 	if(!d->ndns.result().isNull()) {
 		d->host = d->ndns.resultString();
 		d->state = Connecting;
@@ -363,7 +349,6 @@ void BSocket::ndns_done()
 #endif
 		error(ErrHostNotFound);
 	}
-#endif
 }
 
 void BSocket::do_connect()

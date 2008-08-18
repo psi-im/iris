@@ -38,11 +38,7 @@
 #include "safedelete.h"
 #include <libidn/idna.h>
 
-#ifdef NO_NDNS
-#include <q3dns.h>
-#else
 #include "ndns.h"
-#endif
 
 #include "bsocket.h"
 #include "httpconnect.h"
@@ -199,11 +195,7 @@ class AdvancedConnector::Private
 public:
 	int mode;
 	ByteStream *bs;
-#ifdef NO_NDNS
-	Q3Dns *qdns;
-#else
 	NDns dns;
-#endif
 	SrvResolver srv;
 
 	QString server;
@@ -230,11 +222,7 @@ AdvancedConnector::AdvancedConnector(QObject *parent)
 {
 	d = new Private;
 	d->bs = 0;
-#ifdef NO_NDNS
-	d->qdns = 0;
-#else
 	connect(&d->dns, SIGNAL(resultsReady()), SLOT(dns_done()));
-#endif
 	connect(&d->srv, SIGNAL(resultsReady()), SLOT(srv_done()));
 	d->opt_probe = false;
 	d->opt_ssl = false;
@@ -253,17 +241,8 @@ void AdvancedConnector::cleanup()
 	d->mode = Idle;
 
 	// stop any dns
-#ifdef NO_NDNS
-	if(d->qdns) {
-		d->qdns->disconnect(this);
-		d->qdns->deleteLater();
-		//d->sd.deleteLater(d->qdns);
-		d->qdns = 0;
-	}
-#else
 	if(d->dns.isBusy())
 		d->dns.stop();
-#endif
 	if(d->srv.isBusy())
 		d->srv.stop();
 
@@ -409,18 +388,7 @@ int AdvancedConnector::errorCode() const
 
 void AdvancedConnector::do_resolve()
 {
-#ifdef NO_NDNS
-	printf("resolving (aaaa=%d)\n", d->aaaa);
-	d->qdns = new Q3Dns;
-	connect(d->qdns, SIGNAL(resultsReady()), SLOT(dns_done()));
-	if(d->aaaa)
-		d->qdns->setRecordType(Q3Dns::Aaaa); // IPv6
-	else
-		d->qdns->setRecordType(Q3Dns::A); // IPv4
-	d->qdns->setLabel(d->host);
-#else
 	d->dns.resolve(d->host);
-#endif
 }
 
 void AdvancedConnector::dns_done()
@@ -428,41 +396,10 @@ void AdvancedConnector::dns_done()
 	bool failed = false;
 	QHostAddress addr;
 
-#ifdef NO_NDNS
-	//if(!d->qdns)
-	//	return;
-
-	// apparently we sometimes get this signal even though the results aren' t ready
-	//if(d->qdns->isWorking())
-	//	return;
-
-	//SafeDeleteLock s(&d->sd);
-
-        // grab the address list and destroy the qdns object
-	QList<QHostAddress> list = d->qdns->addresses();
-	d->qdns->disconnect(this);
-	d->qdns->deleteLater();
-	//d->sd.deleteLater(d->qdns);
-	d->qdns = 0;
-
-	if(list.isEmpty()) {
-		if(d->aaaa) {
-			d->aaaa = false;
-			do_resolve();
-			return;
-		}
-		//do_resolve();
-		//return;
-		failed = true;
-	}
-	else
-		addr = list.first();
-#else
 	if(d->dns.result().isNull ())
 		failed = true;
 	else
 		addr = QHostAddress(d->dns.result());
-#endif
 
 	if(failed) {
 #ifdef XMPP_DEBUG
