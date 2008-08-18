@@ -8,6 +8,7 @@ windows:include(../conf_windows.pri)
 
 # HACK: use qca from psi if necessary
 qca-static {
+	DEFINES += QCA_STATIC
 	INCLUDEPATH += $$PWD/../third-party/qca/qca/include/QtCrypto
 }
 
