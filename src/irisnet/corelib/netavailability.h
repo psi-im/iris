@@ -36,7 +36,7 @@ public:
 	bool isAvailable() const;
 
 signals:
-	void changed();
+	void changed(bool available);
 
 private:
 	class Private;
