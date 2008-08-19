@@ -21,7 +21,7 @@
 #include <stdlib.h>
 #include <time.h>
 
-#include "ui_ui_test.h"
+#include "ui_test.h"
 
 #include <stdio.h>
 

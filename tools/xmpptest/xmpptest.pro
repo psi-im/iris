@@ -37,5 +37,5 @@ include(../../iris.pri)
 #}
 
 SOURCES += xmpptest.cpp
-INTERFACES += ui_test.ui
+INTERFACES += test.ui
 
