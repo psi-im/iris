@@ -54,3 +54,5 @@ bool NetAvailability::isAvailable() const
 }
 
 }
+
+#include "netavailability.moc"

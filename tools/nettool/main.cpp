@@ -21,6 +21,7 @@
 #include <stdio.h>
 #include <iris/processquit.h>
 #include <iris/netinterface.h>
+#include <iris/netavailability.h>
 #include <iris/netnames.h>
 
 using namespace XMPP;
@@ -31,9 +32,11 @@ class NetMonitor : public QObject
 public:
 	NetInterfaceManager *man;
 	QList<NetInterface*> ifaces;
+	NetAvailability *netavail;
 
 	~NetMonitor()
 	{
+		delete netavail;
 		qDeleteAll(ifaces);
 		delete man;
 	}
@@ -52,6 +55,10 @@ public slots:
 		QStringList list = man->interfaces();
 		for(int n = 0; n < list.count(); ++n)
 			here(list[n]);
+
+		netavail = new NetAvailability;
+		connect(netavail, SIGNAL(changed(bool)), SLOT(avail(bool)));
+		avail(netavail->isAvailable());
 	}
 
 	void here(const QString &id)
@@ -73,6 +80,14 @@ public slots:
 		printf("GONE: %s\n", qPrintable(iface->id()));
 		ifaces.removeAll(iface);
 		delete iface;
+	}
+
+	void avail(bool available)
+	{
+		if(available)
+			printf("** Network available\n");
+		else
+			printf("** Network unavailable\n");
 	}
 };
 
