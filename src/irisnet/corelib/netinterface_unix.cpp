@@ -130,6 +130,7 @@ static QList<UnixIface> get_sioc_ifaces()
 	return out;
 }
 
+#ifdef Q_OS_LINUX
 static QStringList read_proc_as_lines(const char *procfile)
 {
 	QStringList out;
@@ -291,6 +292,7 @@ static QList<UnixGateway> get_linux_gateways()
 
 	return out;
 }
+#endif
 
 static QList<UnixIface> get_unix_ifaces()
 {
