@@ -1,10 +1,9 @@
 #include <qapplication.h>
-#include <q3textedit.h>
-#include <q3groupbox.h>
+#include <qtextedit.h>
+#include <qgroupbox.h>
 #include <qlineedit.h>
 #include <qlabel.h>
 #include <qcheckbox.h>
-#include <q3textedit.h>
 #include <qcombobox.h>
 #include <qpushbutton.h>
 #include <qmessagebox.h>
@@ -12,13 +11,10 @@
 #include <qspinbox.h>
 #include <qtimer.h>
 #include <qmenubar.h>
-#include <q3popupmenu.h>
+#include <qmenu.h>
 #include <qtabwidget.h>
+#include <QTextBlock>
 #include <qca.h>
-//Added by qt3to4:
-#include <Q3PtrList>
-#include <QList>
-//#include <iris/xmpp.h>
 #include "xmpp.h"
 #include "im.h"
 
@@ -42,15 +38,15 @@ static QString plain2rich(const QString &plain)
 			col = 0;
 		}
 		else if(plain[i] == '\t') {
-			rich += QChar::nbsp;
+			rich += QChar::Nbsp;
 			while(col % 4) {
-				rich += QChar::nbsp;
+				rich += QChar::Nbsp;
 				++col;
 			}
 		}
 		else if(plain[i].isSpace()) {
 			if(i > 0 && plain[i-1] == ' ')
-				rich += QChar::nbsp;
+				rich += QChar::Nbsp;
 			else
 				rich += ' ';
 		}
@@ -130,6 +126,56 @@ static QString resultToString(int result)
 	return s;
 }
 
+static QTextBlock get_block(QTextEdit *te, int index)
+{
+	QTextBlock block = te->document()->begin();
+	for(int n = 0; n < index && block.isValid(); ++n)
+		block = block.next();
+	return block;
+}
+
+static int textedit_paragraphLength(QTextEdit *te, int paragraph)
+{
+	QTextBlock block = get_block(te, paragraph);
+	if(block.isValid())
+		return block.length();
+	else
+		return 0;
+}
+
+static void textedit_setCursorPosition(QTextEdit *te, int line, int col)
+{
+	QTextCursor cur = te->textCursor();
+	QTextBlock block = get_block(te, line);
+	if(!block.isValid())
+		return;
+	if(col > block.length())
+		col = block.length();
+	cur.setPosition(block.position() + col);
+	te->setTextCursor(cur);
+}
+
+static void textedit_setSelection(QTextEdit *te, int startLine, int startCol, int endLine, int endCol)
+{
+	QTextCursor cur = te->textCursor();
+
+	QTextBlock block = get_block(te, startLine);
+	if(!block.isValid())
+		return;
+	if(startCol > block.length())
+		startCol = block.length();
+	cur.setPosition(block.position() + startCol); // start
+
+	block = get_block(te, endLine);
+	if(!block.isValid())
+		return;
+	if(endCol > block.length())
+		endCol = block.length();
+	cur.setPosition(block.position() + endCol, QTextCursor::KeepAnchor); // select
+
+	te->setTextCursor(cur);
+}
+
 class TestDebug : public XMPP::Debug
 {
 public:
@@ -165,10 +211,10 @@ public:
 		connect(pb_iqv, SIGNAL(clicked()), SLOT(sc_iqv()));
 		connect(pb_about, SIGNAL(clicked()), SLOT(about()));
 
-		sb_ssfmin->setMinValue(0);
-		sb_ssfmin->setMaxValue(256);
-		sb_ssfmax->setMinValue(0);
-		sb_ssfmax->setMaxValue(256);
+		sb_ssfmin->setMinimum(0);
+		sb_ssfmin->setMaximum(256);
+		sb_ssfmax->setMinimum(0);
+		sb_ssfmax->setMaximum(256);
 
 		pb_send->setEnabled(false);
 		proxy_activated(0);
@@ -291,7 +337,7 @@ private slots:
 			return;
 		}
 
-		int p = cb_proxy->currentItem();
+		int p = cb_proxy->currentIndex();
 		XMPP::AdvancedConnector::Proxy proxy;
 		if(p > 0) {
 			QString s = le_proxyhost->text();
@@ -307,7 +353,7 @@ private slots:
 			QString host;
 			int port = 0;
 			if(!s.isEmpty()) {
-				int n = s.find(':');
+				int n = s.indexOf(':');
 				if(n == -1) {
 					QMessageBox::information(this, tr("Error"), tr("Please enter the proxy host in the form 'host:port'."));
 					return;
@@ -332,7 +378,7 @@ private slots:
 		bool ssl = false;
 		if(useHost) {
 			QString s = le_host->text();
-			int n = s.find(':');
+			int n = s.indexOf(':');
 			if(n == -1) {
 				QMessageBox::information(this, tr("Error"), tr("Please enter the host in the form 'host:port'."));
 				return;
@@ -409,26 +455,26 @@ private slots:
 
 	void send()
 	{
-		if(te_input->text().isEmpty())
+		if(te_input->toPlainText().isEmpty())
 			return;
 
 		// construct a "temporary" document to parse the input
 		QString str = "<stream xmlns=\"jabber:client\">\n";
-		str += te_input->text() + '\n';
+		str += te_input->toPlainText() + '\n';
 		str += "</stream>";
 
 		QDomDocument doc;
 		QString errMsg;
 		int errLine, errCol;
 		if(!doc.setContent(str, true, &errMsg, &errLine, &errCol)) {
-			int lines = QStringList::split('\n', str, true).count();
+			int lines = str.split('\n', QString::KeepEmptyParts).count();
 			--errLine; // skip the first line
 			if(errLine == lines-1) {
 				errLine = lines-2;
-				errCol = te_input->paragraphLength(errLine-1)+1;
+				errCol = textedit_paragraphLength(te_input, errLine-1)+1;
 				errMsg = "incomplete input";
 			}
-			te_input->setCursorPosition(errLine-1, errCol-1);
+			textedit_setCursorPosition(te_input, errLine-1, errCol-1);
 			QMessageBox::information(this, tr("Error"), tr("Bad XML input (%1,%2): %3\nPlease correct and try again.").arg(errCol).arg(errLine).arg(errMsg));
 			return;
 		}
@@ -437,7 +483,7 @@ private slots:
 		int num = 0;
 		QDomNodeList nl = e.childNodes();
 		QList<XMPP::Stanza> stanzaList;
-		for(uint x = 0; x < nl.count(); ++x) {
+		for(int x = 0; x < nl.count(); ++x) {
 			QDomNode n = nl.item(x);
 			if(n.isElement()) {
 				QDomElement e = n.toElement();
@@ -500,11 +546,11 @@ private slots:
 		s += "</message>";
 		te_input->setText(s);
 		if(!to.isEmpty()) {
-			te_input->setCursorPosition(1, 7);
-			te_input->setSelection(1, 7, 1, 18);
+			textedit_setCursorPosition(te_input, 1, 7);
+			textedit_setSelection(te_input, 1, 7, 1, 18);
 		}
 		else
-			te_input->setCursorPosition(0, 13);
+			textedit_setCursorPosition(te_input, 0, 13);
 		te_input->setFocus();
 	}
 
@@ -520,11 +566,11 @@ private slots:
 		s += "</iq>";
 		te_input->setText(s);
 		if(!to.isEmpty()) {
-			te_input->setCursorPosition(0, 8);
-			te_input->setSelection(0, 8, 0, 8 + to.length());
+			textedit_setCursorPosition(te_input, 0, 8);
+			textedit_setSelection(te_input, 0, 8, 0, 8 + to.length());
 		}
 		else
-			te_input->setCursorPosition(0, 8);
+			textedit_setCursorPosition(te_input, 0, 8);
 		te_input->setFocus();
 	}
 
@@ -606,7 +652,7 @@ private slots:
 			else {
 				conn->changePollInterval(10); // slow down during prompt
 				bool ok;
-				QString s = QInputDialog::getText(tr("Password"), tr("Enter the password for %1").arg(jid.full()), QLineEdit::Password, QString::null, &ok, this);
+				QString s = QInputDialog::getText(this, tr("Password"), tr("Enter the password for %1").arg(jid.full()), QLineEdit::Password, QString(), &ok);
 				if(!ok) {
 					stop();
 					return;
@@ -779,7 +825,7 @@ private:
 	void setHostState()
 	{
 		bool ok = false;
-		if(!ck_probe->isChecked() && cb_proxy->currentItem() != 3)
+		if(!ck_probe->isChecked() && cb_proxy->currentIndex() != 3)
 			ok = true;
 		lb_host->setEnabled(ok);
 		le_host->setEnabled(ok);
@@ -816,7 +862,7 @@ public:
 
 	void appendXmlOut(const QString &s)
 	{
-		QStringList lines = QStringList::split('\n', s, true);
+		QStringList lines = s.split('\n', QString::KeepEmptyParts);
 		QString str;
 		bool first = true;
 		for(QStringList::ConstIterator it = lines.begin(); it != lines.end(); ++it) {
@@ -830,7 +876,7 @@ public:
 
 	void appendXmlIn(const QString &s)
 	{
-		QStringList lines = QStringList::split('\n', s, true);
+		QStringList lines = s.split('\n', QString::KeepEmptyParts);
 		QString str;
 		bool first = true;
 		for(QStringList::ConstIterator it = lines.begin(); it != lines.end(); ++it) {

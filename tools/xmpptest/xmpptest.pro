@@ -2,7 +2,7 @@ TEMPLATE = app
 CONFIG += thread 
 CONFIG -= app_bundle
 TARGET  = xmpptest
-QT += xml network qt3support                                                   
+QT += xml network
 DEFINES += QT_STATICPLUGIN
 
 #MOC_DIR        = .moc
