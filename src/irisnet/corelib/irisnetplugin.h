@@ -23,11 +23,13 @@
 
 #include "irisnetglobal.h"
 #include "netinterface.h"
+#include "netavailability.h"
 #include "netnames.h"
 
 namespace XMPP {
 
 class NetInterfaceProvider;
+class NetAvailabilityProvider;
 class NameProvider;
 class ServiceProvider;
 
@@ -37,6 +39,7 @@ class IRISNET_EXPORT IrisNetProvider : public QObject
 
 public:
 	virtual NetInterfaceProvider *createNetInterfaceProvider();
+	virtual NetAvailabilityProvider *createNetAvailabilityProvider();
 	virtual NameProvider *createNameProviderInternet();
 	virtual NameProvider *createNameProviderLocal();
 	virtual ServiceProvider *createServiceProvider();
@@ -65,6 +68,25 @@ public:
 	//   immediately fetched.  do not signal updated() for this.
 	virtual void start() = 0;
 	virtual QList<Info> interfaces() const = 0;
+
+signals:
+	void updated();
+};
+
+class IRISNET_EXPORT NetAvailabilityProvider : public QObject
+{
+	Q_OBJECT
+
+public:
+	NetAvailabilityProvider(QObject *parent = 0) :
+		QObject(parent)
+	{
+	}
+
+	// calling start should populate an initial value that can be
+	//   immediately fetched.  do not signal updated() for this.
+	virtual void start() = 0;
+	virtual bool isAvailable() const = 0;
 
 signals:
 	void updated();

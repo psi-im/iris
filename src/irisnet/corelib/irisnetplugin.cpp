@@ -30,6 +30,11 @@ NetInterfaceProvider *IrisNetProvider::createNetInterfaceProvider()
 	return 0;
 }
 
+NetAvailabilityProvider *IrisNetProvider::createNetAvailabilityProvider()
+{
+	return 0;
+}
+
 NameProvider *IrisNetProvider::createNameProviderInternet()
 {
 	return 0;
