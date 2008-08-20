@@ -21,6 +21,7 @@
 #ifndef XMPP_STATUS_H
 #define XMPP_STATUS_H
 
+#include <QList>
 #include <QString>
 #include <QDateTime>
 
@@ -62,8 +63,7 @@ namespace XMPP
 		const MUCItem & mucItem() const;
 		bool hasMUCDestroy() const;
 		const MUCDestroy & mucDestroy() const;
-		bool hasMUCStatus() const;
-		int mucStatus() const;
+		const QList<int>& getMUCStatuses() const;
 		const QString& mucPassword() const;
 		bool hasMUCHistory() const;
 		int mucHistoryMaxChars() const;
@@ -87,7 +87,7 @@ namespace XMPP
 		void setMUC();
 		void setMUCItem(const MUCItem&);
 		void setMUCDestroy(const MUCDestroy&);
-		void setMUCStatus(int);
+		void addMUCStatus(int);
 		void setMUCPassword(const QString&);
 		void setMUCHistory(int maxchars, int maxstanzas, int seconds);
 
@@ -117,7 +117,7 @@ namespace XMPP
 		bool v_isMUC, v_hasMUCItem, v_hasMUCDestroy;
 		MUCItem v_mucItem;
 		MUCDestroy v_mucDestroy;
-		int v_mucStatus;
+		QList<int> v_mucStatuses;
 		QString v_mucPassword;
 		int v_mucHistoryMaxChars, v_mucHistoryMaxStanzas, v_mucHistorySeconds;
 

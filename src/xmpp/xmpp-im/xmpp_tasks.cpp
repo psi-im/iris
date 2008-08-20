@@ -755,7 +755,7 @@ bool JT_PushPresence::take(const QDomElement &e)
 				if (muc_e.tagName() == "item") 
 					p.setMUCItem(MUCItem(muc_e));
 				else if (muc_e.tagName() == "status") 
-					p.setMUCStatus(muc_e.attribute("code").toInt());
+					p.addMUCStatus(muc_e.attribute("code").toInt());
 				else if (muc_e.tagName() == "destroy")
 					p.setMUCDestroy(MUCDestroy(muc_e));
 			}

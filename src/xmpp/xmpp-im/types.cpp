@@ -915,7 +915,7 @@ public:
 	QMap<QString,HTMLElement> htmlElements;
  	QDomElement sxe;
 	
-	int mucStatus;
+	QList<int> mucStatuses;
 	QList<MUCInvite> mucInvites;
 	MUCDecline mucDecline;
 	QString mucPassword;
@@ -940,7 +940,6 @@ Message::Message(const Jid &to)
 	d->wasEncrypted = false;
 	d->errorCode = -1;*/
 	d->chatState = StateNone;
-	d->mucStatus = -1;
 	d->messageReceipt = ReceiptNone;
 }
 
@@ -1291,19 +1290,14 @@ void Message::setXEncrypted(const QString &s)
 	d->xencrypted = s;
 }
 
-bool Message::hasMUCStatus() const
+const QList<int>& Message::getMUCStatuses() const
 {
-	return d->mucStatus != -1;
+	return d->mucStatuses;
 }
 
-int Message::mucStatus() const
+void Message::addMUCStatus(int i)
 {
-	return d->mucStatus;
-}
-
-void Message::setMUCStatus(int i)
-{
-	d->mucStatus = i;
+	d->mucStatuses += i;
 }
 
 void Message::addMUCInvite(const MUCInvite& i)
@@ -1813,7 +1807,7 @@ bool Message::fromStanza(const Stanza &s, int timeZoneOffset)
 			if(muc_e.isNull())
 				continue;
 			if (muc_e.tagName() == "status") {
-				setMUCStatus(muc_e.attribute("code").toInt());
+				addMUCStatus(muc_e.attribute("code").toInt());
 			}
 			else if (muc_e.tagName() == "invite") {
 				MUCInvite inv(muc_e);
@@ -2044,7 +2038,6 @@ Status::Status(const QString &show, const QString &status, int priority, bool av
 	v_isMUC = false;
 	v_hasMUCItem = false;
 	v_hasMUCDestroy = false;
-	v_mucStatus = -1;
 	v_mucHistoryMaxChars = -1;
 	v_mucHistoryMaxStanzas = -1;
 	v_mucHistorySeconds = -1;
@@ -2060,7 +2053,6 @@ Status::Status(Type type, const QString& status, int priority)
 	v_isMUC = false;
 	v_hasMUCItem = false;
 	v_hasMUCDestroy = false;
-	v_mucStatus = -1;
 	v_mucHistoryMaxChars = -1;
 	v_mucHistoryMaxStanzas = -1;
 	v_mucHistorySeconds = -1;
@@ -2351,19 +2343,14 @@ const MUCDestroy& Status::mucDestroy() const
 	return v_mucDestroy;
 }
 
-bool Status::hasMUCStatus() const
+const QList<int>& Status::getMUCStatuses() const
 {
-	return v_mucStatus != -1;
+	return v_mucStatuses;
 }
 
-int Status::mucStatus() const
+void Status::addMUCStatus(int i)
 {
-	return v_mucStatus;
-}
-
-void Status::setMUCStatus(int i)
-{
-	v_mucStatus = i;
+	v_mucStatuses += i;
 }
 
 const QString& Status::mucPassword() const

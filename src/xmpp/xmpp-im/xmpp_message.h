@@ -137,9 +137,8 @@ namespace XMPP {
 		const QDomElement& sxe() const;
 
 		// MUC
-		void setMUCStatus(int);
-		bool hasMUCStatus() const;
-		int mucStatus() const;
+		void addMUCStatus(int);
+		const QList<int>& getMUCStatuses() const;
 		void addMUCInvite(const MUCInvite&);
 		const QList<MUCInvite>& mucInvites() const;
 		void setMUCDecline(const MUCDecline&);
