@@ -737,12 +737,22 @@ void query_add_server_tried(query_t *q, int ns_id)
 	_intarray_add(&q->servers_tried, &q->servers_tried_count, ns_id);
 }
 
+int query_server_failed(const query_t *q, int ns_id);
+
 void query_clear_servers_tried(query_t *q)
 {
-	if(q->servers_tried)
-		free(q->servers_tried);
-	q->servers_tried_count = 0;
-	q->servers_tried = 0;
+	int n;
+
+	// all failed servers must continue to be considered tried servers, so
+	//   only clear tried servers that haven't failed
+	for(n = 0; n < q->servers_tried_count; ++n)
+	{
+		if(!query_server_failed(q, q->servers_tried[n]))
+		{
+			_intarray_remove(&q->servers_tried, &q->servers_tried_count, n);
+			--n; // adjust position
+		}
+	}
 }
 
 int query_server_failed(const query_t *q, int ns_id)
@@ -1895,12 +1905,12 @@ int _unicast_do_writes(jdns_session_t *s, int now)
 			q->retrying = 1;
 		}
 
-		// find a nameserver that has not been tried or failed
+		// find a nameserver that has not been tried
 		ns = 0;
 		for(k = 0; k < s->name_servers->count; ++k)
 		{
 			name_server_t *i = (name_server_t *)s->name_servers->item[k];
-			if(!query_server_tried(q, i->id) && !query_server_failed(q, i->id))
+			if(!query_server_tried(q, i->id))
 			{
 				ns = i;
 				break;
@@ -2272,7 +2282,16 @@ void _process_message(jdns_session_t *s, jdns_packet_t *packet, int now, query_t
 
 	// this server returned an error?
 	if(!r && ns)
+	{
+		// all failed servers must also be considered tried servers,
+		//   so mark as tried if necessary.  this can happen if the
+		//   tried list is cleared (to perform retrying) and then an
+		//   error is received
+		if(!query_server_tried(q, ns->id))
+			query_add_server_tried(q, ns->id);
+
 		query_add_server_failed(q, ns->id);
+	}
 
 	if(_process_response(s, r, nxdomain, q))
 	{
