@@ -599,7 +599,7 @@ void _intarray_remove(int **array, int *count, int pos)
 	if(*count > 1)
 	{
 		memmove(*array + pos, *array + pos + 1, (*count - pos - 1) * sizeof(int));
-		--count;
+		--(*count);
 		p = (int *)realloc(*array, sizeof(int) * (*count));
 		if(p)
 			*array = p;
