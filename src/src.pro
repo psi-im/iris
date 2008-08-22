@@ -1,6 +1,6 @@
 TEMPLATE = subdirs
 
-include(../common.pri)
+include(libbase.pri)
 
 SUBDIRS += irisnet
 !iris_bundle:SUBDIRS += xmpp

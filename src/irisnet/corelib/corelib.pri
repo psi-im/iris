@@ -1,4 +1,4 @@
-include(../../../common.pri)
+include(../../libbase.pri)
 
 QT *= network
 

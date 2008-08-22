@@ -1,6 +1,6 @@
 TEMPLATE = subdirs
 
-include(../../common.pri)
+include(../libbase.pri)
 
 !irisnetcore_bundle:SUBDIRS += corelib
 appledns:!appledns_bundle:SUBDIRS += appledns

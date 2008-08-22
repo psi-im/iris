@@ -1,5 +1,5 @@
 IRIS_BASE = ../../..
-include(../../../common.pri)
+include(../../libbase.pri)
 
 TEMPLATE = lib
 CONFIG += plugin
