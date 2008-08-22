@@ -1,5 +1,4 @@
 IRIS_BASE = $$PWD/../../..
-include(../../libbase.pri)
 
 QT *= network
 

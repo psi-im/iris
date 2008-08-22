@@ -1,5 +1,3 @@
-include(../../libbase.pri)
-
 QT *= network
 
 # libidn

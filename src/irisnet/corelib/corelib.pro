@@ -8,6 +8,7 @@ windows:DLLDESTDIR = $$IRIS_BASE/bin
 
 VERSION = 1.0.0
 
+include(../../libbase.pri)
 include(corelib.pri)
 
 # fixme: irisnetcore builds as dll or bundled, never static?
