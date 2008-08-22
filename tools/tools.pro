@@ -1,2 +1,2 @@
 TEMPLATE = subdirs
-SUBDIRS = nettool #xmpptest
+SUBDIRS = nettool xmpptest

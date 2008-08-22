@@ -1,5 +1,5 @@
 IRIS_BASE = ../..
-include(../../common.pri)
+include(../../confapp.pri)
 
 CONFIG += console
 CONFIG -= app_bundle
