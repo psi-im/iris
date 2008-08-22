@@ -18,4 +18,4 @@ appledns:!appledns_bundle:CONFIG *= build_src
 
 build_src:SUBDIRS += src
 
-!disable_tests:SUBDIRS += tools
+!no_tests:SUBDIRS += tools
