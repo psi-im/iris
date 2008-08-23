@@ -1,5 +1,5 @@
 <qconf>
- <name>Iris XMPP/Jabber Library</name>
+ <name>Iris</name>
  <profile>iris.pro</profile>
  <noprefix/>
  <lib/>
@@ -14,6 +14,9 @@
   <required/>
  </dep>
  <dep type='qca'>
+  <required/>
+ </dep>
+ <dep type='zlib'>
   <required/>
  </dep>
  <dep type='extra'>
