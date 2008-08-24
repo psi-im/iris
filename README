@@ -1,12 +1,25 @@
 Iris XMPP Library
 -----------------
-Date: July 15th, 2008
+Date: August 24th, 2008
 Website: http://delta.affinix.com/iris/
 Mailing List: Delta Project <delta@lists.affinix.com>
 
 
 Install
 -------
+  First, build Iris:
+
+    Unix:
+      qconf
+      ./configure
+      make
+
+    Windows:
+      copy conf_win.pri.example conf_win.pri
+      copy confapp_win.pri.example confapp_win.pri
+      qmake
+      make (or nmake)
+
   There is no installation.  Just include iris.pri in your qmake project.
   Iris requires Qt 4.2 or greater and QCA 2.0 or greater.
 
