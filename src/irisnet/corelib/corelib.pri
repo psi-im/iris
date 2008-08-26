@@ -8,6 +8,7 @@ INCLUDEPATH += $$PWD/../../jdns
 
 HEADERS += \
 	$$PWD/jdnsshared.h \
+	$$PWD/objectsession.h \
 	$$PWD/irisnetexport.h \
 	$$PWD/irisnetplugin.h \
 	$$PWD/irisnetglobal.h \
@@ -18,6 +19,7 @@ HEADERS += \
 
 SOURCES += \
 	$$PWD/jdnsshared.cpp \
+	$$PWD/objectsession.cpp \
 	$$PWD/irisnetplugin.cpp \
 	$$PWD/irisnetglobal.cpp \
 	$$PWD/netinterface.cpp \
