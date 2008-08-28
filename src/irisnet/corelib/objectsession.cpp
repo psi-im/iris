@@ -122,30 +122,34 @@ public:
 	};
 
 	QList<MethodCall*> pendingCalls;
-	QTimer callTrigger;
+	QTimer *callTrigger;
 	bool paused;
 	QList<ObjectSessionWatcherPrivate*> watchers;
 
 	ObjectSessionPrivate(ObjectSession *_q) :
 		QObject(_q),
 		q(_q),
-		callTrigger(this),
 		paused(false)
 	{
-		connect(&callTrigger, SIGNAL(timeout()), SLOT(doCall()));
-		callTrigger.setSingleShot(true);
+		callTrigger = new QTimer(this);
+		connect(callTrigger, SIGNAL(timeout()), SLOT(doCall()));
+		callTrigger->setSingleShot(true);
 	}
 
 	~ObjectSessionPrivate()
 	{
 		invalidateWatchers();
+
+		callTrigger->disconnect(this);
+		callTrigger->setParent(0);
+		callTrigger->deleteLater();
 	}
 
 	void addPendingCall(MethodCall *call)
 	{
 		pendingCalls += call;
-		if(!paused && !callTrigger.isActive())
-			callTrigger.start();
+		if(!paused && !callTrigger->isActive())
+			callTrigger->start();
 	}
 
 	bool havePendingCall(QObject *obj, const char *method) const
@@ -223,8 +227,8 @@ ObjectSession::~ObjectSession()
 void ObjectSession::reset()
 {
 	d->invalidateWatchers();
-	if(d->callTrigger.isActive())
-		d->callTrigger.stop();
+	if(d->callTrigger->isActive())
+		d->callTrigger->stop();
 	d->pendingCalls.clear();
 }
 
@@ -274,8 +278,8 @@ void ObjectSession::pause()
 {
 	Q_ASSERT(!d->paused);
 
-	if(d->callTrigger.isActive())
-		d->callTrigger.stop();
+	if(d->callTrigger->isActive())
+		d->callTrigger->stop();
 	d->paused = true;
 }
 
@@ -285,7 +289,7 @@ void ObjectSession::resume()
 
 	d->paused = false;
 	if(!d->pendingCalls.isEmpty())
-		d->callTrigger.start();
+		d->callTrigger->start();
 }
 
 }
