@@ -1,6 +1,8 @@
 IRIS_BASE = $$PWD
 include(common.pri)
 
+CONFIG *= depend_prl
+
 INCLUDEPATH += $$IRIS_BASE/include $$IRIS_BASE/include/iris $$IRIS_BASE/src
 
 iris_bundle:{

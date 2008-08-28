@@ -7,6 +7,8 @@ QT -= gui
 QT += network
 DESTDIR = ../../bin
 
+CONFIG *= depend_prl
+
 INCLUDEPATH += ../../include ../../include/iris
 
 iris_bundle:{
