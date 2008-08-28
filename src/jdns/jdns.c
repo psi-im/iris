@@ -1887,6 +1887,22 @@ int _unicast_do_writes(jdns_session_t *s, int now)
 				_append_event_and_hold_id(s, event);
 			}
 
+			// report error to parent
+			if(q->cname_parent)
+			{
+				// report event to any requests listening
+				query_t *cq = q->cname_parent;
+				for(k = 0; k < cq->req_ids_count; ++k)
+				{
+					jdns_event_t *event = jdns_event_new();
+					event->type = JDNS_EVENT_RESPONSE;
+					event->id = cq->req_ids[k];
+					event->status = JDNS_STATUS_TIMEOUT;
+					_append_event_and_hold_id(s, event);
+				}
+				list_remove(s->queries, cq);
+			}
+ 
 			_remove_query_datagrams(s, q);
 			list_remove(s->queries, q);
 			--n; // adjust position
