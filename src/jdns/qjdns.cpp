@@ -27,6 +27,9 @@
 #include "qjdns_sock.h"
 #include "jdns.h"
 
+// for fprintf
+#include <stdio.h>
+
 namespace {
 
 // safeobj stuff, from qca
@@ -960,28 +963,26 @@ QHostAddress QJDns::detectPrimaryMulticast(const QHostAddress &address)
 	}
 	while(1)
 	{
-		sock->waitForReadyRead(-1);
+		if(!sock->waitForReadyRead(1000))
+		{
+			fprintf(stderr, "QJDns::detectPrimaryMulticast: timeout while checking %s\n", qPrintable(address.toString()));
+			delete sock;
+			return QHostAddress();
+		}
 		QByteArray in(128, 0);
 		QHostAddress from_addr;
 		quint16 from_port;
 		int ret = sock->readDatagram(in.data(), in.size(), &from_addr, &from_port);
 		if(ret == -1)
-			continue;
+		{
+			delete sock;
+			return QHostAddress();
+		}
+
 		if(from_port != port)
 			continue;
 		in.resize(ret);
-		if(in.size() != out.size())
-			continue;
-		bool ok = true;
-		for(int n = 0; n < in.size(); ++n)
-		{
-			if(in[n] != out[n])
-			{
-				ok = false;
-				break;
-			}
-		}
-		if(!ok)
+		if(in != out)
 			continue;
 
 		result = from_addr;
