@@ -31,6 +31,11 @@ unix {
 		$$PWD/netinterface_unix.cpp
 }
 
+windows {
+	SOURCES += \
+		$$PWD/netinterface_win.cpp
+}
+
 SOURCES += \
 	$$PWD/netnames_jdns.cpp
 

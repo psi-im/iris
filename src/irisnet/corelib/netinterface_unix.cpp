@@ -395,9 +395,6 @@ public:
 		info = ifaces;
 	}
 
-signals:
-	void updated();
-
 public slots:
 	void check()
 	{
