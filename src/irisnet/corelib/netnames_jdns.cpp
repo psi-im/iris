@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005  Justin Karneges
+ * Copyright (C) 2005-2008  Justin Karneges
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -19,8 +19,12 @@
 
 #include "irisnetplugin.h"
 
+#include "objectsession.h"
 #include "jdnsshared.h"
 #include "netinterface.h"
+
+Q_DECLARE_METATYPE(XMPP::NameRecord)
+Q_DECLARE_METATYPE(XMPP::NameResolver::Error)
 
 namespace XMPP {
 
@@ -114,28 +118,83 @@ QJDns::Record exportJDNSRecord(const NameRecord &in)
 	return out;
 }
 
+class IdManager
+{
+private:
+	QSet<int> set;
+	int at;
+
+	inline void bump_at()
+	{
+		if(at == 0x7fffffff)
+			at = 0;
+		else
+			++at;
+	}
+
+public:
+	IdManager() :
+		at(0)
+	{
+	}
+
+	int reserveId()
+	{
+		while(1)
+		{
+			if(!set.contains(at))
+			{
+				int id = at;
+				set.insert(id);
+				bump_at();
+				return id;
+			}
+
+			bump_at();
+		}
+	}
+
+	void releaseId(int id)
+	{
+		set.remove(id);
+	}
+};
+
 //----------------------------------------------------------------------------
 // JDnsGlobal
 //----------------------------------------------------------------------------
 class JDnsGlobal : public QObject
 {
 	Q_OBJECT
+
 public:
 	JDnsSharedDebug db;
 	JDnsShared *uni_net, *uni_local, *mul;
 	QHostAddress mul_addr4, mul_addr6;
+	NetInterfaceManager netman;
+	QList<NetInterface*> ifaces;
+	QTimer updateTimer;
 
-	JDnsGlobal()
+	JDnsGlobal() :
+		netman(this),
+		updateTimer(this)
 	{
 		uni_net = 0;
 		uni_local = 0;
 		mul = 0;
 
+		qRegisterMetaType<NameRecord>();
+		qRegisterMetaType<NameResolver::Error>();
+
 		connect(&db, SIGNAL(readyRead()), SLOT(jdns_debugReady()));
+		connect(&updateTimer, SIGNAL(timeout()), SLOT(updateMulticastInterfaces()));
+		updateTimer.setSingleShot(true);
 	}
 
 	~JDnsGlobal()
 	{
+		qDeleteAll(ifaces);
+
 		QList<JDnsShared*> list;
 		if(uni_net)
 			list += uni_net;
@@ -192,83 +251,109 @@ public:
 			mul = new JDnsShared(JDnsShared::Multicast, this);
 			mul->setDebug(&db, "M");
 
+			connect(&netman, SIGNAL(interfaceAvailable(const QString &)), SLOT(iface_available(const QString &)));
+
+			// get the current network interfaces.  this initial
+			//   fetching should not trigger any calls to
+			//   updateMulticastInterfaces().  only future
+			//   activity should do that.
+			foreach(const QString &id, netman.interfaces())
+			{
+				NetInterface *iface = new NetInterface(id, &netman);
+				connect(iface, SIGNAL(unavailable()), SLOT(iface_unavailable()));
+				ifaces += iface;
+			}
+
 			updateMulticastInterfaces();
 		}
 		return mul;
 	}
 
-signals:
-	void debug(const QStringList &lines);
+private slots:
+	void jdns_debugReady()
+	{
+		// TODO
+		QStringList lines = db.readDebugLines();
+		Q_UNUSED(lines);
+		//for(int n = 0; n < lines.count(); ++n)
+		//	printf("jdns: %s\n", qPrintable(lines[n]));
+	}
 
-public slots:
-	// TODO: call this when the network changes
+	void iface_available(const QString &id)
+	{
+		NetInterface *iface = new NetInterface(id, &netman);
+		connect(iface, SIGNAL(unavailable()), SLOT(iface_unavailable()));
+		ifaces += iface;
+
+		updateTimer.start(100);
+	}
+
+	void iface_unavailable()
+	{
+		NetInterface *iface = (NetInterface *)sender();
+		ifaces.removeAll(iface);
+		delete iface;
+
+		updateTimer.start(100);
+	}
+
 	void updateMulticastInterfaces()
 	{
 		QHostAddress addr4 = QJDns::detectPrimaryMulticast(QHostAddress::Any);
 		QHostAddress addr6 = QJDns::detectPrimaryMulticast(QHostAddress::AnyIPv6);
 
-		if(!(addr4 == mul_addr4))
-		{
-			if(!mul_addr4.isNull())
-				mul->removeInterface(mul_addr4);
-			mul_addr4 = addr4;
-			if(!mul_addr4.isNull())
-			{
-				if(!mul->addInterface(mul_addr4))
-					mul_addr4 = QHostAddress();
-			}
-		}
-
-		if(!(addr6 == mul_addr6))
-		{
-			if(!mul_addr6.isNull())
-				mul->removeInterface(mul_addr6);
-			mul_addr6 = addr6;
-			if(!mul_addr6.isNull())
-			{
-				if(!mul->addInterface(mul_addr6))
-					mul_addr6 = QHostAddress();
-			}
-		}
+		updateMulticastInterface(&mul_addr4, addr4);
+		updateMulticastInterface(&mul_addr6, addr6);
 	}
 
-private slots:
-	void jdns_debugReady()
+private:
+	void updateMulticastInterface(QHostAddress *curaddr, const QHostAddress &newaddr)
 	{
-		QStringList lines = db.readDebugLines();
-		Q_UNUSED(lines);
-		//for(int n = 0; n < lines.count(); ++n)
-		//	printf("jdns: %s\n", qPrintable(lines[n]));
-		//emit debug(lines);
+		if(!(newaddr == *curaddr)) // QHostAddress doesn't have operator!=
+		{
+			if(!curaddr->isNull())
+				mul->removeInterface(*curaddr);
+			*curaddr = newaddr;
+			if(!curaddr->isNull())
+			{
+				if(!mul->addInterface(*curaddr))
+					*curaddr = QHostAddress();
+			}
+		}
 	}
 };
 
 //----------------------------------------------------------------------------
 // JDnsNameProvider
 //----------------------------------------------------------------------------
-static int next_id = 1;
 class JDnsNameProvider : public NameProvider
 {
 	Q_OBJECT
-	Q_INTERFACES(XMPP::NameProvider);
+	Q_INTERFACES(XMPP::NameProvider)
+
 public:
 	enum Mode { Internet, Local };
 
 	JDnsGlobal *global;
-
 	Mode mode;
+	IdManager idman;
+	ObjectSession sess;
+
 	class Item
 	{
 	public:
-		JDnsSharedRequest *req;
-		QByteArray name;
-		int type;
-		bool longLived;
 		int id;
+		JDnsSharedRequest *req;
+		bool longLived;
+		ObjectSession sess;
+		bool localResult;
 
-		Item()
+		Item(QObject *parent = 0) :
+			id(-1),
+			req(0),
+			sess(parent),
+			localResult(false)
 		{
-			req = 0;
 		}
 
 		~Item()
@@ -294,7 +379,8 @@ public:
 		return new JDnsNameProvider(global, mode, parent);
 	}
 
-	JDnsNameProvider(JDnsGlobal *_global, Mode _mode, QObject *parent = 0) : NameProvider(parent)
+	JDnsNameProvider(JDnsGlobal *_global, Mode _mode, QObject *parent = 0) :
+		NameProvider(parent)
 	{
 		global = _global;
 		mode = _mode;
@@ -302,52 +388,98 @@ public:
 
 	~JDnsNameProvider()
 	{
+		qDeleteAll(items);
+	}
+
+	Item *getItemById(int id)
+	{
+		for(int n = 0; n < items.count(); ++n)
+		{
+			if(items[n]->id == id)
+				return items[n];
+		}
+
+		return 0;
+	}
+
+	Item *getItemByReq(JDnsSharedRequest *req)
+	{
+		for(int n = 0; n < items.count(); ++n)
+		{
+			if(items[n]->req == req)
+				return items[n];
+		}
+
+		return 0;
+	}
+
+	void releaseItem(Item *i)
+	{
+		idman.releaseId(i->id);
+		items.removeAll(i);
+		delete i;
+	}
+
+	bool supportsSingle() const
+	{
+		return true;
+	}
+
+	bool supportsLongLived() const
+	{
+		if(mode == Local)
+			return true;  // we support long-lived local queries
+		else
+			return false; // we do NOT support long-lived internet queries
 	}
 
 	virtual int resolve_start(const QByteArray &name, int qType, bool longLived)
 	{
 		if(mode == Internet)
 		{
+			// if query ends in .local, switch to local resolver
 			if(name.right(6) == ".local" || name.right(7) == ".local.")
 			{
-				Item *i = new Item;
-				i->id = next_id++;
-				i->name = name;
+				Item *i = new Item(this);
+				i->id = idman.reserveId();
 				i->longLived = longLived;
 				items += i;
-				QMetaObject::invokeMethod(this, "do_local", Qt::QueuedConnection, Q_ARG(int, i->id));
+				i->sess.defer(this, "do_local", Q_ARG(int, i->id), Q_ARG(QByteArray, name));
 				return i->id;
 			}
 
+			// we don't support long-lived internet queries
 			if(longLived)
 			{
-				Item *i = new Item;
-				i->id = next_id++;
+				Item *i = new Item(this);
+				i->id = idman.reserveId();
 				items += i;
-				QMetaObject::invokeMethod(this, "do_error", Qt::QueuedConnection, Q_ARG(int, i->id));
+				i->sess.defer(this, "do_error", Q_ARG(int, i->id),
+					Q_ARG(XMPP::NameResolver::Error, NameResolver::ErrorNoLongLived));
 				return i->id;
 			}
 
-			Item *i = new Item;
+			// perform the query
+			Item *i = new Item(this);
+			i->id = idman.reserveId();
 			i->req = new JDnsSharedRequest(global->uni_net);
 			connect(i->req, SIGNAL(resultsReady()), SLOT(req_resultsReady()));
 			i->longLived = false;
-			i->id = next_id++;
 			items += i;
 			i->req->query(name, qType);
 			return i->id;
 		}
 		else
 		{
-			Item *i = new Item;
+			Item *i = new Item(this);
+			i->id = idman.reserveId();
 			if(longLived)
 			{
 				if(!global->ensure_mul())
 				{
-					Item *i = new Item;
-					i->id = next_id++;
 					items += i;
-					QMetaObject::invokeMethod(this, "do_nolocal", Qt::QueuedConnection, Q_ARG(int, i->id));
+					i->sess.defer(this, "do_error", Q_ARG(int, i->id),
+						Q_ARG(XMPP::NameResolver::Error, NameResolver::ErrorNoLocal));
 					return i->id;
 				}
 
@@ -360,7 +492,6 @@ public:
 				i->longLived = false;
 			}
 			connect(i->req, SIGNAL(resultsReady()), SLOT(req_resultsReady()));
-			i->id = next_id++;
 			items += i;
 			i->req->query(name, qType);
 			return i->id;
@@ -369,83 +500,43 @@ public:
 
 	virtual void resolve_stop(int id)
 	{
-		Item *i = 0;
-		for(int n = 0; n < items.count(); ++n)
-		{
-			if(items[n]->id == id)
-			{
-				i = items[n];
-				break;
-			}
-		}
+		Item *i = getItemById(id);
 		if(!i)
 			return;
 
-		i->req->cancel();
-
-		items.removeAll(i);
-		delete i;
+		if(i->req)
+			i->req->cancel();
+		releaseItem(i);
 	}
 
 	virtual void resolve_localResultsReady(int id, const QList<XMPP::NameRecord> &results)
 	{
-		Item *i = 0;
-		for(int n = 0; n < items.count(); ++n)
-		{
-			if(items[n]->id == id)
-			{
-				i = items[n];
-				break;
-			}
-		}
-		if(!i)
-			return;
+		Item *i = getItemById(id);
+		Q_ASSERT(i);
+		Q_ASSERT(!i->localResult);
 
-		// not long-lived, so delete it (long-lived doesn't get looped through here)
-		items.removeAll(i);
-		delete i;
-
-		QMetaObject::invokeMethod(this, "resolve_resultsReady", Qt::QueuedConnection,
-			Q_ARG(int, id), Q_ARG(QList<XMPP::NameRecord>, results));
+		i->localResult = true;
+		i->sess.defer(this, "do_local_ready", Q_ARG(int, id),
+			Q_ARG(QList<XMPP::NameRecord>, results));
 	}
 
 	virtual void resolve_localError(int id, XMPP::NameResolver::Error e)
 	{
-		Item *i = 0;
-		for(int n = 0; n < items.count(); ++n)
-		{
-			if(items[n]->id == id)
-			{
-				i = items[n];
-				break;
-			}
-		}
-		if(!i)
-			return;
+		Item *i = getItemById(id);
+		Q_ASSERT(i);
+		Q_ASSERT(!i->localResult);
 
-		items.removeAll(i);
-		delete i;
-
-		QMetaObject::invokeMethod(this, "resolve_error", Qt::QueuedConnection,
-			Q_ARG(int, id), Q_ARG(XMPP::NameResolver::Error, e));
+		i->localResult = true;
+		i->sess.defer(this, "do_local_error", Q_ARG(int, id),
+			Q_ARG(XMPP::NameResolver::Error, e));
 	}
 
 private slots:
 	void req_resultsReady()
 	{
 		JDnsSharedRequest *req = (JDnsSharedRequest *)sender();
-
-		Item *i = 0;
-		for(int n = 0; n < items.count(); ++n)
-		{
-			if(items[n]->req == req)
-			{
-				i = items[n];
-				break;
-			}
-		}
-		if(!i)
-			return;
+		Item *i = getItemByReq(req);
+		Q_ASSERT(i);
 
 		int id = i->id;
 
@@ -456,17 +547,13 @@ private slots:
 			for(int n = 0; n < results.count(); ++n)
 				out += importJDNSRecord(results[n]);
 			if(!i->longLived)
-			{
-				items.removeAll(i);
-				delete i;
-			}
+				releaseItem(i);
 			emit resolve_resultsReady(id, out);
 		}
 		else
 		{
 			JDnsSharedRequest::Error e = req->error();
-			items.removeAll(i);
-			delete i;
+			releaseItem(i);
 
 			NameResolver::Error error = NameResolver::ErrorGeneric;
 			if(e == JDnsSharedRequest::ErrorNXDomain)
@@ -479,68 +566,46 @@ private slots:
 		}
 	}
 
-	void do_local(int id)
+	void do_error(int id, XMPP::NameResolver::Error e)
 	{
-		Item *i = 0;
-		for(int n = 0; n < items.count(); ++n)
-		{
-			if(items[n]->id == id)
-			{
-				i = items[n];
-				break;
-			}
-		}
-		if(!i)
-			return;
+		Item *i = getItemById(id);
+		Q_ASSERT(i);
 
-		QByteArray name = i->name;
-		if(i->longLived) // longlived is a handoff, so delete our instance
-		{
-			items.removeAll(i);
-			delete i;
-		}
+		releaseItem(i);
+		emit resolve_error(id, e);
+	}
 
+	void do_local(int id, const QByteArray &name)
+	{
+		Item *i = getItemById(id);
+		Q_ASSERT(i);
+
+		// resolve_useLocal has two behaviors:
+		// - if longlived, then it indicates a hand-off
+		// - if non-longlived, then it indicates we want a subquery
+
+		if(i->longLived)
+			releaseItem(i);
 		emit resolve_useLocal(id, name);
 	}
 
-	void do_error(int id)
+	void do_local_ready(int id, const QList<XMPP::NameRecord> &results)
 	{
-		Item *i = 0;
-		for(int n = 0; n < items.count(); ++n)
-		{
-			if(items[n]->id == id)
-			{
-				i = items[n];
-				break;
-			}
-		}
-		if(!i)
-			return;
+		Item *i = getItemById(id);
+		Q_ASSERT(i);
 
-		items.removeAll(i);
-		delete i;
-
-		emit resolve_error(id, NameResolver::ErrorNoLongLived);
+		// only non-longlived queries come through here, so we're done
+		releaseItem(i);
+		emit resolve_resultsReady(id, results);
 	}
 
-	void do_nolocal(int id)
+	void do_local_error(int id, XMPP::NameResolver::Error e)
 	{
-		Item *i = 0;
-		for(int n = 0; n < items.count(); ++n)
-		{
-			if(items[n]->id == id)
-			{
-				i = items[n];
-				break;
-			}
-		}
-		if(!i)
-			return;
+		Item *i = getItemById(id);
+		Q_ASSERT(i);
 
-		items.removeAll(i);
-		delete i;
-
-		emit resolve_error(id, NameResolver::ErrorNoLocal);
+		releaseItem(i);
+		emit resolve_error(id, e);
 	}
 };
 
@@ -550,6 +615,7 @@ private slots:
 class JDnsBrowseLookup : public QObject
 {
 	Q_OBJECT
+
 public:
 	JDnsShared *jdns;
 	JDnsSharedRequest *req;
@@ -679,6 +745,7 @@ public:
 class JDnsBrowse : public QObject
 {
 	Q_OBJECT
+
 public:
 	int id;
 
@@ -773,42 +840,10 @@ private slots:
 	}
 };
 
-/*void JDnsShared::net_available(const QString &id)
-{
-	NetInterface *iface = new NetInterface(id);
-	connect(iface, SIGNAL(unavailable()), SLOT(net_unavailable()));
-	ifaces += iface;
-
-	QList<QHostAddress> addrlist = iface->addresses();
-
-	if(!instances.isEmpty())
-		return;
-
-	// prefer using just ipv4
-	QHostAddress addr;
-	for(int n = 0; n < addrlist.count(); ++n)
-	{
-		if(addrlist[n].protocol() == QAbstractSocket::IPv4Protocol)
-		{
-			addr = addrlist[n];
-			break;
-		}
-	}
-
-	if(addr.isNull())
-		return;
-
-	addr = QHostAddress("192.168.1.150");
-}
-
-void JDnsShared::net_unavailable()
-{
-	// TODO
-}*/
-
 class JDnsServiceProvider : public ServiceProvider
 {
 	Q_OBJECT
+
 public:
 	JDnsGlobal *global;
 
@@ -824,7 +859,8 @@ public:
 		return p;
 	}
 
-	JDnsServiceProvider(JDnsGlobal *_global, QObject *parent = 0) : ServiceProvider(parent)
+	JDnsServiceProvider(JDnsGlobal *_global, QObject *parent = 0) :
+		ServiceProvider(parent)
 	{
 		global = _global;
 	}
@@ -1100,7 +1136,8 @@ private slots:
 class JDnsProvider : public IrisNetProvider
 {
 	Q_OBJECT
-	Q_INTERFACES(XMPP::IrisNetProvider);
+	Q_INTERFACES(XMPP::IrisNetProvider)
+
 public:
 	JDnsGlobal *global;
 
@@ -1114,24 +1151,27 @@ public:
 		delete global;
 	}
 
-	virtual NameProvider *createNameProviderInternet()
+	void ensure_global()
 	{
 		if(!global)
 			global = new JDnsGlobal;
+	}
+
+	virtual NameProvider *createNameProviderInternet()
+	{
+		ensure_global();
 		return JDnsNameProvider::create(global, JDnsNameProvider::Internet);
 	}
 
 	virtual NameProvider *createNameProviderLocal()
 	{
-		if(!global)
-			global = new JDnsGlobal;
+		ensure_global();
 		return JDnsNameProvider::create(global, JDnsNameProvider::Local);
 	}
 
 	virtual ServiceProvider *createServiceProvider()
 	{
-		if(!global)
-			global = new JDnsGlobal;
+		ensure_global();
 		return JDnsServiceProvider::create(global);
 	}
 };
