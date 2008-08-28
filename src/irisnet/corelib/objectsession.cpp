@@ -173,6 +173,8 @@ private slots:
 	void doCall()
 	{
 		MethodCall *call = pendingCalls.takeFirst();
+		if(!pendingCalls.isEmpty())
+			callTrigger.start();
 
 		Q_ASSERT(call->args.count() <= 10);
 
