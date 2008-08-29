@@ -37,6 +37,7 @@
 #define JDNS_TTL_MAX          (86400 * 7)
 #define JDNS_CACHE_MAX        16384
 #define JDNS_CNAME_MAX        16
+#define JDNS_QUERY_MAX        4096
 
 //----------------------------------------------------------------------------
 // util
@@ -918,7 +919,6 @@ struct jdns_session
 	int shutdown;
 	int next_qid;
 	int next_req_id;
-	int next_dns_id;
 	int last_time;
 	int next_timer;
 	int next_name_server_id;
@@ -949,7 +949,6 @@ jdns_session_t *jdns_session_new(jdns_callbacks_t *callbacks)
 	s->shutdown = 0;
 	s->next_qid = 0;
 	s->next_req_id = 1;
-	s->next_dns_id = s->cb.rand_int(s, s->cb.app);
 	s->last_time = 0;
 	s->next_timer = 0;
 	s->next_name_server_id = 0;
@@ -1137,10 +1136,35 @@ static int get_next_req_id(jdns_session_t *s)
 	return id;
 }
 
-// starts at random, must fit in 16 bits
+// random number fitting in 16 bits
 static int get_next_dns_id(jdns_session_t *s)
 {
-	return (s->next_dns_id++ & 0xffff);
+	int n, id, active_ids;
+	active_ids = 0;
+	id = -1;
+	while(id == -1)
+	{
+		// use random number for dns id
+		id = s->cb.rand_int(s, s->cb.app) & 0xffff;
+
+		for(n = 0; n < s->queries->count; ++n)
+		{
+			query_t *q = (query_t *)s->queries->item[n];
+			if(q->dns_id != -1)
+			{
+				++active_ids;
+				if(active_ids >= JDNS_QUERY_MAX)
+					return -1;
+
+				if(q->dns_id == id)
+				{
+					id = -1;
+					break;
+				}
+			}
+		}
+	}
+	return id;
 }
 
 // starts at 0
@@ -1902,7 +1926,7 @@ int _unicast_do_writes(jdns_session_t *s, int now)
 				}
 				list_remove(s->queries, cq);
 			}
- 
+
 			_remove_query_datagrams(s, q);
 			list_remove(s->queries, q);
 			--n; // adjust position
@@ -1911,7 +1935,46 @@ int _unicast_do_writes(jdns_session_t *s, int now)
 
 		// assign a packet id if we don't have one yet
 		if(q->dns_id == -1)
+		{
 			q->dns_id = get_next_dns_id(s);
+
+			// couldn't get an id?
+			if(q->dns_id == -1)
+			{
+				_debug_line(s, "unable to reserve packet id");
+
+				// report event to any requests listening
+				for(k = 0; k < q->req_ids_count; ++k)
+				{
+					jdns_event_t *event = jdns_event_new();
+					event->type = JDNS_EVENT_RESPONSE;
+					event->id = q->req_ids[k];
+					event->status = JDNS_STATUS_ERROR;
+					_append_event_and_hold_id(s, event);
+				}
+
+				// report error to parent
+				if(q->cname_parent)
+				{
+					// report event to any requests listening
+					query_t *cq = q->cname_parent;
+					for(k = 0; k < cq->req_ids_count; ++k)
+					{
+						jdns_event_t *event = jdns_event_new();
+						event->type = JDNS_EVENT_RESPONSE;
+						event->id = cq->req_ids[k];
+						event->status = JDNS_STATUS_ERROR;
+						_append_event_and_hold_id(s, event);
+					}
+					list_remove(s->queries, cq);
+				}
+
+				_remove_query_datagrams(s, q);
+				list_remove(s->queries, q);
+				--n; // adjust position
+				continue;
+			}
+		}
 
 		// out of name servers?
 		if(q->servers_tried_count == s->name_servers->count)
