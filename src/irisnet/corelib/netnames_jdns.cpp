@@ -374,6 +374,7 @@ public:
 	public:
 		int id;
 		JDnsSharedRequest *req;
+		int type;
 		bool longLived;
 		ObjectSession sess;
 		bool localResult;
@@ -494,6 +495,7 @@ public:
 			i->id = idman.reserveId();
 			i->req = new JDnsSharedRequest(global->uni_net);
 			connect(i->req, SIGNAL(resultsReady()), SLOT(req_resultsReady()));
+			i->type = qType;
 			i->longLived = false;
 			items += i;
 			i->req->query(name, qType);
@@ -575,7 +577,16 @@ private slots:
 			QList<NameRecord> out;
 			QList<QJDns::Record> results = req->results();
 			for(int n = 0; n < results.count(); ++n)
-				out += importJDNSRecord(results[n]);
+			{
+				// unless we are asking for all types, only
+				//   accept the type we asked for
+				if(i->type == QJDns::Any || results[n].type == i->type)
+				{
+					NameRecord rec = importJDNSRecord(results[n]);
+					if(!rec.isNull())
+						out += rec;
+				}
+			}
 			if(!i->longLived)
 				releaseItem(i);
 			emit resolve_resultsReady(id, out);
