@@ -128,6 +128,7 @@ public:
 	class ResolveResult
 	{
 	public:
+		QMap<QString,QByteArray> attributes;
 		QHostAddress address;
 		int port;
 		QByteArray hostName; // optional
