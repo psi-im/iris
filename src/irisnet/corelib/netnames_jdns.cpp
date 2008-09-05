@@ -28,7 +28,7 @@ Q_DECLARE_METATYPE(XMPP::NameResolver::Error)
 
 namespace XMPP {
 
-NameRecord importJDNSRecord(const QJDns::Record &in)
+static NameRecord importJDNSRecord(const QJDns::Record &in)
 {
 	NameRecord out;
 	switch(in.type)
@@ -51,7 +51,7 @@ NameRecord importJDNSRecord(const QJDns::Record &in)
 	return out;
 }
 
-QJDns::Record exportJDNSRecord(const NameRecord &in)
+static QJDns::Record exportJDNSRecord(const NameRecord &in)
 {
 	QJDns::Record out;
 	switch(in.type())
@@ -116,6 +116,31 @@ QJDns::Record exportJDNSRecord(const NameRecord &in)
 	out.owner = in.owner();
 	out.ttl = in.ttl();
 	return out;
+}
+
+static bool validServiceType(const QByteArray &in)
+{
+	// can't be empty, or start/end with a dot
+	if(in.isEmpty() || in[0] == '.' || in[in.length() - 1] == '.')
+		return false;
+
+	// must contain exactly one dot
+	int dotcount = 0;
+	for(int n = 0; n < in.length(); ++n)
+	{
+		if(in[n] == '.')
+		{
+			++dotcount;
+
+			// no need to count more than 2
+			if(dotcount >= 2)
+				break;
+		}
+	}
+	if(dotcount != 1)
+		return false;
+
+	return true;
 }
 
 class IdManager
@@ -830,146 +855,69 @@ private slots:
 	}
 };
 
-class JDnsBrowseInfo
-{
-public:
-	QByteArray name;
-	QByteArray instance;
-	QByteArray srvhost;
-	int srvport;
-	QList<QByteArray> attribs;
-};
-
 class JDnsBrowse : public QObject
 {
 	Q_OBJECT
 
 public:
-	int id;
+	QByteArray type, typeAndDomain;
+	JDnsSharedRequest req;
 
-	JDnsShared *jdns;
-	JDnsSharedRequest *req;
-	QByteArray type;
-
-	class Lookup
+	JDnsBrowse(JDnsShared *_jdns) :
+		req(_jdns, this)
 	{
-	public:
-		QByteArray instance;
-		QByteArray name;
-		JDnsServiceResolve *resolve;
-	};
-	QList<Lookup> lookups;
-
-	JDnsBrowse(JDnsShared *_jdns)
-	{
-		req = 0;
-		jdns = _jdns;
-	}
-
-	~JDnsBrowse()
-	{
-		foreach(const Lookup &lu, lookups)
-			delete lu.resolve;
-		//qDeleteAll(lookups);
-		delete req;
+		connect(&req, SIGNAL(resultsReady()), SLOT(jdns_resultsReady()));
 	}
 
 	void start(const QByteArray &_type)
 	{
 		type = _type;
-		req = new JDnsSharedRequest(jdns);
-		connect(req, SIGNAL(resultsReady()), SLOT(jdns_resultsReady()));
-		req->query(type + ".local.", QJDns::Ptr);
+		Q_ASSERT(validServiceType(type));
+		typeAndDomain = type + ".local.";
+		req.query(typeAndDomain, QJDns::Ptr);
 	}
 
 signals:
-	void available(const JDnsBrowseInfo &i);
+	void available(const QByteArray &instance);
 	void unavailable(const QByteArray &instance);
+
+private:
+	QByteArray parseInstanceName(const QByteArray &name)
+	{
+		// needs to be at least X + '.' + typeAndDomain
+		if(name.length() < typeAndDomain.length() + 2)
+			return QByteArray();
+
+		// index of the '.' character
+		int at = name.length() - typeAndDomain.length() - 1;
+
+		if(name[at] != '.')
+			return QByteArray();
+		if(name.mid(at + 1) != typeAndDomain)
+			return QByteArray();
+
+		return name.mid(0, at);
+	}
 
 private slots:
 	void jdns_resultsReady()
 	{
-		QJDns::Record rec = req->results().first();
-		QByteArray name = rec.name;
+		QJDns::Record rec = req.results().first();
 
-		// FIXME: this is wrong, it should search backwards
-		int x = name.indexOf('.');
-		QByteArray instance = name.mid(0, x);
+		Q_ASSERT(rec.type == QJDns::Ptr);
+
+		QByteArray name = rec.name;
+		QByteArray instance = parseInstanceName(name);
+		if(instance.isEmpty())
+			return;
 
 		if(rec.ttl == 0)
 		{
-			// stop any lookups
-			JDnsServiceResolve *bl = 0;
-			int at = -1;
-			for(int n = 0; n < lookups.count(); ++n)
-			{
-				if(lookups[n].name == name)
-				{
-					bl = lookups[n].resolve;
-					at = n;
-					break;
-				}
-			}
-			if(bl)
-			{
-				//lookups.removeAll(bl);
-				lookups.removeAt(at);
-				delete bl;
-			}
-
-			//printf("Instance Gone: [%s]\n", instance.data());
 			emit unavailable(instance);
 			return;
 		}
 
-		//printf("Instance Found: [%s]\n", instance.data());
-
-		//printf("Lookup starting\n");
-		/*JDnsServiceResolve *bl = new JDnsServiceResolve(jdns);
-		connect(bl, SIGNAL(finished()), SLOT(bl_finished()));
-		Lookup lu;
-		lu.instance = instance;
-		lu.resolve = bl;
-		lookups += lu;
-		bl->start(name);*/
-
-		JDnsBrowseInfo i;
-		i.name = name;
-		i.instance = instance;
-		//i.srvhost = bl->srvhost;
-		//i.srvport = bl->srvport;
-		//i.attribs = bl->attribs;
-		emit available(i);
-	}
-
-	void bl_finished()
-	{
-		JDnsServiceResolve *bl = (JDnsServiceResolve *)sender();
-
-		int at = -1;
-		for(int n = 0; n < lookups.count(); ++n)
-		{
-			if(lookups[n].resolve == bl)
-			{
-				at = n;
-				break;
-			}
-		}
-		if(at == -1)
-			return;
-
-		JDnsBrowseInfo i;
-		i.name = lookups[at].name;
-		i.instance = lookups[at].instance;
-		//i.srvhost = bl->srvhost;
-		//i.srvport = bl->srvport;
-		i.attribs = bl->attribs;
-
-		lookups.removeAt(at);
-		delete bl;
-
-		//printf("Lookup finished\n");
-		emit available(i);
+		emit available(instance);
 	}
 };
 
@@ -1017,8 +965,14 @@ public:
 		}
 
 		JDnsBrowse *b = new JDnsBrowse(global->mul);
-		connect(b, SIGNAL(available(const JDnsBrowseInfo &)), SLOT(jb_available(const JDnsBrowseInfo &)));
+		connect(b, SIGNAL(available(const QByteArray &)), SLOT(jb_available(const QByteArray &)));
 		connect(b, SIGNAL(unavailable(const QByteArray &)), SLOT(jb_unavailable(const QByteArray &)));
+
+		if(!validServiceType(type.toLatin1()))
+		{
+			// TODO
+		}
+
 		b->start(type.toLatin1());
 
 		return 1;
@@ -1176,31 +1130,13 @@ public:
 	}
 
 private slots:
-	void jb_available(const JDnsBrowseInfo &i)
+	void jb_available(const QByteArray &instance)
 	{
 		//printf("jb_available: [%s]\n", i.instance.data());
 		JDnsBrowse *b = (JDnsBrowse *)sender();
-		QMap<QString,QByteArray> map;
-		for(int n = 0; n < i.attribs.count(); ++n)
-		{
-			const QByteArray &a = i.attribs[n];
-			QString key;
-			QByteArray value;
-			int x = a.indexOf('=');
-			if(x != -1)
-			{
-				key = QString::fromLatin1(a.mid(0, x));
-				value = a.mid(x + 1);
-			}
-			else
-			{
-				key = QString::fromLatin1(a);
-			}
-
-			map.insert(key, value);
-		}
-		ServiceInstance si(QString::fromLatin1(i.instance), QString::fromLatin1(b->type), "local.", map);
-		items.insert(i.name, si);
+		QByteArray name = instance + '.' + b->typeAndDomain;
+		ServiceInstance si(QString::fromLatin1(instance), QString::fromLatin1(b->type), "local.", QMap<QString,QByteArray>());
+		items.insert(name, si);
 		emit browse_instanceAvailable(1, si);
 	}
 
@@ -1208,7 +1144,7 @@ private slots:
 	{
 		//printf("jb_unavailable: [%s]\n", instance.data());
 		JDnsBrowse *b = (JDnsBrowse *)sender();
-		QByteArray name = instance + '.' + b->type + ".local.";
+		QByteArray name = instance + '.' + b->typeAndDomain;
 		if(!items.contains(name))
 			return;
 
