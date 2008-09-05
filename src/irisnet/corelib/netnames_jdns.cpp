@@ -173,11 +173,10 @@ public:
 	QHostAddress mul_addr4, mul_addr6;
 	NetInterfaceManager netman;
 	QList<NetInterface*> ifaces;
-	QTimer updateTimer;
+	QTimer *updateTimer;
 
 	JDnsGlobal() :
-		netman(this),
-		updateTimer(this)
+		netman(this)
 	{
 		uni_net = 0;
 		uni_local = 0;
@@ -187,12 +186,18 @@ public:
 		qRegisterMetaType<NameResolver::Error>();
 
 		connect(&db, SIGNAL(readyRead()), SLOT(jdns_debugReady()));
-		connect(&updateTimer, SIGNAL(timeout()), SLOT(updateMulticastInterfaces()));
-		updateTimer.setSingleShot(true);
+
+		updateTimer = new QTimer(this);
+		connect(updateTimer, SIGNAL(timeout()), SLOT(updateMulticastInterfaces()));
+		updateTimer->setSingleShot(true);
 	}
 
 	~JDnsGlobal()
 	{
+		updateTimer->disconnect(this);
+		updateTimer->setParent(0);
+		updateTimer->deleteLater();
+
 		qDeleteAll(ifaces);
 
 		QList<JDnsShared*> list;
@@ -285,7 +290,7 @@ private slots:
 		connect(iface, SIGNAL(unavailable()), SLOT(iface_unavailable()));
 		ifaces += iface;
 
-		updateTimer.start(100);
+		updateTimer->start(100);
 	}
 
 	void iface_unavailable()
@@ -294,7 +299,7 @@ private slots:
 		ifaces.removeAll(iface);
 		delete iface;
 
-		updateTimer.start(100);
+		updateTimer->start(100);
 	}
 
 	void updateMulticastInterfaces()
@@ -612,122 +617,215 @@ private slots:
 //----------------------------------------------------------------------------
 // JDnsServiceProvider
 //----------------------------------------------------------------------------
-class JDnsBrowseLookup : public QObject
+
+// 5 second timeout waiting for both A and AAAA
+// 8 second timeout waiting for at least one record
+class JDnsServiceResolve : public QObject
 {
 	Q_OBJECT
 
 public:
-	JDnsShared *jdns;
-	JDnsSharedRequest *req;
+	enum SrvState
+	{
+		Srv               = 0,
+		AddressWait       = 1,
+		AddressFirstCome  = 2
+	};
 
-	bool success; // TODO: use this variable
-	bool mode2;
-	QByteArray name;
-	QByteArray instance;
-	bool haveSrv;
-	QByteArray srvhost;
-	int srvport;
+	JDnsSharedRequest reqtxt; // for TXT
+	JDnsSharedRequest req;    // for SRV/A
+	JDnsSharedRequest req6;   // for AAAA
+	bool haveTxt;
+	SrvState srvState;
+	QTimer *opTimer;
+
+	// out
 	QList<QByteArray> attribs;
-	QHostAddress addr;
+	QByteArray host;
+	int port;
+	bool have4, have6;
+	QHostAddress addr4, addr6;
 
-	JDnsBrowseLookup(JDnsShared *_jdns)
+	JDnsServiceResolve(JDnsShared *_jdns, QObject *parent = 0) :
+		QObject(parent),
+		reqtxt(_jdns, this),
+		req(_jdns, this),
+		req6(_jdns, this)
 	{
-		req = 0;
-		jdns = _jdns;
+		connect(&reqtxt, SIGNAL(resultsReady()), SLOT(reqtxt_ready()));
+		connect(&req, SIGNAL(resultsReady()), SLOT(req_ready()));
+		connect(&req6, SIGNAL(resultsReady()), SLOT(req6_ready()));
+
+		opTimer = new QTimer(this);
+		connect(opTimer, SIGNAL(timeout()), SLOT(op_timeout()));
+		opTimer->setSingleShot(true);
 	}
 
-	~JDnsBrowseLookup()
+	~JDnsServiceResolve()
 	{
-		delete req;
+		opTimer->disconnect(this);
+		opTimer->setParent(0);
+		opTimer->deleteLater();
 	}
 
-	void start(const QByteArray &_name)
+	void start(const QByteArray name)
 	{
-		success = false;
-		mode2 = false;
-		name = _name;
-		haveSrv = false;
+		haveTxt = false;
+		srvState = Srv;
+		have4 = false;
+		have6 = false;
 
-		req = new JDnsSharedRequest(jdns);
-		connect(req, SIGNAL(resultsReady()), SLOT(jdns_resultsReady()));
-		req->query(name, QJDns::Srv);
-	}
+		opTimer->start(8000);
 
-	void start2(const QByteArray &_name)
-	{
-		success = false;
-		mode2 = true;
-		name = _name;
-		haveSrv = false;
-
-		req = new JDnsSharedRequest(jdns);
-		connect(req, SIGNAL(resultsReady()), SLOT(jdns_resultsReady()));
-		req->query(name, QJDns::Srv);
+		reqtxt.query(name, QJDns::Txt);
+		req.query(name, QJDns::Srv);
 	}
 
 signals:
 	void finished();
+	void error();
+
+private:
+	void cleanup()
+	{
+		if(opTimer->isActive())
+			opTimer->stop();
+		if(!haveTxt)
+			reqtxt.cancel();
+		if(srvState == Srv || !have4)
+			req.cancel();
+		if(srvState >= AddressWait && !have6)
+			req6.cancel();
+	}
+
+	bool tryDone()
+	{
+		// we're done when we have txt and addresses
+		if(haveTxt && ( (have4 && have6) || (srvState == AddressFirstCome && (have4 || have6)) ))
+		{
+			cleanup();
+			emit finished();
+			return true;
+		}
+
+		return false;
+	}
 
 private slots:
-	void jdns_resultsReady()
+	void reqtxt_ready()
 	{
-		if(!haveSrv)
+		QJDns::Record rec = reqtxt.results().first();
+		reqtxt.cancel();
+
+		if(rec.type != QJDns::Txt)
 		{
-			QJDns::Record rec = req->results().first();
+			cleanup();
+			emit error();
+			return;
+		}
 
-			haveSrv = true;
-			srvhost = rec.name;
-			srvport = rec.port;
+		attribs.clear();
+		if(!rec.texts.isEmpty())
+		{
+			// if there is only 1 text, it needs to be
+			//   non-empty for us to care
+			if(rec.texts.count() != 1 || !rec.texts[0].isEmpty())
+				attribs = rec.texts;
+		}
 
-			//printf("  Server: [%s] port=%d\n", srvhost.data(), srvport);
-			req->cancel();
+		haveTxt = true;
 
-			if(mode2)
-				req->query(srvhost, QJDns::A); // TODO: ipv6?
-			else
-				req->query(name, QJDns::Txt);
+		tryDone();
+	}
+
+	void req_ready()
+	{
+		QJDns::Record rec = req.results().first();
+		req.cancel();
+
+		if(srvState == Srv)
+		{
+			// in Srv state, req is used for SRV records
+
+			Q_ASSERT(rec.type == QJDns::Srv);
+
+			host = rec.name;
+			port = rec.port;
+
+			srvState = AddressWait;
+			opTimer->start(5000);
+
+			req.query(host, QJDns::A);
+			req6.query(host, QJDns::Aaaa);
 		}
 		else
 		{
-			if(mode2)
+			// in the other states, req is used for A records
+
+			Q_ASSERT(rec.type == QJDns::A);
+
+			addr4 = rec.address;
+			have4 = true;
+
+			tryDone();
+		}
+	}
+
+	void req6_ready()
+	{
+		QJDns::Record rec = req6.results().first();
+		req6.cancel();
+
+		Q_ASSERT(rec.type == QJDns::Aaaa);
+
+		addr6 = rec.address;
+		have6 = true;
+
+		tryDone();
+	}
+
+	void op_timeout()
+	{
+		if(srvState == Srv)
+		{
+			// timeout getting SRV.  it is possible that we could
+			//   have obtained the TXT record, but if SRV times
+			//   out then we consider the whole job to have
+			//   failed.
+			cleanup();
+			emit error();
+		}
+		else if(srvState == AddressWait)
+		{
+			// timeout while waiting for both A and AAAA.  we now
+			//   switch to the AddressFirstCome state, where an
+			//   answer for either will do
+
+			srvState = AddressFirstCome;
+
+			// if we have at least one of these, we're done
+			if(have4 || have6)
 			{
-				QJDns::Record rec = req->results().first();
-
-				addr = rec.address;
-
-				delete req;
-				req = 0;
-
-				//printf("resolve done\n");
-				emit finished();
-				return;
+				// well, almost.  we might still be waiting
+				//   for the TXT record
+				if(tryDone())
+					return;
 			}
 
-			QJDns::Record rec = req->results().first();
+			// if we are here, then it means we are missing TXT
+			//   still, or we have neither A nor AAAA.
 
-			attribs.clear();
-			if(!rec.texts.isEmpty())
+			// wait 3 more seconds
+			opTimer->start(3000);
+		}
+		else // AddressFirstCome
+		{
+			// last chance!
+			if(!tryDone())
 			{
-				if(rec.texts.count() != 1 || !rec.texts[0].isEmpty())
-					attribs = rec.texts;
+				cleanup();
+				emit error();
 			}
-
-			/*if(attribs.isEmpty())
-			{
-				printf("  No attributes\n");
-			}
-			else
-			{
-				printf("  Attributes:\n", attribs.count());
-				for(int n = 0; n < attribs.count(); ++n)
-					printf("    [%s]\n", attribs[n].data());
-			}*/
-
-			delete req;
-			req = 0;
-
-			//printf("Instance Available!\n");
-			emit finished();
 		}
 	}
 };
@@ -752,7 +850,15 @@ public:
 	JDnsShared *jdns;
 	JDnsSharedRequest *req;
 	QByteArray type;
-	QList<JDnsBrowseLookup*> lookups;
+
+	class Lookup
+	{
+	public:
+		QByteArray instance;
+		QByteArray name;
+		JDnsServiceResolve *resolve;
+	};
+	QList<Lookup> lookups;
 
 	JDnsBrowse(JDnsShared *_jdns)
 	{
@@ -762,7 +868,9 @@ public:
 
 	~JDnsBrowse()
 	{
-		qDeleteAll(lookups);
+		foreach(const Lookup &lu, lookups)
+			delete lu.resolve;
+		//qDeleteAll(lookups);
 		delete req;
 	}
 
@@ -791,18 +899,21 @@ private slots:
 		if(rec.ttl == 0)
 		{
 			// stop any lookups
-			JDnsBrowseLookup *bl = 0;
+			JDnsServiceResolve *bl = 0;
+			int at = -1;
 			for(int n = 0; n < lookups.count(); ++n)
 			{
-				if(lookups[n]->name == name)
+				if(lookups[n].name == name)
 				{
-					bl = lookups[n];
+					bl = lookups[n].resolve;
+					at = n;
 					break;
 				}
 			}
 			if(bl)
 			{
-				lookups.removeAll(bl);
+				//lookups.removeAll(bl);
+				lookups.removeAt(at);
 				delete bl;
 			}
 
@@ -814,25 +925,47 @@ private slots:
 		//printf("Instance Found: [%s]\n", instance.data());
 
 		//printf("Lookup starting\n");
-		JDnsBrowseLookup *bl = new JDnsBrowseLookup(jdns);
+		/*JDnsServiceResolve *bl = new JDnsServiceResolve(jdns);
 		connect(bl, SIGNAL(finished()), SLOT(bl_finished()));
-		lookups += bl;
-		bl->instance = instance;
-		bl->start(name);
+		Lookup lu;
+		lu.instance = instance;
+		lu.resolve = bl;
+		lookups += lu;
+		bl->start(name);*/
+
+		JDnsBrowseInfo i;
+		i.name = name;
+		i.instance = instance;
+		//i.srvhost = bl->srvhost;
+		//i.srvport = bl->srvport;
+		//i.attribs = bl->attribs;
+		emit available(i);
 	}
 
 	void bl_finished()
 	{
-		JDnsBrowseLookup *bl = (JDnsBrowseLookup *)sender();
+		JDnsServiceResolve *bl = (JDnsServiceResolve *)sender();
+
+		int at = -1;
+		for(int n = 0; n < lookups.count(); ++n)
+		{
+			if(lookups[n].resolve == bl)
+			{
+				at = n;
+				break;
+			}
+		}
+		if(at == -1)
+			return;
 
 		JDnsBrowseInfo i;
-		i.name = bl->name;
-		i.instance = bl->instance;
-		i.srvhost = bl->srvhost;
-		i.srvport = bl->srvport;
+		i.name = lookups[at].name;
+		i.instance = lookups[at].instance;
+		//i.srvhost = bl->srvhost;
+		//i.srvport = bl->srvport;
 		i.attribs = bl->attribs;
 
-		lookups.removeAll(bl);
+		lookups.removeAt(at);
 		delete bl;
 
 		//printf("Lookup finished\n");
@@ -904,9 +1037,10 @@ public:
 			// TODO
 		}
 
-		JDnsBrowseLookup *bl = new JDnsBrowseLookup(global->mul);
+		JDnsServiceResolve *bl = new JDnsServiceResolve(global->mul);
 		connect(bl, SIGNAL(finished()), SLOT(bl_finished()));
-		bl->start2(name);
+		connect(bl, SIGNAL(error()), SLOT(bl_error()));
+		bl->start(name);
 
 		return 1;
 	}
@@ -1085,17 +1219,65 @@ private slots:
 
 	void bl_finished()
 	{
-		JDnsBrowseLookup *bl = (JDnsBrowseLookup *)sender();
-		QHostAddress addr = bl->addr;
-		int port = bl->srvport;
+		JDnsServiceResolve *bl = (JDnsServiceResolve *)sender();
+		QMap<QString,QByteArray> attribs;
+		for(int n = 0; n < bl->attribs.count(); ++n)
+		{
+			const QByteArray &a = bl->attribs[n];
+			QString key;
+			QByteArray value;
+			int x = a.indexOf('=');
+			if(x != -1)
+			{
+				key = QString::fromLatin1(a.mid(0, x));
+				value = a.mid(x + 1);
+			}
+			else
+			{
+				key = QString::fromLatin1(a);
+			}
+
+			attribs.insert(key, value);
+		}
+
+		QByteArray host = bl->host;
+		bool have6 = bl->have6;
+		bool have4 = bl->have4;
+		QHostAddress addr6 = bl->addr6;
+		QHostAddress addr4 = bl->addr4;
+		int port = bl->port;
 		delete bl;
 
-		ResolveResult r;
-		r.address = addr;
-		r.port = port;
-		emit resolve_resultsReady(1, QList<ResolveResult>() << r);
+		// one of these must be true
+		Q_ASSERT(have4 || have6);
+
+		QList<ResolveResult> results;
+		if(have6)
+		{
+			ResolveResult r;
+			r.attributes = attribs;
+			r.address = addr6;
+			r.port = port;
+			r.hostName = host;
+			results += r;
+		}
+		if(have4)
+		{
+			ResolveResult r;
+			r.attributes = attribs;
+			r.address = addr4;
+			r.port = port;
+			r.hostName = host;
+			results += r;
+		}
+
+		emit resolve_resultsReady(1, results);
 	}
 
+	void bl_error()
+	{
+		printf("resolve error\n");
+	}
 		//connect(&jdns, SIGNAL(published(int)), SLOT(jdns_published(int)));
 
 	/*virtual int publish_start(NameLocalPublisher::Mode pmode, const NameRecord &name)
