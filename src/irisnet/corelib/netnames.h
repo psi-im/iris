@@ -458,7 +458,9 @@ class IRISNET_EXPORT ServiceBrowser : public QObject
 public:
 	enum Error
 	{
-		ErrorGeneric
+		ErrorGeneric,
+		ErrorNoLocal,
+		ErrorNoWide
 	};
 
 	ServiceBrowser(QObject *parent = 0);
