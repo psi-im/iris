@@ -185,8 +185,9 @@ static jdns_response_t *_packet2response(const jdns_packet_t *packet, const unsi
 		put_in_answer = 1;
 		if(qname)
 		{
-			// name must match, type can match or be CNAME
-			if((res->qtype != qtype && res->qtype != JDNS_RTYPE_CNAME) || !jdns_domain_cmp(res->qname->data, qname))
+			// name must match. type must either match or be CNAME,
+			//   unless the query was for any type
+			if((qtype != JDNS_RTYPE_ANY && res->qtype != qtype && res->qtype != JDNS_RTYPE_CNAME) || !jdns_domain_cmp(res->qname->data, qname))
 			{
 				// put unusable records in additional section
 				put_in_answer = 0;
