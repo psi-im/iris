@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006  Justin Karneges
+ * Copyright (C) 2006,2008  Justin Karneges
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -488,7 +488,8 @@ class IRISNET_EXPORT ServiceResolver : public QObject
 public:
 	enum Error
 	{
-		ErrorGeneric
+		ErrorGeneric,
+		ErrorNoLocal
 	};
 
 	ServiceResolver(QObject *parent = 0);
