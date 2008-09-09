@@ -489,6 +489,7 @@ public:
 	enum Error
 	{
 		ErrorGeneric,
+		ErrorTimeout,
 		ErrorNoLocal
 	};
 
