@@ -157,11 +157,11 @@ signals:
 	void resolve_resultsReady(int id, const QList<XMPP::ServiceProvider::ResolveResult> &results);
 	void resolve_error(int id, XMPP::ServiceResolver::Error e);
 
-	// for start or update
+	// update does not cause published() signal to be emitted again
 	void publish_published(int id);
 	void publish_error(int id, XMPP::ServiceLocalPublisher::Error e);
 
-	// for start or update
+	// update does not cause published() signal to be emitted again
 	void publish_extra_published(int id);
 	void publish_extra_error(int id, XMPP::ServiceLocalPublisher::Error e);
 };
