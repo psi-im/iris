@@ -444,6 +444,8 @@ int jdns_publish(jdns_session_t *s, int mode, const jdns_rr_t *rec);
 //   id: the operation id to update
 //   rec: the record data
 //   return: nothing
+// note: update only works on successfully published records, and no event
+//   is generated for a successful update.
 void jdns_update_publish(jdns_session_t *s, int id, const jdns_rr_t *rec);
 
 // jdns_cancel_publish:
