@@ -1005,6 +1005,7 @@ void _jdns_rr_data_reset(jdns_rr_t *r)
 void _jdns_rr_data_copy(const jdns_rr_t *r, jdns_rr_t *c)
 {
 	c->type = r->type;
+	c->qclass = r->qclass;
 	c->rdlength = r->rdlength;
 	c->rdata = jdns_copy_array(r->rdata, r->rdlength);
 
