@@ -287,6 +287,15 @@ void _r_publish(mdnsd d, mdnsdr r)
 // send r out asap
 void _r_send(mdnsd d, mdnsdr r)
 {
+    // removing record
+    if(r->rr.ttl == 0)
+    {
+        if(d->a_publish == r)
+            d->a_publish = r->list;
+        _r_push(&d->a_now, r);
+        return;
+    }
+
     if(r->tries < 4)
     { // being published, make sure that happens soon
         d->publish.tv_sec = d->now.tv_sec; d->publish.tv_usec = d->now.tv_usec;
