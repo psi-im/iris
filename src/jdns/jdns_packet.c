@@ -25,6 +25,14 @@
 
 #include "jdns_p.h"
 
+// maximum length of a sublabel
+#define MAX_SUBLABEL_LENGTH  63
+
+// maximum length of a label, including final terminating zero (root sublabel)
+//   according to RFC 2181, the maximum length is 255, not counting the root
+//   sublabel.  so, with the root sublabel, that means a max length of 256.
+#define MAX_LABEL_LENGTH     256
+
 // jer's endian functions
 static unsigned short int net2short(const unsigned char **bufp)
 {
@@ -125,7 +133,11 @@ static int getoffset(const unsigned char *str, int refsize, int *hopsleft)
 static int readlabel(const unsigned char *in, int insize, const unsigned char *ref, int refsize, int *_at, jdns_string_t **name)
 {
 	int at;
-	unsigned char out[255];
+	// string format is one character smaller than dns format.  e.g.:
+	//   dns:    [7] affinix [3] com [0] = 13 bytes
+	//   string: "affinix.com."          = 12 bytes
+	// only exception is '.' itself, but that won't influence the max.
+	unsigned char out[MAX_LABEL_LENGTH - 1];
 	int out_size;
 	const unsigned char *label, *last;
 	int hopped_yet;
@@ -192,7 +204,7 @@ static int readlabel(const unsigned char *in, int insize, const unsigned char *r
 			goto error;
 
 		// enough dest bytes? (length + dot)
-		if(out_size + label_size + 1 > 255)
+		if(out_size + label_size + 1 > MAX_LABEL_LENGTH - 1)
 			goto error;
 
 		memcpy(out + out_size, label + 1, label_size);
@@ -281,9 +293,9 @@ int jdns_packet_name_isvalid(const unsigned char *name, int size)
 {
 	int n, at, len;
 
-	// at least one byte, no larger than 254 (one byte is gained when
-	//   converting to a label, which has a 255 byte max)
-	if(size < 1 || size > 254)
+	// at least one byte, no larger than MAX_LABEL_LENGTH - 1 (one byte is
+	//   gained when converting to a label)
+	if(size < 1 || size > (MAX_LABEL_LENGTH - 1))
 		return 0;
 
 	// last byte must be a dot
@@ -294,7 +306,7 @@ int jdns_packet_name_isvalid(const unsigned char *name, int size)
 	if(size > 1 && name[0] == '.')
 		return 0;
 
-	// each sublabel must be between 1 and 63 in length
+	// each sublabel must be between 1 and MAX_SUBLABEL_LENGTH in length
 	at = 0;
 	while(1)
 	{
@@ -309,7 +321,7 @@ int jdns_packet_name_isvalid(const unsigned char *name, int size)
 			break;
 
 		len = n - at;
-		if(len < 1 || len > 63)
+		if(len < 1 || len > MAX_SUBLABEL_LENGTH)
 			return 0;
 		at = n + 1; // skip over the dot
 	}
@@ -317,7 +329,7 @@ int jdns_packet_name_isvalid(const unsigned char *name, int size)
 	return 1;
 }
 
-// this function assumes label is pointing to a 255 byte buffer
+// this function assumes label is pointing to a MAX_LABEL_LENGTH byte buffer
 static int name_to_label(const jdns_string_t *name, unsigned char *label)
 {
 	int n, i, at, len;
@@ -342,7 +354,7 @@ static int name_to_label(const jdns_string_t *name, unsigned char *label)
 				break;
 		}
 		len = n - at;
-		if(i + (len + 1) > 255) // length byte + length
+		if(i + (len + 1) > MAX_LABEL_LENGTH) // length byte + length
 			return 0;
 
 		label[i++] = len;
@@ -360,7 +372,7 @@ static int name_to_label(const jdns_string_t *name, unsigned char *label)
 // lookup list is made of jdns_packet_labels
 static int writelabel(const jdns_string_t *name, int at, int left, unsigned char **bufp, jdns_list_t *lookup)
 {
-	unsigned char label[255];
+	unsigned char label[MAX_LABEL_LENGTH];
 	int n, i, len;
 	unsigned char *l;
 	unsigned char *ref;
