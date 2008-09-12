@@ -62,7 +62,7 @@ typedef struct jdns_packet_resource
 	JDNS_OBJECT
 	jdns_string_t *qname;
 	unsigned short int qtype, qclass;
-	unsigned long int ttl;
+	unsigned long int ttl; // 31-bit number, top bit always 0
 	unsigned short int rdlength;
 	unsigned char *rdata;
 

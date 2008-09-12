@@ -1435,7 +1435,7 @@ jdns_rr_t *jdns_rr_from_resource(const jdns_packet_resource_t *pr, const jdns_pa
 	{
 		rr->qclass = pr->qclass;
 		rr->owner = _ustrdup(pr->qname->data);
-		rr->ttl = pr->ttl;
+		rr->ttl = (int)pr->ttl; // pr->ttl is 31-bits, cast is safe
 		rr->rdlength = pr->rdlength;
 		rr->rdata = jdns_copy_array(pr->rdata, pr->rdlength);
 	}

@@ -649,6 +649,13 @@ static int process_rrsection(jdns_list_t *dest, int count, const unsigned char *
 		r->qtype = net2short(&buf);
 		r->qclass = net2short(&buf);
 		r->ttl = net2long(&buf);
+
+		// per RFC 2181, ttl is supposed to be a 31 bit number.  if
+		//   the top bit of the 32 bit field is 1, then entire ttl is
+		//   to be considered 0.
+		if(r->ttl & 0x80000000)
+			r->ttl = 0;
+
 		r->rdlength = net2short(&buf);
 
 		offset = buf - data;
