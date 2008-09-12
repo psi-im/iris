@@ -3184,6 +3184,17 @@ void _multicast_update_publish(jdns_session_t *s, int id, const jdns_rr_t *rr)
 	qtype = pub->qtype;
 	r = pub->rec;
 
+	// expire existing record.  this is mostly needed for shared records
+	//   since unique records already have the cache flush bit and that
+	//   should achieve the same result.  however, since Apple expires
+	//   unique records before updates, so will we.
+	mdnsd_done(s->mdns, r);
+	if(pub->mode == JDNS_PUBLISH_UNIQUE)
+		r = mdnsd_unique(s->mdns, (char *)pub->rr->owner, pub->rr->type, rr->ttl, _multicast_pubresult, s);
+	else
+		r = mdnsd_shared(s->mdns, (char *)pub->rr->owner, pub->rr->type, rr->ttl);
+	pub->rec = r;
+
 	if(!_publish_applyrr(s, r, rr))
 	{
 		_debug_line(s, "attempt to update_publish an unsupported type");
