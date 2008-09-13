@@ -143,6 +143,56 @@ static bool matchRecordExceptTtl(const QJDns::Record &a, const QJDns::Record &b)
 	return false;
 }
 
+static void getHex(unsigned char in, char *hi, char *lo)
+{
+	QString str;
+	str.sprintf("%02x", in);
+	*hi = str[0].toLatin1();
+	*lo = str[1].toLatin1();
+}
+
+static QByteArray getDec(int in)
+{
+	return QString::number(in).toLatin1();
+}
+
+static QByteArray makeReverseName(const QHostAddress &addr)
+{
+	QByteArray out;
+
+	if(addr.protocol() == QAbstractSocket::IPv6Protocol)
+	{
+		Q_IPV6ADDR raw = addr.toIPv6Address();
+		for(int n = 0; n < 32; ++n)
+		{
+			char hi, lo;
+			getHex(raw.c[31 - n], &hi, &lo);
+			out += lo;
+			out += '.';
+			out += hi;
+			out += '.';
+		}
+		out += "ip6.arpa.";
+	}
+	else
+	{
+		quint32 rawi = addr.toIPv4Address();
+		int raw[4];
+		raw[0] = (rawi >> 24) & 0xff;
+		raw[1] = (rawi >> 16) & 0xff;
+		raw[2] = (rawi >>  8) & 0xff;
+		raw[3] = rawi & 0xff;
+		for(int n = 0; n < 4; ++n)
+		{
+			out += getDec(raw[3 - n]);
+			out += '.';
+		}
+		out += "in-addr.arpa.";
+	}
+
+	return out;
+}
+
 //----------------------------------------------------------------------------
 // Handle
 //----------------------------------------------------------------------------
@@ -361,6 +411,14 @@ public:
 		}
 	};
 
+	enum PreprocessMode
+	{
+		None,            // don't muck with anything
+		FillInAddress,   // for A/AAAA
+		FillInPtrOwner6, // for PTR, IPv6
+		FillInPtrOwner4, // for PTR, IPv4
+	};
+
 	JDnsShared *q;
 	JDnsShared::Mode mode;
 	bool shutting_down;
@@ -424,7 +482,7 @@ public:
 			db->d->addDebug(dbname + QString::number(index), lines);
 	}
 
-	QJDns::Record manipulateRecord(const QJDns::Record &in)
+	PreprocessMode determinePpMode(const QJDns::Record &in)
 	{
 		// Note: since our implementation only allows 1 ipv4 and 1 ipv6
 		//   interface to exist, it is safe to publish both kinds of
@@ -439,7 +497,28 @@ public:
 		//   wants us to fill in the blank with our address.
 		if((in.type == QJDns::Aaaa || in.type == QJDns::A) && in.address.isNull())
 		{
+			return FillInAddress;
+		}
+		// publishing our own reverse lookup?  partial owner means
+		//   user wants us to fill in the rest.
+		else if(in.type == QJDns::Ptr && in.owner == ".ip6.arpa.")
+		{
+			return FillInPtrOwner6;
+		}
+		else if(in.type == QJDns::Ptr && in.owner == ".in-addr.arpa.")
+		{
+			return FillInPtrOwner4;
+		}
+
+		return None;
+	}
+
+	QJDns::Record manipulateRecord(const QJDns::Record &in, PreprocessMode ppmode, bool *modified = 0)
+	{
+		if(ppmode == FillInAddress)
+		{
 			QJDns::Record out = in;
+
 			if(in.type == QJDns::Aaaa)
 			{
 				// are we operating on ipv6?
@@ -447,6 +526,8 @@ public:
 				{
 					if(i->addr.protocol() == QAbstractSocket::IPv6Protocol)
 					{
+						if(modified && !(out.address == i->addr))
+							*modified = true;
 						out.address = i->addr;
 						break;
 					}
@@ -459,13 +540,57 @@ public:
 				{
 					if(i->addr.protocol() == QAbstractSocket::IPv4Protocol)
 					{
+						if(modified && !(out.address == i->addr))
+							*modified = true;
 						out.address = i->addr;
 						break;
 					}
 				}
 			}
+
 			return out;
 		}
+		else if(ppmode == FillInPtrOwner6)
+		{
+			QJDns::Record out = in;
+
+			// are we operating on ipv6?
+			foreach(Instance *i, instances)
+			{
+				if(i->addr.protocol() == QAbstractSocket::IPv6Protocol)
+				{
+					QByteArray newOwner = makeReverseName(i->addr);
+					if(modified && !(out.owner == newOwner))
+						*modified = true;
+					out.owner = newOwner;
+					break;
+				}
+			}
+
+			return out;
+		}
+		else if(ppmode == FillInPtrOwner4)
+		{
+			QJDns::Record out = in;
+
+			// are we operating on ipv4?
+			foreach(Instance *i, instances)
+			{
+				if(i->addr.protocol() == QAbstractSocket::IPv4Protocol)
+				{
+					QByteArray newOwner = makeReverseName(i->addr);
+					if(modified && !(out.owner == newOwner))
+						*modified = true;
+					out.owner = newOwner;
+					break;
+				}
+			}
+
+			return out;
+		}
+
+		if(modified)
+			*modified = false;
 		return in;
 	}
 
@@ -505,6 +630,7 @@ public:
 	QByteArray name;
 	int qType;
 	QJDns::PublishMode pubmode;
+	JDnsSharedPrivate::PreprocessMode ppmode;
 	QJDns::Record pubrecord;
 
 	// a single request might have to perform multiple QJDns operations
@@ -774,6 +900,16 @@ bool JDnsSharedPrivate::addInterface(const QHostAddress &addr)
 			}
 			else // Publish
 			{
+				bool modified;
+				obj->d->pubrecord = manipulateRecord(obj->d->pubrecord, obj->d->ppmode, &modified);
+				// if the record changed, update on the other (existing) interfaces
+				if(modified)
+				{
+					foreach(Handle h, obj->d->handles)
+						h.jdns->publishUpdate(h.id, obj->d->pubrecord);
+				}
+
+				// publish the record on the new interface
 				Handle h(i->jdns, i->jdns->publishStart(obj->d->pubmode, obj->d->pubrecord));
 				obj->d->handles += h;
 				requestForHandle.insert(h, obj);
@@ -1002,7 +1138,8 @@ void JDnsSharedPrivate::publishStart(JDnsSharedRequest *obj, QJDns::PublishMode 
 	obj->d->success = false;
 	obj->d->results.clear();
 	obj->d->pubmode = m;
-	obj->d->pubrecord = manipulateRecord(record);
+	obj->d->ppmode = determinePpMode(record);
+	obj->d->pubrecord = manipulateRecord(record, obj->d->ppmode);
 
 	// if we have no QJDns instances to operate on, then error
 	if(instances.isEmpty())
@@ -1031,7 +1168,8 @@ void JDnsSharedPrivate::publishUpdate(JDnsSharedRequest *obj, const QJDns::Recor
 	if(!requests.contains(obj))
 		return;
 
-	obj->d->pubrecord = manipulateRecord(record);
+	obj->d->ppmode = determinePpMode(record);
+	obj->d->pubrecord = manipulateRecord(record, obj->d->ppmode);
 
 	// publish update on all handles for this request
 	foreach(Handle h, obj->d->handles)
