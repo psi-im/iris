@@ -260,7 +260,7 @@ public:
 		connect(&db, SIGNAL(readyRead()), SLOT(jdns_debugReady()));
 
 		updateTimer = new QTimer(this);
-		connect(updateTimer, SIGNAL(timeout()), SLOT(updateMulticastInterfaces()));
+		connect(updateTimer, SIGNAL(timeout()), SLOT(doUpdateMulticastInterfaces()));
 		updateTimer->setSingleShot(true);
 	}
 
@@ -341,10 +341,23 @@ public:
 				ifaces += iface;
 			}
 
-			updateMulticastInterfaces();
+			updateMulticastInterfaces(false);
 		}
 		return mul;
 	}
+
+	bool haveMulticast4() const
+	{
+		return !mul_addr4.isNull();
+	}
+
+	bool haveMulticast6() const
+	{
+		return !mul_addr6.isNull();
+	}
+
+signals:
+	void interfacesChanged();
 
 private slots:
 	void jdns_debugReady()
@@ -376,16 +389,34 @@ private slots:
 		updateTimer->start(100);
 	}
 
-	void updateMulticastInterfaces()
+	void doUpdateMulticastInterfaces()
+	{
+		updateMulticastInterfaces(true);
+	}
+
+private:
+	void updateMulticastInterfaces(bool useSignals)
 	{
 		QHostAddress addr4 = QJDns::detectPrimaryMulticast(QHostAddress::Any);
 		QHostAddress addr6 = QJDns::detectPrimaryMulticast(QHostAddress::AnyIPv6);
 
+		bool had4 = !mul_addr4.isNull();
+		bool had6 = !mul_addr6.isNull();
+
 		updateMulticastInterface(&mul_addr4, addr4);
 		updateMulticastInterface(&mul_addr6, addr6);
+
+		bool have4 = !mul_addr4.isNull();
+		bool have6 = !mul_addr6.isNull();
+
+		// did we gain/lose something?
+		if(had4 != have4 || had6 != have6)
+		{
+			if(useSignals)
+				emit interfacesChanged();
+		}
 	}
 
-private:
 	void updateMulticastInterface(QHostAddress *curaddr, const QHostAddress &newaddr)
 	{
 		if(!(newaddr == *curaddr)) // QHostAddress doesn't have operator!=
@@ -1012,6 +1043,105 @@ private slots:
 // JDnsPublishAddresses
 //----------------------------------------------------------------------------
 
+// helper class for JDnsPublishAddresses.  publishes A+PTR or AAAA+PTR pair.
+class JDnsPublishAddress : public QObject
+{
+	Q_OBJECT
+
+public:
+	enum Type
+	{
+		IPv4,
+		IPv6
+	};
+
+	Type type;
+	QByteArray host;
+	JDnsSharedRequest pub_addr;
+	JDnsSharedRequest pub_ptr;
+	bool success_;
+
+	JDnsPublishAddress(JDnsShared *_jdns, QObject *parent = 0) :
+		QObject(parent),
+		pub_addr(_jdns, this),
+		pub_ptr(_jdns, this)
+	{
+		connect(&pub_addr, SIGNAL(resultsReady()), SLOT(pub_addr_ready()));
+		connect(&pub_ptr, SIGNAL(resultsReady()), SLOT(pub_ptr_ready()));
+	}
+
+	void start(Type _type, const QByteArray &_host)
+	{
+		type = _type;
+		host = _host;
+		success_ = false;
+
+		QJDns::Record rec;
+		if(type == IPv6)
+			rec.type = QJDns::Aaaa;
+		else
+			rec.type = QJDns::A;
+		rec.owner = host;
+		rec.ttl = 120;
+		rec.haveKnown = true;
+		rec.address = QHostAddress(); // null address, will be filled in
+		pub_addr.publish(QJDns::Unique, rec);
+	}
+
+	void cancel()
+	{
+		pub_addr.cancel();
+		pub_ptr.cancel();
+	}
+
+	bool success() const
+	{
+		return success_;
+	}
+
+signals:
+	void resultsReady();
+
+private slots:
+	void pub_addr_ready()
+	{
+		if(pub_addr.success())
+		{
+			QJDns::Record rec;
+			rec.type = QJDns::Ptr;
+			if(type == IPv6)
+				rec.owner = ".ip6.arpa.";
+			else
+				rec.owner = ".in-addr.arpa.";
+			rec.ttl = 120;
+			rec.haveKnown = true;
+			rec.name = host;
+			pub_ptr.publish(QJDns::Shared, rec);
+		}
+		else
+		{
+			pub_ptr.cancel(); // needed if addr fails during or after ptr
+			success_ = false;
+			emit resultsReady();
+		}
+	}
+
+	void pub_ptr_ready()
+	{
+		if(pub_ptr.success())
+		{
+			success_ = true;
+		}
+		else
+		{
+			pub_addr.cancel();
+			success_ = false;
+		}
+
+		emit resultsReady();
+	}
+};
+
 // This class publishes A/AAAA records for the machine, using a derived
 //   hostname (it will use QHostInfo::localHostName(), but append a unique
 //   suffix if necessary).  If there is ever a record conflict, it will
@@ -1029,29 +1159,34 @@ class JDnsPublishAddresses : public QObject
 
 public:
 	bool started;
-	JDnsSharedRequest pub_a;
-	JDnsSharedRequest pub_aaaa;
+	bool use6, use4;
+	JDnsPublishAddress pub6;
+	JDnsPublishAddress pub4;
 	int counter;
 	QByteArray host;
 	bool success;
-	bool haveA, haveAaaa;
+	bool have6, have4;
+	ObjectSession sess;
 
 	JDnsPublishAddresses(JDnsShared *_jdns, QObject *parent = 0) :
 		QObject(parent),
 		started(false),
-		pub_a(_jdns, this),
-		pub_aaaa(_jdns, this)
+		use6(false),
+		use4(false),
+		pub6(_jdns, this),
+		pub4(_jdns, this),
+		sess(this)
 	{
-		connect(&pub_a, SIGNAL(resultsReady()), SLOT(pub_a_ready()));
-		connect(&pub_aaaa, SIGNAL(resultsReady()), SLOT(pub_aaaa_ready()));
+		connect(&pub6, SIGNAL(resultsReady()), SLOT(pub6_ready()));
+		connect(&pub4, SIGNAL(resultsReady()), SLOT(pub4_ready()));
 	}
 
 	void start()
 	{
 		counter = 1;
 		success = false;
-		haveA = false;
-		haveAaaa = false;
+		have6 = false;
+		have4 = false;
 		started = true;
 		tryPublish();
 	}
@@ -1059,6 +1194,78 @@ public:
 	bool isStarted() const
 	{
 		return started;
+	}
+
+	// comments in this method apply to setUseIPv4 as well.
+	void setUseIPv6(bool b)
+	{
+		if(b == use6)
+			return;
+
+		use6 = b;
+		if(!started)
+			return;
+
+		// a "deferred call to doDisable" and "publish operations"
+		//   are mutually exclusive.  thus, a deferred call is only
+		//   invoked when both publishes are canceled, and the
+		//   deferred call is canceled if any of the publishes are
+		//   reinstantiated.
+
+		if(use6)
+		{
+			if(use4)
+			{
+				// if the other is already active, then
+				//   just activate this one without
+				//   recomputing the hostname
+				tryPublish6();
+			}
+			else
+			{
+				sess.reset();
+
+				// otherwise, recompute the hostname
+				tryPublish();
+			}
+		}
+		else
+		{
+			pub6.cancel();
+			have6 = false;
+			if(!use4)
+				sess.defer(this, "doDisable");
+		}
+	}
+
+	void setUseIPv4(bool b)
+	{
+		if(b == use4)
+			return;
+
+		use4 = b;
+		if(!started)
+			return;
+
+		if(use4)
+		{
+			if(use6)
+			{
+				tryPublish4();
+			}
+			else
+			{
+				sess.reset();
+				tryPublish();
+			}
+		}
+		else
+		{
+			pub4.cancel();
+			have4 = false;
+			if(!use6)
+				sess.defer(this, "doDisable");
+		}
 	}
 
 signals:
@@ -1069,32 +1276,35 @@ private:
 	{
 		QString me = QHostInfo::localHostName();
 		if(counter > 1)
-			me += QString(" (%1)").arg(counter);
+			me += QString("-%1").arg(counter);
 
 		host = escapeDomainPart(me.toUtf8()) + ".local.";
 
-		// A
-		QJDns::Record rec;
-		rec.type = QJDns::A;
-		rec.owner = host;
-		rec.ttl = 120;
-		rec.haveKnown = true;
-		rec.address = QHostAddress(); // null address, will be filled in
-		pub_a.publish(QJDns::Unique, rec);
+		if(use6)
+			tryPublish6();
+		if(use4)
+			tryPublish4();
+	}
 
-		// AAAA
-		rec = QJDns::Record();
-		rec.type = QJDns::Aaaa;
-		rec.owner = host;
-		rec.ttl = 120;
-		rec.haveKnown = true;
-		rec.address = QHostAddress(); // null address, will be filled in
-		pub_aaaa.publish(QJDns::Unique, rec);
+	void tryPublish6()
+	{
+		pub6.start(JDnsPublishAddress::IPv6, host);
+	}
+
+	void tryPublish4()
+	{
+		pub4.start(JDnsPublishAddress::IPv4, host);
 	}
 
 	void tryDone()
 	{
-		if(haveA && haveAaaa)
+		bool done = true;
+		if(use6 && !have6)
+			done = false;
+		if(use4 && !have4)
+			done = false;
+
+		if(done)
 		{
 			success = true;
 			emit hostName(host);
@@ -1125,34 +1335,43 @@ private:
 	}
 
 private slots:
-	void pub_a_ready()
+	void doDisable()
 	{
-		if(pub_a.success())
+		bool lostHost = success;
+		success = false;
+
+		if(lostHost)
+			emit hostName(QByteArray());
+	}
+
+	void pub6_ready()
+	{
+		if(pub6.success())
 		{
-			haveA = true;
+			have6 = true;
 			tryDone();
 		}
 		else
 		{
-			haveA = false;
-			haveAaaa = false;
-			pub_aaaa.cancel();
+			have6 = false;
+			have4 = false;
+			pub4.cancel();
 			handleFail();
 		}
 	}
 
-	void pub_aaaa_ready()
+	void pub4_ready()
 	{
-		if(pub_aaaa.success())
+		if(pub4.success())
 		{
-			haveAaaa = true;
+			have4 = true;
 			tryDone();
 		}
 		else
 		{
-			haveAaaa = false;
-			haveA = false;
-			pub_a.cancel();
+			have4 = false;
+			have6 = false;
+			pub6.cancel();
 			handleFail();
 		}
 	}
@@ -1899,6 +2118,7 @@ public:
 		pub_addresses(0)
 	{
 		global = _global;
+		connect(global, SIGNAL(interfacesChanged()), SLOT(interfacesChanged()));
 	}
 
 	~JDnsServiceProvider()
@@ -2030,6 +2250,8 @@ public:
 		{
 			pub_addresses = new JDnsPublishAddresses(global->mul, this);
 			connect(pub_addresses, SIGNAL(hostName(const QByteArray &)), SLOT(pub_addresses_hostName(const QByteArray &)));
+			pub_addresses->setUseIPv6(global->haveMulticast6());
+			pub_addresses->setUseIPv4(global->haveMulticast4());
 			pub_addresses->start();
 		}
 
@@ -2153,6 +2375,15 @@ private:
 	}
 
 private slots:
+	void interfacesChanged()
+	{
+		if(pub_addresses)
+		{
+			pub_addresses->setUseIPv6(global->haveMulticast6());
+			pub_addresses->setUseIPv4(global->haveMulticast4());
+		}
+	}
+
 	void jb_available(const QByteArray &instance)
 	{
 		JDnsBrowse *jb = (JDnsBrowse *)sender();
