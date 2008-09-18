@@ -44,7 +44,7 @@ namespace XMPP
 	{
 		Q_OBJECT
 	public:
-		enum { ErrReject, ErrNeg, ErrConnect, ErrProxy, ErrStream };
+		enum { ErrReject, ErrNeg, ErrConnect, ErrProxy, ErrStream, Err400 };
 		enum { Idle, Requesting, Connecting, WaitingForAccept, Active };
 		~FileTransfer();
 

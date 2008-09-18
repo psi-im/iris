@@ -261,6 +261,8 @@ void FileTransfer::ft_finished()
 		reset();
 		if(ft->statusCode() == 403)
 			error(ErrReject);
+		else if(ft->statusCode() == 400)
+			error(Err400);
 		else
 			error(ErrNeg);
 	}
