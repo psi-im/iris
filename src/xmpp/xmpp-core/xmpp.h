@@ -83,6 +83,8 @@ namespace XMPP
 		QHostAddress peerAddress() const;
 		quint16 peerPort() const;
 
+		virtual QString host() const;
+
 	signals:
 		void connected();
 		void error();
@@ -138,6 +140,7 @@ namespace XMPP
 
 		void setProxy(const Proxy &proxy);
 		void setOptHostPort(const QString &host, quint16 port);
+		void setOptHostsPort(const QStringList &hosts, quint16 port);
 		void setOptProbe(bool);
 		void setOptSSL(bool);
 
@@ -148,6 +151,8 @@ namespace XMPP
 		void done();
 
 		int errorCode() const;
+
+		virtual QString host() const;
 
 	signals:
 		void srvLookup(const QString &server);
@@ -162,6 +167,7 @@ namespace XMPP
 		void bs_error(int);
 		void http_syncStarted();
 		void http_syncFinished();
+		void t_timeout();
 
 	private:
 		class Private;

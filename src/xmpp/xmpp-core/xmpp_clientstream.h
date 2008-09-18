@@ -147,6 +147,9 @@ namespace XMPP
 		void writeDirect(const QString &s);
 		void setNoopTime(int mills);
 
+		// barracuda extension
+		QStringList hosts() const;
+
 	signals:
 		void connected();
 		void securityLayerActivated(int);

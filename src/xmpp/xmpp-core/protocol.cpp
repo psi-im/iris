@@ -1325,6 +1325,13 @@ bool CoreProtocol::normalStep(const QDomElement &e)
 			QDomElement b = e.elementsByTagNameNS(NS_BIND, "bind").item(0).toElement();
 			if(!b.isNull())
 				f.bind_supported = true;
+			QDomElement h = e.elementsByTagNameNS(NS_HOSTS, "hosts").item(0).toElement();
+			if(!h.isNull()) {
+				QDomNodeList l = h.elementsByTagNameNS(NS_HOSTS, "host");
+				for(int n = 0; n < l.count(); ++n)
+					f.hosts += l.item(n).toElement().text();
+				hosts += f.hosts;
+			}
 
 			if(f.tls_supported) {
 #ifdef XMPP_TEST

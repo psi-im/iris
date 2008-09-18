@@ -181,6 +181,7 @@ public:
 	bool haveLocalAddr;
 	QHostAddress localAddr;
 	quint16 localPort;
+	QString connectHost;
 	int minimumSSF, maximumSSF;
 	QString sasl_mech;
 	bool doBinding;
@@ -557,6 +558,7 @@ void ClientStream::write(const Stanza &s)
 
 void ClientStream::cr_connected()
 {
+	d->connectHost = d->conn->host();
 	d->bs = d->conn->stream();
 	connect(d->bs, SIGNAL(connectionClosed()), SLOT(bs_connectionClosed()));
 	connect(d->bs, SIGNAL(delayedCloseFinished()), SLOT(bs_delayedCloseFinished()));
@@ -1085,9 +1087,19 @@ bool ClientStream::handleNeed()
 #ifdef XMPP_DEBUG
 			printf("Need SASL First Step\n");
 #endif
-			// no SASL plugin?  fall back to Simple SASL
-			if(!QCA::isSupported("sasl")) {
+
+			// ensure simplesasl provider is installed
+			bool found = false;
+			foreach(QCA::Provider *p, QCA::providers()) {
+				if(p->name() == "simplesasl") {
+					found = true;
+					break;
+				}
+			}
+			if(!found) {
+				// install with low-priority
 				QCA::insertProvider(createProviderSimpleSASL());
+				QCA::setProviderPriority("simplesasl", 10);
 			}
 
 			d->sasl = new QCA::SASL();
@@ -1121,7 +1133,11 @@ bool ClientStream::handleNeed()
 			else
 				ml = d->client.features.sasl_mechs;
 
+#ifdef IRIS_SASLCONNECTHOST
+			d->sasl->startClient("xmpp", QUrl::toAce(d->connectHost), ml, QCA::SASL::AllowClientSendFirst);
+#else
 			d->sasl->startClient("xmpp", QUrl::toAce(d->server), ml, QCA::SASL::AllowClientSendFirst);
+#endif
 			return false;
 		}
 		case CoreProtocol::NSASLNext: {
@@ -1317,6 +1333,12 @@ void ClientStream::handleError()
 		}
 	}
 }
+
+QStringList ClientStream::hosts() const
+{
+	return d->client.hosts;
+}
+
 
 //----------------------------------------------------------------------------
 // Debug

@@ -35,6 +35,7 @@
 #include <qca.h>
 #include <QList>
 #include <QUrl>
+#include <QTimer>
 #include "safedelete.h"
 #include <libidn/idna.h>
 
@@ -101,6 +102,11 @@ void Connector::setPeerAddress(const QHostAddress &_addr, quint16 _port)
 	haveaddr = true;
 	addr = _addr;
 	port = _port;
+}
+
+QString Connector::host() const
+{
+	return QString();
 }
 
 
@@ -199,15 +205,17 @@ public:
 	SrvResolver srv;
 
 	QString server;
-	QString opt_host;
+	QStringList opt_hosts;
 	int opt_port;
 	bool opt_probe, opt_ssl;
 	Proxy proxy;
 
+	QStringList hostsToTry;
 	QString host;
 	int port;
 	QList<Q3Dns::Server> servers;
 	int errorCode;
+	QString connectHost;
 
 	bool multi, using_srv;
 	bool will_be_ssl;
@@ -215,6 +223,8 @@ public:
 
 	bool aaaa;
 	SafeDelete sd;
+
+	QTimer connectTimeout;
 };
 
 AdvancedConnector::AdvancedConnector(QObject *parent)
@@ -224,6 +234,8 @@ AdvancedConnector::AdvancedConnector(QObject *parent)
 	d->bs = 0;
 	connect(&d->dns, SIGNAL(resultsReady()), SLOT(dns_done()));
 	connect(&d->srv, SIGNAL(resultsReady()), SLOT(srv_done()));
+	connect(&d->connectTimeout, SIGNAL(timeout()), SLOT(t_timeout()));
+	d->connectTimeout.setSingleShot(true);
 	d->opt_probe = false;
 	d->opt_ssl = false;
 	cleanup();
@@ -270,7 +282,15 @@ void AdvancedConnector::setOptHostPort(const QString &host, quint16 _port)
 {
 	if(d->mode != Idle)
 		return;
-	d->opt_host = host;
+	d->opt_hosts = QStringList() << host;
+	d->opt_port = _port;
+}
+
+void AdvancedConnector::setOptHostsPort(const QStringList &_hosts, quint16 _port)
+{
+	if(d->mode != Idle)
+		return;
+	d->opt_hosts = _hosts;
 	d->opt_port = _port;
 }
 
@@ -295,9 +315,11 @@ void AdvancedConnector::connectToServer(const QString &server)
 	if(server.isEmpty())
 		return;
 
+	d->hostsToTry.clear();
 	d->errorCode = 0;
 	d->mode = Connecting;
 	d->aaaa = true;
+	d->connectHost.clear();
 
 	// Encode the servername
 	d->server = QUrl::toAce(server);
@@ -331,8 +353,9 @@ void AdvancedConnector::connectToServer(const QString &server)
 			s->connectToHost(d->proxy.host(), d->proxy.port(), d->proxy.url());
 	}
 	else if (d->proxy.type() == Proxy::HttpConnect) {
-		if(!d->opt_host.isEmpty()) {
-			d->host = d->opt_host;
+		if(!d->opt_hosts.isEmpty()) {
+			d->hostsToTry = d->opt_hosts;
+			d->host = d->hostsToTry.takeFirst();
 			d->port = d->opt_port;
 		}
 		else {
@@ -342,8 +365,9 @@ void AdvancedConnector::connectToServer(const QString &server)
 		do_connect();
 	}
 	else {
-		if(!d->opt_host.isEmpty()) {
-			d->host = d->opt_host;
+		if(!d->opt_hosts.isEmpty()) {
+			d->hostsToTry = d->opt_hosts;
+			d->host = d->hostsToTry.takeFirst();
 			d->port = d->opt_port;
 			do_resolve();
 		}
@@ -436,6 +460,14 @@ void AdvancedConnector::dns_done()
 #ifdef XMPP_DEBUG
 			printf("dns1.3\n");
 #endif
+			if(!d->hostsToTry.isEmpty())
+			{
+				d->aaaa = true;
+				d->host = d->hostsToTry.takeFirst();
+				do_resolve();
+				return;
+			}
+
 			cleanup();
 			d->errorCode = ErrHostNotFound;
 			error();
@@ -445,6 +477,7 @@ void AdvancedConnector::dns_done()
 #ifdef XMPP_DEBUG
 		printf("dns2\n");
 #endif
+		d->connectHost = d->host;
 		d->host = addr.toString();
 		do_connect();
 	}
@@ -452,6 +485,9 @@ void AdvancedConnector::dns_done()
 
 void AdvancedConnector::do_connect()
 {
+	// 5 seconds to connect
+	d->connectTimeout.start(5000);
+
 #ifdef XMPP_DEBUG
 	printf("trying %s:%d\n", d->host.latin1(), d->port);
 #endif
@@ -551,6 +587,8 @@ void AdvancedConnector::srv_done()
 
 void AdvancedConnector::bs_connected()
 {
+	d->connectTimeout.stop();
+
 	if(d->proxy.type() == Proxy::None) {
 		QHostAddress h = (static_cast<BSocket*>(d->bs))->peerAddress();
 		int p = (static_cast<BSocket*>(d->bs))->peerPort();
@@ -558,7 +596,7 @@ void AdvancedConnector::bs_connected()
 	}
 
 	// only allow ssl override if proxy==poll or host:port
-	if((d->proxy.type() == Proxy::HttpPoll || !d->opt_host.isEmpty()) && d->opt_ssl)
+	if((d->proxy.type() == Proxy::HttpPoll || !d->opt_hosts.isEmpty()) && d->opt_ssl)
 		setUseSSL(true);
 	else if(d->will_be_ssl)
 		setUseSSL(true);
@@ -636,6 +674,15 @@ void AdvancedConnector::bs_error(int x)
 		}
 	}
 
+	// try next host, if any
+	if(!d->hostsToTry.isEmpty())
+	{
+		d->aaaa = true;
+		d->host = d->hostsToTry.takeFirst();
+		do_resolve();
+		return;
+	}
+
 	// no-multi or proxy error means we quit
 	if(!d->multi || proxyError) {
 		cleanup();
@@ -677,4 +724,23 @@ void AdvancedConnector::http_syncStarted()
 void AdvancedConnector::http_syncFinished()
 {
 	httpSyncFinished();
+}
+
+void AdvancedConnector::t_timeout()
+{
+	// skip to next host, if there is one
+	if(!d->hostsToTry.isEmpty())
+	{
+		delete d->bs;
+		d->bs = 0;
+
+		d->aaaa = true;
+		d->host = d->hostsToTry.takeFirst();
+		do_resolve();
+	}
+}
+
+QString AdvancedConnector::host() const
+{
+	return d->connectHost;
 }

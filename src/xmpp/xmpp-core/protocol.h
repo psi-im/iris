@@ -39,6 +39,7 @@
 #define NS_BIND     "urn:ietf:params:xml:ns:xmpp-bind"
 #define NS_COMPRESS_FEATURE "http://jabber.org/features/compress"
 #define NS_COMPRESS_PROTOCOL "http://jabber.org/protocol/compress"
+#define NS_HOSTS    "http://barracuda.com/xmppextensions/hosts"
 
 namespace XMPP
 {
@@ -59,6 +60,7 @@ namespace XMPP
 		bool tls_required;
 		QStringList sasl_mechs;
 		QStringList compression_mechs;
+		QStringList hosts;
 	};
 
 	class BasicProtocol : public XmlProtocol
@@ -281,6 +283,7 @@ namespace XMPP
 		bool old;
 
 		StreamFeatures features;
+		QStringList hosts;
 
 		//static QString xmlToString(const QDomElement &e, bool clip=false);
 
