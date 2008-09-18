@@ -141,6 +141,7 @@ namespace XMPP
 		void pres(const Status &);
 		void pres(const Jid &, const Status &);
 		void sub(const Jid &, const QString &subType, const QString& nick = QString());
+		void probe(const Jid &to);
 
 		void onGo();
 
@@ -241,6 +242,7 @@ namespace XMPP
 		~JT_VCard();
 
 		void get(const Jid &);
+		void set(const VCard &);
 		void set(const Jid &, const VCard &);
 
 		const Jid & jid() const;
@@ -266,8 +268,12 @@ namespace XMPP
 		const Form & form() const;
 		const QList<SearchResult> & results() const;
 
+		bool hasXData() const;
+		const XData & xdata() const;
+
 		void get(const Jid &);
 		void set(const Form &);
+		void set(const Jid &, const XData &);
 
 		void onGo();
 		bool take(const QDomElement &x);

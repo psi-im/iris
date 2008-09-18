@@ -635,6 +635,15 @@ void JT_Presence::sub(const Jid &to, const QString &subType, const QString& nick
 	}
 }
 
+void JT_Presence::probe(const Jid &to)
+{
+	type = 2;
+
+	tag = doc()->createElement("presence");
+	tag.setAttribute("to", to.full());
+	tag.setAttribute("type", "probe");
+}
+
 void JT_Presence::onGo()
 {
 	send(tag);
@@ -997,6 +1006,15 @@ const VCard & JT_VCard::vcard() const
 	return d->vcard;
 }
 
+void JT_VCard::set(const VCard &card)
+{
+	type = 1;
+	d->vcard = card;
+	d->jid = "";
+	d->iq = createIQ(doc(), "set", d->jid.full(), id());
+	d->iq.appendChild(card.toXml(doc()) );
+}
+
 void JT_VCard::set(const Jid &j, const VCard &card)
 {
 	type = 1;
@@ -1060,6 +1078,8 @@ public:
 
 	Jid jid;
 	Form form;
+	bool hasXData;
+	XData xdata;
 	QList<SearchResult> resultList;
 };
 
@@ -1079,6 +1099,8 @@ void JT_Search::get(const Jid &jid)
 {
 	type = 0;
 	d->jid = jid;
+	d->hasXData = false;
+	d->xdata = XData();
 	iq = createIQ(doc(), "get", d->jid.full(), id());
 	QDomElement query = doc()->createElement("query");
 	query.setAttribute("xmlns", "jabber:iq:search");
@@ -1089,6 +1111,8 @@ void JT_Search::set(const Form &form)
 {
 	type = 1;
 	d->jid = form.jid();
+	d->hasXData = false;
+	d->xdata = XData();
 	iq = createIQ(doc(), "set", d->jid.full(), id());
 	QDomElement query = doc()->createElement("query");
 	query.setAttribute("xmlns", "jabber:iq:search");
@@ -1105,6 +1129,19 @@ void JT_Search::set(const Form &form)
 	}
 }
 
+void JT_Search::set(const Jid &jid, const XData &form)
+{
+	type = 1;
+	d->jid = jid;
+	d->hasXData = false;
+	d->xdata = XData();
+	iq = createIQ(doc(), "set", d->jid.full(), id());
+	QDomElement query = doc()->createElement("query");
+	query.setAttribute("xmlns", "jabber:iq:search");
+	iq.appendChild(query);
+	query.appendChild(form.toXml(doc(), true));
+}
+
 const Form & JT_Search::form() const
 {
 	return d->form;
@@ -1113,6 +1150,16 @@ const Form & JT_Search::form() const
 const QList<SearchResult> & JT_Search::results() const
 {
 	return d->resultList;
+}
+
+bool JT_Search::hasXData() const
+{
+	return d->hasXData;
+}
+
+const XData & JT_Search::xdata() const
+{
+	return d->xdata;
 }
 
 void JT_Search::onGo()
@@ -1141,6 +1188,10 @@ bool JT_Search::take(const QDomElement &x)
 					d->form.setInstructions(tagContent(i));
 				else if(i.tagName() == "key")
 					d->form.setKey(tagContent(i));
+				else if(i.tagName() == "x" && i.attribute("xmlns") == "jabber:x:data") {
+					d->xdata.fromXml(i);
+					d->hasXData = true;
+				}
 				else {
 					FormField f;
 					if(f.setType(i.tagName())) {
@@ -1179,6 +1230,10 @@ bool JT_Search::take(const QDomElement &x)
 						r.setEmail(tagContent(tag));
 
 					d->resultList += r;
+				}
+				else if(i.tagName() == "x" && i.attribute("xmlns") == "jabber:x:data") {
+					d->xdata.fromXml(i);
+					d->hasXData = true;
 				}
 			}
 		}
