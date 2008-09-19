@@ -63,6 +63,12 @@ bool NameProvider::supportsLongLived() const
 	return false;
 }
 
+bool NameProvider::supportsRecordType(NameRecord::Type type) const
+{
+	Q_UNUSED(type);
+	return false;
+}
+
 void NameProvider::resolve_localResultsReady(int id, const QList<XMPP::NameRecord> &results)
 {
 	Q_UNUSED(id);

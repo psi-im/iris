@@ -104,6 +104,7 @@ public:
 
 	virtual bool supportsSingle() const;
 	virtual bool supportsLongLived() const;
+	virtual bool supportsRecordType(NameRecord::Type type) const;
 
 	virtual int resolve_start(const QByteArray &name, int qType, bool longLived) = 0;
 	virtual void resolve_stop(int id) = 0;

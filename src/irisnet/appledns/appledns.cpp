@@ -634,8 +634,15 @@ public:
 		global->stop_all(this);
 	}
 
-	bool supportsLongLived() const
+	virtual bool supportsLongLived() const
 	{
+		return true;
+	}
+
+	virtual bool supportsRecordType(NameRecord::Type type) const
+	{
+		// all record types supported
+		Q_UNUSED(type);
 		return true;
 	}
 

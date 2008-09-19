@@ -531,17 +531,24 @@ public:
 		delete i;
 	}
 
-	bool supportsSingle() const
+	virtual bool supportsSingle() const
 	{
 		return true;
 	}
 
-	bool supportsLongLived() const
+	virtual bool supportsLongLived() const
 	{
 		if(mode == Local)
 			return true;  // we support long-lived local queries
 		else
 			return false; // we do NOT support long-lived internet queries
+	}
+
+	virtual bool supportsRecordType(NameRecord::Type type) const
+	{
+		// all record types supported
+		Q_UNUSED(type);
+		return true;
 	}
 
 	virtual int resolve_start(const QByteArray &name, int qType, bool longLived)
