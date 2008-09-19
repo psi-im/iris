@@ -63,7 +63,7 @@ bool NameProvider::supportsLongLived() const
 	return false;
 }
 
-bool NameProvider::supportsRecordType(NameRecord::Type type) const
+bool NameProvider::supportsRecordType(int type) const
 {
 	Q_UNUSED(type);
 	return false;

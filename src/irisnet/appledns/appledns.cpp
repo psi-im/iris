@@ -639,7 +639,7 @@ public:
 		return true;
 	}
 
-	virtual bool supportsRecordType(NameRecord::Type type) const
+	virtual bool supportsRecordType(int type) const
 	{
 		// all record types supported
 		Q_UNUSED(type);
