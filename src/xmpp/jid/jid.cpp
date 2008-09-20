@@ -20,7 +20,7 @@
 
 #include "xmpp/jid/jid.h"
 
-#include <QApplication>
+#include <QCoreApplication>
 #include <QByteArray>
 #include <QHash>
 #include <libidn/stringprep.h>
