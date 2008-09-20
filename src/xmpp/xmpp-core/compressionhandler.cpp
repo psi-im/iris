@@ -2,16 +2,17 @@
 #include <QDebug>
 
 #include "compressionhandler.h"
-#include "compress.h"
+#include "xmpp/zlib/zlibcompressor.h"
+#include "xmpp/zlib/zlibdecompressor.h"
 
 CompressionHandler::CompressionHandler()
 	: errorCode_(0)
 {
 	outgoing_buffer_.open(QIODevice::ReadWrite);
-	compressor_ = new Compressor(&outgoing_buffer_);
+	compressor_ = new ZLibCompressor(&outgoing_buffer_);
 	
 	incoming_buffer_.open(QIODevice::ReadWrite);
-	decompressor_ = new Decompressor(&incoming_buffer_);
+	decompressor_ = new ZLibDecompressor(&incoming_buffer_);
 }
 
 CompressionHandler::~CompressionHandler()

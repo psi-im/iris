@@ -4,8 +4,8 @@
 #include <QObject>
 #include <QBuffer>
 
-class Compressor;
-class Decompressor;
+class ZLibCompressor;
+class ZLibDecompressor;
 
 class CompressionHandler : public QObject
 {
@@ -26,8 +26,8 @@ signals:
 	void error();
 
 private: 
-	Compressor* compressor_;
-	Decompressor* decompressor_;
+	ZLibCompressor* compressor_;
+	ZLibDecompressor* decompressor_;
 	QBuffer outgoing_buffer_, incoming_buffer_;
 	int errorCode_;
 };
