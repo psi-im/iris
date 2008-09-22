@@ -1,5 +1,6 @@
 IRIS_BASE = $PWD/../..
 include(../libbase.pri)
+include($$PWD/modules.pri)
 
 QT *= xml network
 
@@ -13,8 +14,10 @@ else {
 
 include($$PWD/../libidn/libidn.pri)
 include($$PWD/cutestuff/cutestuff.pri)
-include($$PWD/jid/jid.pri)
-include($$PWD/zlib/zlib.pri)
+include($$IRIS_XMPP_BASE_MODULE)
+include($$IRIS_XMPP_ZLIB_MODULE)
+include($$IRIS_XMPP_JID_MODULE)
+include($$IRIS_XMPP_SASL_MODULE)
 
 DEFINES += XMPP_TEST
 
