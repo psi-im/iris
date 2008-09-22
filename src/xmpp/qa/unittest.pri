@@ -12,3 +12,8 @@ TARGET = checker
 
 SOURCES += \
 	checker.cpp
+
+QMAKE_EXTRA_TARGETS = check
+check.commands = \$(MAKE) && ./checker
+
+QMAKE_CLEAN += $(QMAKE_TARGET)
