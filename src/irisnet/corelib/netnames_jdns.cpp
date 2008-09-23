@@ -592,6 +592,7 @@ public:
 		{
 			Item *i = new Item(this);
 			i->id = idman.reserveId();
+			i->type = qType;
 			if(longLived)
 			{
 				if(!global->ensure_mul())
@@ -661,21 +662,34 @@ private slots:
 		if(req->success())
 		{
 			QList<NameRecord> out;
-			QList<QJDns::Record> results = req->results();
-			for(int n = 0; n < results.count(); ++n)
+			foreach(const QJDns::Record &r, req->results())
 			{
 				// unless we are asking for all types, only
 				//   accept the type we asked for
-				if(i->type == QJDns::Any || results[n].type == i->type)
+				if(i->type == QJDns::Any || r.type == i->type)
 				{
-					NameRecord rec = importJDNSRecord(results[n]);
+					NameRecord rec = importJDNSRecord(r);
 					if(!rec.isNull())
 						out += rec;
 				}
 			}
-			if(!i->longLived)
+
+			// don't report anything if long-lived gives no results
+			if(i->longLived && out.isEmpty())
+				return;
+
+			// only emit success if we have at least 1 result
+			if(!out.isEmpty())
+			{
+				if(!i->longLived)
+					releaseItem(i);
+				emit resolve_resultsReady(id, out);
+			}
+			else
+			{
 				releaseItem(i);
-			emit resolve_resultsReady(id, out);
+				emit resolve_error(id, NameResolver::ErrorGeneric);
+			}
 		}
 		else
 		{
