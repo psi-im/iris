@@ -222,7 +222,12 @@ public:
 
 	void unload()
 	{
-		qDeleteAll(plugins);
+		// unload in reverse order
+		QList<PluginInstance*> revlist;
+		for(int n = 0; n < plugins.count(); ++n)
+			revlist.prepend(plugins[n]);
+		qDeleteAll(revlist);
+
 		plugins.clear();
 		providers.clear();
 	}
