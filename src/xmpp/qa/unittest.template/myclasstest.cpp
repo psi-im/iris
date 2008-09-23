@@ -25,5 +25,5 @@ class MyClassTest : public QObject
 		}
 };
 
-REGISTER_TEST(MyClassTest);
+QTTESTUTIL_REGISTER_TEST(MyClassTest);
 #include "myclasstest.moc"
