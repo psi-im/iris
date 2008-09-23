@@ -5,6 +5,9 @@ TEMPLATE = lib
 TARGET   = iris
 DESTDIR  = $$IRIS_BASE/lib
 CONFIG  += staticlib create_prl
+OBJECTS_DIR = .obj
+MOC_DIR = .moc
+UI_DIR = .ui
 
 VERSION = 1.0.0
 

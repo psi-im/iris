@@ -1,7 +1,13 @@
+/*
+ * Copyright (C) 2008  Remko Troncon
+ * See COPYING for license details.
+ */
+
 #ifndef INCREMENTINGRANDOMNUMBERGENERATOR_H
 #define INCREMENTINGRANDOMNUMBERGENERATOR_H
 
 #include <QtDebug>
+
 #include "xmpp/base/randomnumbergenerator.h"
 
 namespace XMPP {

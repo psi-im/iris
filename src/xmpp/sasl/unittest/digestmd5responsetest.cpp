@@ -5,15 +5,17 @@
 
 #include <QObject>
 #include <QtTest/QtTest>
+#include <QtCrypto>
 
+#include "qttestutil/qttestutil.h"
 #include "xmpp/sasl/digestmd5response.h"
 #include "xmpp/base/unittest/incrementingrandomnumbergenerator.h"
 
 using namespace XMPP;
 
 class DIGESTMD5ResponseTest : public QObject
- {
-     Q_OBJECT
+{
+		Q_OBJECT
 
 	private slots:
 		void testConstructor_WithAuthzid() {
@@ -35,7 +37,7 @@ class DIGESTMD5ResponseTest : public QObject
 
 			QVERIFY(response.isValid());
 			QCOMPARE(response.getValue(), expectedValue);
-		 }
+		}
 
 		void testConstructor_WithoutAuthzid() {
 			DIGESTMD5Response response(
@@ -55,5 +57,11 @@ class DIGESTMD5ResponseTest : public QObject
 			
 			QVERIFY(response.isValid());
 			QCOMPARE(response.getValue(), expectedValue);
-		 }
- };
+		}
+	
+	private:
+		QCA::Initializer initializer;
+};
+
+QTTESTUTIL_REGISTER_TEST(DIGESTMD5ResponseTest);
+#include "digestmd5responsetest.moc"

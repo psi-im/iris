@@ -1,9 +1,16 @@
+#
+# Declares all common settings/includes for a unittest module.
+#
+# Include this file from your module's unittest project file to create a 
+# standalone checker for the module.
+#
+
+include($$PWD/qttestutil/qttestutil.pri)
+include($$PWD/../common.pri)
+
 QT += testlib
 QT -= gui
 CONFIG -= app_bundle
-
-MOC_DIR = .moc
-OBJECTS_DIR = .obj
 
 INCLUDEPATH *= $$PWD
 DEPENDPATH *= $$PWD
@@ -11,7 +18,7 @@ DEPENDPATH *= $$PWD
 TARGET = checker
 
 SOURCES += \
-	checker.cpp
+	$$PWD/checker.cpp
 
 QMAKE_EXTRA_TARGETS = check
 check.commands = \$(MAKE) && ./checker

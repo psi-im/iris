@@ -6,13 +6,14 @@
 #include <QObject>
 #include <QtTest/QtTest>
 
+#include "qttestutil/qttestutil.h"
 #include "xmpp/base/randrandomnumbergenerator.h"
 
 using namespace XMPP;
 
 class RandRandomNumberGeneratorTest : public QObject
- {
-     Q_OBJECT
+{
+		Q_OBJECT
 
 	private slots:
 		void testGenerateNumber() {
@@ -24,3 +25,6 @@ class RandRandomNumberGeneratorTest : public QObject
 			QVERIFY(a != b);
 		}
  };
+
+QTTESTUTIL_REGISTER_TEST(RandRandomNumberGeneratorTest);
+#include "randrandomnumbergeneratortest.moc"
