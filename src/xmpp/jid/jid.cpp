@@ -25,8 +25,8 @@
 #include <QHash>
 #include <libidn/stringprep.h>
 
-
 using namespace XMPP;
+
 
 //----------------------------------------------------------------------------
 // StringPrepCache
@@ -34,24 +34,21 @@ using namespace XMPP;
 class StringPrepCache : public QObject
 {
 public:
-	static bool nameprep(const QString &in, int maxbytes, QString *out)
+	static bool nameprep(const QString &in, int maxbytes, QString& out)
 	{
-		if(in.isEmpty())
-		{
-			if(out)
-				*out = QString();
+		if (in.isEmpty()) {
+			out = QString();
 			return true;
 		}
 
 		StringPrepCache *that = get_instance();
 
 		Result *r = that->nameprep_table[in];
-		if(r)
-		{
-			if(!r->norm)
+		if (r) {
+			if(!r->norm) {
 				return false;
-			if(out)
-				*out = *(r->norm);
+			}
+			out = *(r->norm);
 			return true;
 		}
 
@@ -65,80 +62,69 @@ public:
 
 		QString norm = QString::fromUtf8(cs);
 		that->nameprep_table.insert(in, new Result(norm));
-		if(out)
-			*out = norm;
+		out = norm;
 		return true;
 	}
 
-	static bool nodeprep(const QString &in, int maxbytes, QString *out)
+	static bool nodeprep(const QString &in, int maxbytes, QString& out)
 	{
-		if(in.isEmpty())
-		{
-			if(out)
-				*out = QString();
+		if(in.isEmpty()) {
+      out = QString();
 			return true;
 		}
 
 		StringPrepCache *that = get_instance();
 
 		Result *r = that->nodeprep_table[in];
-		if(r)
-		{
-			if(!r->norm)
+		if(r) {
+			if(!r->norm) {
 				return false;
-			if(out)
-				*out = *(r->norm);
+			}
+			out = *(r->norm);
 			return true;
 		}
 
 		QByteArray cs = in.toUtf8();
 		cs.resize(maxbytes);
-		if(stringprep(cs.data(), maxbytes, (Stringprep_profile_flags)0, stringprep_xmpp_nodeprep) != 0)
-		{
+		if(stringprep(cs.data(), maxbytes, (Stringprep_profile_flags)0, stringprep_xmpp_nodeprep) != 0) {
 			that->nodeprep_table.insert(in, new Result);
 			return false;
 		}
 
 		QString norm = QString::fromUtf8(cs);
 		that->nodeprep_table.insert(in, new Result(norm));
-		if(out)
-			*out = norm;
+		out = norm;
 		return true;
 	}
 
-	static bool resourceprep(const QString &in, int maxbytes, QString *out)
+	static bool resourceprep(const QString &in, int maxbytes, QString& out)
 	{
-		if(in.isEmpty())
-		{
-			if(out)
-				*out = QString();
+		if(in.isEmpty()) {
+      out = QString();
 			return true;
 		}
 
 		StringPrepCache *that = get_instance();
 
 		Result *r = that->resourceprep_table[in];
-		if(r)
-		{
-			if(!r->norm)
+		if(r) {
+			if(!r->norm) {
 				return false;
-			if(out)
-				*out = *(r->norm);
+			}
+			out = *(r->norm);
 			return true;
 		}
 
 		QByteArray cs = in.toUtf8();
 		cs.resize(maxbytes);
-		if(stringprep(cs.data(), maxbytes, (Stringprep_profile_flags)0, stringprep_xmpp_resourceprep) != 0)
-		{
+		if(stringprep(cs.data(), maxbytes, (Stringprep_profile_flags)0, stringprep_xmpp_resourceprep) != 0) {
 			that->resourceprep_table.insert(in, new Result);
 			return false;
 		}
 
 		QString norm = QString::fromUtf8(cs);
 		that->resourceprep_table.insert(in, new Result(norm));
-		if(out)
-			*out = norm;
+		out = norm;
 		return true;
 	}
 
@@ -202,6 +188,22 @@ StringPrepCache *StringPrepCache::instance = 0;
 //----------------------------------------------------------------------------
 // Jid
 //----------------------------------------------------------------------------
+//
+static inline bool validDomain(const QString &s, QString& norm)
+{
+	return StringPrepCache::nameprep(s, 1024, norm);
+}
+
+static inline bool validNode(const QString &s, QString& norm)
+{
+	return StringPrepCache::nodeprep(s, 1024, norm);
+}
+
+static inline bool validResource(const QString &s, QString& norm)
+{
+	return StringPrepCache::resourceprep(s, 1024, norm);
+}
+
 Jid::Jid()
 {
 	valid = false;
@@ -215,6 +217,11 @@ Jid::~Jid()
 Jid::Jid(const QString &s)
 {
 	set(s);
+}
+
+Jid::Jid(const QString &node, const QString& domain, const QString& resource)
+{
+	set(domain, node, resource);
 }
 
 Jid::Jid(const char *s)
@@ -274,7 +281,7 @@ void Jid::set(const QString &s)
 		rest = s;
 		resource = QString();
 	}
-	if(!validResource(resource, &norm_resource)) {
+	if(!validResource(resource, norm_resource)) {
 		reset();
 		return;
 	}
@@ -288,7 +295,7 @@ void Jid::set(const QString &s)
 		node = QString();
 		domain = rest;
 	}
-	if(!validDomain(domain, &norm_domain) || !validNode(node, &norm_node)) {
+	if(!validDomain(domain, norm_domain) || !validNode(node, norm_node)) {
 		reset();
 		return;
 	}
@@ -304,7 +311,7 @@ void Jid::set(const QString &s)
 void Jid::set(const QString &domain, const QString &node, const QString &resource)
 {
 	QString norm_domain, norm_node, norm_resource;
-	if(!validDomain(domain, &norm_domain) || !validNode(node, &norm_node) || !validResource(resource, &norm_resource)) {
+	if(!validDomain(domain, norm_domain) || !validNode(node, norm_node) || !validResource(resource, norm_resource)) {
 		reset();
 		return;
 	}
@@ -321,7 +328,7 @@ void Jid::setDomain(const QString &s)
 	if(!valid)
 		return;
 	QString norm;
-	if(!validDomain(s, &norm)) {
+	if(!validDomain(s, norm)) {
 		reset();
 		return;
 	}
@@ -334,7 +341,7 @@ void Jid::setNode(const QString &s)
 	if(!valid)
 		return;
 	QString norm;
-	if(!validNode(s, &norm)) {
+	if(!validNode(s, norm)) {
 		reset();
 		return;
 	}
@@ -347,7 +354,7 @@ void Jid::setResource(const QString &s)
 	if(!valid)
 		return;
 	QString norm;
-	if(!validResource(s, &norm)) {
+	if(!validResource(s, norm)) {
 		reset();
 		return;
 	}
@@ -392,40 +399,4 @@ bool Jid::compare(const Jid &a, bool compareRes) const
 		return false;
 
 	return true;
-}
-
-bool Jid::validDomain(const QString &s, QString *norm)
-{
-	/*QCString cs = s.utf8();
-	cs.resize(1024);
-	if(stringprep(cs.data(), 1024, (Stringprep_profile_flags)0, stringprep_nameprep) != 0)
-		return false;
-	if(norm)
-		*norm = QString::fromUtf8(cs);
-	return true;*/
-	return StringPrepCache::nameprep(s, 1024, norm);
-}
-
-bool Jid::validNode(const QString &s, QString *norm)
-{
-	/*QCString cs = s.utf8();
-	cs.resize(1024);
-	if(stringprep(cs.data(), 1024, (Stringprep_profile_flags)0, stringprep_xmpp_nodeprep) != 0)
-		return false;
-	if(norm)
-		*norm = QString::fromUtf8(cs);
-	return true;*/
-	return StringPrepCache::nodeprep(s, 1024, norm);
-}
-
-bool Jid::validResource(const QString &s, QString *norm)
-{
-	/*QCString cs = s.utf8();
-	cs.resize(1024);
-	if(stringprep(cs.data(), 1024, (Stringprep_profile_flags)0, stringprep_xmpp_resourceprep) != 0)
-		return false;
-	if(norm)
-		*norm = QString::fromUtf8(cs);
-	return true;*/
-	return StringPrepCache::resourceprep(s, 1024, norm);
 }

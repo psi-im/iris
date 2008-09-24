@@ -11,3 +11,6 @@ SOURCES += \
 # user of libidn, and many modules include this module, we include this
 # module here
 include($$PWD/../../libidn/libidn.pri)
+
+# Remove this
+DEFINES += IRIS_XMPP_JID_DEPRECATED

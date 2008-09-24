@@ -1032,7 +1032,7 @@ void JT_VCard::onGo()
 bool JT_VCard::take(const QDomElement &x)
 {
 	Jid to = d->jid;
-	if (to.userHost() == client()->jid().userHost())
+	if (to.bare() == client()->jid().bare())
 		to = client()->host();
 	if(!iqVerify(x, to, id()))
 		return false;

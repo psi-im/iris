@@ -966,9 +966,8 @@ bool CoreProtocol::dialbackStep(const QDomElement &e)
 	if(!e.isNull()) {
 		if(e.namespaceURI() == NS_DIALBACK) {
 			if(e.tagName() == "result") {
-				Jid to, from;
-				to.set(e.attribute("to"), "");
-				from.set(e.attribute("from"), "");
+				Jid to(Jid(e.attribute("to")).domain());
+				Jid from(Jid(e.attribute("from")).domain());
 				if(isIncoming()) {
 					QString key = e.text();
 					// TODO: report event
@@ -990,9 +989,8 @@ bool CoreProtocol::dialbackStep(const QDomElement &e)
 				}
 			}
 			else if(e.tagName() == "verify") {
-				Jid to, from;
-				to.set(e.attribute("to"), "");
-				from.set(e.attribute("from"), "");
+				Jid to(Jid(e.attribute("to")).domain());
+				Jid from(Jid(e.attribute("from")).domain());
 				QString id = e.attribute("id");
 				if(isIncoming()) {
 					QString key = e.text();
