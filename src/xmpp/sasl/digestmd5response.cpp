@@ -11,6 +11,7 @@
 
 #include "xmpp/sasl/digestmd5proplist.h"
 #include "xmpp/base/randomnumbergenerator.h"
+#include "xmpp/base64/base64.h"
 
 namespace XMPP {
 
@@ -32,7 +33,7 @@ DIGESTMD5Response::DIGESTMD5Response(const QByteArray& challenge, const QString&
 	for(int n = 0; n < (int)a.size(); ++n) {
 		a[n] = (char) rand.generateNumberBetween(0, 255); 
 	}
-	QByteArray cnonce = QCA::Base64().arrayToString(a).toLatin1();
+	QByteArray cnonce = Base64::encode(a).toLatin1();
 
 	// make other variables
 	if (realm.isEmpty()) {
