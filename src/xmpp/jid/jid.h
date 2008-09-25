@@ -23,6 +23,12 @@
 
 #include <QString>
 
+#ifdef IRIS_XMPP_JID_DEPRECATED
+#define IRIS_XMPP_JID_DECL_DEPRECATED Q_DECL_DEPRECATED
+#else
+#define IRIS_XMPP_JID_DECL_DEPRECATED
+#endif
+
 namespace XMPP 
 {
 	class Jid
@@ -52,22 +58,21 @@ namespace XMPP
 		bool compare(const Jid &a, bool compareRes=true) const;
 
 #ifdef IRIS_XMPP_JID_DEPRECATED
-		// TODO: kill these later
-		const QString & host() const { return d; }
-		const QString & user() const { return n; }
-		const QString & userHost() const { return b; }
+		IRIS_XMPP_JID_DECL_DEPRECATED const QString & host() const { return d; }
+		IRIS_XMPP_JID_DECL_DEPRECATED const QString & user() const { return n; }
+		IRIS_XMPP_JID_DECL_DEPRECATED const QString & userHost() const { return b; }
 #endif
 
 	private:
 #ifdef IRIS_XMPP_JID_DEPRECATED
 	public:
 #endif
-		void set(const QString &s);
-		void set(const QString &domain, const QString &node, const QString &resource="");
+		IRIS_XMPP_JID_DECL_DEPRECATED void set(const QString &s);
+		IRIS_XMPP_JID_DECL_DEPRECATED void set(const QString &domain, const QString &node, const QString &resource="");
 
-		void setDomain(const QString &s);
-		void setNode(const QString &s);
-		void setResource(const QString &s);
+		IRIS_XMPP_JID_DECL_DEPRECATED void setDomain(const QString &s);
+		IRIS_XMPP_JID_DECL_DEPRECATED void setNode(const QString &s);
+		IRIS_XMPP_JID_DECL_DEPRECATED void setResource(const QString &s);
 
 	private:
 		void reset();

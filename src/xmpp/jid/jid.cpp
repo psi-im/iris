@@ -18,6 +18,7 @@
  *
  */
 
+#undef IRIS_XMPP_JID_DEPRECATED
 #include "xmpp/jid/jid.h"
 
 #include <QCoreApplication>
