@@ -163,7 +163,7 @@ private:
 	}
 
 	StringPrepCache()
-		: QObject(qApp)
+		: QObject(QCoreApplication::instance())
 	{
 	}
 
