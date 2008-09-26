@@ -1,5 +1,8 @@
 # common stuff for iris.pro and iris.pri
 
+# FIXME: Remove this
+DEFINES += IRIS_XMPP_JID_DEPRECATED
+
 # default build configuration
 !iris_build_pri {
 	# build appledns on mac
