@@ -11,8 +11,6 @@ UI_DIR = .ui
 
 VERSION = 1.0.0
 
-!qca-static:CONFIG += crypto
-
 # static targets don't pick up prl defines
 DEFINES += IRISNET_STATIC
 
