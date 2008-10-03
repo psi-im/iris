@@ -176,7 +176,7 @@ class Features::FeatureName : public QObject
 
 public:
 	FeatureName()
-	: QObject(qApp)
+	: QObject(QCoreApplication::instance())
 	{
 		id2s[FID_Invalid]	= tr("ERROR: Incorrect usage of Features class");
 		id2s[FID_None]		= tr("None");
