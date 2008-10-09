@@ -763,6 +763,7 @@ void ClientStream::sasl_error()
 #endif
 	// has to be auth error
 	int x = convertedSASLCond();
+	d->errText = tr("Offered mechanisms: ") + d->client.features.sasl_mechs.join(", ");
 	reset();
 	d->errCond = x;
 	error(ErrAuth);
