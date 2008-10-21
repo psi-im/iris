@@ -701,7 +701,11 @@ static int my_res_init()
 }
 #endif
 
-#ifdef __res_state_ext
+// on some platforms, __res_state_ext exists as a struct but it is not
+//   a define, so the #ifdef doesn't work.  as a workaround, we'll explicitly
+//   specify the platforms that have __res_state_ext
+//#ifdef __res_state_ext
+#if defined(JDNS_OS_MAC) || defined(JDNS_OS_FREEBSD)
 # define USE_EXTEXT
 #endif
 
