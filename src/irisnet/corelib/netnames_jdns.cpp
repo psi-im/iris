@@ -1296,6 +1296,15 @@ private:
 	void tryPublish()
 	{
 		QString me = QHostInfo::localHostName();
+
+		// some hosts may already have ".local" in their name
+		if(me.endsWith(".local"))
+			me.truncate(me.length() - 6);
+
+		// prefix our hostname so we don't conflict with a system
+		//   mdns daemon
+		me.prepend("jdns-");
+
 		if(counter > 1)
 			me += QString("-%1").arg(counter);
 
