@@ -2216,10 +2216,18 @@ int _unicast_do_reads(jdns_session_t *s, int now)
 				jdns_address_delete(m6);
 			}
 
-			// if there is no suitable name server, don't accept
-			//   as a reply
+			// no suitable name server
 			if(!ns)
-				q = 0;
+			{
+				// setting q = 0 causes the response to be
+				//   ignored.  earlier versions of jdns would
+				//   do this, but now we comment it out because
+				//   the behavior is too strict.
+				//q = 0;
+
+				// instead we'll just print a warning
+				_debug_line(s, "warning: response from unexpected nameserver");
+			}
 		}
 
 		jdns_address_delete(addr);
