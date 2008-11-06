@@ -18,7 +18,7 @@ DEPENDPATH *= $$PWD
 TARGET = checker
 
 SOURCES += \
-	$$PWD/checker.cpp
+	$$PWD/qttestutil/simplechecker.cpp
 
 QMAKE_EXTRA_TARGETS = check
 check.commands = \$(MAKE) && ./checker
