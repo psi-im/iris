@@ -347,14 +347,17 @@ namespace XMPP
 		bool take(const QDomElement &);
 
 		Jid jid() const;
+
 		QString desc() const;
 		QString prompt() const;
+		Jid translatedJid() const;
 
 	private:
 		QDomElement iq;
 
 		int type;
 		Jid v_jid;
+		Jid v_translatedJid;
 		QString v_prompt, v_desc;
 	};
 

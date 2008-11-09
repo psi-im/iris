@@ -1580,6 +1580,11 @@ QString JT_Gateway::prompt() const
 	return v_prompt;
 }
 
+Jid JT_Gateway::translatedJid() const
+{
+	return v_translatedJid;
+}
+
 bool JT_Gateway::take(const QDomElement &x)
 {
 	if(!iqVerify(x, v_jid, id()))
@@ -1591,19 +1596,28 @@ bool JT_Gateway::take(const QDomElement &x)
 			bool found;
 			QDomElement tag;
 			tag = findSubTag(query, "desc", &found);
-			if(found)
+			if (found) {
 				v_desc = tagContent(tag);
+			}
 			tag = findSubTag(query, "prompt", &found);
-			if(found)
+			if (found) {
 				v_prompt = tagContent(tag);
+			}
 		}
 		else {
 			QDomElement query = queryTag(x);
 			bool found;
 			QDomElement tag;
+			tag = findSubTag(query, "jid", &found);
+			if (found) {
+				v_translatedJid = tagContent(tag);
+			}
+			// we used to read 'prompt' in the past
+			// and some gateways still send it
 			tag = findSubTag(query, "prompt", &found);
-			if(found)
+			if (found) {
 				v_prompt = tagContent(tag);
+			}
 		}
 
 		setSuccess();
