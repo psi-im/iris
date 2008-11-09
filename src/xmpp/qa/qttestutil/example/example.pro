@@ -17,7 +17,7 @@ SOURCES += \
 
 # Add an extra 'make check' target.
 QMAKE_EXTRA_TARGETS = check
-check.commands = \$(MAKE) && ./checker
+check.commands = \$(MAKE) && ./$(QMAKE_TARGET)
 
 # Cleanup the checker on 'make clean'
 QMAKE_CLEAN += $(QMAKE_TARGET)
