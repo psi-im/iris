@@ -1,0 +1,10 @@
+Makefile
+*.o
+*.moc
+moc_*.cpp
+/conf.log
+/conf.pri
+/configure
+/bin
+/lib
+/plugins
