@@ -17,8 +17,10 @@
  *
  */
 
-#include "xmpp/jid/jid.h"
 #include "xmpp_stanza.h"
+
+#include <QCoreApplication>
+#include "xmpp/jid/jid.h"
 #include "xmpp_stream.h"
 
 using namespace XMPP;
@@ -171,7 +173,8 @@ public:
 	{
 		for(int n = 0; errorDescriptions[n].str; ++n) {
 			if(x == errorDescriptions[n].cond)
-				return QPair<QString,QString>(QObject::tr(errorDescriptions[n].name), QObject::tr(errorDescriptions[n].str));
+				return QPair<QString, QString>(QCoreApplication::translate("Stanza::Error::Private", errorDescriptions[n].name),
+				                               QCoreApplication::translate("Stanza::Error::Private", errorDescriptions[n].str));
 		}
 		return QPair<QString,QString>();
 	}
