@@ -10,7 +10,6 @@ Install
   First, build Iris:
 
     Unix:
-      qconf
       ./configure
       make
 
