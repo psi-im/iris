@@ -56,6 +56,9 @@ namespace XMPP
 		bool isValid() const;
 		bool isEmpty() const;
 		bool compare(const Jid &a, bool compareRes=true) const;
+		inline bool operator==(const Jid &other) const { return compare(other, true); }
+		inline bool operator!=(const Jid &other) const { return !(*this == other); }
+
 
 #ifdef IRIS_XMPP_JID_DEPRECATED
 		IRIS_XMPP_JID_DECL_DEPRECATED const QString & host() const { return d; }
