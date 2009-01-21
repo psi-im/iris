@@ -23,6 +23,8 @@
 #include <iris/netinterface.h>
 #include <iris/netavailability.h>
 #include <iris/netnames.h>
+#include <iris/stunmessage.h>
+#include <QtCrypto>
 
 using namespace XMPP;
 
@@ -384,7 +386,269 @@ private slots:
 	}
 };
 
-#include "main.moc"
+// pass valid magic and id pointers to do XOR-MAPPED-ADDRESS processing
+// pass 0 for magic and id to do MAPPED-ADDRESS processing
+static bool parse_mapped_address(const QByteArray &val, const quint8 *magic, const quint8 *id, QHostAddress *addr, quint16 *port)
+{
+	// val is at least 4 bytes
+	if(val.size() < 4)
+		return false;
+
+	const quint8 *p = (const quint8 *)val.data();
+
+	if(p[0] != 0)
+		return false;
+
+	quint16 _port;
+	if(magic)
+	{
+		_port = p[2] ^ magic[0];
+		_port <<= 8;
+		_port += p[3] ^ magic[1];
+	}
+	else
+	{
+		_port = p[2];
+		_port <<= 8;
+		_port += p[3];
+	}
+
+	QHostAddress _addr;
+
+	if(p[1] == 0x01)
+	{
+		// ipv4
+
+		// val is 8 bytes in this case
+		if(val.size() != 8)
+			return false;
+
+		quint32 addr4;
+		if(magic)
+		{
+			addr4 = p[4] ^ magic[0];
+			addr4 <<= 8;
+			addr4 += p[5] ^ magic[1];
+			addr4 <<= 8;
+			addr4 += p[6] ^ magic[2];
+			addr4 <<= 8;
+			addr4 += p[7] ^ magic[3];
+		}
+		else
+		{
+			addr4 = p[4];
+			addr4 <<= 8;
+			addr4 += p[5];
+			addr4 <<= 8;
+			addr4 += p[6];
+			addr4 <<= 8;
+			addr4 += p[7];
+		}
+		_addr = QHostAddress(addr4);
+	}
+	else if(p[1] == 0x02)
+	{
+		// ipv6
+
+		// val is 20 bytes in this case
+		if(val.size() != 20)
+			return false;
+
+		quint8 tmp[16];
+		for(int n = 0; n < 16; ++n)
+		{
+			quint8 x;
+			if(n < 4)
+				x = magic[n];
+			else
+				x = id[n - 4];
+
+			tmp[n] = p[n + 4] ^ x;
+		}
+
+		_addr = QHostAddress(tmp);
+	}
+	else
+		return false;
+
+	*addr = _addr;
+	*port = _port;
+	return true;
+}
+
+class StunBinding : public QObject
+{
+	Q_OBJECT
+public:
+	QHostAddress addr;
+	int port;
+	int localPort;
+	QUdpSocket *sock;
+	QTimer *t;
+	int rto, rc, rm;
+	int tries;
+	int last_interval;
+	StunMessage outMessage;
+	QByteArray packet;
+
+public slots:
+	void start()
+	{
+		sock = new QUdpSocket(this);
+		connect(sock, SIGNAL(readyRead()), SLOT(sock_readyRead()));
+
+		t = new QTimer(this);
+		connect(t, SIGNAL(timeout()), SLOT(t_timeout()));
+		t->setSingleShot(true);
+
+		if(!sock->bind(localPort != -1 ? localPort : 0))
+		{
+			printf("Error binding to local port.\n");
+			emit quit();
+			return;
+		}
+
+		printf("Bound to local port %d.\n", sock->localPort());
+
+		QByteArray id = QCA::Random::randomArray(12).toByteArray();
+
+		outMessage.setClass(StunMessage::Request);
+		outMessage.setMethod(0x001);
+		outMessage.setId((const quint8 *)id.data());
+
+		packet = outMessage.toBinary();
+		if(packet.isEmpty())
+		{
+			printf("Error serializing STUN message.\n");
+			emit quit();
+			return;
+		}
+
+		// default RTO/Rc/Rm values from RFC 5389
+		rto = 500;
+		rc = 7;
+		rm = 16;
+		tries = 0;
+		last_interval = rm * rto;
+		trySend();
+	}
+
+signals:
+	void quit();
+
+private slots:
+	void sock_readyRead()
+	{
+		QByteArray buf(sock->pendingDatagramSize(), 0);
+		QHostAddress from;
+		quint16 fromPort;
+
+		sock->readDatagram(buf.data(), buf.size(), &from, &fromPort);
+		if(from == addr && fromPort == port)
+		{
+			StunMessage message = StunMessage::fromBinary(buf);
+			if(message.isNull())
+			{
+				printf("Server responded with what doesn't seem to be a STUN packet, skipping.\n");
+				return;
+			}
+
+			if(message.mclass() != StunMessage::SuccessResponse && message.mclass() != StunMessage::ErrorResponse)
+			{
+				printf("Error: received unexpected message class type, skipping.\n");
+				return;
+			}
+
+			if(memcmp(message.id(), outMessage.id(), 12) != 0)
+			{
+				printf("Error: received unexpected transaction id, skipping.\n");
+				return;
+			}
+
+			if(message.mclass() == StunMessage::ErrorResponse)
+			{
+				printf("Error: server responded with an error.\n");
+				t->stop();
+				emit quit();
+				return;
+			}
+
+			QHostAddress saddr;
+			quint16 sport = 0;
+
+			QByteArray val;
+			val = message.attribute(0x0020);
+			if(!val.isNull())
+			{
+				if(!parse_mapped_address(val, message.magic(), message.id(), &saddr, &sport))
+				{
+					printf("Error parsing XOR-MAPPED-ADDRESS response.\n");
+					t->stop();
+					emit quit();
+					return;
+				}
+			}
+			else
+			{
+				val = message.attribute(0x0001);
+				if(!val.isNull())
+				{
+					if(!parse_mapped_address(val, 0, 0, &saddr, &sport))
+					{
+						printf("Error parsing MAPPED-ADDRESS response.\n");
+						t->stop();
+						emit quit();
+						return;
+					}
+				}
+				else
+				{
+					printf("Error: response does not contain XOR-MAPPED-ADDRESS or MAPPED-ADDRESS.\n");
+					t->stop();
+					emit quit();
+					return;
+				}
+			}
+
+			printf("Server says we are %s;%d\n", qPrintable(saddr.toString()), sport);
+			t->stop();
+			emit quit();
+		}
+		else
+		{
+			printf("Response from unknown sender %s:%d, dropping.\n", qPrintable(from.toString()), fromPort);
+		}
+	}
+
+	void t_timeout()
+	{
+		if(tries == rc)
+		{
+			printf("Error: Timeout\n");
+			t->stop();
+			emit quit();
+			return;
+		}
+
+		trySend();
+	}
+
+	void trySend()
+	{
+		++tries;
+		sock->writeDatagram(packet, addr, port);
+
+		if(tries == rc)
+		{
+			t->start(last_interval);
+		}
+		else
+		{
+			t->start(rto);
+			rto *= 2;
+		}
+	}
+};
 
 void usage()
 {
@@ -398,7 +662,8 @@ void usage()
 	printf(" rservi [instance] [service type]                look up browsed instance\n");
 	printf(" rservd [domain] [service type]                  look up normal SRV\n");
 	printf(" rservp [domain] [port]                          look up non-SRV\n");
-	printf(" pserv  [inst] [type] [port] (attr) (-a [rec])   publish service instance\n");
+	printf(" pserv [inst] [type] [port] (attr) (-a [rec])    publish service instance\n");
+	printf(" stun [addr](;port) (local port)                 STUN binding\n");
 	printf("\n");
 	printf("record types: a aaaa ptr srv mx txt hinfo null\n");
 	printf("service types: _service._proto format (e.g. \"_xmpp-client._tcp\")\n");
@@ -410,6 +675,7 @@ void usage()
 
 int main(int argc, char **argv)
 {
+	QCA::Initializer qcaInit;
 	QCoreApplication app(argc, argv);
 	if(argc < 2)
 	{
@@ -595,6 +861,47 @@ int main(int argc, char **argv)
 		QTimer::singleShot(0, &a, SLOT(start()));
 		app.exec();
 	}
+	else if(args[0] == "stun")
+	{
+		if(args.count() < 2)
+		{
+			usage();
+			return 1;
+		}
+
+		QString addrstr, portstr;
+		int x = args[1].indexOf(';');
+		if(x != -1)
+		{
+			addrstr = args[1].mid(0, x);
+			portstr = args[1].mid(x + 1);
+		}
+		else
+			addrstr = args[1];
+
+		QHostAddress addr = QHostAddress(addrstr);
+		if(addr.isNull())
+		{
+			printf("Error: addr must be an IP address\n");
+			return 1;
+		}
+
+		int port = 3478;
+		if(!portstr.isEmpty())
+			port = portstr.toInt();
+
+		int localPort = -1;
+		if(args.count() >= 3)
+			localPort = args[2].toInt();
+
+		StunBinding a;
+		a.localPort = localPort;
+		a.addr = addr;
+		a.port = port;
+		QObject::connect(&a, SIGNAL(quit()), &app, SLOT(quit()));
+		QTimer::singleShot(0, &a, SLOT(start()));
+		app.exec();
+	}
 	else
 	{
 		usage();
@@ -602,3 +909,5 @@ int main(int argc, char **argv)
 	}
 	return 0;
 }
+
+#include "main.moc"

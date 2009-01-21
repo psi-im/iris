@@ -12,9 +12,11 @@ else {
 INCLUDEPATH += $$PWD/../corelib
 
 HEADERS += \
-	$$PWD/processquit.h
+	$$PWD/processquit.h \
+	$$PWD/stunmessage.h
 
 SOURCES += \
-	$$PWD/processquit.cpp
+	$$PWD/processquit.cpp \
+	$$PWD/stunmessage.cpp
 
 include(legacy/legacy.pri)
