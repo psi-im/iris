@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008  Barracuda Networks, Inc.
+ * Copyright (C) 2009  Barracuda Networks, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -160,56 +160,18 @@ static quint32 read32(const quint8 *in)
 	return out;
 }
 
-static void write16(quint8 *out, quint16 in)
+static void write16(quint8 *out, quint16 i)
 {
-	out[0] = (in >> 8) & 0xff;
-	out[1] = in & 0xff;
+	out[0] = (i >> 8) & 0xff;
+	out[1] = i & 0xff;
 }
 
-// note: because the attribute area of the packet has a maximum size of
-//   2^16-1, and each attribute itself has a 4 byte header, it follows that
-//   the maximum size of an attribute's value is 2^16-5.  this means that,
-//   even if padded with up to 3 bytes, the physical size of an attribute's
-//   value will not overflow a 16-bit unsigned integer.
-static quint16 round_up_length(quint16 in)
+static void write32(quint8 *out, quint32 i)
 {
-	Q_ASSERT(in <= 65530);
-	quint16 out = in;
-	quint16 remainder = out % 4;
-	if(remainder != 0)
-		out += (4 - remainder);
-	return out;
-}
-
-// buf    = entire stun packet
-// offset = byte index of current attribute (first is offset=20)
-// type   = take attribute type
-// len    = take attribute value length (value is at offset + 4)
-// returns offset of next attribute, -1 if no more
-static int get_attribute_props(const QByteArray &buf, int offset, quint16 *type, int *len)
-{
-	Q_ASSERT(offset >= 20);
-
-	const quint8 *p = (const quint8 *)buf.data();
-
-	// need at least 4 bytes for an attribute
-	if(offset + 4 > buf.size())
-		return -1;
-
-	quint16 _type = read16(p + offset);
-	offset += 2;
-	quint16 _alen = read16(p + offset);
-	offset += 2;
-
-	// get physical length.  stun attributes are 4-byte aligned, and may
-	//   contain 0-3 bytes of padding.
-	quint16 plen = round_up_length(_alen);
-	if(offset + plen > buf.size())
-		return -1;
-
-	*type = _type;
-	*len = _alen;
-	return offset + plen;
+	out[0] = (i >> 24) & 0xff;
+	out[1] = (i >> 16) & 0xff;
+	out[2] = (i >> 8) & 0xff;
+	out[3] = i & 0xff;
 }
 
 // do 3-field check of stun packet
@@ -244,51 +206,149 @@ static int check_and_get_length(const QByteArray &buf)
 	return mlen;
 }
 
+#define ATTRIBUTE_AREA_START  20
+#define ATTRIBUTE_AREA_MAX    65535
+#define ATTRIBUTE_VALUE_MAX   65531
+
+// note: because the attribute area of the packet has a maximum size of
+//   2^16-1, and each attribute itself has a 4 byte header, it follows that
+//   the maximum size of an attribute's value is 2^16-5.  this means that,
+//   even if padded with up to 3 bytes, the physical size of an attribute's
+//   value will not overflow a 16-bit unsigned integer.
+static quint16 round_up_length(quint16 in)
+{
+	Q_ASSERT(in <= ATTRIBUTE_VALUE_MAX);
+	quint16 out = in;
+	quint16 remainder = out % 4;
+	if(remainder != 0)
+		out += (4 - remainder);
+	return out;
+}
+
+// buf    = entire stun packet
+// offset = byte index of current attribute (first is offset=20)
+// type   = take attribute type
+// len    = take attribute value length (value is at offset + 4)
+// returns offset of next attribute, -1 if no more
+static int get_attribute_props(const QByteArray &buf, int offset, quint16 *type, int *len)
+{
+	Q_ASSERT(offset >= ATTRIBUTE_AREA_START);
+
+	const quint8 *p = (const quint8 *)buf.data();
+
+	// need at least 4 bytes for an attribute
+	if(offset + 4 > buf.size())
+		return -1;
+
+	quint16 _type = read16(p + offset);
+	offset += 2;
+	quint16 _alen = read16(p + offset);
+	offset += 2;
+
+	// get physical length.  stun attributes are 4-byte aligned, and may
+	//   contain 0-3 bytes of padding.
+	quint16 plen = round_up_length(_alen);
+	if(offset + plen > buf.size())
+		return -1;
+
+	*type = _type;
+	*len = _alen;
+	return offset + plen;
+}
+
+// buf    = entire stun packet
+// type   = attribute type to find
+// len    = take attribute value length (value is at offset + 4)
+// next   = take offset of next attribute
+// returns offset of found attribute, -1 if not found
+static int find_attribute(const QByteArray &buf, quint16 type, int *len, int *next = 0)
+{
+	int at = ATTRIBUTE_AREA_START;
+	quint16 _type;
+	int _len;
+	int _next;
+
+	while(1)
+	{
+		_next = get_attribute_props(buf, at, &_type, &_len);
+		if(_next == -1)
+			break;
+		if(_type == type)
+		{
+			*len = _len;
+			if(next)
+				*next = _next;
+			return at;
+		}
+		at = _next;
+	}
+
+	return -1;
+}
+
+// buf  = stun packet to append attribute to
+// type = type of attribute
+// len  = length of value
+// returns offset of new attribute, or -1 if it can't fit
+// note: attribute value is located at offset + 4 and is uninitialized
+// note: padding following attribute is zeroed out
+static int append_attribute_uninitialized(QByteArray *buf, quint16 type, int len)
+{
+	if(len > ATTRIBUTE_VALUE_MAX)
+		return -1;
+
+	quint16 alen = (quint16)len;
+	quint16 plen = round_up_length(alen);
+
+	if((buf->size() - ATTRIBUTE_AREA_START) + 4 + plen > ATTRIBUTE_AREA_MAX)
+		return -1;
+
+	int at = buf->size();
+	buf->resize(buf->size() + 4 + plen);
+	quint8 *p = (quint8 *)buf->data();
+
+	write16(p + at, type);
+	write16(p + at + 2, alen);
+
+	// padding
+	for(int n = 0; n < plen - alen; ++n)
+		p[at + alen + n] = 0;
+
+	return at;
+}
+
+static quint32 fingerprint_calc(const quint8 *buf, int size)
+{
+	QByteArray region = QByteArray::fromRawData((const char *)buf, size);
+	return Crc32::process(region) ^ 0x5354554e;
+}
+
+static QByteArray message_integrity_calc(const quint8 *buf, int size, const QByteArray &key)
+{
+	QCA::MessageAuthenticationCode hmac("hmac(sha1)", key);
+	QByteArray region = QByteArray::fromRawData((const char *)buf, size);
+	QByteArray result = hmac.process(region).toByteArray();
+	Q_ASSERT(result.size() == 20);
+	return result;
+}
+
 // look for fingerprint attribute and confirm it
 // buf = entire stun packet
 // returns true if fingerprint attribute exists and is correct
-static bool check_fingerprint(const QByteArray &buf)
+static bool fingerprint_check(const QByteArray &buf)
 {
+	int at, len;
+	at = find_attribute(buf, AttribFingerprint, &len);
+	if(at == -1 || len != 4) // value must be 4 bytes
+		return false;
+
 	const quint8 *p = (const quint8 *)buf.data();
-	int at = 20; // start of attributes offset
-	bool found = false;
-	quint32 fpval;
-	while(1)
-	{
-		quint16 type;
-		int len;
-		int next;
-
-		next = get_attribute_props(buf, at, &type, &len);
-		if(next == -1)
-			break;
-
-		if(type == AttribFingerprint)
-		{
-			// length must be 4
-			if(len != 4)
-				break;
-
-			fpval = read32(p + at + 4);
-			found = true;
-			break;
-		}
-
-		at = next;
-	}
-
-	// no fingerprint attribute?  bail
-	if(!found)
+	quint32 fpval = read32(p + at + 4);
+	quint32 fpcalc = fingerprint_calc(p, at);
+	if(fpval == fpcalc)
+		return true;
+	else
 		return false;
-
-	QByteArray region = QByteArray::fromRawData(buf.data(), at);
-	quint32 fpcalc = Crc32::process(region) ^ 0x5354554e;
-
-	// fingerprint wrong?  bail
-	if(fpval != fpcalc)
-		return false;
-
-	return true;
 }
 
 // copy the input buffer and prepare for message integrity checking.  the
@@ -298,63 +358,43 @@ static bool check_fingerprint(const QByteArray &buf)
 // buf    = input stun packet
 // out    = take output stun packet
 // offset = take offset of message-integrity attribute
-// val    = take value of message-integrity attribute
 // returns true if message-integrity attribute exists and packet is prepared
-static bool message_integrity_prep(const QByteArray &buf, QByteArray *out, int *offset, QByteArray *val)
+// note: message-integrity value is at offset + 4 and is exactly 20 bytes
+static bool message_integrity_prep(const QByteArray &buf, QByteArray *out, int *offset)
 {
-	int at = 20; // start of attributes offset
-	while(1)
-	{
-		quint16 type;
-		int len;
-		int next;
+	int at, len, next;
+	at = find_attribute(buf, AttribMessageIntegrity, &len, &next);
+	if(at == -1 || len != 20) // value must be 20 bytes
+		return false;
 
-		next = get_attribute_props(buf, at, &type, &len);
-		if(next == -1)
-			break;
+	// prepare new attribute area size
+	int i = next - ATTRIBUTE_AREA_START;
 
-		if(type == AttribMessageIntegrity)
-		{
-			// length must be 20
-			if(len != 20)
-				break;
+	// new value must be divisible by 4
+	if(i % 4 != 0)
+		return false;
 
-			// new attribute area size must be divisible by 4
-			if((next % 4) != 0)
-				break;
+	// copy truncated packet
+	*out = buf.mid(0, next);
 
-			// copy truncated packet
-			*out = buf.mid(0, next);
+	// set new length in header
+	quint16 newlen = (quint16)i;
+	write16((quint8 *)out->data() + 2, newlen);
 
-			// set new length in header
-			int i = next - 20;
-			quint16 newlen = (quint16)i;
-			write16((quint8 *)out->data() + 2, newlen);
-
-			// set offset/val
-			*offset = at;
-			*val = out->mid(at + 4, len);
-			return true;
-		}
-
-		at = next;
-	}
-
-	return false;
+	*offset = at;
+	return true;
 }
 
 // confirm message integrity
 // buf    = prepared stun packet (from message_integrity_prep())
 // offset = offset of message-integrity attribute
 // key    = the HMAC key
-// val    = value of message-integrity attribute
 // returns true if correct
-static bool check_message_integrity(const QByteArray &buf, int offset, const QByteArray &key, const QByteArray &val)
+static bool message_integrity_check(const QByteArray &buf, int offset, const QByteArray &key)
 {
-	QCA::MessageAuthenticationCode hmac("hmac(sha1)", key);
-	QByteArray region = QByteArray::fromRawData(buf.data(), offset);
-	QByteArray result = hmac.process(region).toByteArray();
-	if(result == val)
+	QByteArray mival = QByteArray::fromRawData(buf.data() + offset + 4, 20);
+	QByteArray micalc = message_integrity_calc((const quint8 *)buf.data(), offset, key);
+	if(mival == micalc)
 		return true;
 	else
 		return false;
@@ -518,39 +558,49 @@ QByteArray StunMessage::toBinary(int validationFlags, const QByteArray &key) con
 
 	foreach(const Attribute &i, d->attribs)
 	{
-		// size of an individual attribute cannot be larger than this
-		if(i.value.size() > 65530)
+		int at = append_attribute_uninitialized(&buf, i.type, i.value.size());
+		if(at == -1)
 			return QByteArray();
 
-		quint16 alen = (quint16)i.value.size();
-		quint16 plen = round_up_length(alen);
-
-		// size of the attribute area cannot be larger than this
-		if((buf.size() - 20) + 4 + plen > 65532)
-			return QByteArray();
-
-		int at = buf.size();
-		buf.resize(buf.size() + 4 + plen);
-		p = (quint8 *)buf.data(); // follow the resize
-
-		write16(p + at, i.type);
-		write16(p + at + 2, alen);
-		memcpy(p + at + 4, i.value.data(), alen);
-
-		// padding
-		for(int n = 0; n < plen - alen; ++n)
-			p[at + alen + n] = 0;
+		memcpy(buf.data() + at + 4, i.value.data(), i.value.size());
 	}
+
+	// set attribute area size
+	write16(p + 2, buf.size() - ATTRIBUTE_AREA_START);
 
 	if(validationFlags & MessageIntegrity)
 	{
-		// TODO
-		Q_UNUSED(key);
+		quint16 alen = 20; // size of hmac(sha1)
+		int at = append_attribute_uninitialized(&buf, AttribMessageIntegrity, alen);
+		if(at == -1)
+			return QByteArray();
+
+		p = (quint8 *)buf.data(); // follow the resize
+
+		// set attribute area size to include the new attribute
+		write16(p + 2, buf.size() - ATTRIBUTE_AREA_START);
+
+		// now calculate the hash and fill in the value
+		QByteArray result = message_integrity_calc(p, at, key);
+		Q_ASSERT(result.size() == alen);
+		memcpy(p + at + 4, result.data(), alen);
 	}
 
 	if(validationFlags & Fingerprint)
 	{
-		// TODO
+		quint16 alen = 4; // size of crc32
+		int at = append_attribute_uninitialized(&buf, AttribFingerprint, alen);
+		if(at == -1)
+			return QByteArray();
+
+		p = (quint8 *)buf.data(); // follow the resize
+
+		// set attribute area size to include the new attribute
+		write16(p + 2, buf.size() - ATTRIBUTE_AREA_START);
+
+		// now calculate the fingerprint and fill in the value
+		quint32 fpcalc = fingerprint_calc(p, at);
+		write32(p + at + 4, fpcalc);
 	}
 
 	return buf;
@@ -568,7 +618,7 @@ StunMessage StunMessage::fromBinary(const QByteArray &a, ConvertResult *result, 
 
 	if(validationFlags & Fingerprint)
 	{
-		if(!check_fingerprint(a))
+		if(!fingerprint_check(a))
 		{
 			if(result)
 				*result = ErrorFingerprint;
@@ -581,15 +631,14 @@ StunMessage StunMessage::fromBinary(const QByteArray &a, ConvertResult *result, 
 	if(validationFlags & MessageIntegrity)
 	{
 		int offset;
-		QByteArray mival;
-		if(!message_integrity_prep(a, &in, &offset, &mival))
+		if(!message_integrity_prep(a, &in, &offset))
 		{
 			if(result)
 				*result = ErrorMessageIntegrity;
 			return StunMessage();
 		}
 
-		if(!check_message_integrity(in, offset, key, mival))
+		if(!message_integrity_check(in, offset, key))
 		{
 			if(result)
 				*result = ErrorMessageIntegrity;
@@ -638,7 +687,7 @@ StunMessage StunMessage::fromBinary(const QByteArray &a, ConvertResult *result, 
 	out.setId(p + 8);
 
 	QList<Attribute> list;
-	int at = 20; // start of attributes offset
+	int at = ATTRIBUTE_AREA_START;
 	while(1)
 	{
 		quint16 type;

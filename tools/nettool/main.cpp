@@ -24,6 +24,7 @@
 #include <iris/netavailability.h>
 #include <iris/netnames.h>
 #include <iris/stunmessage.h>
+#include <iris/stuntransaction.h>
 #include <QtCrypto>
 
 using namespace XMPP;
@@ -484,6 +485,148 @@ public:
 	int port;
 	int localPort;
 	QUdpSocket *sock;
+	StunTransaction *trans;
+	StunTransactionPool *pool;
+
+public slots:
+	void start()
+	{
+		sock = new QUdpSocket(this);
+		connect(sock, SIGNAL(readyRead()), SLOT(sock_readyRead()));
+
+		pool = new StunTransactionPool(this);
+		connect(pool, SIGNAL(retransmit(XMPP::StunTransaction *)), SLOT(pool_retransmit(XMPP::StunTransaction *)));
+		connect(pool, SIGNAL(finished(XMPP::StunTransaction *, const XMPP::StunMessage &)), SLOT(pool_finished(XMPP::StunTransaction *, const XMPP::StunMessage &)));
+		connect(pool, SIGNAL(error(XMPP::StunTransaction *, XMPP::StunTransaction::Error)), SLOT(pool_error(XMPP::StunTransaction *, XMPP::StunTransaction::Error)));
+
+		if(!sock->bind(localPort != -1 ? localPort : 0))
+		{
+			printf("Error binding to local port.\n");
+			emit quit();
+			return;
+		}
+
+		printf("Bound to local port %d.\n", sock->localPort());
+
+		StunMessage message;
+		message.setClass(StunMessage::Request);
+		message.setMethod(0x001);
+		trans = new StunTransaction(this);
+		trans->start(StunTransaction::Udp, message);
+		pool->insert(trans);
+
+		// first packet we have to send ourselves
+		pool_retransmit(trans);
+	}
+
+signals:
+	void quit();
+
+private slots:
+	void sock_readyRead()
+	{
+		while(sock->hasPendingDatagrams())
+		{
+			QByteArray buf(sock->pendingDatagramSize(), 0);
+			QHostAddress from;
+			quint16 fromPort;
+
+			sock->readDatagram(buf.data(), buf.size(), &from, &fromPort);
+			if(from == addr && fromPort == port)
+			{
+				processDatagram(buf);
+			}
+			else
+			{
+				printf("Response from unknown sender %s:%d, dropping.\n", qPrintable(from.toString()), fromPort);
+			}
+		}
+	}
+
+	void pool_retransmit(XMPP::StunTransaction *)
+	{
+		sock->writeDatagram(trans->packet(), addr, port);
+	}
+
+	void pool_finished(XMPP::StunTransaction *, const XMPP::StunMessage &response)
+	{
+		if(response.mclass() == StunMessage::ErrorResponse)
+		{
+			printf("Error: server responded with an error.\n");
+			emit quit();
+			return;
+		}
+
+		QHostAddress saddr;
+		quint16 sport = 0;
+
+		QByteArray val;
+		val = response.attribute(0x0020);
+		if(!val.isNull())
+		{
+			if(!parse_mapped_address(val, response.magic(), response.id(), &saddr, &sport))
+			{
+				printf("Error parsing XOR-MAPPED-ADDRESS response.\n");
+				emit quit();
+				return;
+			}
+		}
+		else
+		{
+			val = response.attribute(0x0001);
+			if(!val.isNull())
+			{
+				if(!parse_mapped_address(val, 0, 0, &saddr, &sport))
+				{
+					printf("Error parsing MAPPED-ADDRESS response.\n");
+					emit quit();
+					return;
+				}
+			}
+			else
+			{
+				printf("Error: response does not contain XOR-MAPPED-ADDRESS or MAPPED-ADDRESS.\n");
+				emit quit();
+				return;
+			}
+		}
+
+		printf("Server says we are %s;%d\n", qPrintable(saddr.toString()), sport);
+		emit quit();
+	}
+
+	void pool_error(XMPP::StunTransaction *, XMPP::StunTransaction::Error error)
+	{
+		if(error == StunTransaction::ErrorTimeout)
+			printf("Error: Timeout\n");
+		else
+			printf("Error: Generic\n");
+		emit quit();
+	}
+
+private:
+	void processDatagram(const QByteArray &buf)
+	{
+		StunMessage message = StunMessage::fromBinary(buf);
+		if(message.isNull())
+		{
+			printf("Warning: server responded with what doesn't seem to be a STUN packet, skipping.\n");
+			return;
+		}
+
+		if(!pool->writeIncomingMessage(message))
+			printf("Warning: received unexpected message, skipping.\n");
+	}
+};
+
+/*class StunBinding : public QObject
+{
+	Q_OBJECT
+public:
+	QHostAddress addr;
+	int port;
+	int localPort;
+	QUdpSocket *sock;
 	QTimer *t;
 	int rto, rc, rm;
 	int tries;
@@ -648,7 +791,7 @@ private slots:
 			rto *= 2;
 		}
 	}
-};
+};*/
 
 void usage()
 {
