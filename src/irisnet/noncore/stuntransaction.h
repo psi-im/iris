@@ -75,7 +75,7 @@ signals:
 	void error(XMPP::StunTransaction::Error error);
 
 private:
-	Q_DISABLE_COPY(StunTransaction);
+	Q_DISABLE_COPY(StunTransaction)
 
 	class Private;
 	friend class Private;
@@ -108,7 +108,7 @@ signals:
 	void error(XMPP::StunTransaction *trans, XMPP::StunTransaction::Error error);
 
 private:
-	Q_DISABLE_COPY(StunTransactionPool);
+	Q_DISABLE_COPY(StunTransactionPool)
 
 	class Private;
 	friend class Private;
