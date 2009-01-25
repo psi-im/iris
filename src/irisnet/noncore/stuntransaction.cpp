@@ -157,7 +157,7 @@ StunTransaction::~StunTransaction()
 
 void StunTransaction::start(Mode mode, const StunMessage &msg)
 {
-	Q_ASSERT(!active);
+	Q_ASSERT(!d->active);
 	d->start(mode, msg);
 }
 
@@ -173,25 +173,25 @@ QByteArray StunTransaction::packet() const
 
 void StunTransaction::setRTO(int i)
 {
-	Q_ASSERT(!active);
+	Q_ASSERT(!d->active);
 	d->rto = i;
 }
 
 void StunTransaction::setRc(int i)
 {
-	Q_ASSERT(!active);
+	Q_ASSERT(!d->active);
 	d->rc = i;
 }
 
 void StunTransaction::setRm(int i)
 {
-	Q_ASSERT(!active);
+	Q_ASSERT(!d->active);
 	d->rm = i;
 }
 
 void StunTransaction::setTi(int i)
 {
-	Q_ASSERT(!active);
+	Q_ASSERT(!d->active);
 	d->ti = i;
 }
 
