@@ -24,6 +24,10 @@
 #include <QObject>
 #include <QByteArray>
 
+namespace QCA {
+	class SecureArray;
+}
+
 namespace XMPP {
 
 class StunMessage;
@@ -82,30 +86,48 @@ private:
 	Private *d;
 };
 
-// keep track of many open transactions
+// keep track of many open transactions.  note that retransmit() may be
+//   emitted as a direct result of calling certain member functions of this
+//   class as well as any other class that might use it (such as StunBinding).
+//   so, be careful with what you do in your retransmit slot.
 class StunTransactionPool : public QObject
 {
 	Q_OBJECT
 
 public:
-	StunTransactionPool(QObject *parent = 0);
+	StunTransactionPool(StunTransaction::Mode mode, QObject *parent = 0);
 	~StunTransactionPool();
 
-	// you must start the transaction before inserting it
+	StunTransaction::Mode mode() const;
+
+	// generate a random id not used by any transaction in the pool
+	QByteArray generateId() const;
+
+	// you must start the transaction before inserting it.
+	// note: not DOR-DS safe.  this function will cause retransmit() to be
+	//   emitted.
 	void insert(StunTransaction *trans);
 
 	void remove(StunTransaction *trans);
 
-	// note: not DOR-DS safe.  this will either emit signals and return
-	//   true, or not emit signals and return false.
+	// note: not DOR-DS safe.  this will either cause transactions to emit
+	//   signals and return true, or not cause signals and return false.
 	bool writeIncomingMessage(const StunMessage &msg);
 
+	// long-term credentials
+	QString realm() const;
+	void setUsername(const QString &username);
+	void setPassword(const QCA::SecureArray &password);
+	void setRealm(const QString &realm);
+
+	void continueAfterParams();
+
 signals:
+	// note: not DOR-SS safe.  writeIncomingMessage() must not be called
+	//   during this signal.
 	void retransmit(XMPP::StunTransaction *trans);
 
-	// when these are emitted, the transaction is removed from the pool
-	void finished(XMPP::StunTransaction *trans, const XMPP::StunMessage &response);
-	void error(XMPP::StunTransaction *trans, XMPP::StunTransaction::Error error);
+	void needAuthParams();
 
 private:
 	Q_DISABLE_COPY(StunTransactionPool)

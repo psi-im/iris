@@ -15,12 +15,16 @@ HEADERS += \
 	$$PWD/processquit.h \
 	$$PWD/stunmessage.h \
 	$$PWD/stuntransaction.h \
+	$$PWD/stunbinding.h \
+	$$PWD/stunallocate.h \
 	$$PWD/ice176.h
 
 SOURCES += \
 	$$PWD/processquit.cpp \
 	$$PWD/stunmessage.cpp \
 	$$PWD/stuntransaction.cpp \
+	$$PWD/stunbinding.cpp \
+	$$PWD/stunallocate.cpp \
 	$$PWD/ice176.cpp
 
 include(legacy/legacy.pri)

@@ -74,8 +74,7 @@ public:
 		mode = _mode;
 		StunMessage out = msg;
 
-		id = QCA::Random::randomArray(12).toByteArray();
-		out.setId((const quint8 *)id.data());
+		id = QByteArray((const char *)msg.id(), 12);
 
 		packet = out.toBinary();
 		if(packet.isEmpty())
@@ -87,6 +86,7 @@ public:
 			return;
 		}
 
+		active = true;
 		tries = 1; // assume the user does its job
 
 		if(mode == StunTransaction::Udp)
@@ -133,12 +133,16 @@ private slots:
 public:
 	bool processIncoming(const StunMessage &msg)
 	{
+		if(!active)
+			return false;
+
 		if(msg.mclass() != StunMessage::SuccessResponse && msg.mclass() != StunMessage::ErrorResponse)
 			return false;
 
 		if(memcmp(msg.id(), id.data(), 12) != 0)
 			return false;
 
+		active = false;
 		emit q->finished(msg);
 		return true;
 	}
@@ -209,6 +213,7 @@ class StunTransactionPool::Private : public QObject
 
 public:
 	StunTransactionPool *q;
+	StunTransaction::Mode mode;
 	QHash<StunTransaction*,QByteArray> transToId;
 	QHash<QByteArray,StunTransaction*> idToTrans;
 
@@ -221,19 +226,18 @@ public:
 	void insert(StunTransaction *trans)
 	{
 		connect(trans, SIGNAL(retransmit()), this, SLOT(trans_retransmit()));
-		connect(trans, SIGNAL(finished(const XMPP::StunMessage &)), this, SLOT(trans_finished(const XMPP::StunMessage &)));
-		connect(trans, SIGNAL(error(XMPP::StunTransaction::Error)), this, SLOT(trans_error(XMPP::StunTransaction::Error)));
 
 		QByteArray id = trans->transactionId();
 		transToId.insert(trans, id);
 		idToTrans.insert(id, trans);
+
+		// send the first transmit attempt
+		emit q->retransmit(trans);
 	}
 
 	void remove(StunTransaction *trans)
 	{
 		disconnect(trans, SIGNAL(retransmit()), this, SLOT(trans_retransmit()));
-		disconnect(trans, SIGNAL(finished(const XMPP::StunMessage &)), this, SLOT(trans_finished(const XMPP::StunMessage &)));
-		disconnect(trans, SIGNAL(error(XMPP::StunTransaction::Error)), this, SLOT(trans_error(XMPP::StunTransaction::Error)));
 
 		QByteArray id = transToId.value(trans);
 		transToId.remove(trans);
@@ -246,31 +250,35 @@ private slots:
 		StunTransaction *trans = (StunTransaction *)sender();
 		emit q->retransmit(trans);
 	}
-
-	void trans_finished(const XMPP::StunMessage &response)
-	{
-		StunTransaction *trans = (StunTransaction *)sender();
-		remove(trans);
-		emit q->finished(trans, response);
-	}
-
-	void trans_error(XMPP::StunTransaction::Error error)
-	{
-		StunTransaction *trans = (StunTransaction *)sender();
-		remove(trans);
-		emit q->error(trans, error);
-	}
 };
 
-StunTransactionPool::StunTransactionPool(QObject *parent) :
+StunTransactionPool::StunTransactionPool(StunTransaction::Mode mode, QObject *parent) :
 	QObject(parent)
 {
 	d = new Private(this);
+	d->mode = mode;
 }
 
 StunTransactionPool::~StunTransactionPool()
 {
 	delete d;
+}
+
+StunTransaction::Mode StunTransactionPool::mode() const
+{
+	return d->mode;
+}
+
+QByteArray StunTransactionPool::generateId() const
+{
+	QByteArray id;
+
+	do
+	{
+		id = QCA::Random::randomArray(12).toByteArray();
+	} while(d->idToTrans.contains(id));
+
+	return id;
 }
 
 void StunTransactionPool::insert(StunTransaction *trans)
@@ -294,6 +302,35 @@ bool StunTransactionPool::writeIncomingMessage(const StunMessage &msg)
 		return false;
 
 	return trans->writeIncomingMessage(msg);
+}
+
+QString StunTransactionPool::realm() const
+{
+	// TODO
+	return QString();
+}
+
+void StunTransactionPool::setUsername(const QString &username)
+{
+	// TODO
+	Q_UNUSED(username);
+}
+
+void StunTransactionPool::setPassword(const QCA::SecureArray &password)
+{
+	// TODO
+	Q_UNUSED(password);
+}
+
+void StunTransactionPool::setRealm(const QString &realm)
+{
+	// TODO
+	Q_UNUSED(realm);
+}
+
+void StunTransactionPool::continueAfterParams()
+{
+	// TODO
 }
 
 }
