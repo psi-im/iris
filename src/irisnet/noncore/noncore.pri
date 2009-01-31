@@ -17,6 +17,7 @@ HEADERS += \
 	$$PWD/stuntransaction.h \
 	$$PWD/stunbinding.h \
 	$$PWD/stunallocate.h \
+	$$PWD/icelocaltransport.h \
 	$$PWD/ice176.h
 
 SOURCES += \
@@ -25,6 +26,7 @@ SOURCES += \
 	$$PWD/stuntransaction.cpp \
 	$$PWD/stunbinding.cpp \
 	$$PWD/stunallocate.cpp \
+	$$PWD/icelocaltransport.cpp \
 	$$PWD/ice176.cpp
 
 include(legacy/legacy.pri)
