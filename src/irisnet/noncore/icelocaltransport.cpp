@@ -154,6 +154,7 @@ public:
 	StunBinding *stunBinding;
 	StunAllocate *stunAllocate;
 	bool alloc_started;
+	bool changing_perms;
 	QHostAddress addr;
 	int port;
 	QHostAddress refAddr;
@@ -169,6 +170,7 @@ public:
 	QList<Datagram> inRelayed;
 	QList<Datagram> outRelayed;
 	QList<WriteType> pendingWrites;
+	QList<QHostAddress> pendingPerms;
 
 	Private(IceLocalTransport *_q) :
 		QObject(_q),
@@ -178,6 +180,7 @@ public:
 		stunBinding(0),
 		stunAllocate(0),
 		alloc_started(false),
+		changing_perms(false),
 		port(-1),
 		refPort(-1),
 		relPort(-1)
@@ -201,6 +204,7 @@ public:
 		delete stunAllocate;
 		stunAllocate = 0;
 		alloc_started = false;
+		changing_perms = false;
 
 		delete sock;
 		sock = 0;
@@ -265,30 +269,101 @@ public:
 		}
 	}
 
-	void writeRelayed(const QByteArray &buf, const QHostAddress &addr, int port)
+	void tryWriteRelayed(const QByteArray &buf, const QHostAddress &addr, int port)
 	{
-		Datagram dg;
-		dg.addr = addr;
-		dg.port = port;
-		dg.buf = buf;
+		QList<QHostAddress> perms = stunAllocate->permissions();
 
-		// TODO: if permission is ready, send.  else, queue packet,
-		//   request permission, flush queue when done
+		// do we have permission to relay to this address yet?
+		if(perms.contains(addr))
+		{
+			writeRelayed(buf, addr, port);
+		}
+		else
+		{
+			// no?  then queue while we ask the server to grant
+			Datagram dg;
+			dg.addr = addr;
+			dg.port = port;
+			dg.buf = buf;
+			outRelayed += dg;
+
+			if(!changing_perms)
+			{
+				perms += addr;
+				stunAllocate->setPermissions(perms);
+			}
+			else
+				pendingPerms += addr;
+		}
 	}
 
-	void processIncomingStun(const QByteArray &buf)
+	void writeRelayed(const QByteArray &buf, const QHostAddress &addr, int port)
 	{
+		QByteArray enc = stunAllocate->encode(buf, addr, port);
+		if(enc.isEmpty())
+		{
+			printf("Warning: could not encode packet for sending.\n");
+			return;
+		}
+
+		pendingWrites += RelayedWrite;
+		sock->writeDatagram(enc, stunAddr, stunPort);
+	}
+
+	// return true if we received a relayed packet
+	bool processIncomingStun(const QByteArray &buf, Datagram *dg)
+	{
+		// this might be a ChannelData message.  check the first
+		//   two bits:
+		if(stunAllocate && alloc_started && buf.size() >= 1 && buf[0] & 0xC0 == 0x40)
+		{
+			QHostAddress fromAddr;
+			int fromPort;
+			QByteArray buf = stunAllocate->decode(buf, &fromAddr, &fromPort);
+			if(fromAddr.isNull())
+			{
+				printf("Warning: server responded with what appears to be an invalid packet, skipping.\n");
+				return false;
+			}
+
+			dg->addr = fromAddr;
+			dg->port = fromPort;
+			dg->buf = buf;
+			return true;
+		}
+
+		// else, interpret it as a stun message
 		StunMessage message = StunMessage::fromBinary(buf);
 		if(message.isNull())
 		{
 			printf("Warning: server responded with what doesn't seem to be a STUN packet, skipping.\n");
-			return;
+			return false;
+		}
+
+		// indication?  maybe it's a relayed packet
+		if(message.mclass() == StunMessage::Indication)
+		{
+			QHostAddress fromAddr;
+			int fromPort;
+			QByteArray buf = stunAllocate->decode(message, &fromAddr, &fromPort);
+			if(fromAddr.isNull())
+			{
+				printf("Warning: server responded with an unknown Indication packet, skipping.\n");
+				return false;
+			}
+
+			dg->addr = fromAddr;
+			dg->port = fromPort;
+			dg->buf = buf;
+			return true;
 		}
 
 		if(!pool->writeIncomingMessage(message))
 		{
 			printf("Warning: received unexpected message, skipping.\n");
 		}
+
+		return false;
 	}
 
 public slots:
@@ -323,7 +398,7 @@ public slots:
 		ObjectSessionWatcher watcher(&sess);
 
 		QList<Datagram> dreads;
-		//QList<Datagram> rreads;
+		QList<Datagram> rreads;
 
 		while(sock->hasPendingDatagrams())
 		{
@@ -331,15 +406,19 @@ public slots:
 			quint16 fromPort;
 			QByteArray buf = sock->readDatagram(&from, &fromPort);
 
+			Datagram dg;
+
 			if(from == stunAddr && fromPort == stunPort)
 			{
-				processIncomingStun(buf);
+				// came from stun server
+				if(processIncomingStun(buf, &dg))
+					rreads += dg;
+
 				if(!watcher.isValid())
 					return;
 			}
 			else
 			{
-				Datagram dg;
 				dg.addr = from;
 				dg.port = fromPort;
 				dg.buf = buf;
@@ -351,9 +430,15 @@ public slots:
 		{
 			in += dreads;
 			emit q->readyRead(IceLocalTransport::Direct);
+			if(!watcher.isValid())
+				return;
 		}
 
-		// TODO: emit q->readyRead(IceLocalTransport::Relayed);
+		if(rreads.count() > 0)
+		{
+			inRelayed += rreads;
+			emit q->readyRead(IceLocalTransport::Relayed);
+		}
 	}
 
 	void sock_datagramsWritten(int count)
@@ -462,18 +547,35 @@ public slots:
 
 	void allocate_permissionsChanged()
 	{
-		// TODO
-	}
+		// get updated list
+		QList<QHostAddress> perms = stunAllocate->permissions();
 
-	void allocate_readyRead()
-	{
-		// TODO
-	}
+		// extract any sendable packets from the out queue
+		QList<Datagram> sendable;
+		for(int n = 0; n < outRelayed.count(); ++n)
+		{
+			if(perms.contains(outRelayed[n].addr))
+			{
+				sendable += outRelayed[n];
+				outRelayed.removeAt(n);
+				--n; // adjust position
+			}
+		}
 
-	void allocate_datagramsWritten(int count)
-	{
-		// TODO
-		Q_UNUSED(count);
+		// and send them
+		foreach(const Datagram &dg, sendable)
+			writeRelayed(dg.buf, dg.addr, dg.port);
+
+		changing_perms = false;
+
+		if(!pendingPerms.isEmpty())
+		{
+			perms += pendingPerms;
+			pendingPerms.clear();
+
+			changing_perms = true;
+			stunAllocate->setPermissions(perms);
+		}
 	}
 };
 
@@ -600,7 +702,7 @@ void IceLocalTransport::writeDatagram(TransmitPath path, const QByteArray &buf, 
 	else if(path == Relayed)
 	{
 		if(d->stunAllocate && d->alloc_started)
-			d->writeRelayed(buf, addr, port);
+			d->tryWriteRelayed(buf, addr, port);
 	}
 	else
 		Q_ASSERT(0);
