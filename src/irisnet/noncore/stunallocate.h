@@ -29,6 +29,7 @@ class QHostAddress;
 
 namespace XMPP {
 
+class StunMessage;
 class StunTransactionPool;
 
 class StunAllocate : public QObject
@@ -59,9 +60,9 @@ public:
 	QList<QHostAddress> permissions() const;
 	void setPermissions(const QList<QHostAddress> &perms);
 
-	bool hasPendingDatagrams() const;
-	QByteArray readDatagram(QHostAddress *addr = 0, int *port = 0);
-	void writeDatagram(const QByteArray &datagram, const QHostAddress &addr, int port);
+	QByteArray encode(const QByteArray &datagram, const QHostAddress &addr, int port);
+	QByteArray decode(const QByteArray &encoded, QHostAddress *addr = 0, int *port = 0);
+	QByteArray decode(const StunMessage &encoded, QHostAddress *addr = 0, int *port = 0);
 
 signals:
 	void started();
@@ -70,9 +71,6 @@ signals:
 
 	// emitted after calling setPermissions()
 	void permissionsChanged();
-
-	void readyRead();
-	void datagramsWritten(int count);
 
 private:
 	Q_DISABLE_COPY(StunAllocate)

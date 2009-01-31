@@ -104,26 +104,31 @@ void StunAllocate::setPermissions(const QList<QHostAddress> &perms)
 	Q_UNUSED(perms);
 }
 
-bool StunAllocate::hasPendingDatagrams() const
-{
-	// TODO
-	return false;
-}
-
-QByteArray StunAllocate::readDatagram(QHostAddress *addr, int *port)
-{
-	// TODO
-	Q_UNUSED(addr);
-	Q_UNUSED(port);
-	return QByteArray();
-}
-
-void StunAllocate::writeDatagram(const QByteArray &datagram, const QHostAddress &addr, int port)
+QByteArray StunAllocate::encode(const QByteArray &datagram, const QHostAddress &addr, int port)
 {
 	// TODO
 	Q_UNUSED(datagram);
 	Q_UNUSED(addr);
 	Q_UNUSED(port);
+	return QByteArray();
+}
+
+QByteArray StunAllocate::decode(const QByteArray &encoded, QHostAddress *addr, int *port)
+{
+	// TODO
+	Q_UNUSED(encoded);
+	Q_UNUSED(addr);
+	Q_UNUSED(port);
+	return QByteArray();
+}
+
+QByteArray StunAllocate::decode(const StunMessage &encoded, QHostAddress *addr, int *port)
+{
+	// TODO
+	Q_UNUSED(encoded);
+	Q_UNUSED(addr);
+	Q_UNUSED(port);
+	return QByteArray();
 }
 
 }
