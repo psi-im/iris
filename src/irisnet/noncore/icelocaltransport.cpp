@@ -232,7 +232,7 @@ public:
 		connect(sock, SIGNAL(readyRead()), SLOT(sock_readyRead()));
 		connect(sock, SIGNAL(datagramsWritten(int)), SLOT(sock_datagramsWritten(int)));
 
-		sess.defer(q, "postStart");
+		sess.defer(this, "postStart");
 	}
 
 	void stop()
@@ -242,7 +242,7 @@ public:
 		if(stunAllocate)
 			stunAllocate->stop();
 		else
-			sess.defer(q, "postStop");
+			sess.defer(this, "postStop");
 	}
 
 	void stunStart()
