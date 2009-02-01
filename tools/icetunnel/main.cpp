@@ -20,7 +20,10 @@
 
 #include <QCoreApplication>
 #include <QTimer>
+#include <QUdpSocket>
 #include <QtCrypto>
+#include <iris/netnames.h>
+#include <iris/netinterface.h>
 #include <iris/ice176.h>
 #include <stdio.h>
 
@@ -41,7 +44,7 @@ static QString urlishEncode(const QString &in)
 	return out;
 }
 
-static QString urlishDecode(const QString &in)
+static QString urlishDecode(const QString &in, bool *ok = 0)
 {
 	QString out;
 	for(int n = 0; n < in.length(); ++n)
@@ -49,13 +52,21 @@ static QString urlishDecode(const QString &in)
 		if(in[n] == '%')
 		{
 			if(n + 2 >= in.length())
+			{
+				if(ok)
+					*ok = false;
 				return QString();
+			}
 
 			QString hex = in.mid(n + 1, 2);
-			bool ok;
-			int x = hex.toInt(&ok, 16);
-			if(!ok)
+			bool b;
+			int x = hex.toInt(&b, 16);
+			if(!b)
+			{
+				if(ok)
+					*ok = false;
 				return QString();
+			}
 
 			unsigned char c = (unsigned char)x;
 			out += c;
@@ -64,13 +75,16 @@ static QString urlishDecode(const QString &in)
 		else
 			out += in[n];
 	}
+
+	if(ok)
+		*ok = true;
 	return out;
 }
 
 static QString candidate_to_line(const XMPP::Ice176::Candidate &in)
 {
 	QStringList list;
-	list += in.component;
+	list += QString::number(in.component);
 	list += in.foundation;
 	list += QString::number(in.generation);
 	list += in.id;
@@ -98,14 +112,15 @@ static XMPP::Ice176::Candidate line_to_candidate(const QString &in)
 
 	for(int n = 0; n < list.count(); ++n)
 	{
-		QString str = urlishDecode(list[n]);
-		if(str.isEmpty())
+		bool ok;
+		QString str = urlishDecode(list[n], &ok);
+		if(!ok)
 			return XMPP::Ice176::Candidate();
 		list[n] = str;
 	}
 
 	XMPP::Ice176::Candidate out;
-	out.component = list[0];
+	out.component = list[0].toInt();
 	out.foundation = list[1];
 	out.generation = list[2].toInt();
 	out.id = list[3];
@@ -160,7 +175,7 @@ static QStringList iceblock_read()
 			break;
 
 		// hack off newline
-		line.resize(line.size() - 1);
+		line.resize(qstrlen(line.data()) - 1);
 
 		QString str = QString::fromLocal8Bit(line);
 		out += str;
@@ -176,25 +191,265 @@ class App : public QObject
 	Q_OBJECT
 
 public:
+	class Channel
+	{
+	public:
+		QUdpSocket *sock;
+		bool ready;
+	};
+
 	int opt_mode;
 	int opt_localBase;
 	int opt_channels;
 	QString opt_stunHost;
+	int opt_stunPort;
 	bool opt_is_relay;
 	QString opt_user, opt_pass;
+
+	XMPP::NameResolver dns;
+	QHostAddress stunAddr;
+	XMPP::Ice176 *ice;
+	QList<XMPP::Ice176::LocalAddress> localAddrs;
+	QList<Channel> channels;
 
 	App()
 	{
 	}
 
+	~App()
+	{
+		delete ice;
+
+		for(int n = 0; n < channels.count(); ++n)
+		{
+			channels[n].sock->disconnect(this);
+			channels[n].sock->setParent(0);
+			channels[n].sock->deleteLater();
+			channels[n].sock = 0;
+		}
+	}
+
 public slots:
 	void start()
 	{
-		emit quit();
+		connect(&dns, SIGNAL(resultsReady(const QList<XMPP::NameRecord> &)), SLOT(dns_resultsReady(const QList<XMPP::NameRecord> &)));
+		connect(&dns, SIGNAL(error(XMPP::NameResolver::Error)), SLOT(dns_error(XMPP::NameResolver::Error)));
+
+		if(!opt_stunHost.isEmpty())
+			dns.start(opt_stunHost.toLatin1(), XMPP::NameRecord::A);
+		else
+			start_ice();
+	}
+
+public:
+	void start_ice()
+	{
+		ice = new XMPP::Ice176(this);
+		connect(ice, SIGNAL(started()), SLOT(ice_started()));
+		connect(ice, SIGNAL(localCandidatesReady(const QList<XMPP::Ice176::Candidate> &)), SLOT(ice_localCandidatesReady(const QList<XMPP::Ice176::Candidate> &)));
+		connect(ice, SIGNAL(componentReady(int)), SLOT(ice_componentReady(int)));
+		connect(ice, SIGNAL(readyRead(int)), SLOT(ice_readyRead(int)));
+		connect(ice, SIGNAL(datagramsWritten(int, int)), SLOT(ice_datagramsWritten(int, int)));
+
+		QStringList strList;
+		{
+			XMPP::NetInterfaceManager netman;
+			foreach(const QString &id, netman.interfaces())
+			{
+				XMPP::NetInterface ni(id, &netman);
+	
+				XMPP::Ice176::LocalAddress addr;
+				addr.addr = ni.addresses().first();
+				localAddrs += addr;
+
+				strList += addr.addr.toString();
+			}
+		}
+		ice->setLocalAddresses(localAddrs);
+
+		printf("Interfaces: %s\n", qPrintable(strList.join(", ")));
+
+		for(int n = 0; n < opt_channels; ++n)
+		{
+			Channel chan;
+			chan.sock = new QUdpSocket(this);
+			connect(chan.sock, SIGNAL(readyRead()), SLOT(sock_readyRead()));
+			connect(chan.sock, SIGNAL(bytesWritten(qint64)), SLOT(sock_bytesWritten(qint64)));
+			if(!chan.sock->bind(opt_localBase + 32 + n))
+			{
+				printf("Unable to bind to port %d.\n", opt_localBase + 32);
+				emit quit();
+				return;
+			}
+			chan.ready = false;
+
+			channels += chan;
+		}
+
+		ice->setComponentCount(opt_channels);
+
+		if(!stunAddr.isNull())
+		{
+			XMPP::Ice176::StunServiceType stunType;
+			if(opt_is_relay)
+				stunType = XMPP::Ice176::Relay;
+			else
+				stunType = XMPP::Ice176::Basic;
+			ice->setStunService(stunType, stunAddr, opt_stunPort);
+			if(!opt_user.isEmpty())
+			{
+				ice->setStunUsername(opt_user);
+				ice->setStunPassword(opt_pass.toUtf8());
+			}
+
+			printf("STUN service: %s\n", qPrintable(stunAddr.toString()));
+		}
+
+		if(opt_mode == 0)
+			ice->start(XMPP::Ice176::Initiator);
+		else
+			ice->start(XMPP::Ice176::Responder);
 	}
 
 signals:
 	void quit();
+
+private slots:
+	void dns_resultsReady(const QList<XMPP::NameRecord> &results)
+	{
+		stunAddr = results.first().address();
+
+		start_ice();
+	}
+
+	void dns_error(XMPP::NameResolver::Error e)
+	{
+		Q_UNUSED(e);
+		printf("Unable to resolve stun host.\n");
+		emit quit();
+	}
+
+	void ice_started()
+	{
+		if(channels.count() > 1)
+		{
+			printf("Local ports: %d-%d\n", opt_localBase, opt_localBase + channels.count() - 1);
+			printf("Tunnel ports: %d-%d\n", opt_localBase + 32, opt_localBase + 32 + channels.count() - 1);
+		}
+		else
+		{
+			printf("Local port: %d\n", opt_localBase);
+			printf("Tunnel port: %d\n", opt_localBase + 32);
+		}
+
+		if(opt_mode == 1)
+		{
+			printf("Please obtain ICE block from initiator and paste...\n");
+			QList<XMPP::Ice176::Candidate> in = iceblock_parse(iceblock_read());
+			if(in.isEmpty())
+			{
+				printf("Error parsing ICE block.\n");
+				emit quit();
+				return;
+			}
+
+			ice->addRemoteCandidates(in);
+		}
+	}
+
+	void ice_localCandidatesReady(const QList<XMPP::Ice176::Candidate> &list)
+	{
+		QStringList block = iceblock_create(list);
+		foreach(const QString &s, block)
+			printf("%s\n", qPrintable(s));
+
+		if(opt_mode == 0)
+		{
+			printf("Copy above ICE block and give to responder.\n");
+			printf("Please obtain ICE block from responder and paste...\n");
+			QList<XMPP::Ice176::Candidate> in = iceblock_parse(iceblock_read());
+			if(in.isEmpty())
+			{
+				printf("Error parsing ICE block.\n");
+				emit quit();
+				return;
+			}
+
+			ice->addRemoteCandidates(in);
+		}
+	}
+
+	void ice_componentReady(int index)
+	{
+		printf("Channel %d ready.\n", index);
+		channels[index].ready = true;
+
+		bool allReady = true;
+		for(int n = 0; n < channels.count(); ++n)
+		{
+			if(!channels[n].ready)
+			{
+				allReady = false;
+				break;
+			}
+		}
+
+		if(allReady)
+		{
+			printf("Tunnel established!\n");
+		}
+	}
+
+	void ice_readyRead(int componentIndex)
+	{
+		while(ice->hasPendingDatagrams(componentIndex))
+		{
+			QByteArray buf = ice->readDatagram(componentIndex);
+			channels[componentIndex].sock->writeDatagram(buf, QHostAddress::LocalHost, opt_localBase);
+		}
+	}
+
+	void ice_datagramsWritten(int componentIndex, int count)
+	{
+		Q_UNUSED(componentIndex);
+		Q_UNUSED(count);
+
+		// do nothing
+	}
+
+	void sock_readyRead()
+	{
+		QUdpSocket *sock = (QUdpSocket *)sender();
+		int at = -1;
+		for(int n = 0; n < channels.count(); ++n)
+		{
+			if(channels[n].sock == sock)
+			{
+				at = n;
+				break;
+			}
+		}
+		Q_ASSERT(at != -1);
+
+		while(sock->hasPendingDatagrams())
+		{
+			QByteArray buf;
+			buf.resize(sock->pendingDatagramSize());
+
+			// note: we don't care who sent it
+			sock->readDatagram(buf.data(), buf.size());
+
+			if(channels[at].ready)
+				ice->writeDatagram(at, buf);
+		}
+	}
+
+	void sock_bytesWritten(qint64 bytes)
+	{
+		Q_UNUSED(bytes);
+
+		// do nothing
+	}
 };
 
 void usage()
@@ -205,7 +460,8 @@ void usage()
 	printf("\n");
 	printf(" --localbase=[n]     local base port (default=60000)\n");
 	printf(" --channels=[n]      number of channels to create (default=4)\n");
-	printf(" --stun=[host]       STUN server to use\n");
+	printf(" --stunhost=[host]   STUN server to use\n");
+	printf(" --stunport=[n]      STUN server port to use (default=3478)\n");
 	printf(" --relay             set if STUN server supports relaying (TURN)\n");
 	printf(" --user=[user]       STUN server username\n");
 	printf(" --pass=[pass]       STUN server password\n");
@@ -223,6 +479,7 @@ int main(int argc, char **argv)
 	int localBase = 60000;
 	int channels = 4;
 	QString stunHost;
+	int stunPort = 3478;
 	bool is_relay = false;
 	QString user, pass;
 
@@ -249,9 +506,18 @@ int main(int argc, char **argv)
 		if(var == "localbase")
 			localBase = val.toInt();
 		else if(var == "channels")
+		{
 			channels = val.toInt();
-		else if(var == "stun")
+			if(channels < 1 || channels > 32)
+			{
+				fprintf(stderr, "Number of channels must be between 1-32.\n");
+				return 1;
+			}
+		}
+		else if(var == "stunhost")
 			stunHost = val;
+		else if(var == "stunport")
+			stunPort = val.toInt();
 		else if(var == "relay")
 			is_relay = true;
 		else if(var == "user")
@@ -294,6 +560,7 @@ int main(int argc, char **argv)
 	app.opt_localBase = localBase;
 	app.opt_channels = channels;
 	app.opt_stunHost = stunHost;
+	app.opt_stunPort = stunPort;
 	app.opt_is_relay = is_relay;
 	app.opt_user = user;
 	app.opt_pass = pass;
