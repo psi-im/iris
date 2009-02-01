@@ -69,6 +69,13 @@ public:
 		ti = 39500;
 	}
 
+	~Private()
+	{
+		t->disconnect(this);
+		t->setParent(0);
+		t->deleteLater();
+	}
+
 	void start(StunTransaction::Mode _mode, const StunMessage &msg)
 	{
 		mode = _mode;
