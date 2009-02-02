@@ -33,7 +33,7 @@ static QString urlishEncode(const QString &in)
 	QString out;
 	for(int n = 0; n < in.length(); ++n)
 	{
-		if(in[n] == '%' || in[n] == ',' || in[n] == ';' || in[n] == ':' || in[n] == '\n')
+		if(in[n] == '%' || in[n] == ',' || in[n] == ';' || in[n] == ':' || in[n] == ' ' || in[n] == '\n')
 		{
 			unsigned char c = (unsigned char)in[n].toLatin1();
 			out += QString().sprintf("%%%02x", c);
@@ -137,27 +137,78 @@ static XMPP::Ice176::Candidate line_to_candidate(const QString &in)
 	return out;
 }
 
-static QStringList iceblock_create(const QList<XMPP::Ice176::Candidate> &in)
+class IceOffer
+{
+public:
+	QString user, pass;
+	QList<XMPP::Ice176::Candidate> candidates;
+};
+
+static QStringList line_wrap(const QString &in, int maxlen)
+{
+	Q_ASSERT(maxlen >= 1);
+
+	QStringList out;
+	int at = 0;
+	while(at < in.length())
+	{
+		int takeAmount = qMin(maxlen, in.length() - at);
+		out += in.mid(at, takeAmount);
+		at += takeAmount;
+	}
+	return out;
+}
+
+static QString lines_unwrap(const QStringList &in)
+{
+	return in.join(QString());
+}
+
+static QStringList iceblock_create(const IceOffer &in)
 {
 	QStringList out;
 	out += "-----BEGIN ICE-----";
-	foreach(const XMPP::Ice176::Candidate &c, in)
-		out += candidate_to_line(c);
+	{
+		QStringList body;
+		QStringList userpass;
+		userpass += urlishEncode(in.user);
+		userpass += urlishEncode(in.pass);
+		body += userpass.join(",");
+		foreach(const XMPP::Ice176::Candidate &c, in.candidates)
+			body += candidate_to_line(c);
+		out += line_wrap(body.join(";"), 78);
+	}
 	out += "-----END ICE-----";
 	return out;
 }
 
-static QList<XMPP::Ice176::Candidate> iceblock_parse(const QStringList &in)
+static IceOffer iceblock_parse(const QStringList &in)
 {
-	QList<XMPP::Ice176::Candidate> out;
+	IceOffer out;
 	if(in.count() < 3 || in[0] != "-----BEGIN ICE-----" || in[in.count()-1] != "-----END ICE-----")
-		return out;
-	for(int n = 1; n < in.count() - 1; ++n)
+		return IceOffer();
+
+	QStringList body = lines_unwrap(in.mid(1, in.count() - 2)).split(';');
+	if(body.count() < 2)
+		return IceOffer();
+
+	QStringList parts = body[0].split(',');
+	if(parts.count() != 2)
+		return IceOffer();
+	bool ok;
+	out.user = urlishDecode(parts[0], &ok);
+	if(!ok || out.user.isEmpty())
+		return IceOffer();
+	out.pass = urlishDecode(parts[1], &ok);
+	if(!ok || out.pass.isEmpty())
+		return IceOffer();
+
+	for(int n = 1; n < body.count(); ++n)
 	{
-		XMPP::Ice176::Candidate c = line_to_candidate(in[n]);
+		XMPP::Ice176::Candidate c = line_to_candidate(body[n]);
 		if(c.type.isEmpty())
-			return QList<XMPP::Ice176::Candidate>();
-		out += c;
+			return IceOffer();
+		out.candidates += c;
 	}
 	return out;
 }
@@ -261,9 +312,14 @@ public:
 				XMPP::Ice176::LocalAddress addr;
 				addr.addr = ni.addresses().first();
 				localAddrs += addr;
-
 				strList += addr.addr.toString();
 			}
+		}
+		{
+			XMPP::Ice176::LocalAddress addr;
+			addr.addr = QHostAddress::LocalHost;
+			localAddrs += addr;
+			strList += addr.addr.toString();
 		}
 		ice->setLocalAddresses(localAddrs);
 
@@ -341,42 +397,30 @@ private slots:
 			printf("Local port: %d\n", opt_localBase);
 			printf("Tunnel port: %d\n", opt_localBase + 32);
 		}
-
-		if(opt_mode == 1)
-		{
-			printf("Please obtain ICE block from initiator and paste...\n");
-			QList<XMPP::Ice176::Candidate> in = iceblock_parse(iceblock_read());
-			if(in.isEmpty())
-			{
-				printf("Error parsing ICE block.\n");
-				emit quit();
-				return;
-			}
-
-			ice->addRemoteCandidates(in);
-		}
 	}
 
 	void ice_localCandidatesReady(const QList<XMPP::Ice176::Candidate> &list)
 	{
-		QStringList block = iceblock_create(list);
+		IceOffer out;
+		out.user = ice->localUfrag();
+		out.pass = ice->localPassword();
+		out.candidates = list;
+		QStringList block = iceblock_create(out);
 		foreach(const QString &s, block)
 			printf("%s\n", qPrintable(s));
 
-		if(opt_mode == 0)
+		printf("Give above ICE block to peer.  Obtain peer ICE block and paste below...\n");
+		IceOffer in = iceblock_parse(iceblock_read());
+		if(in.user.isEmpty())
 		{
-			printf("Copy above ICE block and give to responder.\n");
-			printf("Please obtain ICE block from responder and paste...\n");
-			QList<XMPP::Ice176::Candidate> in = iceblock_parse(iceblock_read());
-			if(in.isEmpty())
-			{
-				printf("Error parsing ICE block.\n");
-				emit quit();
-				return;
-			}
-
-			ice->addRemoteCandidates(in);
+			printf("Error parsing ICE block.\n");
+			emit quit();
+			return;
 		}
+
+		ice->setPeerUfrag(in.user);
+		ice->setPeerPassword(in.pass);
+		ice->addRemoteCandidates(in.candidates);
 	}
 
 	void ice_componentReady(int index)
