@@ -20,6 +20,7 @@
 
 #include "ice176.h"
 
+#include <QTimer>
 #include <QtCrypto>
 #include "stuntransaction.h"
 #include "stunbinding.h"
@@ -38,9 +39,9 @@ static QChar randomPrintableChar()
 	if(c <= 25)
 		return 'a' + c;
 	else if(c <= 51)
-		return 'A' + c;
+		return 'A' + (c - 26);
 	else
-		return '0' + c;
+		return '0' + (c - 52);
 }
 
 static QString randomCredential(int len)
@@ -138,6 +139,7 @@ public:
 	{
 	public:
 		IceLocalTransport *sock;
+		QTimer *t; // for cutting stun request short
 		int addrAt; // for calculating foundation, not great
 		int network;
 		bool isVpn;
@@ -148,6 +150,7 @@ public:
 
 		LocalTransport() :
 			sock(0),
+			t(0),
 			addrAt(-1),
 			network(-1),
 			isVpn(false),
@@ -189,7 +192,16 @@ public:
 	~Private()
 	{
 		for(int n = 0; n < localTransports.count(); ++n)
+		{
 			delete localTransports[n]->sock;
+
+			QTimer *t = localTransports[n]->t;
+			t->disconnect(this);
+			t->setParent(0);
+			t->deleteLater();
+		}
+
+		qDeleteAll(localTransports);
 	}
 
 	// localPref is the priority of the network interface being used for
@@ -258,6 +270,56 @@ public:
 		}
 	}
 
+	void tryFinishGather()
+	{
+		bool allReady = true;
+		foreach(const LocalTransport *lt, localTransports)
+		{
+			if(!lt->started || (lt->use_stun && !lt->stun_finished))
+			{
+				allReady = false;
+				break;
+			}
+		}
+
+		if(allReady)
+		{
+			emit q->started();
+
+			// FIXME: DOR-SS
+			QList<Ice176::Candidate> list;
+			foreach(const CandidateInfo &ci, localCandidates)
+			{
+				Ice176::Candidate c;
+				c.component = ci.componentId;
+				c.foundation = ci.foundation;
+				c.generation = 0;
+				c.id = QString(); // FIXME
+				c.ip = ci.addr.addr;
+				c.network = ci.network;
+				c.port = ci.addr.port;
+				c.priority = ci.priority;
+				c.protocol = "udp";
+				if(ci.type != HostType)
+				{
+					c.rel_addr = ci.base.addr;
+					c.rel_port = ci.base.port;
+				}
+				else
+				{
+					c.rel_addr = QHostAddress();
+					c.rel_port = -1;
+				}
+				c.rem_addr = QHostAddress();
+				c.rem_port = -1;
+				c.type = candidateType_to_string(ci.type);
+				list += c;
+			}
+			if(!list.isEmpty())
+				emit q->localCandidatesReady(list);
+		}
+	}
+
 public slots:
 	void lt_started()
 	{
@@ -296,23 +358,19 @@ public slots:
 			else
 				lt->sock->setStunService(IceLocalTransport::Basic, stunAddr, stunPort);
 
+			// reduce gathering of STUN candidates to 4 seconds
+			//   when trickle mode is disabled
+			lt->t = new QTimer(this);
+			connect(lt->t, SIGNAL(timeout()), SLOT(lt_timeout()));
+			lt->t->setSingleShot(true);
+			lt->t->start(4000);
+
 			printf("starting stun\n");
 			lt->sock->stunStart();
 			return;
 		}
 
-		bool ready = true;
-		foreach(const LocalTransport *lt, localTransports)
-		{
-			if(!lt->started || (lt->use_stun && !lt->stun_finished))
-			{
-				ready = false;
-				break;
-			}
-		}
-
-		if(ready)
-			emit q->started();
+		tryFinishGather();
 	}
 
 	void lt_stopped()
@@ -339,6 +397,13 @@ public slots:
 			return;
 
 		LocalTransport *lt = localTransports[at];
+
+		// already marked as finished?  this can happen if we timed
+		//   out the operation from earlier.  in that case just
+		//   ignore the event
+		if(lt->stun_finished)
+			return;
+
 		lt->stun_finished = true;
 
 		if(!lt->sock->serverReflexiveAddress().isNull())
@@ -358,52 +423,7 @@ public slots:
 
 		// TODO: relayed candidate
 
-		bool ready = true;
-		foreach(const LocalTransport *lt, localTransports)
-		{
-			if(!lt->started || (lt->use_stun && !lt->stun_finished))
-			{
-				ready = false;
-				break;
-			}
-		}
-
-		if(ready)
-			emit q->started();
-
-		if(!ready)
-			return;
-
-		QList<Ice176::Candidate> list;
-		foreach(const CandidateInfo &ci, localCandidates)
-		{
-			Ice176::Candidate c;
-			c.component = ci.componentId;
-			c.foundation = ci.foundation;
-			c.generation = 0;
-			c.id = QString(); // FIXME
-			c.ip = ci.addr.addr;
-			c.network = ci.network;
-			c.port = ci.addr.port;
-			c.priority = ci.priority;
-			c.protocol = "udp";
-			if(ci.type != HostType)
-			{
-				c.rel_addr = ci.base.addr;
-				c.rel_port = ci.base.port;
-			}
-			else
-			{
-				c.rel_addr = QHostAddress();
-				c.rel_port = -1;
-			}
-			c.rem_addr = QHostAddress();
-			c.rem_port = -1;
-			c.type = candidateType_to_string(ci.type);
-			list += c;
-		}
-		if(!list.isEmpty())
-			emit q->localCandidatesReady(list);
+		tryFinishGather();
 	}
 
 	void lt_error(XMPP::IceLocalTransport::Error e)
@@ -424,6 +444,29 @@ public slots:
 		// TODO
 		Q_UNUSED(path);
 		Q_UNUSED(count);
+	}
+
+	void lt_timeout()
+	{
+		QTimer *t = (QTimer *)sender();
+		int at = -1;
+		for(int n = 0; n < localTransports.count(); ++n)
+		{
+			if(localTransports[n]->t == t)
+			{
+				at = n;
+				break;
+			}
+		}
+		if(at == -1)
+			return;
+
+		LocalTransport *lt = localTransports[at];
+		lt->stun_finished = true;
+
+		// TODO: delete lt->t ?
+
+		tryFinishGather();
 	}
 
 	void pool_retransmit(XMPP::StunTransaction *trans)
