@@ -545,8 +545,8 @@ QByteArray StunMessage::toBinary(int validationFlags, const QByteArray &key) con
 
 	// class bits are split into 2 sections
 	quint16 c1, c2;
-	c1 = classbits & 0x10; // C1
-	c1 <<= 8;
+	c1 = classbits & 0x02; // C1
+	c1 <<= 7;
 	c2 = classbits & 0x01; // C0
 	c2 <<= 4;
 
