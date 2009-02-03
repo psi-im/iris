@@ -21,6 +21,7 @@
 #include <QCoreApplication>
 #include <QTimer>
 #include <QUdpSocket>
+#include <QNetworkInterface>
 #include <QtCrypto>
 #include <iris/netnames.h>
 #include <iris/netinterface.h>
@@ -237,6 +238,12 @@ static QStringList iceblock_read()
 	return out;
 }
 
+static void wait_for_enter()
+{
+	QByteArray buf(1024, 0);
+	fgets(buf.data(), buf.size(), stdin);
+}
+
 class App : public QObject
 {
 	Q_OBJECT
@@ -302,25 +309,47 @@ public:
 		connect(ice, SIGNAL(readyRead(int)), SLOT(ice_readyRead(int)));
 		connect(ice, SIGNAL(datagramsWritten(int, int)), SLOT(ice_datagramsWritten(int, int)));
 
+		ice->setBasePort(opt_localBase + 64);
+
 		QStringList strList;
 		{
-			XMPP::NetInterfaceManager netman;
+			/*XMPP::NetInterfaceManager netman;
 			foreach(const QString &id, netman.interfaces())
 			{
 				XMPP::NetInterface ni(id, &netman);
-	
+
+				QHostAddress v4addr;
+				foreach(const QHostAddress &h, ni.addresses())
+				{
+					if(h.protocol() == QAbstractSocket::IPv4Protocol)
+					{
+						v4addr = h;
+						break;
+					}
+				}
+
+				if(!v4addr.isNull())
+				{
+					XMPP::Ice176::LocalAddress addr;
+					addr.addr = v4addr;
+					localAddrs += addr;
+					strList += addr.addr.toString();
+				}
+			}*/
+			foreach(const QHostAddress &h, QNetworkInterface::allAddresses())
+			{
 				XMPP::Ice176::LocalAddress addr;
-				addr.addr = ni.addresses().first();
+				addr.addr = h;
 				localAddrs += addr;
 				strList += addr.addr.toString();
 			}
 		}
-		{
+		/*{
 			XMPP::Ice176::LocalAddress addr;
 			addr.addr = QHostAddress::LocalHost;
 			localAddrs += addr;
 			strList += addr.addr.toString();
-		}
+		}*/
 		ice->setLocalAddresses(localAddrs);
 
 		printf("Interfaces: %s\n", qPrintable(strList.join(", ")));
@@ -417,6 +446,9 @@ private slots:
 			emit quit();
 			return;
 		}
+
+		printf("Press enter to begin.\n");
+		wait_for_enter();
 
 		ice->setPeerUfrag(in.user);
 		ice->setPeerPassword(in.pass);
