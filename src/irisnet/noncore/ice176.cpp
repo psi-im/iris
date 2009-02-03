@@ -629,6 +629,7 @@ public slots:
 			return;
 		}
 
+		lt->t->stop();
 		lt->stun_finished = true;
 
 		if(!lt->sock->serverReflexiveAddress().isNull())
