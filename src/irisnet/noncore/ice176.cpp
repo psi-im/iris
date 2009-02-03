@@ -773,8 +773,15 @@ public slots:
 								break;
 							}
 						}
+						if(at == -1)
+						{
+							printf("the local transport does not seem to be associated with a candidate?!\n");
+							continue;
+						}
 
 						int componentIndex = checkList.pairs[at].local.componentId - 1;
+						printf("packet is considered to be application data for component index %d\n", componentIndex);
+
 						in[componentIndex] += buf;
 						emit q->readyRead(componentIndex);
 					}
