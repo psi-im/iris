@@ -763,6 +763,13 @@ public slots:
 					{
 						//printf("received some non-stun or invalid stun packet\n");
 
+						// FIXME: i don't know if this is good enough
+						if(StunMessage::isProbablyStun(buf))
+						{
+							printf("unexpected stun packet (loopback?), skipping.\n");
+							continue;
+						}
+
 						int at = -1;
 						for(int n = 0; n < checkList.pairs.count(); ++n)
 						{
