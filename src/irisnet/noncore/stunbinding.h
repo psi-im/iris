@@ -45,6 +45,12 @@ public:
 	StunBinding(StunTransactionPool *pool);
 	~StunBinding();
 
+	// for ICE-use only
+	void setPriority(quint32 i);
+	void setUseCandidate(bool enabled);
+	void setIceControlling(quint64 i);
+	void setIceControlled(quint64 i);
+
 	void start();
 
 	QHostAddress reflexiveAddress() const;

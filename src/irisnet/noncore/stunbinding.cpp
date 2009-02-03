@@ -26,6 +26,27 @@
 
 namespace XMPP {
 
+// from stunmessage.cpp
+static void write32(quint8 *out, quint32 i)
+{
+	out[0] = (i >> 24) & 0xff;
+	out[1] = (i >> 16) & 0xff;
+	out[2] = (i >> 8) & 0xff;
+	out[3] = i & 0xff;
+}
+
+static void write64(quint8 *out, quint64 i)
+{
+	out[0] = (i >> 56) & 0xff;
+	out[1] = (i >> 48) & 0xff;
+	out[2] = (i >> 40) & 0xff;
+	out[3] = (i >> 32) & 0xff;
+	out[4] = (i >> 24) & 0xff;
+	out[5] = (i >> 16) & 0xff;
+	out[6] = (i >> 8) & 0xff;
+	out[7] = i & 0xff;
+}
+
 // pass valid magic and id pointers to do XOR-MAPPED-ADDRESS processing
 // pass 0 for magic and id to do MAPPED-ADDRESS processing
 static bool parse_mapped_address(const QByteArray &val, const quint8 *magic, const quint8 *id, QHostAddress *addr, quint16 *port)
@@ -127,12 +148,20 @@ public:
 	QHostAddress addr;
 	int port;
 	QString errorString;
+	bool use_extPriority, use_extIceControlling, use_extIceControlled;
+	quint32 extPriority;
+	bool extUseCandidate;
+	quint64 extIceControlling, extIceControlled;
 
 	Private(StunBinding *_q) :
 		QObject(_q),
 		q(_q),
 		pool(0),
-		trans(0)
+		trans(0),
+		use_extPriority(false),
+		use_extIceControlling(false),
+		use_extIceControlled(false),
+		extUseCandidate(false)
 	{
 	}
 
@@ -156,7 +185,44 @@ public:
 		QByteArray id = pool->generateId();
 		message.setId((const quint8 *)id.data());
 
-		trans->start(pool->mode(), message);
+		QList<StunMessage::Attribute> list;
+
+		if(use_extPriority)
+		{
+			StunMessage::Attribute a;
+			a.type = 0x0024; // PRIORITY
+			QByteArray val(4, 0);
+			write32((quint8 *)val.data(), extPriority);
+			a.value = val;
+		}
+
+		if(extUseCandidate)
+		{
+			StunMessage::Attribute a;
+			a.type = 0x0025; // USE-CANDIDATE
+		}
+
+		if(use_extIceControlling)
+		{
+			StunMessage::Attribute a;
+			a.type = 0x802a;
+			QByteArray val(8, 0);
+			write64((quint8 *)val.data(), extIceControlling);
+			a.value = val;
+		}
+
+		if(use_extIceControlled)
+		{
+			StunMessage::Attribute a;
+			a.type = 0x0029;
+			QByteArray val(8, 0);
+			write64((quint8 *)val.data(), extIceControlled);
+			a.value = val;
+		}
+
+		message.setAttributes(list);
+
+		trans->start(pool->mode(), message, pool->username(), pool->password());
 
 		pool->insert(trans);
 	}
@@ -241,6 +307,29 @@ StunBinding::StunBinding(StunTransactionPool *pool) :
 StunBinding::~StunBinding()
 {
 	delete d;
+}
+
+void StunBinding::setPriority(quint32 i)
+{
+	d->use_extPriority = true;
+	d->extPriority = i;
+}
+
+void StunBinding::setUseCandidate(bool enabled)
+{
+	d->extUseCandidate = enabled;
+}
+
+void StunBinding::setIceControlling(quint64 i)
+{
+	d->use_extIceControlling = true;
+	d->extIceControlling = i;
+}
+
+void StunBinding::setIceControlled(quint64 i)
+{
+	d->use_extIceControlled = true;
+	d->extIceControlled = i;
 }
 
 void StunBinding::start()
