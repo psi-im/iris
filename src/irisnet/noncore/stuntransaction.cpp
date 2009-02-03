@@ -49,6 +49,8 @@ public:
 	int last_interval;
 	QTimer *t;
 	//QTime time;
+	QString stuser;
+	QByteArray key;
 
 	Private(StunTransaction *_q) :
 		QObject(_q),
@@ -76,14 +78,30 @@ public:
 		t->deleteLater();
 	}
 
-	void start(StunTransaction::Mode _mode, const StunMessage &msg)
+	void start(StunTransaction::Mode _mode, const StunMessage &msg, const QString &_stuser, const QString &stpass)
 	{
 		mode = _mode;
+		stuser = _stuser;
 		StunMessage out = msg;
 
 		id = QByteArray((const char *)msg.id(), 12);
 
-		packet = out.toBinary();
+		// HACK HACK HACK
+		if(!stuser.isEmpty())
+		{
+			QList<StunMessage::Attribute> list = out.attributes();
+			StunMessage::Attribute attr;
+			attr.type = 0x0006; // USERNAME
+			attr.value = stuser.toUtf8();
+			list += attr;
+			out.setAttributes(list);
+
+			key = stpass.toUtf8();
+			// FIXME: why also fingerprint?  this is such a mess
+			packet = out.toBinary(StunMessage::MessageIntegrity | StunMessage::Fingerprint, key);
+		}
+		else
+			packet = out.toBinary();
 		if(packet.isEmpty())
 		{
 			// since a transaction is not cancelable nor reusable,
@@ -150,6 +168,7 @@ public:
 			return false;
 
 		active = false;
+		t->stop();
 		emit q->finished(msg);
 		return true;
 	}
@@ -166,10 +185,10 @@ StunTransaction::~StunTransaction()
 	delete d;
 }
 
-void StunTransaction::start(Mode mode, const StunMessage &msg)
+void StunTransaction::start(Mode mode, const StunMessage &msg, const QString &stuser, const QString &stpass)
 {
 	Q_ASSERT(!d->active);
-	d->start(mode, msg);
+	d->start(mode, msg, stuser, stpass);
 }
 
 QByteArray StunTransaction::transactionId() const
@@ -223,10 +242,13 @@ public:
 	StunTransaction::Mode mode;
 	QHash<StunTransaction*,QByteArray> transToId;
 	QHash<QByteArray,StunTransaction*> idToTrans;
+	bool shortTermCredentials;
+	QString username, password;
 
 	Private(StunTransactionPool *_q) :
 		QObject(_q),
-		q(_q)
+		q(_q),
+		shortTermCredentials(false)
 	{
 	}
 
@@ -319,14 +341,13 @@ QString StunTransactionPool::realm() const
 
 void StunTransactionPool::setUsername(const QString &username)
 {
-	// TODO
-	Q_UNUSED(username);
+	d->username = username;
 }
 
 void StunTransactionPool::setPassword(const QCA::SecureArray &password)
 {
-	// TODO
-	Q_UNUSED(password);
+	// HACK HACK HACK
+	d->password = QString::fromUtf8(password.toByteArray());
 }
 
 void StunTransactionPool::setRealm(const QString &realm)
@@ -335,9 +356,24 @@ void StunTransactionPool::setRealm(const QString &realm)
 	Q_UNUSED(realm);
 }
 
+void StunTransactionPool::setShortTermCredentialsEnabled(bool enabled)
+{
+	d->shortTermCredentials = enabled;
+}
+
 void StunTransactionPool::continueAfterParams()
 {
 	// TODO
+}
+
+QString StunTransactionPool::username() const
+{
+	return d->username;
+}
+
+QString StunTransactionPool::password() const
+{
+	return d->password;
 }
 
 }

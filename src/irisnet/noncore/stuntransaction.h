@@ -56,7 +56,8 @@ public:
 	//   after calling this function, immediately obtain the result by
 	//   calling packet(), and send it.  the start() function will not
 	//   perform the first send attempt.  it leaves that to you.
-	void start(Mode mode, const StunMessage &request);
+	// FIXME: stuser/stpass are a hack
+	void start(Mode mode, const StunMessage &request, const QString &stuser = QString(), const QString &stpass = QString());
 
 	QByteArray transactionId() const;
 	QByteArray packet() const;
@@ -114,13 +115,16 @@ public:
 	//   signals and return true, or not cause signals and return false.
 	bool writeIncomingMessage(const StunMessage &msg);
 
-	// long-term credentials
 	QString realm() const;
 	void setUsername(const QString &username);
 	void setPassword(const QCA::SecureArray &password);
 	void setRealm(const QString &realm);
 
+	void setShortTermCredentialsEnabled(bool enabled);
 	void continueAfterParams();
+
+	QString username() const;
+	QString password() const;
 
 signals:
 	// note: not DOR-SS safe.  writeIncomingMessage() must not be called
