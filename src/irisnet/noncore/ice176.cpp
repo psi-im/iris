@@ -138,6 +138,7 @@ public:
 		int componentId;
 		TransportAddress base;
 		TransportAddress related;
+		QString id;
 		int network;
 
 		bool operator==(const CandidateInfo &other) const
@@ -372,7 +373,7 @@ public:
 				c.component = ci.componentId;
 				c.foundation = ci.foundation;
 				c.generation = 0;
-				c.id = QString(); // FIXME
+				c.id = ci.id;
 				c.ip = ci.addr.addr;
 				c.network = ci.network;
 				c.port = ci.addr.port;
@@ -416,6 +417,7 @@ public:
 				ci.base.port = c.rel_port;
 			}
 			ci.network = c.network;
+			ci.id = c.id;
 			remoteCandidates += ci;
 		}
 
@@ -570,6 +572,7 @@ public slots:
 		ci.foundation = QString::number(lt->addrAt);
 		ci.base = ci.addr;
 		ci.network = lt->network;
+		ci.id = randomCredential(10); // FIXME: ensure unique
 		localCandidates += ci;
 
 		if(!stunAddr.isNull())
@@ -644,6 +647,7 @@ public slots:
 			ci.base.addr = lt->sock->localAddress();
 			ci.base.port = lt->sock->localPort();
 			ci.network = lt->network;
+			ci.id = randomCredential(10); // FIXME: ensure unique
 			localCandidates += ci;
 		}
 
