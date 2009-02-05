@@ -432,6 +432,7 @@ public:
 					continue;
 
 				CandidatePair pair;
+				pair.state = PFrozen; // FIXME: setting state here may be wrong
 				pair.local = lc;
 				pair.remote = rc;
 				pair.isDefault = false;
@@ -447,7 +448,9 @@ public:
 
 		printf("%d pairs\n", pairs.count());
 
-		// sort
+		// combine pairs with existing, and sort
+		pairs = checkList.pairs + pairs;
+		checkList.pairs.clear();
 		while(!pairs.isEmpty())
 		{
 			int at = -1;
@@ -503,6 +506,11 @@ public:
 		for(int n = 0; n < checkList.pairs.count(); ++n)
 		{
 			CandidatePair &pair = checkList.pairs[n];
+
+			// only initialize the new pairs
+			if(pair.state != PFrozen)
+				continue;
+
 			pair.foundation = pair.local.foundation + pair.remote.foundation;
 
 			// FIXME: for now we just do checks to everything immediately
