@@ -256,9 +256,12 @@ public:
 			delete localTransports[n]->sock;
 
 			QTimer *t = localTransports[n]->t;
-			t->disconnect(this);
-			t->setParent(0);
-			t->deleteLater();
+			if(t)
+			{
+				t->disconnect(this);
+				t->setParent(0);
+				t->deleteLater();
+			}
 		}
 
 		qDeleteAll(localTransports);
@@ -270,9 +273,12 @@ public:
 
 			delete binding;
 
-			pool->disconnect(this);
-			pool->setParent(0);
-			pool->deleteLater();
+			if(pool)
+			{
+				pool->disconnect(this);
+				pool->setParent(0);
+				pool->deleteLater();
+			}
 		}
 	}
 
@@ -357,6 +363,8 @@ public:
 				localTransports += lt;
 				int port = (basePort != -1) ? basePort + n : -1;
 				lt->sock->start(localAddrs[i].addr, port);
+
+				printf("starting transport %s:%d for component %d\n", qPrintable(localAddrs[i].addr.toString()), port, lt->componentId);
 			}
 		}
 	}
@@ -567,6 +575,8 @@ public:
 public slots:
 	void lt_started()
 	{
+		printf("lt_started\n");
+
 		IceLocalTransport *sock = (IceLocalTransport *)sender();
 		int at = -1;
 		for(int n = 0; n < localTransports.count(); ++n)
