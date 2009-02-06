@@ -22,6 +22,7 @@
 
 #include <QMetaType>
 #include <QHostAddress>
+#include "stunmessage.h"
 #include "stuntransaction.h"
 
 Q_DECLARE_METATYPE(XMPP::StunAllocate::Error)
