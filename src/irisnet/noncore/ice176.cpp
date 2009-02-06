@@ -262,6 +262,18 @@ public:
 		}
 
 		qDeleteAll(localTransports);
+
+		for(int n = 0; n < checkList.pairs.count(); ++n)
+		{
+			StunBinding *binding = checkList.pairs[n].binding;
+			StunTransactionPool *pool = checkList.pairs[n].pool;
+
+			delete binding;
+
+			pool->disconnect(this);
+			pool->setParent(0);
+			pool->deleteLater();
+		}
 	}
 
 	// localPref is the priority of the network interface being used for
