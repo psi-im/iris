@@ -631,6 +631,12 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
+	if(!QCA::isSupported("hmac(sha1)"))
+	{
+		printf("Error: Need hmac(sha1) support.\n");
+		return 1;
+	}
+
 	App app;
 	app.opt_mode = mode;
 	app.opt_localBase = localBase;

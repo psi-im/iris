@@ -726,6 +726,12 @@ int main(int argc, char **argv)
 		if(args.count() >= 3)
 			localPort = args[2].toInt();
 
+		if(!QCA::isSupported("hmac(sha1)"))
+		{
+			printf("Error: Need hmac(sha1) support to use STUN.\n");
+			return 1;
+		}
+
 		StunBind a;
 		a.localPort = localPort;
 		a.addr = addr;
