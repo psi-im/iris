@@ -57,6 +57,7 @@ public:
 	}
 
 	~NetTracker() {
+		QMutexLocker locker(&m);
 		delete c;
 	}
 
@@ -135,7 +136,6 @@ public:
 
 	~NetTrackerThread() {
 		// locked from caller
-		delete nettracker;
 	}
 
 
@@ -166,6 +166,8 @@ private:
 			startCond.wakeOne(); // we're ready to serve.
 		}
 		exec();
+		delete nettracker;
+		nettracker = 0;
 	}
 
 private:
