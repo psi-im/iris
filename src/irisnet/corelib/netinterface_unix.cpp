@@ -92,15 +92,22 @@ static QList<UnixIface> get_sioc_ifaces()
 		struct ifreq *ifr = (struct ifreq *)(buf.data() + at);
 
 		int sockaddr_len;
-		if(((struct sockaddr *)&ifr->ifr_addr)->sa_family == AF_INET)
+
+#ifndef Q_OS_LINUX
+
+		if(((struct sockaddr *)&ifr->ifr_addr)->sa_family == AF_INET) {
 			sockaddr_len = sizeof(struct sockaddr_in);
-		else if(((struct sockaddr *)&ifr->ifr_addr)->sa_family == AF_INET6)
+		} else if(((struct sockaddr *)&ifr->ifr_addr)->sa_family == AF_INET6) {
 			sockaddr_len = sizeof(struct sockaddr_in6);
-		else
+		} else {
 			sockaddr_len = sizeof(struct sockaddr);
+		}
 
 		// set this asap so the next iteration is possible
 		itemsize = sizeof(ifr->ifr_name) + sockaddr_len;
+#else
+		itemsize = sizeof(ifreq);
+#endif
 
 		// skip if the family is 0 (sometimes you get empty entries)
 		if(ifr->ifr_addr.sa_family == 0)
