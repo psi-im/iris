@@ -91,9 +91,8 @@ static QList<UnixIface> get_sioc_ifaces()
 	{
 		struct ifreq *ifr = (struct ifreq *)(buf.data() + at);
 
-		int sockaddr_len;
-
 #ifndef Q_OS_LINUX
+		int sockaddr_len;
 
 		if(((struct sockaddr *)&ifr->ifr_addr)->sa_family == AF_INET) {
 			sockaddr_len = sizeof(struct sockaddr_in);
