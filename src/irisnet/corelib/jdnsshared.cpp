@@ -257,6 +257,35 @@ signals:
 	void started();
 };
 
+class JDnsShutdownWorker : public QObject
+{
+	Q_OBJECT
+public:
+	QList<JDnsShared*> list;
+
+	JDnsShutdownWorker(const QList<JDnsShared*> &_list) : QObject(0), list(_list)
+	{
+		foreach(JDnsShared *i, list)
+		{
+			connect(i, SIGNAL(shutdownFinished()), SLOT(jdns_shutdownFinished()));
+			i->shutdown(); // MUST support DOR-DS, and it does
+		}
+	}
+
+signals:
+	void finished();
+
+private slots:
+	void jdns_shutdownFinished()
+	{
+		JDnsShared *i = (JDnsShared *)sender();
+		list.removeAll(i);
+		delete i;
+		if(list.isEmpty())
+			emit finished();
+	}
+};
+
 class JDnsShutdown : public QThread
 {
 	Q_OBJECT
@@ -265,6 +294,7 @@ public:
 	QWaitCondition w;
 	QList<JDnsShared*> list;
 	JDnsShutdownAgent *agent;
+	JDnsShutdownWorker *worker;
 	int phase;
 
 	void waitForShutdown(const QList<JDnsShared*> &_list)
@@ -308,21 +338,17 @@ private slots:
 		}
 		else
 		{
-			foreach(JDnsShared *i, list)
-			{
-				connect(i, SIGNAL(shutdownFinished()), SLOT(jdns_shutdownFinished()), Qt::DirectConnection);
-				i->shutdown();
-			}
+			worker = new JDnsShutdownWorker(list);
+			connect(worker, SIGNAL(finished()), SLOT(worker_finished()), Qt::DirectConnection);
 		}
 	}
 
-	void jdns_shutdownFinished()
+	void worker_finished()
 	{
-		JDnsShared *i = (JDnsShared *)sender();
-		delete i;
-		list.removeAll(i);
-		if(list.isEmpty())
-			quit();
+		delete worker;
+		worker = 0;
+
+		quit();
 	}
 };
 
