@@ -2067,7 +2067,8 @@ bool S5BServer::isActive() const
 bool S5BServer::start(int port)
 {
 	d->serv.stop();
-	return d->serv.listen(port, true);
+	//return d->serv.listen(port, true);
+	return d->serv.listen(port);
 }
 
 void S5BServer::stop()
