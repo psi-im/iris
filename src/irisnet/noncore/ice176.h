@@ -158,6 +158,7 @@ public:
 
 signals:
 	void started();
+	void error();
 
 	void localCandidatesReady(const QList<XMPP::Ice176::Candidate> &list);
 	void componentReady(int index);

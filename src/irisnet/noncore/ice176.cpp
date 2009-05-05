@@ -605,6 +605,31 @@ public slots:
 		ci.id = randomCredential(10); // FIXME: ensure unique
 		localCandidates += ci;
 
+		int extAt = -1;
+		for(int n = 0; n < extAddrs.count(); ++n)
+		{
+			if(extAddrs[n].base.addr == lt->sock->localAddress() && (extAddrs[n].portBase == -1 || extAddrs[n].portBase == lt->sock->localPort()))
+			{
+				extAt = n;
+				break;
+			}
+		}
+		if(extAt != -1)
+		{
+			CandidateInfo ci;
+			ci.addr.addr = extAddrs[extAt].addr;
+			ci.addr.port = (extAddrs[extAt].portBase != -1) ? extAddrs[extAt].portBase : lt->sock->localPort();
+			ci.type = ServerReflexiveType;
+			ci.componentId = lt->componentId;
+			ci.priority = choose_default_priority(ci.type, 65535 - lt->addrAt, lt->isVpn, ci.componentId);
+			ci.foundation = QString::number(lt->addrAt) + 'e';
+			ci.base.addr = lt->sock->localAddress();
+			ci.base.port = lt->sock->localPort();
+			ci.network = lt->network;
+			ci.id = randomCredential(10); // FIXME: ensure unique
+			localCandidates += ci;
+		}
+
 		if(!stunAddr.isNull())
 		{
 			lt->use_stun = true;
@@ -691,6 +716,7 @@ public slots:
 		// TODO
 		Q_UNUSED(e);
 		printf("lt_error\n");
+		emit q->error();
 	}
 
 	void lt_readyRead(XMPP::IceLocalTransport::TransmitPath path)
