@@ -544,6 +544,21 @@ public:
 		res_instances.insert(np->id, np);
 	}
 
+	void resolve_stop(NameResolver::Private *np)
+	{
+		// FIXME: stop sub instances?
+		p_net->resolve_stop(np->id);
+		resolve_cleanup(np);
+	}
+
+	void resolve_cleanup(NameResolver::Private *np)
+	{
+		res_instances.remove(np->id);
+		NameResolver *q = np->q;
+		delete q->d;
+		q->d = 0;
+	}
+
 	void browse_start(ServiceBrowser::Private *np, const QString &type, const QString &domain)
 	{
 		QMutexLocker locker(nman_mutex());
@@ -658,7 +673,10 @@ private slots:
 		}
 
 		NameResolver::Private *np = res_instances.value(id);
-		emit np->q->resultsReady(results);
+		NameResolver *q = np->q; // resolve_cleanup deletes np
+		if(!np->longLived)
+			resolve_cleanup(np);
+		emit q->resultsReady(results);
 	}
 
 	void provider_resolve_error(int id, XMPP::NameResolver::Error e)
@@ -673,7 +691,9 @@ private slots:
 		}
 
 		NameResolver::Private *np = res_instances.value(id);
-		emit np->q->error(e);
+		NameResolver *q = np->q; // resolve_cleanup deletes np
+		resolve_cleanup(np);
+		emit q->error(e);
 	}
 
 	void provider_resolve_useLocal(int id, const QByteArray &name)
@@ -798,16 +818,18 @@ static int recordType2Rtype(NameRecord::Type type)
 NameResolver::NameResolver(QObject *parent)
 :QObject(parent)
 {
-	d = new Private(this);
+	d = 0;
 }
 
 NameResolver::~NameResolver()
 {
-	delete d;
+	stop();
 }
 
 void NameResolver::start(const QByteArray &name, NameRecord::Type type, Mode mode)
 {
+	stop();
+	d = new Private(this);
 	int qType = recordType2Rtype(type);
 	if(qType == -1)
 		qType = JDNS_RTYPE_A;
@@ -816,7 +838,12 @@ void NameResolver::start(const QByteArray &name, NameRecord::Type type, Mode mod
 
 void NameResolver::stop()
 {
-	// TODO
+	if(d)
+	{
+		NameManager::instance()->resolve_stop(d);
+		delete d;
+		d = 0;
+	}
 }
 
 //----------------------------------------------------------------------------
