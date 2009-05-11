@@ -744,7 +744,7 @@ public slots:
 				int fromPort;
 				QByteArray buf = lt->sock->readDatagram(path, &fromAddr, &fromPort);
 
-				printf("port %d: received packet (%d bytes)\n", lt->sock->localPort(), buf.size());
+				//printf("port %d: received packet (%d bytes)\n", lt->sock->localPort(), buf.size());
 
 				QString requser = localUser + ':' + peerUser;
 				QByteArray reqkey = localPass.toUtf8();
@@ -847,7 +847,7 @@ public slots:
 						}
 
 						int componentIndex = checkList.pairs[at].local.componentId - 1;
-						printf("packet is considered to be application data for component index %d\n", componentIndex);
+						//printf("packet is considered to be application data for component index %d\n", componentIndex);
 
 						in[componentIndex] += buf;
 						emit q->readyRead(componentIndex);
