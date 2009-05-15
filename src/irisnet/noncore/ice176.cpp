@@ -339,6 +339,7 @@ public:
 		localUser = randomCredential(4);
 		localPass = randomCredential(22);
 
+		bool atLeastOneTransport = false;
 		for(int n = 0; n < componentCount; ++n)
 		{
 			in += QList<QByteArray>();
@@ -346,7 +347,10 @@ public:
 			for(int i = 0; i < localAddrs.count(); ++i)
 			{
 				if(localAddrs[i].addr.protocol() != QAbstractSocket::IPv4Protocol)
+				{
+					printf("warning: skipping non-ipv4 address: %s\n", qPrintable(localAddrs[i].addr.toString()));
 					continue;
+				}
 
 				LocalTransport *lt = new LocalTransport;
 				lt->sock = new IceLocalTransport(this);
@@ -364,9 +368,13 @@ public:
 				int port = (basePort != -1) ? basePort + n : -1;
 				lt->sock->start(localAddrs[i].addr, port);
 
+				atLeastOneTransport = true;
 				printf("starting transport %s:%d for component %d\n", qPrintable(localAddrs[i].addr.toString()), port, lt->componentId);
 			}
 		}
+
+		if(!atLeastOneTransport)
+			QMetaObject::invokeMethod(q, "error", Qt::QueuedConnection);
 	}
 
 	void tryFinishGather()
@@ -716,6 +724,8 @@ public slots:
 		// TODO
 		Q_UNUSED(e);
 		printf("lt_error\n");
+		for(int n = 0; n < localTransports.count(); ++n)
+			localTransports[n]->sock->disconnect(this);
 		emit q->error();
 	}
 
