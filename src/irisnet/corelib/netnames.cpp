@@ -533,9 +533,9 @@ public:
 			// use queued connections
 			qRegisterMetaType< QList<XMPP::NameRecord> >("QList<XMPP::NameRecord>");
 			qRegisterMetaType<XMPP::NameResolver::Error>("XMPP::NameResolver::Error");
-			connect(p_net, SIGNAL(resolve_resultsReady(int, const QList<XMPP::NameRecord> &)), SLOT(provider_resolve_resultsReady(int, const QList<XMPP::NameRecord> &)), Qt::QueuedConnection);
-			connect(p_net, SIGNAL(resolve_error(int, XMPP::NameResolver::Error)), SLOT(provider_resolve_error(int, XMPP::NameResolver::Error)), Qt::QueuedConnection);
-			connect(p_net, SIGNAL(resolve_useLocal(int, const QByteArray &)), SLOT(provider_resolve_useLocal(int, const QByteArray &)), Qt::QueuedConnection);
+			connect(p_net, SIGNAL(resolve_resultsReady(int, const QList<XMPP::NameRecord> &)), SLOT(provider_resolve_resultsReady(int, const QList<XMPP::NameRecord> &)));
+			connect(p_net, SIGNAL(resolve_error(int, XMPP::NameResolver::Error)), SLOT(provider_resolve_error(int, XMPP::NameResolver::Error)));
+			connect(p_net, SIGNAL(resolve_useLocal(int, const QByteArray &)), SLOT(provider_resolve_useLocal(int, const QByteArray &)));
 		}
 
 		np->id = p_net->resolve_start(name, qType, longLived);
