@@ -44,6 +44,8 @@
 #include "servsock.h"
 #include "bsocket.h"
 
+//#define PROX_DEBUG
+
 #ifdef PROX_DEBUG
 #include <stdio.h>
 #endif
@@ -507,11 +509,11 @@ void SocksClient::connectToHost(const QString &proxyHost, int proxyPort, const Q
 	d->udp = udpMode;
 
 #ifdef PROX_DEBUG
-	fprintf(stderr, "SocksClient: Connecting to %s:%d", proxyHost.toLatin1(), proxyPort);
+	fprintf(stderr, "SocksClient: Connecting to %s:%d", qPrintable(proxyHost), proxyPort);
 	if(d->user.isEmpty())
 		fprintf(stderr, "\n");
 	else
-		fprintf(stderr, ", auth {%s,%s}\n", d->user.toLatin1(), d->pass.toLatin1());
+		fprintf(stderr, ", auth {%s,%s}\n", qPrintable(d->user), qPrintable(d->pass));
 #endif
 	d->sock.connectToHost(d->host, d->port);
 }
