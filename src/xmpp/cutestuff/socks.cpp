@@ -99,12 +99,12 @@ void SocksUDP::write(const QByteArray &data)
 
 void SocksUDP::sd_activated()
 {
-  while (d->sd->hasPendingDatagrams()) {
-    QByteArray datagram;
-    datagram.resize(d->sd->pendingDatagramSize());
-    d->sd->readDatagram(datagram.data(), datagram.size());
-    packetReady(datagram);
-  }
+	while (d->sd->hasPendingDatagrams()) {
+		QByteArray datagram;
+		datagram.resize(d->sd->pendingDatagramSize());
+		d->sd->readDatagram(datagram.data(), datagram.size());
+		packetReady(datagram);
+	}
 }
 
 //----------------------------------------------------------------------------
@@ -127,7 +127,7 @@ void SocksUDP::sd_activated()
 static QByteArray spc_set_version()
 {
 	QByteArray ver;
-  ver.resize(4);
+	ver.resize(4);
 	ver[0] = 0x05; // socks version 5
 	ver[1] = 0x02; // number of methods
 	ver[2] = 0x00; // no-auth
@@ -138,7 +138,7 @@ static QByteArray spc_set_version()
 static QByteArray sps_set_version(int method)
 {
 	QByteArray ver;
-  ver.resize(2);
+	ver.resize(2);
 	ver[0] = 0x05;
 	ver[1] = method;
 	return ver;
@@ -197,7 +197,7 @@ static QByteArray spc_set_authUsername(const QByteArray &user, const QByteArray 
 	if(len2 > 255)
 		len2 = 255;
 	QByteArray a;
-  a.resize(1+1+len1+1+len2);
+	a.resize(1+1+len1+1+len2);
 	a[0] = 0x01; // username auth version 1
 	a[1] = len1;
 	memcpy(a.data() + 2, user.data(), len1);
@@ -209,7 +209,7 @@ static QByteArray spc_set_authUsername(const QByteArray &user, const QByteArray 
 static QByteArray sps_set_authUsername(bool success)
 {
 	QByteArray a;
-  a.resize(2);
+	a.resize(2);
 	a[0] = 0x01;
 	a[1] = success ? 0x00 : 0xff;
 	return a;
@@ -268,7 +268,7 @@ static QByteArray sp_set_request(const QHostAddress &addr, unsigned short port, 
 {
 	int at = 0;
 	QByteArray a;
-  a.resize(4);
+	a.resize(4);
 	a[at++] = 0x05; // socks version 5
 	a[at++] = cmd1;
 	a[at++] = 0x00; // reserved
@@ -318,7 +318,7 @@ static QByteArray sp_set_request(const QString &host, quint16 port, unsigned cha
 
 	int at = 0;
 	QByteArray a;
-  a.resize(4);
+	a.resize(4);
 	a[at++] = 0x05; // socks version 5
 	a[at++] = cmd1;
 	a[at++] = 0x00; // reserved
@@ -375,7 +375,7 @@ static int sp_get_request(QByteArray *from, SPS_CONNREQ *s)
 		if((int)from->size() < full_len)
 			return 0;
 		QByteArray cs;
-    cs.resize(host_len+1);
+		cs.resize(host_len+1);
 		memcpy(cs.data(), from->data() + 5, host_len);
 		host = QString::fromLatin1(cs);
 	}
@@ -532,6 +532,13 @@ void SocksClient::close()
 
 void SocksClient::writeData(const QByteArray &buf)
 {
+#ifdef PROX_DEBUG
+	// show hex
+	fprintf(stderr, "SocksClient: client write { ");
+	for(int n = 0; n < (int)buf.size(); ++n)
+		fprintf(stderr, "%02X ", (unsigned char)buf[n]);
+	fprintf(stderr, " } \n");
+#endif
 	d->pending += buf.size();
 	d->sock.write(buf);
 }
@@ -1022,9 +1029,9 @@ SocksServer::SocksServer(QObject *parent)
 SocksServer::~SocksServer()
 {
 	stop();
-  while (d->incomingConns.count()) {
-    delete d->incomingConns.takeFirst();
-  }
+	while (d->incomingConns.count()) {
+		delete d->incomingConns.takeFirst();
+	}
 	delete d;
 }
 
@@ -1108,14 +1115,14 @@ void SocksServer::connectionError()
 
 void SocksServer::sd_activated()
 {
-  while (d->sd->hasPendingDatagrams()) {
-    QByteArray datagram;
-    QHostAddress sender;
-    quint16 senderPort;
-    datagram.resize(d->sd->pendingDatagramSize());
-    d->sd->readDatagram(datagram.data(), datagram.size(), &sender, &senderPort);
-    incomingUDP(sender.toString(), senderPort, d->sd->peerAddress(), d->sd->peerPort(), datagram);
-  }
+	while (d->sd->hasPendingDatagrams()) {
+		QByteArray datagram;
+		QHostAddress sender;
+		quint16 senderPort;
+		datagram.resize(d->sd->pendingDatagramSize());
+		d->sd->readDatagram(datagram.data(), datagram.size(), &sender, &senderPort);
+		incomingUDP(sender.toString(), senderPort, d->sd->peerAddress(), d->sd->peerPort(), datagram);
+	}
 }
 
 // CS_NAMESPACE_END
