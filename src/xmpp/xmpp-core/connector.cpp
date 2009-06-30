@@ -282,6 +282,11 @@ void AdvancedConnector::setOptHostPort(const QString &host, quint16 _port)
 {
 	if(d->mode != Idle)
 		return;
+	// empty host means disable explicit host support
+	if(host.isEmpty()) {
+		d->opt_hosts.clear();
+		return;
+	}
 	d->opt_hosts = QStringList() << host;
 	d->opt_port = _port;
 }
