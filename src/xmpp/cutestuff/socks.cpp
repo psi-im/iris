@@ -238,8 +238,8 @@ static int spc_get_authUsername(QByteArray *from, SPCS_AUTHUSERNAME *s)
 	QByteArray a = ByteStream::takeArray(from, ulen + plen + 3);
 
 	QByteArray user, pass;
-	user.resize(ulen+1);
-	pass.resize(plen+1);
+	user.resize(ulen);
+	pass.resize(plen);
 	memcpy(user.data(), a.data()+2, ulen);
 	memcpy(pass.data(), a.data()+ulen+3, plen);
 	s->user = QString::fromUtf8(user);
@@ -375,7 +375,7 @@ static int sp_get_request(QByteArray *from, SPS_CONNREQ *s)
 		if((int)from->size() < full_len)
 			return 0;
 		QByteArray cs;
-		cs.resize(host_len+1);
+		cs.resize(host_len);
 		memcpy(cs.data(), from->data() + 5, host_len);
 		host = QString::fromLatin1(cs);
 	}
