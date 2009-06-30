@@ -25,11 +25,32 @@
 #include "bsocket.h"
 #include <QtCrypto>
 
+//#define PROX_DEBUG
+
 #ifdef PROX_DEBUG
 #include <stdio.h>
 #endif
 
 // CS_NAMESPACE_BEGIN
+
+#ifdef PROX_DEBUG
+QString escapeOutput(const QByteArray &in)
+{
+	QString out;
+	for(int n = 0; n < in.size(); ++n) {
+		if(in[n] == '\\') {
+			out += QString("\\\\");
+		}
+		else if(in[n] >= 32 && in[n] < 127) {
+			out += QChar::fromLatin1(in[n]);
+		}
+		else {
+			out += QString().sprintf("\\x%02x", (unsigned char)in[n]);
+		}
+	}
+	return out;
+}
+#endif
 
 static QString extractLine(QByteArray *buf, bool *found)
 {
@@ -139,11 +160,11 @@ void HttpConnect::connectToHost(const QString &proxyHost, int proxyPort, const Q
 	d->real_port = port;
 
 #ifdef PROX_DEBUG
-	fprintf(stderr, "HttpConnect: Connecting to %s:%d", proxyHost.latin1(), proxyPort);
+	fprintf(stderr, "HttpConnect: Connecting to %s:%d", qPrintable(proxyHost), proxyPort);
 	if(d->user.isEmpty())
 		fprintf(stderr, "\n");
 	else
-		fprintf(stderr, ", auth {%s,%s}\n", d->user.latin1(), d->pass.latin1());
+		fprintf(stderr, ", auth {%s,%s}\n", qPrintable(d->user), qPrintable(d->pass));
 #endif
 	d->sock.connectToHost(d->host, d->port);
 }
@@ -203,6 +224,9 @@ void HttpConnect::sock_connected()
 	s += "\r\n";
 
 	QByteArray block = s.toUtf8();
+#ifdef PROX_DEBUG
+	fprintf(stderr, "HttpConnect: writing: {%s}\n", qPrintable(escapeOutput(block)));
+#endif
 	d->toWrite = block.size();
 	d->sock.write(block);
 }
@@ -265,9 +289,9 @@ void HttpConnect::sock_readyRead()
 				}
 				else {
 #ifdef PROX_DEBUG
-					fprintf(stderr, "HttpConnect: header proto=[%s] code=[%d] msg=[%s]\n", proto.latin1(), code, msg.latin1());
+					fprintf(stderr, "HttpConnect: header proto=[%s] code=[%d] msg=[%s]\n", qPrintable(proto), code, qPrintable(msg));
 					for(QStringList::ConstIterator it = d->headerLines.begin(); it != d->headerLines.end(); ++it)
-						fprintf(stderr, "HttpConnect: * [%s]\n", (*it).latin1());
+						fprintf(stderr, "HttpConnect: * [%s]\n", qPrintable(*it));
 #endif
 				}
 
@@ -310,7 +334,7 @@ void HttpConnect::sock_readyRead()
 					}
 
 #ifdef PROX_DEBUG
-					fprintf(stderr, "HttpConnect: << Error >> [%s]\n", errStr.latin1());
+					fprintf(stderr, "HttpConnect: << Error >> [%s]\n", qPrintable(errStr));
 #endif
 					reset(true);
 					error(err);
