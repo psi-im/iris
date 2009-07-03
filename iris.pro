@@ -12,6 +12,10 @@ appledns:!appledns_bundle:CONFIG *= build_src
 !irisnetcore_bundle:CONFIG *= build_src
 !iris_bundle:CONFIG *= build_src
 
-build_src:SUBDIRS += src
+sub_src.subdir = src
+sub_tools.subdir = tools
+sub_tools.depends = sub_src
 
-!no_tests:SUBDIRS += tools
+build_src:SUBDIRS += sub_src
+
+!no_tests:SUBDIRS += sub_tools
