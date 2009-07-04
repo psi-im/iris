@@ -478,7 +478,7 @@ typedef struct list
 	list_item_t **item;
 } list_t;
 
-list_t *list_new()
+static list_t *list_new()
 {
 	list_t *l = alloc_type(list_t);
 	l->count = 0;
@@ -486,7 +486,7 @@ list_t *list_new()
 	return l;
 }
 
-void list_delete(list_t *l)
+static void list_delete(list_t *l)
 {
 	int n;
 	if(!l)
@@ -498,7 +498,7 @@ void list_delete(list_t *l)
 	jdns_free(l);
 }
 
-void list_insert(list_t *l, void *item, int pos)
+static void list_insert(list_t *l, void *item, int pos)
 {
 	list_item_t *i = (list_item_t *)item;
 	if(!l->item)
@@ -513,7 +513,7 @@ void list_insert(list_t *l, void *item, int pos)
 	++l->count;
 }
 
-void list_remove(list_t *l, void *item)
+static void list_remove(list_t *l, void *item)
 {
 	int n;
 	list_item_t *i = (list_item_t *)item;
@@ -551,9 +551,9 @@ typedef struct name_server
 	int port;
 } name_server_t;
 
-void name_server_delete(name_server_t *ns);
+static void name_server_delete(name_server_t *ns);
 
-name_server_t *name_server_new()
+static name_server_t *name_server_new()
 {
 	name_server_t *ns = alloc_type(name_server_t);
 	ns->dtor = name_server_delete;
