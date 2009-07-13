@@ -28,6 +28,7 @@
 #include <QImageReader>
 #include <QImageWriter>
 #include <QtCrypto>
+#include <QtDebug>
 
 #include "xmpp_xmlcommon.h"
 
@@ -60,7 +61,7 @@ QString image2type(const QByteArray &ba)
 	if ( format.toUpper() == "JPEG" )
 		return "image/jpeg";
 
-	qWarning(QString("WARNING! VCard::image2type: unknown format = '%1'").arg(format.isNull() ? QString("UNKNOWN") : format).toAscii());
+	qWarning() << QString("WARNING! VCard::image2type: unknown format = '%1'").arg(format.isNull() ? QString("UNKNOWN") : format);
 
 	return "image/unknown";
 }

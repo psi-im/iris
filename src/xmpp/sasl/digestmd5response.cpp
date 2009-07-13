@@ -59,9 +59,9 @@ DIGESTMD5Response::DIGESTMD5Response(const QByteArray& challenge, const QString&
 	QByteArray KD = HA1 + ':' + nonce + ':' + nc + ':' + cnonce + ':' + qop + ':' + HA2;
 	QByteArray Z = QCA::Hash("md5").hashToString(KD).toLatin1();
 
-	//qDebug() << (QString("simplesasl.cpp: A1 = %1").arg(QString(A1)).toAscii());
-	//qDebug() << (QString("simplesasl.cpp: A2 = %1").arg(QString(A2)).toAscii());
-	//qDebug() << (QString("simplesasl.cpp: KD = %1").arg(QString(KD)).toAscii());
+	//qDebug() << QString("simplesasl.cpp: A1 = %1").arg(QString(A1));
+	//qDebug() << QString("simplesasl.cpp: A2 = %1").arg(QString(A2));
+	//qDebug() << QString("simplesasl.cpp: KD = %1").arg(QString(KD));
 
 	// build output
 	DIGESTMD5PropList out;
