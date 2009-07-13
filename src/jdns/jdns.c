@@ -2279,8 +2279,15 @@ void _process_message(jdns_session_t *s, jdns_packet_t *packet, int now, query_t
 	// nxdomain
 	if(packet->opts.rcode == 3)
 	{
-		r = jdns_response_new();
-		nxdomain = 1;
+		// FIXME: treat nxdomain as a generic error.  this is a simple
+		//   solution to ensuring resolving keeps going, in case the
+		//   user has multiple dns servers and one of them reports
+		//   nxdomain when a later one would succeed.  this has the
+		//   side-effect of nxdomain errors being reported as generic
+		//   errors, but, as exhibited by the need for this fix, the
+		//   distinction is not all that useful.
+		//r = jdns_response_new();
+		//nxdomain = 1;
 	}
 	// normal
 	else if(packet->opts.rcode == 0)
