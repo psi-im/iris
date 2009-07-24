@@ -38,6 +38,8 @@
 
 #if defined(__FreeBSD__) || defined(__DragonFly__)
 # define JDNS_OS_FREEBSD
+#elif defined(__NetBSD__)
+# define JDNS_OS_NETBSD
 #elif defined(__APPLE__) && (defined(__GNUC__) || defined(__xlC__) || defined(__xlc__))
 # define JDNS_OS_MAC
 #endif

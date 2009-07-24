@@ -705,7 +705,7 @@ static int my_res_init()
 //   a define, so the #ifdef doesn't work.  as a workaround, we'll explicitly
 //   specify the platforms that have __res_state_ext
 //#ifdef __res_state_ext
-#if defined(JDNS_OS_MAC) || defined(JDNS_OS_FREEBSD)
+#if defined(JDNS_OS_MAC) || defined(JDNS_OS_FREEBSD) || defined(JDNS_OS_NETBSD)
 # define USE_EXTEXT
 #endif
 
