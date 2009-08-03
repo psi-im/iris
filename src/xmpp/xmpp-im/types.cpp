@@ -1430,6 +1430,14 @@ Stanza Message::toStanza(Stream *stream) const
 		}
 	}
 
+	if (containsHTML()) {
+		QDomElement html = s.createElement("http://jabber.org/protocol/xhtml-im", "html");
+		s.appendChild(html);
+		foreach (HTMLElement el, d->htmlElements) {
+			html.appendChild(s.doc().importNode(el.body(), true).toElement());
+		}
+	}
+
 	if(d->type == "error")
 		s.setError(d->error);
 
