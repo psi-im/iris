@@ -194,12 +194,14 @@ public:
 			QByteArray val(4, 0);
 			write32((quint8 *)val.data(), extPriority);
 			a.value = val;
+			list += a;
 		}
 
 		if(extUseCandidate)
 		{
 			StunMessage::Attribute a;
 			a.type = 0x0025; // USE-CANDIDATE
+			list += a;
 		}
 
 		if(use_extIceControlling)
@@ -209,6 +211,7 @@ public:
 			QByteArray val(8, 0);
 			write64((quint8 *)val.data(), extIceControlling);
 			a.value = val;
+			list += a;
 		}
 
 		if(use_extIceControlled)
@@ -218,6 +221,7 @@ public:
 			QByteArray val(8, 0);
 			write64((quint8 *)val.data(), extIceControlled);
 			a.value = val;
+			list += a;
 		}
 
 		message.setAttributes(list);
