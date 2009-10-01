@@ -108,8 +108,8 @@ public:
 	struct ErrorDescEntry
 	{
 		int cond;
-		char *name;
-		char *str;
+		const char *name;
+		const char *str;
 	};
 	static ErrorDescEntry errorDescriptions[];
 

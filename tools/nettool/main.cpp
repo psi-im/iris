@@ -223,7 +223,10 @@ private slots:
 		if(null_dump && list[0].type() == NameRecord::Null)
 		{
 			QByteArray buf = list[0].rawData();
-			fwrite(buf.data(), buf.size(), 1, stdout);
+			if (fwrite(buf.data(), buf.size(), 1, stdout) != static_cast<size_t>(buf.size())) {
+				// FIXME Need error handling
+				return;
+			}
 		}
 		else
 		{
