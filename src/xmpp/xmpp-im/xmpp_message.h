@@ -157,9 +157,11 @@ namespace XMPP {
 		void setWasEncrypted(bool);
 
 		Stanza toStanza(Stream *stream) const;
+		bool fromStanza(const Stanza &s);
 		bool fromStanza(const Stanza &s, int tzoffset);
+		bool fromStanza(const Stanza &s, bool useTimeZoneOffset, int timeZoneOffset);
 
-	private:
+	private:		
 		class Private;
 		Private *d;
 	};

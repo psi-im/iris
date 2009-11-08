@@ -133,6 +133,7 @@ public:
 	Features features;
 	QMap<QString,Features> extension_features;
 	int tzoffset;
+	bool useTzoffset;	// manual tzoffset is old way of doing utc<->local translations
 	bool active;
 
 	LiveRoster roster;
@@ -150,6 +151,7 @@ Client::Client(QObject *par)
 {
 	d = new ClientPrivate;
 	d->tzoffset = 0;
+	d->useTzoffset = false;
 	d->active = false;
 	d->osname = "N/A";
 	d->clientName = "N/A";
@@ -992,6 +994,21 @@ int Client::timeZoneOffset() const
 	return d->tzoffset;
 }
 
+/**
+  \brief Returns true if Client is using old, manual time zone conversions.
+
+  By default, conversions between UTC and local time are done automatically by Qt.
+  In this mode, manualTimeZoneOffset() returns true,
+  and timeZoneOffset() always retuns 0 (so you shouldn't use that function).
+
+  However, if you call setTimeZone(), Client instance switches to old mode
+  and uses given time zone offset for all calculations.
+  */
+bool Client::manualTimeZoneOffset() const
+{
+	return d->useTzoffset;
+}
+
 QString Client::clientName() const
 {
 	return d->clientName;
@@ -1026,6 +1043,7 @@ void Client::setTimeZone(const QString &name, int offset)
 {
 	d->tzname = name;
 	d->tzoffset = offset;
+	d->useTzoffset = true;
 }
 
 void Client::setClientName(const QString &s)

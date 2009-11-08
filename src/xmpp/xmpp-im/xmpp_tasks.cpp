@@ -707,17 +707,21 @@ bool JT_PushPresence::take(const QDomElement &e)
 	if(found)
 		p.setPriority(tagContent(tag).toInt());
 
+	QDateTime stamp;
+
 	for(QDomNode n = e.firstChild(); !n.isNull(); n = n.nextSibling()) {
 		QDomElement i = n.toElement();
 		if(i.isNull())
 			continue;
 
 		if(i.tagName() == "x" && i.attribute("xmlns") == "jabber:x:delay") {
-			if(i.hasAttribute("stamp")) {
-				QDateTime dt;
-				if(stamp2TS(i.attribute("stamp"), &dt))
-					dt = dt.addSecs(client()->timeZoneOffset() * 3600);
-				p.setTimeStamp(dt);
+			if(i.hasAttribute("stamp") && !stamp.isValid()) {
+				stamp = stamp2TS(i.attribute("stamp"));
+			}
+		}
+		else if(i.tagName() == "delay" && i.attribute("xmlns") == "urn:xmpp:delay") {
+			if(i.hasAttribute("stamp") && !stamp.isValid()) {
+				stamp = QDateTime::fromString(i.attribute("stamp").left(19), Qt::ISODate);
 			}
 		}
 		else if(i.tagName() == "x" && i.attribute("xmlns") == "gabber:x:music:info") {
@@ -769,6 +773,17 @@ bool JT_PushPresence::take(const QDomElement &e)
 					p.setMUCDestroy(MUCDestroy(muc_e));
 			}
 		}
+	}
+
+
+	if (stamp.isValid()) {
+		if (client()->manualTimeZoneOffset()) {
+			stamp = stamp.addSecs(client()->timeZoneOffset() * 3600);
+		} else {
+			stamp.setTimeSpec(Qt::UTC);
+			stamp = stamp.toLocalTime();
+		}
+		p.setTimeStamp(stamp);
 	}
 
 	presence(j, p);
@@ -862,7 +877,7 @@ bool JT_PushMessage::take(const QDomElement &e)
 	}
 
 	Message m;
-	if(!m.fromStanza(s, client()->timeZoneOffset())) {
+	if(!m.fromStanza(s, client()->manualTimeZoneOffset(), client()->timeZoneOffset())) {
 		//printf("bad message\n");
 		return false;
 	}

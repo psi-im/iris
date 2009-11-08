@@ -1449,7 +1449,11 @@ Stanza Message::toStanza(Stream *stream) const
 
 	// timestamp
 	if(d->timeStampSend && !d->timeStamp.isNull()) {
-		QDomElement e = s.createElement("jabber:x:delay", "x");
+		QDomElement e = s.createElement("urn:xmpp:delay", "delay");
+		e.setAttribute("stamp", d->timeStamp.toUTC().toString(Qt::ISODate) + "Z");
+		s.appendChild(e);
+
+		e = s.createElement("jabber:x:delay", "x");
 		e.setAttribute("stamp", TS2stamp(d->timeStamp.toUTC()));
 		s.appendChild(e);
 	}
@@ -1605,7 +1609,31 @@ Stanza Message::toStanza(Stream *stream) const
 	return s;
 }
 
+/**
+  \brief Create Message from Stanza \a s, using given \a timeZoneOffset (old style)
+  */
 bool Message::fromStanza(const Stanza &s, int timeZoneOffset)
+{
+	return fromStanza(s, true, timeZoneOffset);
+}
+
+/**
+  \brief Create Message from Stanza \a s
+  */
+bool Message::fromStanza(const Stanza &s)
+{
+	return fromStanza(s, false, 0);
+}
+
+/**
+  \brief Create Message from Stanza \a s
+
+  If \a useTimeZoneOffset is true, \a timeZoneOffset is used when converting between UTC and local time (old style).
+  Else, \a timeZoneOffset is ignored and Qt is used to do the conversion (new style).
+
+  This function exists to make transition between old and new style easier.
+  */
+bool Message::fromStanza(const Stanza &s, bool useTimeZoneOffset, int timeZoneOffset)
 {
 	if(s.kind() != Stanza::Message)
 		return false;
@@ -1686,10 +1714,23 @@ bool Message::fromStanza(const Stanza &s, int timeZoneOffset)
 	}
 
 	// timestamp
-	QDomElement t = childElementsByTagNameNS(root, "jabber:x:delay", "x").item(0).toElement();
-	if(!t.isNull()) {
-		d->timeStamp = stamp2TS(t.attribute("stamp"));
-		d->timeStamp = d->timeStamp.addSecs(timeZoneOffset * 3600);
+	QDomElement t = childElementsByTagNameNS(root, "urn:xmpp:delay", "delay").item(0).toElement();
+	QDateTime stamp;
+	if (!t.isNull()) {
+		stamp = QDateTime::fromString(t.attribute("stamp").left(19), Qt::ISODate);
+	} else {
+		t = childElementsByTagNameNS(root, "jabber:x:delay", "x").item(0).toElement();
+		if (!t.isNull()) {
+			stamp = stamp2TS(t.attribute("stamp"));
+		}
+	}
+	if (!stamp.isNull()) {
+		if (useTimeZoneOffset) {			
+			d->timeStamp = stamp.addSecs(timeZoneOffset * 3600);
+		} else {
+			stamp.setTimeSpec(Qt::UTC);
+			d->timeStamp = stamp.toLocalTime();
+		}
 		d->spooled = true;
 	}
 	else {

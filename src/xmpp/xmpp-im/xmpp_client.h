@@ -90,6 +90,7 @@ namespace XMPP
 		QString OSName() const;
 		QString timeZone() const;
 		int timeZoneOffset() const;
+		bool manualTimeZoneOffset() const;
 		QString clientName() const;
 		QString clientVersion() const;
 		QString capsNode() const;
