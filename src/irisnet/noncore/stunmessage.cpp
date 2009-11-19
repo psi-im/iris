@@ -22,10 +22,13 @@
 
 #include <QSharedData>
 #include <QtCrypto>
+#include "stunutil.h"
 
 #define ENSURE_D { if(!d) d = new Private; }
 
 namespace XMPP {
+
+using namespace StunUtil;
 
 // some attribute types we need to explicitly support
 enum
@@ -139,40 +142,6 @@ public:
 };
 
 static quint8 magic_cookie[4] = { 0x21, 0x12, 0xA4, 0x42 };
-
-static quint16 read16(const quint8 *in)
-{
-	quint16 out = in[0];
-	out <<= 8;
-	out += in[1];
-	return out;
-}
-
-static quint32 read32(const quint8 *in)
-{
-	quint32 out = in[0];
-	out <<= 8;
-	out += in[1];
-	out <<= 8;
-	out += in[2];
-	out <<= 8;
-	out += in[3];
-	return out;
-}
-
-static void write16(quint8 *out, quint16 i)
-{
-	out[0] = (i >> 8) & 0xff;
-	out[1] = i & 0xff;
-}
-
-static void write32(quint8 *out, quint32 i)
-{
-	out[0] = (i >> 24) & 0xff;
-	out[1] = (i >> 16) & 0xff;
-	out[2] = (i >> 8) & 0xff;
-	out[3] = i & 0xff;
-}
 
 // do 3-field check of stun packet
 // returns length of packet not counting the header, or -1 on error

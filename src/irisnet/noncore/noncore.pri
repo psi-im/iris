@@ -13,7 +13,9 @@ INCLUDEPATH += $$PWD/../corelib
 
 HEADERS += \
 	$$PWD/processquit.h \
+	$$PWD/stunutil.h \
 	$$PWD/stunmessage.h \
+	$$PWD/stuntypes.h \
 	$$PWD/stuntransaction.h \
 	$$PWD/stunbinding.h \
 	$$PWD/stunallocate.h \
@@ -22,7 +24,9 @@ HEADERS += \
 
 SOURCES += \
 	$$PWD/processquit.cpp \
+	$$PWD/stunutil.cpp \
 	$$PWD/stunmessage.cpp \
+	$$PWD/stuntypes.cpp \
 	$$PWD/stuntransaction.cpp \
 	$$PWD/stunbinding.cpp \
 	$$PWD/stunallocate.cpp \
