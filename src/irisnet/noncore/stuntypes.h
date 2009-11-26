@@ -73,6 +73,16 @@ enum Attribute
 	ICE_CONTROLLING      = 0x802a
 };
 
+enum Error
+{
+	TryAlternate      = 300,
+	BadRequest        = 400,
+	Unauthorized      = 401,
+	UnknownAttribute  = 420,
+	StaleNonce        = 438,
+	ServerError       = 500
+};
+
 QByteArray createMappedAddress(const QHostAddress &addr, quint16 port);
 QByteArray createUsername(const QString &username);
 QByteArray createErrorCode(int code, const QString &reason);
