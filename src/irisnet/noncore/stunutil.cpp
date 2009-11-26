@@ -90,6 +90,12 @@ void write64(quint8 *out, quint64 i)
 	out[7] = i & 0xff;
 }
 
+QCA::SecureArray saslPrep(const QCA::SecureArray &in)
+{
+	// TODO
+	return in;
+}
+
 }
 
 }

@@ -21,7 +21,7 @@
 #ifndef STUNUTIL_H
 #define STUNUTIL_H
 
-#include <QtGlobal>
+#include <QtCrypto>
 
 namespace XMPP {
 
@@ -34,6 +34,8 @@ quint64 read64(const quint8 *in);
 void write16(quint8 *out, quint16 i);
 void write32(quint8 *out, quint32 i);
 void write64(quint8 *out, quint64 i);
+
+QCA::SecureArray saslPrep(const QCA::SecureArray &in);
 
 }
 
