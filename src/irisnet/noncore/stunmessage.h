@@ -89,6 +89,10 @@ public:
 	// minimal 3-field check
 	static bool isProbablyStun(const QByteArray &a);
 
+	// extract out the class value from a raw packet.  assumes that 'a' has
+	//   already passed isProbablyStun()
+	static Class extractClass(const QByteArray &a);
+
 private:
 	class Private;
 	QSharedDataPointer<Private> d;

@@ -531,6 +531,8 @@ QByteArray StunMessage::toBinary(int validationFlags, const QByteArray &key) con
 		if(at == -1)
 			return QByteArray();
 
+		p = (quint8 *)buf.data(); // follow the resize
+
 		memcpy(buf.data() + at + 4, i.value.data(), i.value.size());
 	}
 
@@ -684,6 +686,32 @@ StunMessage StunMessage::fromBinary(const QByteArray &a, ConvertResult *result, 
 bool StunMessage::isProbablyStun(const QByteArray &a)
 {
 	return (check_and_get_length(a) != -1 ? true: false);
+}
+
+StunMessage::Class StunMessage::extractClass(const QByteArray &in)
+{
+	const quint8 *p = (const quint8 *)in.data();
+
+	// class bits are split into 2 sections
+	quint8 c1, c2;
+	c1 = p[0] & 0x01; // C1
+	c1 <<= 1;
+	c2 = p[1] & 0x10; // C0
+	c2 >>= 4;
+
+	quint8 classbits = c1 | c2;
+
+	Class mclass;
+	if(classbits == 0) // 00
+		mclass = Request;
+	else if(classbits == 1) // 01
+		mclass = Indication;
+	else if(classbits == 2) // 10
+		mclass = SuccessResponse;
+	else // 11
+		mclass = ErrorResponse;
+
+	return mclass;
 }
 
 }
