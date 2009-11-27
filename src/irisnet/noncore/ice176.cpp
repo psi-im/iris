@@ -558,9 +558,9 @@ public:
 			LocalTransport *lt = localTransports[at];
 
 			pair.pool = new StunTransactionPool(StunTransaction::Udp, this);
-			connect(pair.pool, SIGNAL(retransmit(XMPP::StunTransaction *)), SLOT(pool_retransmit(XMPP::StunTransaction *)));
-			pair.pool->setUsername(peerUser + ':' + localUser);
-			pair.pool->setPassword(peerPass.toUtf8());
+			connect(pair.pool, SIGNAL(outgoingMessage(const QByteArray &, const QHostAddress &, int)), SLOT(pool_outgoingMessage(const QByteArray &, const QHostAddress &, int)));
+			//pair.pool->setUsername(peerUser + ':' + localUser);
+			//pair.pool->setPassword(peerPass.toUtf8());
 
 			pair.binding = new StunBinding(pair.pool);
 			connect(pair.binding, SIGNAL(success()), SLOT(binding_success()));
@@ -575,6 +575,9 @@ public:
 			}
 			else
 				pair.binding->setIceControlled(0);
+
+			pair.binding->setShortTermUsername(peerUser + ':' + localUser);
+			pair.binding->setShortTermPassword(peerPass);
 
 			pair.binding->start();
 		}
@@ -901,8 +904,11 @@ public slots:
 		tryFinishGather();
 	}
 
-	void pool_retransmit(XMPP::StunTransaction *trans)
+	void pool_outgoingMessage(const QByteArray &packet, const QHostAddress &addr, int port)
 	{
+		Q_UNUSED(addr);
+		Q_UNUSED(port);
+
 		StunTransactionPool *pool = (StunTransactionPool *)sender();
 		int at = -1;
 		for(int n = 0; n < checkList.pairs.count(); ++n)
@@ -933,7 +939,7 @@ public slots:
 		LocalTransport *lt = localTransports[at];
 
 		printf("connectivity check from %s:%d to %s:%d\n", qPrintable(pair.local.addr.addr.toString()), pair.local.addr.port, qPrintable(pair.remote.addr.addr.toString()), pair.remote.addr.port);
-		lt->sock->writeDatagram(IceLocalTransport::Direct, trans->packet(), pair.remote.addr.addr, pair.remote.addr.port);
+		lt->sock->writeDatagram(IceLocalTransport::Direct, packet, pair.remote.addr.addr, pair.remote.addr.port);
 	}
 
 	void binding_success()

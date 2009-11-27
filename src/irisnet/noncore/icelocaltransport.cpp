@@ -186,7 +186,7 @@ public:
 		relPort(-1)
 	{
 		pool = new StunTransactionPool(StunTransaction::Udp, this);
-		connect(pool, SIGNAL(retransmit(XMPP::StunTransaction *)), SLOT(pool_retransmit(XMPP::StunTransaction *)));
+		connect(pool, SIGNAL(outgoingMessage(const QByteArray &, const QHostAddress &, int)), SLOT(pool_outgoingMessage(const QByteArray &, const QHostAddress &, int)));
 	}
 
 	~Private()
@@ -469,13 +469,16 @@ public slots:
 			emit q->datagramsWritten(IceLocalTransport::Relayed, rwrites);
 	}
 
-	void pool_retransmit(XMPP::StunTransaction *trans)
+	void pool_outgoingMessage(const QByteArray &packet, const QHostAddress &addr, int port)
 	{
+		Q_UNUSED(addr);
+		Q_UNUSED(port);
+
 		// warning: read StunTransactionPool docs before modifying
 		//   this function
 
 		pendingWrites += InternalWrite;
-		sock->writeDatagram(trans->packet(), stunAddr, stunPort);
+		sock->writeDatagram(packet, stunAddr, stunPort);
 	}
 
 	void binding_success()

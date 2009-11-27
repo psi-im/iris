@@ -23,6 +23,7 @@
 
 #include <QObject>
 #include <QByteArray>
+#include <QHostAddress>
 
 namespace QCA {
 	class SecureArray;
@@ -31,6 +32,10 @@ namespace QCA {
 namespace XMPP {
 
 class StunMessage;
+
+class StunTransactionPrivate;
+class StunTransactionPool;
+class StunTransactionPoolPrivate;
 
 class StunTransaction : public QObject
 {
@@ -46,21 +51,22 @@ public:
 	enum Error
 	{
 		ErrorGeneric,
-		ErrorTimeout
+		ErrorTimeout,
+		ErrorAuth
 	};
 
 	StunTransaction(QObject *parent = 0);
 	~StunTransaction();
 
-	// pass a message with transaction id unset.  it will be filled in.
-	//   after calling this function, immediately obtain the result by
-	//   calling packet(), and send it.  the start() function will not
-	//   perform the first send attempt.  it leaves that to you.
-	// FIXME: stuser/stpass are a hack
-	void start(Mode mode, const StunMessage &request, const QString &stuser = QString(), const QString &stpass = QString());
+	// toAddress/toPort are optional, to associate this request to a
+	//   specific endpoint
+	// note: not DOR-DS safe.  this function will cause the pool's
+	//   outgoingMessage() signal to be emitted.
+	void start(StunTransactionPool *pool, const QHostAddress &toAddress = QHostAddress(), int toPort = -1);
 
-	QByteArray transactionId() const;
-	QByteArray packet() const;
+	// pass message with class unset.  use transaction id from the
+	//   createMessage signal.
+	void setMessage(const StunMessage &request);
 
 	// transmission/timeout parameters, from RFC 5389.  by default,
 	//   they are set to the recommended values from the RFC.
@@ -69,22 +75,27 @@ public:
 	void setRm(int i);
 	void setTi(int i);
 
-	// note: not DOR-DS safe.  this will either emit signals and return
-	//   true, or not emit signals and return false.
-	bool writeIncomingMessage(const StunMessage &msg);
+	void setShortTermUsername(const QString &username);
+	void setShortTermPassword(const QString &password);
 
 signals:
-	// indicates you should retransmit the value of packet()
-	void retransmit();
+	// you must use a direct connection with this signal and call
+	//   setMessage() in the slot.  this signal may occur many times
+	//   before the StunTransaction completes, and you must recreate the
+	//   message every time using the new transactionId.
+	void createMessage(const QByteArray &transactionId);
+
 	void finished(const XMPP::StunMessage &response);
 	void error(XMPP::StunTransaction::Error error);
 
 private:
 	Q_DISABLE_COPY(StunTransaction)
 
-	class Private;
-	friend class Private;
-	Private *d;
+	friend class StunTransactionPool;
+	friend class StunTransactionPoolPrivate;
+
+	friend class StunTransactionPrivate;
+	StunTransactionPrivate *d;
 };
 
 // keep track of many open transactions.  note that retransmit() may be
@@ -101,44 +112,45 @@ public:
 
 	StunTransaction::Mode mode() const;
 
-	// generate a random id not used by any transaction in the pool
-	QByteArray generateId() const;
-
-	// you must start the transaction before inserting it.
-	// note: not DOR-DS safe.  this function will cause retransmit() to be
-	//   emitted.
-	void insert(StunTransaction *trans);
-
-	void remove(StunTransaction *trans);
-
 	// note: not DOR-DS safe.  this will either cause transactions to emit
 	//   signals and return true, or not cause signals and return false.
-	bool writeIncomingMessage(const StunMessage &msg);
+	bool writeIncomingMessage(const StunMessage &msg, const QHostAddress &addr = QHostAddress(), int port = -1);
+	bool writeIncomingMessage(const QByteArray &packet, const QHostAddress &addr = QHostAddress(), int port = -1);
+
+	void setLongTermAuthEnabled(bool enabled);
 
 	QString realm() const;
 	void setUsername(const QString &username);
 	void setPassword(const QCA::SecureArray &password);
 	void setRealm(const QString &realm);
-
-	void setShortTermCredentialsEnabled(bool enabled);
 	void continueAfterParams();
 
-	QString username() const;
-	QString password() const;
+	// for use with stun indications
+	QByteArray generateId() const;
 
 signals:
 	// note: not DOR-SS safe.  writeIncomingMessage() must not be called
 	//   during this signal.
-	void retransmit(XMPP::StunTransaction *trans);
+	//
+	// why do we need this restriction?  long explanation: since
+	//   outgoingMessage() can be emitted as a result of calling a
+	//   transaction's start(), and calling writeIncomingMessage() could
+	//   result in a transaction completing, then calling
+	//   writeIncomingMessage() during outgoingMessage() could cause
+	//   a transaction's finished() or error() signals to emit during
+	//   start(), which would violate DOR-DS.
+	void outgoingMessage(const QByteArray &packet, const QHostAddress &addr, int port);
 
 	void needAuthParams();
 
 private:
 	Q_DISABLE_COPY(StunTransactionPool)
 
-	class Private;
-	friend class Private;
-	Private *d;
+	friend class StunTransaction;
+	friend class StunTransactionPrivate;
+
+	friend class StunTransactionPoolPrivate;
+	StunTransactionPoolPrivate *d;
 };
 
 }

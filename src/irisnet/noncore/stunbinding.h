@@ -51,6 +51,9 @@ public:
 	void setIceControlling(quint64 i);
 	void setIceControlled(quint64 i);
 
+	void setShortTermUsername(const QString &username);
+	void setShortTermPassword(const QString &password);
+
 	void start();
 
 	QHostAddress reflexiveAddress() const;

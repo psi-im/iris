@@ -48,8 +48,12 @@ public:
 	StunAllocate(StunTransactionPool *pool);
 	~StunAllocate();
 
+	void setClientSoftwareNameAndVersion(const QString &str);
+
 	void start();
 	void stop();
+
+	QString serverSoftwareNameAndVersion() const;
 
 	QHostAddress reflexiveAddress() const;
 	int reflexivePort() const;
@@ -60,9 +64,13 @@ public:
 	QList<QHostAddress> permissions() const;
 	void setPermissions(const QList<QHostAddress> &perms);
 
+	int packetHeaderOverhead(const QHostAddress &addr) const;
+
 	QByteArray encode(const QByteArray &datagram, const QHostAddress &addr, int port);
 	QByteArray decode(const QByteArray &encoded, QHostAddress *addr = 0, int *port = 0);
 	QByteArray decode(const StunMessage &encoded, QHostAddress *addr = 0, int *port = 0);
+
+	QString errorString() const;
 
 signals:
 	void started();

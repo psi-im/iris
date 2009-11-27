@@ -42,6 +42,7 @@ public:
 	quint32 extPriority;
 	bool extUseCandidate;
 	quint64 extIceControlling, extIceControlled;
+	QString stuser, stpass;
 
 	Private(StunBinding *_q) :
 		QObject(_q),
@@ -57,8 +58,7 @@ public:
 
 	~Private()
 	{
-		if(trans)
-			pool->remove(trans);
+		delete trans;
 	}
 
 	void start()
@@ -66,14 +66,25 @@ public:
 		Q_ASSERT(!trans);
 
 		trans = new StunTransaction(this);
+		connect(trans, SIGNAL(createMessage(const QByteArray &)), SLOT(trans_createMessage(const QByteArray &)));
 		connect(trans, SIGNAL(finished(const XMPP::StunMessage &)), SLOT(trans_finished(const XMPP::StunMessage &)));
 		connect(trans, SIGNAL(error(XMPP::StunTransaction::Error)), SLOT(trans_error(XMPP::StunTransaction::Error)));
 
+		if(!stuser.isEmpty())
+		{
+			trans->setShortTermUsername(stuser);
+			trans->setShortTermPassword(stpass);
+		}
+
+		trans->start(pool);
+	}
+
+private slots:
+	void trans_createMessage(const QByteArray &transactionId)
+	{
 		StunMessage message;
-		message.setClass(StunMessage::Request);
 		message.setMethod(StunTypes::Binding);
-		QByteArray id = pool->generateId();
-		message.setId((const quint8 *)id.data());
+		message.setId((const quint8 *)transactionId.data());
 
 		QList<StunMessage::Attribute> list;
 
@@ -110,15 +121,12 @@ public:
 
 		message.setAttributes(list);
 
-		trans->start(pool->mode(), message, pool->username(), pool->password());
-
-		pool->insert(trans);
+		trans->setMessage(message);
 	}
 
-private slots:
 	void trans_finished(const XMPP::StunMessage &response)
 	{
-		pool->remove(trans);
+		delete trans;
 		trans = 0;
 
 		if(response.mclass() == StunMessage::ErrorResponse)
@@ -169,7 +177,7 @@ private slots:
 
 	void trans_error(XMPP::StunTransaction::Error e)
 	{
-		pool->remove(trans);
+		delete trans;
 		trans = 0;
 
 		if(e == StunTransaction::ErrorTimeout)
@@ -218,6 +226,16 @@ void StunBinding::setIceControlled(quint64 i)
 {
 	d->use_extIceControlled = true;
 	d->extIceControlled = i;
+}
+
+void StunBinding::setShortTermUsername(const QString &username)
+{
+	d->stuser = username;
+}
+
+void StunBinding::setShortTermPassword(const QString &password)
+{
+	d->stpass = password;
 }
 
 void StunBinding::start()

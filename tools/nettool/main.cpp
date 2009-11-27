@@ -26,6 +26,7 @@
 #include <iris/stunmessage.h>
 #include <iris/stuntransaction.h>
 #include <iris/stunbinding.h>
+#include <iris/stunallocate.h>
 #include <QtCrypto>
 
 using namespace XMPP;
@@ -399,6 +400,12 @@ public:
 	StunTransactionPool *pool;
 	StunBinding *binding;
 
+	~StunBind()
+	{
+		// make sure transactions are always deleted before the pool
+		delete binding;
+	}
+
 public slots:
 	void start()
 	{
@@ -406,7 +413,7 @@ public slots:
 		connect(sock, SIGNAL(readyRead()), SLOT(sock_readyRead()));
 
 		pool = new StunTransactionPool(StunTransaction::Udp, this);
-		connect(pool, SIGNAL(retransmit(XMPP::StunTransaction *)), SLOT(pool_retransmit(XMPP::StunTransaction *)));
+		connect(pool, SIGNAL(outgoingMessage(const QByteArray &, const QHostAddress &, int)), SLOT(pool_outgoingMessage(const QByteArray &, const QHostAddress &, int)));
 
 		if(!sock->bind(localPort != -1 ? localPort : 0))
 		{
@@ -447,9 +454,13 @@ private slots:
 		}
 	}
 
-	void pool_retransmit(XMPP::StunTransaction *trans)
+	void pool_outgoingMessage(const QByteArray &packet, const QHostAddress &toAddress, int toPort)
 	{
-		sock->writeDatagram(trans->packet(), addr, port);
+		// in this example, we aren't using IP-associated transactions
+		Q_UNUSED(toAddress);
+		Q_UNUSED(toPort);
+
+		sock->writeDatagram(packet, addr, port);
 	}
 
 	void binding_success()
@@ -482,26 +493,207 @@ private:
 	}
 };
 
+class TurnEcho : public QObject
+{
+	Q_OBJECT
+public:
+	int mode;
+	QHostAddress relayAddr;
+	int relayPort;
+	QHostAddress peerAddr;
+	int peerPort;
+	QUdpSocket *sock;
+	StunTransactionPool *pool;
+	StunAllocate *allocate;
+
+	~TurnEcho()
+	{
+		// make sure transactions are always deleted before the pool
+		delete allocate;
+	}
+
+public slots:
+	void start()
+	{
+		if(mode == 1 || mode == 2)
+		{
+			printf("FIXME: tcp and tcp-tls modes are not supported yet.\n");
+			emit quit();
+			return;
+		}
+
+		sock = new QUdpSocket(this);
+		connect(sock, SIGNAL(readyRead()), SLOT(sock_readyRead()));
+
+		pool = new StunTransactionPool(StunTransaction::Udp, this);
+		connect(pool, SIGNAL(outgoingMessage(const QByteArray &, const QHostAddress &, int)), SLOT(pool_outgoingMessage(const QByteArray &, const QHostAddress &, int)));
+		connect(pool, SIGNAL(needAuthParams()), SLOT(pool_needAuthParams()));
+
+		pool->setLongTermAuthEnabled(true);
+
+		if(!sock->bind())
+		{
+			printf("Error binding to local port.\n");
+			emit quit();
+			return;
+		}
+
+		allocate = new StunAllocate(pool);
+		connect(allocate, SIGNAL(started()), SLOT(allocate_started()));
+		connect(allocate, SIGNAL(stopped()), SLOT(allocate_stopped()));
+		connect(allocate, SIGNAL(error(XMPP::StunAllocate::Error)), SLOT(allocate_error(XMPP::StunAllocate::Error)));
+		connect(allocate, SIGNAL(permissionsChanged()), SLOT(allocate_permissionsChanged()));
+
+		allocate->setClientSoftwareNameAndVersion("nettool (Iris)");
+
+		printf("Allocating...\n");
+		allocate->start();
+	}
+
+signals:
+	void quit();
+
+private slots:
+	void sock_readyRead()
+	{
+		while(sock->hasPendingDatagrams())
+		{
+			QByteArray buf(sock->pendingDatagramSize(), 0);
+			QHostAddress from;
+			quint16 fromPort;
+
+			sock->readDatagram(buf.data(), buf.size(), &from, &fromPort);
+			if(from == relayAddr && fromPort == relayPort)
+			{
+				processDatagram(buf);
+			}
+			else
+			{
+				printf("Response from unknown sender %s:%d, dropping.\n", qPrintable(from.toString()), fromPort);
+			}
+		}
+	}
+
+	void pool_outgoingMessage(const QByteArray &packet, const QHostAddress &toAddress, int toPort)
+	{
+		// in this example, we aren't using IP-associated transactions
+		Q_UNUSED(toAddress);
+		Q_UNUSED(toPort);
+
+		sock->writeDatagram(packet, relayAddr, relayPort);
+	}
+
+	void pool_needAuthParams()
+	{
+		pool->setUsername("toto");
+		pool->setPassword("password");
+		pool->setRealm("domain.org");
+
+		pool->continueAfterParams();
+	}
+
+	void allocate_started()
+	{
+		printf("Allocate started\n");
+		QHostAddress saddr = allocate->reflexiveAddress();
+		quint16 sport = allocate->reflexivePort();
+		printf("Server says we are %s;%d\n", qPrintable(saddr.toString()), sport);
+		saddr = allocate->relayedAddress();
+		sport = allocate->relayedPort();
+		printf("Server relays via %s;%d\n", qPrintable(saddr.toString()), sport);
+
+		printf("Setting permission for peer address %s\n", qPrintable(peerAddr.toString()));
+		QList<QHostAddress> perms;
+		perms += peerAddr;
+		allocate->setPermissions(perms);
+	}
+
+	void allocate_stopped()
+	{
+		printf("Done\n");
+		emit quit();
+	}
+
+	void allocate_error(XMPP::StunAllocate::Error e)
+	{
+		Q_UNUSED(e);
+		printf("Error: %s\n", qPrintable(allocate->errorString()));
+		emit quit();
+	}
+
+	void allocate_permissionsChanged()
+	{
+		printf("PermissionsChanged.  Sending test packet...\n");
+
+		QByteArray buf = "Hello, world!";
+		QByteArray packet = allocate->encode(buf, peerAddr, peerPort);
+		sock->writeDatagram(packet, relayAddr, relayPort);
+	}
+
+private:
+	void processDatagram(const QByteArray &buf)
+	{
+		StunMessage message = StunMessage::fromBinary(buf);
+		QByteArray data;
+		QHostAddress fromAddr;
+		int fromPort;
+		if(message.isNull())
+		{
+			data = allocate->decode(buf, &fromAddr, &fromPort);
+			if(!data.isNull())
+			{
+				printf("Received ChannelData-based data packet\n");
+				processDataPacket(data, fromAddr, fromPort);
+				return;
+			}
+
+			printf("Warning: server responded with what doesn't seem to be a STUN or data packet, skipping.\n");
+			return;
+		}
+
+		if(message.mclass() == StunMessage::Indication && message.method() == 0x007)
+		{
+			printf("Received STUN-based data packet\n");
+			data = allocate->decode(message, &fromAddr, &fromPort);
+			processDataPacket(data, fromAddr, fromPort);
+			return;
+		}
+
+		if(!pool->writeIncomingMessage(message))
+			printf("Warning: received unexpected message, skipping.\n");
+	}
+
+	void processDataPacket(const QByteArray &buf, const QHostAddress &addr, int port)
+	{
+		printf("Received %d bytes from %s:%d: [%s]\n", buf.size(), qPrintable(addr.toString()), port, buf.data());
+
+		printf("Deallocating...\n");
+		allocate->stop();
+	}
+};
+
 void usage()
 {
 	printf("nettool: simple testing utility\n");
 	printf("usage: nettool [command]\n");
 	printf("\n");
-	printf(" netmon                                          monitor network interfaces\n");
-	printf(" rname (-r) [domain] (record type)               look up record (default = a)\n");
-	printf(" rnamel [domain] [record type]                   look up record (long-lived)\n");
-	printf(" browse [service type]                           browse for local services\n");
-	printf(" rservi [instance] [service type]                look up browsed instance\n");
-	printf(" rservd [domain] [service type]                  look up normal SRV\n");
-	printf(" rservp [domain] [port]                          look up non-SRV\n");
-	printf(" pserv [inst] [type] [port] (attr) (-a [rec])    publish service instance\n");
-	printf(" stun [addr](;port) (local port)                 STUN binding\n");
+	printf(" netmon                                            monitor network interfaces\n");
+	printf(" rname (-r) [domain] (record type)                 look up record (default = a)\n");
+	printf(" rnamel [domain] [record type]                     look up record (long-lived)\n");
+	printf(" browse [service type]                             browse for local services\n");
+	printf(" rservi [instance] [service type]                  look up browsed instance\n");
+	printf(" rservd [domain] [service type]                    look up normal SRV\n");
+	printf(" rservp [domain] [port]                            look up non-SRV\n");
+	printf(" pserv [inst] [type] [port] (attr) (-a [rec])      publish service instance\n");
+	printf(" stun [addr](;port) (local port)                   STUN binding\n");
+	printf(" turn [mode] [relayaddr](;port) [peeraddr](;port)  TURN UDP echo test\n");
 	printf("\n");
 	printf("record types: a aaaa ptr srv mx txt hinfo null\n");
 	printf("service types: _service._proto format (e.g. \"_xmpp-client._tcp\")\n");
 	printf("attributes: var0[=val0],...,varn[=valn]\n");
 	printf("rname -r: for null type, dump raw record data to stdout\n");
 	printf("pub -a: add extra record.  format: null:filename.dat\n");
+	printf("turn modes: udp tcp tcp-tls\n");
 	printf("\n");
 }
 
@@ -736,6 +928,85 @@ int main(int argc, char **argv)
 		a.localPort = localPort;
 		a.addr = addr;
 		a.port = port;
+		QObject::connect(&a, SIGNAL(quit()), &app, SLOT(quit()));
+		QTimer::singleShot(0, &a, SLOT(start()));
+		app.exec();
+	}
+	else if(args[0] == "turn")
+	{
+		if(args.count() < 4)
+		{
+			usage();
+			return 1;
+		}
+
+		int mode;
+		if(args[1] == "udp")
+			mode = 0;
+		else if(args[2] == "tcp")
+			mode = 1;
+		else if(args[3] == "tcp-tls")
+			mode = 2;
+		else
+		{
+			usage();
+			return 1;
+		}
+
+		QString addrstr, portstr;
+		int x = args[2].indexOf(';');
+		if(x != -1)
+		{
+			addrstr = args[2].mid(0, x);
+			portstr = args[2].mid(x + 1);
+		}
+		else
+			addrstr = args[2];
+
+		QHostAddress raddr = QHostAddress(addrstr);
+		if(raddr.isNull())
+		{
+			printf("Error: relayaddr must be an IP address\n");
+			return 1;
+		}
+
+		int rport = 3478;
+		if(!portstr.isEmpty())
+			rport = portstr.toInt();
+
+		portstr.clear();
+		x = args[3].indexOf(';');
+		if(x != -1)
+		{
+			addrstr = args[3].mid(0, x);
+			portstr = args[3].mid(x + 1);
+		}
+		else
+			addrstr = args[3];
+
+		QHostAddress paddr = QHostAddress(addrstr);
+		if(raddr.isNull())
+		{
+			printf("Error: peeraddr must be an IP address\n");
+			return 1;
+		}
+
+		int pport = 4588;
+		if(!portstr.isEmpty())
+			pport = portstr.toInt();
+
+		if(!QCA::isSupported("hmac(sha1)"))
+		{
+			printf("Error: Need hmac(sha1) support to use TURN.\n");
+			return 1;
+		}
+
+		TurnEcho a;
+		a.mode = mode;
+		a.relayAddr = raddr;
+		a.relayPort = rport;
+		a.peerAddr = paddr;
+		a.peerPort = pport;
 		QObject::connect(&a, SIGNAL(quit()), &app, SLOT(quit()));
 		QTimer::singleShot(0, &a, SLOT(start()));
 		app.exec();
