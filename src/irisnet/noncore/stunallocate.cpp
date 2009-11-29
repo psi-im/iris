@@ -150,13 +150,30 @@ private slots:
 
 	void trans_finished(const XMPP::StunMessage &response)
 	{
-		printf("trans_finished\n");
+		//printf("trans_finished\n");
 		delete trans;
 		trans = 0;
 
 		// HACK
 		if(perms.isEmpty())
+		{
+			QHostAddress addr;
+			quint16 port;
+
+			if(StunTypes::parseXorRelayedAddress(response.attribute(StunTypes::XOR_MAPPED_ADDRESS), response.magic(), response.id(), &addr, &port))
+			{
+				relayedAddress = addr;
+				relayedPort = port;
+			}
+
+			if(StunTypes::parseXorMappedAddress(response.attribute(StunTypes::XOR_MAPPED_ADDRESS), response.magic(), response.id(), &addr, &port))
+			{
+				reflexiveAddress = addr;
+				reflexivePort = port;
+			}
+
 			emit q->started();
+		}
 		else
 			emit q->permissionsChanged();
 
@@ -357,9 +374,9 @@ QByteArray StunAllocate::encode(const QByteArray &datagram, const QHostAddress &
 	message.setAttributes(list);
 
 	QByteArray out = message.toBinary();
-	StunMessage tmp = StunMessage::fromBinary(out);
+	//StunMessage tmp = StunMessage::fromBinary(out);
 	//StunTypes::print_packet(message);
-	StunTypes::print_packet(tmp);
+	//StunTypes::print_packet(tmp);
 
 	return out; //return message.toBinary();
 }

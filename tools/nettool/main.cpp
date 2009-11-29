@@ -623,7 +623,7 @@ private slots:
 
 	void allocate_permissionsChanged()
 	{
-		printf("PermissionsChanged.  Sending test packet...\n");
+		printf("PermissionsChanged.  Relaying test packet to %s;%d...\n", qPrintable(peerAddr.toString()), peerPort);
 
 		QByteArray buf = "Hello, world!";
 		QByteArray packet = allocate->encode(buf, peerAddr, peerPort);
