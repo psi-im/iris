@@ -43,6 +43,7 @@ public:
 	bool extUseCandidate;
 	quint64 extIceControlling, extIceControlled;
 	QString stuser, stpass;
+	bool fpRequired;
 
 	Private(StunBinding *_q) :
 		QObject(_q),
@@ -52,7 +53,8 @@ public:
 		use_extPriority(false),
 		use_extIceControlling(false),
 		use_extIceControlled(false),
-		extUseCandidate(false)
+		extUseCandidate(false),
+		fpRequired(false)
 	{
 	}
 
@@ -75,6 +77,8 @@ public:
 			trans->setShortTermUsername(stuser);
 			trans->setShortTermPassword(stpass);
 		}
+
+		trans->setFingerprintRequired(fpRequired);
 
 		trans->start(pool);
 	}
@@ -236,6 +240,11 @@ void StunBinding::setShortTermUsername(const QString &username)
 void StunBinding::setShortTermPassword(const QString &password)
 {
 	d->stpass = password;
+}
+
+void StunBinding::setFingerprintRequired(bool enabled)
+{
+	d->fpRequired = enabled;
 }
 
 void StunBinding::start()

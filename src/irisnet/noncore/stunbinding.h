@@ -54,6 +54,8 @@ public:
 	void setShortTermUsername(const QString &username);
 	void setShortTermPassword(const QString &password);
 
+	void setFingerprintRequired(bool enabled);
+
 	void start();
 
 	QHostAddress reflexiveAddress() const;
