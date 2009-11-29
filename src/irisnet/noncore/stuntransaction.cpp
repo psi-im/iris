@@ -35,6 +35,62 @@ Q_DECLARE_METATYPE(XMPP::StunTransaction::Error)
 
 namespace XMPP {
 
+// parse a stun message, optionally performing validity checks.  the
+//   StunMessage class itself provides parsing with validity or parsing
+//   without validity, but it does not provide a way to do both together,
+//   so we attempt to do that here.
+// TODO: consider moving this code into StunMessage
+static StunMessage parse_stun_message(const QByteArray &packet, int *validationFlags, const QByteArray &key)
+{
+	// ideally we shouldn't fully parse the packet more than once.  the
+	//   integrity checks performed by fromBinary do not require fully
+	//   parsing the packet, so we should be able to avoid most redundant
+	//   processing.  fromBinary checks the fingerprint first, and we
+	//   can use that knowledge to avoid duplicating integrity checks.
+	int flags = 0;
+	StunMessage::ConvertResult result;
+	StunMessage msg = StunMessage::fromBinary(packet, &result, StunMessage::MessageIntegrity | StunMessage::Fingerprint, key);
+	if(result == StunMessage::ErrorFingerprint)
+	{
+		// if fingerprint fails, then it is the only thing that was
+		//   performed and we can skip it now.
+		msg = StunMessage::fromBinary(packet, &result, StunMessage::MessageIntegrity, key);
+		if(result == StunMessage::ErrorMessageIntegrity)
+		{
+			// if message-integrity fails, then it is the only
+			//   thing that was performed and we can skip it now
+			msg = StunMessage::fromBinary(packet, &result);
+			if(result == StunMessage::ConvertGood)
+				flags = 0;
+			else
+				return msg; // null
+		}
+		else if(result == StunMessage::ConvertGood)
+			flags = StunMessage::MessageIntegrity;
+		else
+			return msg; // null
+	}
+	else if(result == StunMessage::ErrorMessageIntegrity)
+	{
+		// fingerprint succeeded, but message-integrity failed.  parse
+		//   without validation now (to skip redundant
+		//   fingerprint/message-integrity checks), and assume correct
+		//   fingerprint
+		msg = StunMessage::fromBinary(packet, &result);
+		if(result == StunMessage::ConvertGood)
+			flags = StunMessage::Fingerprint;
+		else
+			return msg; // null
+	}
+	else if(result == StunMessage::ConvertGood)
+		flags = StunMessage::MessageIntegrity | StunMessage::Fingerprint;
+	else
+		return msg; // null
+
+	*validationFlags = flags;
+	return msg;
+}
+
 class StunTransactionPoolPrivate : public QObject
 {
 	Q_OBJECT
@@ -42,8 +98,12 @@ class StunTransactionPoolPrivate : public QObject
 public:
 	StunTransactionPool *q;
 	StunTransaction::Mode mode;
+	QSet<StunTransaction*> transactions;
 	QHash<StunTransaction*,QByteArray> transToId;
 	QHash<QByteArray,StunTransaction*> idToTrans;
+	bool useLongTermAuth;
+	bool needLongTermAuth;
+	bool triedLongTermAuth;
 	QString user;
 	QCA::SecureArray pass;
 	QString realm;
@@ -51,7 +111,10 @@ public:
 
 	StunTransactionPoolPrivate(StunTransactionPool *_q) :
 		QObject(_q),
-		q(_q)
+		q(_q),
+		useLongTermAuth(false),
+		needLongTermAuth(false),
+		triedLongTermAuth(false)
 	{
 	}
 
@@ -70,22 +133,25 @@ class StunTransactionPrivate : public QObject
 
 public:
 	StunTransaction *q;
+
 	StunTransactionPool *pool;
 	bool active;
 	StunTransaction::Mode mode;
 	StunMessage origMessage;
 	QByteArray id;
 	QByteArray packet;
+	QHostAddress to_addr;
+	int to_port;
+
 	int rto, rc, rm, ti;
 	int tries;
 	int last_interval;
 	QTimer *t;
+
 	QString stuser;
 	QString stpass;
+	bool fpRequired;
 	QByteArray key;
-	QHostAddress to_addr;
-	int to_port;
-	bool triedLtAuth;
 #ifdef STUNTRANSACTION_DEBUG
 	QTime time;
 #endif
@@ -94,7 +160,7 @@ public:
 		QObject(_q),
 		q(_q),
 		pool(0),
-		triedLtAuth(false)
+		fpRequired(false)
 	{
 		qRegisterMetaType<StunTransaction::Error>();
 
@@ -209,7 +275,7 @@ public:
 		if(!key.isEmpty())
 			packet = out.toBinary(StunMessage::MessageIntegrity | StunMessage::Fingerprint, key);
 		else
-			packet = out.toBinary();
+			packet = out.toBinary(StunMessage::Fingerprint);
 
 		if(packet.isEmpty())
 		{
@@ -281,67 +347,19 @@ private:
 		pool->d->transmit(q);
 	}
 
-public:
-	bool writeIncomingMessage(const StunMessage &msg, const QHostAddress &from_addr, int from_port)
-	{
-		// if a StunMessage is passed directly to us then we assume
-		//   the user has done his own integrity checks, if any.
-		int validationFlags = StunMessage::MessageIntegrity | StunMessage::Fingerprint;
-
-		return processIncoming(msg, validationFlags, from_addr, from_port);
-	}
-
-	bool writeIncomingMessage(const QByteArray &packet, const QHostAddress &from_addr, int from_port)
-	{
-		int validationFlags = 0;
-
-		// NOTE: this code is kind of goofy but hopefully never results
-		//   in a packet being fully parsed twice.  the integrity
-		//   checks performed by fromBinary are minimal.  it seems like
-		//   this code belongs in StunMessage though.
-		StunMessage::ConvertResult result;
-		StunMessage msg = StunMessage::fromBinary(packet, &result, StunMessage::MessageIntegrity | StunMessage::Fingerprint, key);
-		if(result == StunMessage::ConvertGood)
-		{
-			validationFlags = StunMessage::MessageIntegrity | StunMessage::Fingerprint;
-		}
-		else
-		{
-			msg = StunMessage::fromBinary(packet, &result, StunMessage::MessageIntegrity, key);
-			if(result == StunMessage::ConvertGood)
-			{
-				validationFlags = StunMessage::MessageIntegrity;
-			}
-			else
-			{
-				msg = StunMessage::fromBinary(packet, &result, StunMessage::Fingerprint);
-				if(result == StunMessage::ConvertGood)
-				{
-					validationFlags = StunMessage::Fingerprint;
-				}
-				else
-				{
-					msg = StunMessage::fromBinary(packet, &result);
-					if(result != StunMessage::ConvertGood)
-						return false;
-				}
-			}
-		}
-
-		return processIncoming(msg, validationFlags, from_addr, from_port);
-	}
-
-	bool processIncoming(const StunMessage &msg, int validationFlags, const QHostAddress &from_addr, int from_port)
+	bool checkActiveAndFrom(const QHostAddress &from_addr, int from_port)
 	{
 		if(!active)
 			return false;
 
-		//if(memcmp(msg.id(), id.data(), 12) != 0)
-		//	return false;
-
 		if(!to_addr.isNull() && (to_addr != from_addr || to_port != from_port))
 			return false;
 
+		return true;
+	}
+
+	void processIncoming(const StunMessage &msg, bool authed)
+	{
 		active = false;
 		t->stop();
 
@@ -349,52 +367,110 @@ public:
 		printf("matched incoming response to existing request.  elapsed=%d\n", time.elapsed());
 #endif
 
-		// we'll handle certain error codes at this layer
-		int code;
-		QString reason;
-		if(StunTypes::parseErrorCode(msg.attribute(StunTypes::ERROR_CODE), &code, &reason))
+		if(pool->d->useLongTermAuth)
 		{
-			if(code == StunTypes::Unauthorized && !triedLtAuth)
+			// we'll handle certain error codes at this layer
+			int code;
+			QString reason;
+			if(StunTypes::parseErrorCode(msg.attribute(StunTypes::ERROR_CODE), &code, &reason))
 			{
-				QString realm;
-				QString nonce;
-				if(StunTypes::parseRealm(msg.attribute(StunTypes::REALM), &realm) &&
-					StunTypes::parseRealm(msg.attribute(StunTypes::NONCE), &nonce))
+				if(code == StunTypes::Unauthorized && !pool->d->triedLongTermAuth)
 				{
-					if(pool->d->realm.isEmpty())
-						pool->d->realm = realm;
-					pool->d->nonce = nonce;
+					QString realm;
+					QString nonce;
+					if(StunTypes::parseRealm(msg.attribute(StunTypes::REALM), &realm) &&
+						StunTypes::parseRealm(msg.attribute(StunTypes::NONCE), &nonce))
+					{
+						// always set these to the latest received values,
+						//   which will be used for all transactions
+						//   once creds are provided.
+						if(pool->d->realm.isEmpty())
+							pool->d->realm = realm;
+						pool->d->nonce = nonce;
 
-					emit pool->needAuthParams();
-					return true;
+						if(!pool->d->needLongTermAuth)
+						{
+							if(!pool->d->user.isEmpty())
+							{
+								// creds already set?  use them
+								retry();
+							}
+							else
+							{
+								// else ask the user
+								pool->d->needLongTermAuth = true;
+								emit pool->needAuthParams();
+							}
+						}
+						return;
+					}
 				}
-			}
-			else if(code == StunTypes::StaleNonce)
-			{
-				QString nonce;
-				if(StunTypes::parseNonce(msg.attribute(StunTypes::NONCE), &nonce) && nonce != pool->d->nonce)
+				else if(code == StunTypes::StaleNonce && pool->d->triedLongTermAuth)
 				{
-					pool->d->nonce = nonce;
-					retry();
-					return true;
+					QString nonce;
+					if(StunTypes::parseNonce(msg.attribute(StunTypes::NONCE), &nonce) && nonce != pool->d->nonce)
+					{
+						pool->d->nonce = nonce;
+						retry();
+						return;
+					}
 				}
 			}
 		}
 
 		// require message integrity when auth is used
-		if((!stuser.isEmpty() || !pool->d->nonce.isEmpty()) && !(validationFlags & StunMessage::MessageIntegrity))
+		if((!stuser.isEmpty() || pool->d->useLongTermAuth) && !authed)
+			return;
+
+		pool->d->remove(q);
+		emit q->finished(msg);
+	}
+
+public:
+	bool writeIncomingMessage(const StunMessage &msg, const QHostAddress &from_addr, int from_port)
+	{
+		if(!checkActiveAndFrom(from_addr, from_port))
 			return false;
 
-		// TODO: care about fingerprint?
+		// if a StunMessage is passed directly to us then we assume
+		//   the user has authenticated the message as necessary
+		processIncoming(msg, true);
+		return true;
+	}
 
-		emit q->finished(msg);
+	bool writeIncomingMessage(const QByteArray &packet, bool *notStun, const QHostAddress &from_addr, int from_port)
+	{
+		if(!checkActiveAndFrom(from_addr, from_port))
+		{
+			// could be STUN, don't really know for sure
+			*notStun = false;
+			return false;
+		}
+
+		int validationFlags;
+		StunMessage msg = parse_stun_message(packet, &validationFlags, key);
+		if(msg.isNull())
+		{
+			// packet doesn't parse at all, surely not STUN
+			*notStun = true;
+			return false;
+		}
+
+		if(fpRequired && !(validationFlags & StunMessage::Fingerprint))
+		{
+			// fingerprint failed when required.  consider the
+			//   packet to be surely not STUN
+			*notStun = true;
+			return false;
+		}
+
+		processIncoming(msg, (validationFlags & StunMessage::MessageIntegrity) ? true : false);
 		return true;
 	}
 
 public slots:
 	void continueAfterParams()
 	{
-		triedLtAuth = true;
 		retry();
 	}
 };
@@ -455,6 +531,11 @@ void StunTransaction::setShortTermPassword(const QString &password)
 	d->stpass = password;
 }
 
+void StunTransaction::setFingerprintRequired(bool enabled)
+{
+	d->fpRequired = enabled;
+}
+
 //----------------------------------------------------------------------------
 // StunTransactionPool
 //----------------------------------------------------------------------------
@@ -473,6 +554,8 @@ QByteArray StunTransactionPoolPrivate::generateId() const
 void StunTransactionPoolPrivate::insert(StunTransaction *trans)
 {
 	Q_ASSERT(!trans->d->id.isEmpty());
+
+	transactions.insert(trans);
 	QByteArray id = trans->d->id;
 	transToId.insert(trans, id);
 	idToTrans.insert(id, trans);
@@ -480,9 +563,13 @@ void StunTransactionPoolPrivate::insert(StunTransaction *trans)
 
 void StunTransactionPoolPrivate::remove(StunTransaction *trans)
 {
-	QByteArray id = transToId.value(trans);
-	transToId.remove(trans);
-	idToTrans.remove(id);
+	if(transactions.contains(trans))
+	{
+		transactions.remove(trans);
+		QByteArray id = transToId.value(trans);
+		transToId.remove(trans);
+		idToTrans.remove(id);
+	}
 }
 
 void StunTransactionPoolPrivate::transmit(StunTransaction *trans)
@@ -530,10 +617,15 @@ bool StunTransactionPool::writeIncomingMessage(const StunMessage &msg, const QHo
 	return trans->d->writeIncomingMessage(msg, addr, port);
 }
 
-bool StunTransactionPool::writeIncomingMessage(const QByteArray &packet, const QHostAddress &addr, int port)
+bool StunTransactionPool::writeIncomingMessage(const QByteArray &packet, bool *notStun, const QHostAddress &addr, int port)
 {
 	if(!StunMessage::isProbablyStun(packet))
+	{
+		// basic stun check failed?  surely not STUN
+		if(notStun)
+			*notStun = true;
 		return false;
+	}
 
 #ifdef STUNTRANSACTION_DEBUG
 	StunMessage msg = StunMessage::fromBinary(packet);
@@ -551,19 +643,32 @@ bool StunTransactionPool::writeIncomingMessage(const QByteArray &packet, const Q
 	StunMessage::Class mclass = StunMessage::extractClass(packet);
 
 	if(mclass != StunMessage::SuccessResponse && mclass != StunMessage::ErrorResponse)
+	{
+		// could be STUN, don't really know for sure
+		if(notStun)
+			*notStun = false;
 		return false;
+	}
 
 	StunTransaction *trans = d->idToTrans.value(id);
 	if(!trans)
+	{
+		// could be STUN, don't really know for sure
+		if(notStun)
+			*notStun = false;
 		return false;
+	}
 
-	return trans->d->writeIncomingMessage(packet, addr, port);
+	bool _notStun;
+	bool ret = trans->d->writeIncomingMessage(packet, &_notStun, addr, port);
+	if(!ret && notStun)
+		*notStun = _notStun;
+	return ret;
 }
 
 void StunTransactionPool::setLongTermAuthEnabled(bool enabled)
 {
-	Q_UNUSED(enabled);
-	// TODO
+	d->useLongTermAuth = enabled;
 }
 
 QString StunTransactionPool::realm() const
@@ -589,24 +694,31 @@ void StunTransactionPool::setRealm(const QString &realm)
 void StunTransactionPool::continueAfterParams()
 {
 #ifdef STUNTRANSACTION_DEBUG
-	printf("continue after params:\n  U=[%s]\n  P=[%s]\n  R=[%s]\n  N=[%s]\n", qPrintable(d->user), d->pass.data(), qPrintable(d->realm), qPrintable(d->nonce));
+	printf("continue after params:\n");
+	printf("  U=[%s]\n", qPrintable(d->user));
+	printf("  P=[%s]\n", d->pass.data());
+	printf("  R=[%s]\n", qPrintable(d->realm));
+	printf("  N=[%s]\n", qPrintable(d->nonce));
 #endif
 
-	// collect a list of inactive stun transactions that need to do auth
-	QList<StunTransaction*> list;
-	QHashIterator<StunTransaction*,QByteArray> it(d->transToId);
-	while(it.hasNext())
-	{
-		it.next();
-		StunTransaction *trans = it.key();
-		if(!trans->d->active && !trans->d->triedLtAuth)
-			list += trans;
-	}
+	Q_ASSERT(d->useLongTermAuth);
+	Q_ASSERT(d->needLongTermAuth);
+	Q_ASSERT(!d->triedLongTermAuth);
 
-	foreach(StunTransaction *trans, list)
+	d->needLongTermAuth = false;
+	d->triedLongTermAuth = true;
+
+	foreach(StunTransaction *trans, d->transactions)
 	{
-		QMetaObject::invokeMethod(trans->d, "continueAfterParams",
-			Qt::QueuedConnection);
+		// the only reason an inactive transaction would be in the
+		//   list is if it is waiting for an auth retry
+		if(!trans->d->active)
+		{
+			// use queued call to prevent all sorts of DOR-SS
+			//   nastiness
+			QMetaObject::invokeMethod(trans->d, "continueAfterParams",
+				Qt::QueuedConnection);
+		}
 	}
 }
 

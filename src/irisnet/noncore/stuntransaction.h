@@ -37,6 +37,30 @@ class StunTransactionPrivate;
 class StunTransactionPool;
 class StunTransactionPoolPrivate;
 
+// Notes:
+//
+// - we allow multiple simultaneous requests.  no serializing or waiting, at
+//   least not at the transaction layer.
+// - requests may require authentication.  the protocol flow for STUN is that
+//   you first try a request without providing credentials, and if
+//   authentication is needed then an error is returned.  the request must be
+//   tried again with credentials provided for it to succeed.  note that the
+//   error response contains a nonce value that must be passed back in the
+//   second request, and so the first request cannot be skipped.
+// - it is possible to provide credentials in advance, so that the user is not
+//   asked for them dynamically.  however, the protocol flow remains the same
+//   either way (i.e. request w/o creds, error, request with creds).
+// - the user is only asked for credentials once ever.  if two requests require
+//   authentication, the user is asked only once and both requests will be
+//   retried once the creds are provided.  if an authentication error is
+//   received after providing creds, then the transaction will fail.  this
+//   means the user only has one chance to get the creds right, and creds
+//   cannot change during a session.  in the event of failure due to wrong or
+//   changed creds, the pool will need to be recreated in order to try new
+//   creds.
+// - if short term or long term auth is used, then the request is authenticated
+//   and the response is required to be authenticated.
+
 class StunTransaction : public QObject
 {
 	Q_OBJECT
@@ -78,6 +102,11 @@ public:
 	void setShortTermUsername(const QString &username);
 	void setShortTermPassword(const QString &password);
 
+	// fingerprint is always provided in outbound requests, but ignored
+	//   on responses.  if this flag is set, then responses will be
+	//   required to provide a fingerprint.
+	void setFingerprintRequired(bool enabled);
+
 signals:
 	// you must use a direct connection with this signal and call
 	//   setMessage() in the slot.  this signal may occur many times
@@ -112,10 +141,19 @@ public:
 
 	StunTransaction::Mode mode() const;
 
-	// note: not DOR-DS safe.  this will either cause transactions to emit
-	//   signals and return true, or not cause signals and return false.
+	// note: the writeIncomingMessage functions are not DOR-DS safe.  they
+	//   may cause a transaction to emit finished() or error() signals.
+
+	// returns true if the message is owned by the pool, else false.
 	bool writeIncomingMessage(const StunMessage &msg, const QHostAddress &addr = QHostAddress(), int port = -1);
-	bool writeIncomingMessage(const QByteArray &packet, const QHostAddress &addr = QHostAddress(), int port = -1);
+
+	// returns true if the packet is surely a STUN message and owned by the
+	//   pool, else false.  a packet must be owned by the pool to be
+	//   considered surely a STUN message.  if false, the packet may or may
+	//   not be a STUN message.  *notStun will be set to true if the packet
+	//   is surely not STUN, or set to false if it is unclear whether the
+	//   packet is STUN or not.
+	bool writeIncomingMessage(const QByteArray &packet, bool *notStun = 0, const QHostAddress &addr = QHostAddress(), int port = -1);
 
 	void setLongTermAuthEnabled(bool enabled);
 
