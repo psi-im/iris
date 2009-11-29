@@ -160,7 +160,7 @@ private slots:
 			QHostAddress addr;
 			quint16 port;
 
-			if(StunTypes::parseXorRelayedAddress(response.attribute(StunTypes::XOR_MAPPED_ADDRESS), response.magic(), response.id(), &addr, &port))
+			if(StunTypes::parseXorRelayedAddress(response.attribute(StunTypes::XOR_RELAYED_ADDRESS), response.magic(), response.id(), &addr, &port))
 			{
 				relayedAddress = addr;
 				relayedPort = port;
