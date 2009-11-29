@@ -103,7 +103,7 @@ QByteArray createErrorCode(int code, const QString &reason)
 
 	int ih = code / 100;
 	int il = code % 100;
-	ih <<= 5;
+	ih &= 0x07; // keep only lower 3 bits
 
 	unsigned char ch = (unsigned char)ih;
 	unsigned char cl = (unsigned char)il;
@@ -171,8 +171,10 @@ QByteArray createXorRelayedAddress(const QHostAddress &addr, quint16 port, const
 QByteArray createEvenPort(bool reserve)
 {
 	QByteArray val(1, 0);
+	unsigned char c = 0;
 	if(reserve)
-		val[0] = 1;
+		c |= 0x80; // set high bit
+	val[0] = c;
 	return val;
 }
 
@@ -252,14 +254,7 @@ bool parseErrorCode(const QByteArray &val, int *code, QString *reason)
 
 	unsigned char ch = (unsigned char)val[2];
 	unsigned char cl = (unsigned char)val[3];
-	int ih = ch >> 5;
-
-	// workaround for servers that set the low bits instead of the high
-	//   bits (such as turnserver.org).
-	// FIXME: do we still need this workaround?
-	if(ih == 0)
-		ih = ch;
-
+	int ih = ch & 0x07; // lower 3 bits
 	int x = ih * 100 + (int)cl;
 
 	QString str;
@@ -352,7 +347,8 @@ bool parseEvenPort(const QByteArray &val, bool *reserve)
 	if(val.size() != 1)
 		return false;
 
-	if(val[0] & 1)
+	unsigned char c = val[0];
+	if(c & 0x80)
 		*reserve = true;
 	else
 		*reserve = false;
