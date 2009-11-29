@@ -633,34 +633,47 @@ private slots:
 private:
 	void processDatagram(const QByteArray &buf)
 	{
-		StunMessage message = StunMessage::fromBinary(buf);
 		QByteArray data;
 		QHostAddress fromAddr;
 		int fromPort;
-		if(message.isNull())
+
+		bool notStun;
+		if(!pool->writeIncomingMessage(buf, &notStun))
 		{
-			data = allocate->decode(buf, &fromAddr, &fromPort);
-			if(!data.isNull())
+			if(notStun)
 			{
-				printf("Received ChannelData-based data packet\n");
-				processDataPacket(data, fromAddr, fromPort);
-				return;
+				// not stun?  maybe it is a data packet
+				data = allocate->decode(buf, &fromAddr, &fromPort);
+				if(!data.isNull())
+				{
+					printf("Received ChannelData-based data packet\n");
+					processDataPacket(data, fromAddr, fromPort);
+					return;
+				}
+			}
+			else
+			{
+				// packet might be stun not owned by pool.
+				//   let's see
+				StunMessage message = StunMessage::fromBinary(buf);
+				if(!message.isNull())
+				{
+					data = allocate->decode(message, &fromAddr, &fromPort);
+
+					if(!data.isNull())
+					{
+						printf("Received STUN-based data packet\n");
+						processDataPacket(data, fromAddr, fromPort);
+					}
+					else
+						printf("Warning: server responded with an unexpected STUN packet, skipping.\n");
+
+					return;
+				}
 			}
 
 			printf("Warning: server responded with what doesn't seem to be a STUN or data packet, skipping.\n");
-			return;
 		}
-
-		if(message.mclass() == StunMessage::Indication && message.method() == 0x007)
-		{
-			printf("Received STUN-based data packet\n");
-			data = allocate->decode(message, &fromAddr, &fromPort);
-			processDataPacket(data, fromAddr, fromPort);
-			return;
-		}
-
-		if(!pool->writeIncomingMessage(message))
-			printf("Warning: received unexpected message, skipping.\n");
 	}
 
 	void processDataPacket(const QByteArray &buf, const QHostAddress &addr, int port)
