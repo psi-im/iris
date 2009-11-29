@@ -447,7 +447,7 @@ public:
 			return false;
 		}
 
-		int validationFlags;
+		int validationFlags = 0;
 		StunMessage msg = parse_stun_message(packet, &validationFlags, key);
 		if(msg.isNull())
 		{
@@ -659,7 +659,7 @@ bool StunTransactionPool::writeIncomingMessage(const QByteArray &packet, bool *n
 		return false;
 	}
 
-	bool _notStun;
+	bool _notStun = false;
 	bool ret = trans->d->writeIncomingMessage(packet, &_notStun, addr, port);
 	if(!ret && notStun)
 		*notStun = _notStun;
