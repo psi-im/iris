@@ -75,12 +75,19 @@ enum Attribute
 
 enum Error
 {
-	TryAlternate      = 300,
-	BadRequest        = 400,
-	Unauthorized      = 401,
-	UnknownAttribute  = 420,
-	StaleNonce        = 438,
-	ServerError       = 500
+	TryAlternate                  = 300,
+	BadRequest                    = 400,
+	Unauthorized                  = 401,
+	UnknownAttribute              = 420,
+	StaleNonce                    = 438,
+	ServerError                   = 500,
+
+	Forbidden                     = 403,
+	AllocationMismatch            = 437,
+	WrongCredentials              = 441,
+	UnsupportedTransportProtocol  = 442,
+	AllocationQuotaReached        = 486,
+	InsufficientCapacity          = 508
 };
 
 QByteArray createMappedAddress(const QHostAddress &addr, quint16 port);
