@@ -39,7 +39,8 @@ public:
 		ErrorGeneric,
 		ErrorTimeout,
 		ErrorRejected,
-		ErrorProtocol
+		ErrorProtocol,
+		ErrorConflict
 	};
 
 	StunBinding(StunTransactionPool *pool);

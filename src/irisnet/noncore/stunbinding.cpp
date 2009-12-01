@@ -133,10 +133,28 @@ private slots:
 		delete trans;
 		trans = 0;
 
+		bool error = false;
+		int code;
+		QString reason;
 		if(response.mclass() == StunMessage::ErrorResponse)
 		{
-			errorString = "Server responded with an error.";
-			emit q->error(StunBinding::ErrorRejected);
+			if(!StunTypes::parseErrorCode(response.attribute(StunTypes::ERROR_CODE), &code, &reason))
+			{
+				errorString = "Unable to parse ERROR-CODE in error response.";
+				emit q->error(StunBinding::ErrorProtocol);
+				return;
+			}
+
+			error = true;
+		}
+
+		if(error)
+		{
+			errorString = reason;
+			if(code == StunTypes::RoleConflict)
+				emit q->error(StunBinding::ErrorConflict);
+			else
+				emit q->error(StunBinding::ErrorRejected);
 			return;
 		}
 
