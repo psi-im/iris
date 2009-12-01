@@ -75,8 +75,7 @@ public:
 	enum Error
 	{
 		ErrorGeneric,
-		ErrorTimeout,
-		ErrorAuth
+		ErrorTimeout
 	};
 
 	StunTransaction(QObject *parent = 0);

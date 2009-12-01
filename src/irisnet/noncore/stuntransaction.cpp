@@ -367,7 +367,7 @@ private:
 		printf("matched incoming response to existing request.  elapsed=%d\n", time.elapsed());
 #endif
 
-		if(pool->d->useLongTermAuth)
+		if(msg.mclass() == StunMessage::ErrorResponse && pool->d->useLongTermAuth)
 		{
 			// we'll handle certain error codes at this layer
 			int code;
@@ -393,6 +393,7 @@ private:
 							if(!pool->d->user.isEmpty())
 							{
 								// creds already set?  use them
+								pool->d->triedLongTermAuth = true;
 								retry();
 							}
 							else
@@ -419,7 +420,7 @@ private:
 		}
 
 		// require message integrity when auth is used
-		if((!stuser.isEmpty() || pool->d->useLongTermAuth) && !authed)
+		if((!stuser.isEmpty() || pool->d->triedLongTermAuth) && !authed)
 			return;
 
 		pool->d->remove(q);
