@@ -31,6 +31,18 @@
 
 using namespace XMPP;
 
+static QString prompt(const QString &s)
+{
+	printf("* %s ", qPrintable(s));
+	fflush(stdout);
+	char line[256];
+	fgets(line, 255, stdin);
+	QString result = line;
+	if(result[result.length()-1] == '\n')
+		result.truncate(result.length()-1);
+	return result;
+}
+
 class NetMonitor : public QObject
 {
 	Q_OBJECT
@@ -500,6 +512,7 @@ public:
 	int mode;
 	QHostAddress relayAddr;
 	int relayPort;
+	QString relayUser, relayPass, relayRealm;
 	QHostAddress peerAddr;
 	int peerPort;
 	QUdpSocket *sock;
@@ -530,6 +543,13 @@ public slots:
 		connect(pool, SIGNAL(needAuthParams()), SLOT(pool_needAuthParams()));
 
 		pool->setLongTermAuthEnabled(true);
+		if(!relayUser.isEmpty())
+		{
+			pool->setUsername(relayUser);
+			pool->setPassword(relayPass.toUtf8());
+			if(!relayRealm.isEmpty())
+				pool->setRealm(relayRealm);
+		}
 
 		if(!sock->bind())
 		{
@@ -585,9 +605,20 @@ private slots:
 
 	void pool_needAuthParams()
 	{
-		pool->setUsername("toto");
-		pool->setPassword("password");
-		pool->setRealm("domain.org");
+		relayUser = prompt("Username:");
+		relayPass = prompt("Password:");
+
+		pool->setUsername(relayUser);
+		pool->setPassword(relayPass.toUtf8());
+
+		QString str = prompt(QString("Realm: [%1]").arg(pool->realm()));
+		if(!str.isEmpty())
+		{
+			relayRealm = str;
+			pool->setRealm(relayRealm);
+		}
+		else
+			relayRealm = pool->realm();
 
 		pool->continueAfterParams();
 	}
@@ -688,7 +719,8 @@ private:
 void usage()
 {
 	printf("nettool: simple testing utility\n");
-	printf("usage: nettool [command]\n");
+	printf("usage: nettool (options) [command]\n");
+	printf("  options: --user=x, --pass=x, --realm=x\n");
 	printf("\n");
 	printf(" netmon                                            monitor network interfaces\n");
 	printf(" rname (-r) [domain] (record type)                 look up record (default = a)\n");
@@ -705,7 +737,7 @@ void usage()
 	printf("service types: _service._proto format (e.g. \"_xmpp-client._tcp\")\n");
 	printf("attributes: var0[=val0],...,varn[=valn]\n");
 	printf("rname -r: for null type, dump raw record data to stdout\n");
-	printf("pub -a: add extra record.  format: null:filename.dat\n");
+	printf("pserv -a: add extra record.  format: null:filename.dat\n");
 	printf("turn modes: udp tcp tcp-tls\n");
 	printf("\n");
 }
@@ -713,23 +745,64 @@ void usage()
 int main(int argc, char **argv)
 {
 	QCA::Initializer qcaInit;
-	QCoreApplication app(argc, argv);
-	if(argc < 2)
+	QCoreApplication qapp(argc, argv);
+
+	QStringList args = qapp.arguments();
+	args.removeFirst();
+
+	QString user, pass, realm;
+
+	for(int n = 0; n < args.count(); ++n)
+	{
+		QString s = args[n];
+		if(!s.startsWith("--"))
+			continue;
+		QString var;
+		QString val;
+		int x = s.indexOf('=');
+		if(x != -1)
+		{
+			var = s.mid(2, x - 2);
+			val = s.mid(x + 1);
+		}
+		else
+		{
+			var = s.mid(2);
+		}
+
+		bool known = true;
+
+		if(var == "user")
+			user = val;
+		else if(var == "pass")
+			pass = val;
+		else if(var == "realm")
+			realm = val;
+		else
+			known = false;
+
+		if(!known)
+		{
+			fprintf(stderr, "Unknown option '%s'.\n", qPrintable(var));
+			return 1;
+		}
+
+		args.removeAt(n);
+		--n; // adjust position
+	}
+
+	if(args.isEmpty())
 	{
 		usage();
 		return 1;
 	}
 
-	QStringList args;
-	for(int n = 1; n < argc; ++n)
-		args += argv[n];
-
 	if(args[0] == "netmon")
 	{
 		NetMonitor a;
-		QObject::connect(&a, SIGNAL(quit()), &app, SLOT(quit()));
+		QObject::connect(&a, SIGNAL(quit()), &qapp, SLOT(quit()));
 		QTimer::singleShot(0, &a, SLOT(start()));
-		app.exec();
+		qapp.exec();
 	}
 	else if(args[0] == "rname" || args[0] == "rnamel")
 	{
@@ -770,9 +843,9 @@ int main(int argc, char **argv)
 		a.longlived = (args[0] == "rnamel") ? true : false;
 		if(args[0] == "rname" && null_dump)
 			a.null_dump = true;
-		QObject::connect(&a, SIGNAL(quit()), &app, SLOT(quit()));
+		QObject::connect(&a, SIGNAL(quit()), &qapp, SLOT(quit()));
 		QTimer::singleShot(0, &a, SLOT(start()));
-		app.exec();
+		qapp.exec();
 	}
 	else if(args[0] == "browse")
 	{
@@ -784,9 +857,9 @@ int main(int argc, char **argv)
 
 		BrowseServices a;
 		a.type = args[1];
-		QObject::connect(&a, SIGNAL(quit()), &app, SLOT(quit()));
+		QObject::connect(&a, SIGNAL(quit()), &qapp, SLOT(quit()));
 		QTimer::singleShot(0, &a, SLOT(start()));
-		app.exec();
+		qapp.exec();
 	}
 	else if(args[0] == "rservi" || args[0] == "rservd" || args[0] == "rservp")
 	{
@@ -816,9 +889,9 @@ int main(int argc, char **argv)
 			a.domain = args[1];
 			a.port = args[2].toInt();
 		}
-		QObject::connect(&a, SIGNAL(quit()), &app, SLOT(quit()));
+		QObject::connect(&a, SIGNAL(quit()), &qapp, SLOT(quit()));
 		QTimer::singleShot(0, &a, SLOT(start()));
-		app.exec();
+		qapp.exec();
 	}
 	else if(args[0] == "pserv")
 	{
@@ -894,9 +967,9 @@ int main(int argc, char **argv)
 		a.port = args[3].toInt();
 		a.attribs = attribs;
 		a.extra_null = extra_null;
-		QObject::connect(&a, SIGNAL(quit()), &app, SLOT(quit()));
+		QObject::connect(&a, SIGNAL(quit()), &qapp, SLOT(quit()));
 		QTimer::singleShot(0, &a, SLOT(start()));
-		app.exec();
+		qapp.exec();
 	}
 	else if(args[0] == "stun")
 	{
@@ -941,9 +1014,9 @@ int main(int argc, char **argv)
 		a.localPort = localPort;
 		a.addr = addr;
 		a.port = port;
-		QObject::connect(&a, SIGNAL(quit()), &app, SLOT(quit()));
+		QObject::connect(&a, SIGNAL(quit()), &qapp, SLOT(quit()));
 		QTimer::singleShot(0, &a, SLOT(start()));
-		app.exec();
+		qapp.exec();
 	}
 	else if(args[0] == "turn")
 	{
@@ -1018,11 +1091,14 @@ int main(int argc, char **argv)
 		a.mode = mode;
 		a.relayAddr = raddr;
 		a.relayPort = rport;
+		a.relayUser = user;
+		a.relayPass = pass;
+		a.relayRealm = realm;
 		a.peerAddr = paddr;
 		a.peerPort = pport;
-		QObject::connect(&a, SIGNAL(quit()), &app, SLOT(quit()));
+		QObject::connect(&a, SIGNAL(quit()), &qapp, SLOT(quit()));
 		QTimer::singleShot(0, &a, SLOT(start()));
-		app.exec();
+		qapp.exec();
 	}
 	else
 	{
