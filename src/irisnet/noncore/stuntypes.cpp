@@ -146,8 +146,9 @@ QByteArray createXorMappedAddress(const QHostAddress &addr, quint16 port, const 
 
 QByteArray createChannelNumber(quint16 i)
 {
-	QByteArray val(2, 0);
+	QByteArray val(4, 0);
 	write16((quint8 *)val.data(), i);
+	// bytes 2-3 are zeroed out
 	return val;
 }
 
@@ -314,7 +315,7 @@ bool parseXorMappedAddress(const QByteArray &val, const quint8 *magic, const qui
 
 bool parseChannelNumber(const QByteArray &val, quint16 *i)
 {
-	if(val.size() != 2)
+	if(val.size() != 4)
 		return false;
 
 	const quint8 *p = (const quint8 *)val.data();
@@ -580,7 +581,7 @@ QString attributeValueToString(int type, const QByteArray &val, const quint8 *ma
 		{
 			quint16 i;
 			if(parseChannelNumber(val, &i))
-				return QString::number(i);
+				return QString().sprintf("0x%04x", (int)i);
 			break;
 		}
 		case LIFETIME:
