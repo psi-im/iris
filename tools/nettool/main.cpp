@@ -563,6 +563,7 @@ public slots:
 		connect(allocate, SIGNAL(stopped()), SLOT(allocate_stopped()));
 		connect(allocate, SIGNAL(error(XMPP::StunAllocate::Error)), SLOT(allocate_error(XMPP::StunAllocate::Error)));
 		connect(allocate, SIGNAL(permissionsChanged()), SLOT(allocate_permissionsChanged()));
+		connect(allocate, SIGNAL(channelsChanged()), SLOT(allocate_channelsChanged()));
 
 		allocate->setClientSoftwareNameAndVersion("nettool (Iris)");
 
@@ -572,6 +573,17 @@ public slots:
 
 signals:
 	void quit();
+
+private:
+	void sendTestPacket()
+	{
+		QByteArray buf = "Hello, world!";
+		QByteArray packet = allocate->encode(buf, peerAddr, peerPort);
+
+		printf("Relaying test packet of %d bytes (%d overhead) to %s;%d...\n", packet.size(), allocate->packetHeaderOverhead(peerAddr, peerPort), qPrintable(peerAddr.toString()), peerPort);
+
+		sock->writeDatagram(packet, relayAddr, relayPort);
+	}
 
 private slots:
 	void sock_readyRead()
@@ -654,11 +666,19 @@ private slots:
 
 	void allocate_permissionsChanged()
 	{
-		printf("PermissionsChanged.  Relaying test packet to %s;%d...\n", qPrintable(peerAddr.toString()), peerPort);
+		printf("PermissionsChanged\n");
 
-		QByteArray buf = "Hello, world!";
-		QByteArray packet = allocate->encode(buf, peerAddr, peerPort);
-		sock->writeDatagram(packet, relayAddr, relayPort);
+		printf("Setting channel for peer address/port %s;%d\n", qPrintable(peerAddr.toString()), peerPort);
+		QList<StunAllocate::Channel> channels;
+		channels += StunAllocate::Channel(peerAddr, peerPort);
+		allocate->setChannels(channels);
+	}
+
+	void allocate_channelsChanged()
+	{
+		printf("ChannelsChanged\n");
+
+		sendTestPacket();
 	}
 
 private:

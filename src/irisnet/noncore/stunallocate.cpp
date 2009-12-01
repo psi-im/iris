@@ -25,6 +25,7 @@
 #include <QTimer>
 #include <QtCrypto>
 #include "objectsession.h"
+#include "stunutil.h"
 #include "stunmessage.h"
 #include "stuntypes.h"
 #include "stuntransaction.h"
@@ -46,43 +47,6 @@ void releaseAndDeleteLater(QObject *owner, QObject *obj)
 	obj->deleteLater();
 }
 
-/*class StunAllocateRefreshable : public QObject
-{
-	Q_OBJECT
-
-private:
-	QTimer *timer;
-
-public:
-	StunAllocateRefreshable(int interval, QObject *parent = 0) :
-		QObject(parent)
-	{
-		timer = new QTimer(this);
-		connect(timer, SIGNAL(timeout()), SLOT(timer_timeout()));
-		timer->setSingleShot(true);
-		timer->setInterval(interval);
-	}
-
-	~StunAllocateRefreshable()
-	{
-		releaseAndDeleteLater(this, timer);
-	}
-
-	void restartTimer()
-	{
-		timer->start();
-	}
-
-signals:
-	void needRefresh();
-
-private slots:
-	void timer_timeout()
-	{
-		emit needRefresh();
-	}
-};*/
-
 class StunAllocatePermission : public QObject
 {
 	Q_OBJECT
@@ -93,15 +57,13 @@ public:
 	StunTransaction *trans;
 	QHostAddress addr;
 	bool active;
-	int channelId;
 
 	StunAllocatePermission(StunTransactionPool *_pool, const QHostAddress &_addr) :
 		QObject(_pool),
 		pool(_pool),
 		trans(0),
 		addr(_addr),
-		active(false),
-		channelId(-1)
+		active(false)
 	{
 		timer = new QTimer(this);
 		connect(timer, SIGNAL(timeout()), SLOT(timer_timeout()));
@@ -120,10 +82,6 @@ public:
 	{
 		Q_ASSERT(!active);
 		doTransaction();
-	}
-
-	void makeChannel(int id)
-	{
 	}
 
 signals:
@@ -159,11 +117,16 @@ private:
 private slots:
 	void trans_createMessage(const QByteArray &transactionId)
 	{
+		// CreatePermission
 		StunMessage message;
 		message.setMethod(StunTypes::CreatePermission);
 		message.setId((const quint8 *)transactionId.data());
 
 		QList<StunMessage::Attribute> list;
+
+		// we only do one address per permission request, because
+		//   otherwise if we receive an error it would be ambiguous
+		//   as to which address the error applies to
 
 		{
 			StunMessage::Attribute a;
@@ -234,22 +197,163 @@ private slots:
 	}
 };
 
-/*class StunAllocateChannel : public StunAllocateRefreshable
+class StunAllocateChannel : public QObject
 {
 	Q_OBJECT
 
 public:
+	QTimer *timer;
+	StunTransactionPool *pool;
+	StunTransaction *trans;
+	int channelId;
 	QHostAddress addr;
-	int num;
-	bool refreshing;
+	int port;
+	bool active;
 
-	StunAllocateChannel(QObject *parent = 0) :
-		StunAllocateRefreshable(CHAN_INTERVAL, parent),
-		num(-1),
-		refreshing(false)
+	StunAllocateChannel(StunTransactionPool *_pool, int _channelId, const QHostAddress &_addr, int _port) :
+		QObject(_pool),
+		pool(_pool),
+		trans(0),
+		channelId(_channelId),
+		addr(_addr),
+		port(_port),
+		active(false)
 	{
+		timer = new QTimer(this);
+		connect(timer, SIGNAL(timeout()), SLOT(timer_timeout()));
+		timer->setSingleShot(true);
+		timer->setInterval(CHAN_INTERVAL);
 	}
-};*/
+
+	~StunAllocateChannel()
+	{
+		cleanup();
+
+		releaseAndDeleteLater(this, timer);
+	}
+
+	void start()
+	{
+		Q_ASSERT(!active);
+		doTransaction();
+	}
+
+signals:
+	void ready();
+	void error(int e, const QString &reason);
+
+private:
+	void cleanup()
+	{
+		delete trans;
+		trans = 0;
+
+		timer->stop();
+
+		channelId = -1;
+		active = false;
+	}
+
+	void doTransaction()
+	{
+		Q_ASSERT(!trans);
+		trans = new StunTransaction(this);
+		connect(trans, SIGNAL(createMessage(const QByteArray &)), SLOT(trans_createMessage(const QByteArray &)));
+		connect(trans, SIGNAL(finished(const XMPP::StunMessage &)), SLOT(trans_finished(const XMPP::StunMessage &)));
+		connect(trans, SIGNAL(error(XMPP::StunTransaction::Error)), SLOT(trans_error(XMPP::StunTransaction::Error)));
+		trans->start(pool);
+	}
+
+	void restartTimer()
+	{
+		timer->start();
+	}
+
+private slots:
+	void trans_createMessage(const QByteArray &transactionId)
+	{
+		// ChannelBind
+		StunMessage message;
+		message.setMethod(StunTypes::ChannelBind);
+		message.setId((const quint8 *)transactionId.data());
+
+		QList<StunMessage::Attribute> list;
+
+		{
+			StunMessage::Attribute a;
+			a.type = StunTypes::CHANNEL_NUMBER;
+			a.value = StunTypes::createChannelNumber(channelId);
+			list += a;
+		}
+
+		{
+			StunMessage::Attribute a;
+			a.type = StunTypes::XOR_PEER_ADDRESS;
+			a.value = StunTypes::createXorPeerAddress(addr, port, message.magic(), message.id());
+			list += a;
+		}
+
+		message.setAttributes(list);
+
+		trans->setMessage(message);
+	}
+
+	void trans_finished(const XMPP::StunMessage &response)
+	{
+		delete trans;
+		trans = 0;
+
+		bool err = false;
+		int code;
+		QString reason;
+		if(response.mclass() == StunMessage::ErrorResponse)
+		{
+			if(!StunTypes::parseErrorCode(response.attribute(StunTypes::ERROR_CODE), &code, &reason))
+			{
+				cleanup();
+				emit error(StunAllocate::ErrorProtocol, "Unable to parse ERROR-CODE in error response.");
+				return;
+			}
+
+			err = true;
+		}
+
+		if(err)
+		{
+			cleanup();
+
+			if(code == StunTypes::InsufficientCapacity)
+				emit error(StunAllocate::ErrorCapacity, reason);
+			else
+				emit error(StunAllocate::ErrorRejected, reason);
+
+			return;
+		}
+
+		restartTimer();
+
+		if(!active)
+		{
+			active = true;
+			emit ready();
+		}
+	}
+
+	void trans_error(XMPP::StunTransaction::Error e)
+	{
+		cleanup();
+
+		if(e == XMPP::StunTransaction::ErrorTimeout)
+			emit error(StunAllocate::ErrorTimeout, "Request timed out.");
+		else
+			emit error(StunAllocate::ErrorGeneric, "Generic transaction error.");
+	}
+
+	void timer_timeout()
+	{
+		doTransaction();
+	}
+};
 
 class StunAllocate::Private : public QObject
 {
@@ -273,6 +377,7 @@ public:
 	};
 
 	StunAllocate *q;
+	ObjectSession sess;
 	StunTransactionPool *pool;
 	StunTransaction *trans;
 	State state;
@@ -284,19 +389,19 @@ public:
 	StunMessage msg;
 	int allocateLifetime;
 	QTimer *allocateRefreshTimer;
-	QList<QHostAddress> pendingPerms;
 	QList<StunAllocatePermission*> perms;
-	QList<QHostAddress> permsAddrs;
-	ObjectSession sess;
+	QList<StunAllocateChannel*> channels;
+	QList<QHostAddress> permsOut;
+	QList<StunAllocate::Channel> channelsOut;
 
 	Private(StunAllocate *_q) :
 		QObject(_q),
 		q(_q),
+		sess(this),
 		pool(0),
 		trans(0),
 		state(Stopped),
-		dfState(DF_Unknown),
-		sess(this)
+		dfState(DF_Unknown)
 	{
 		qRegisterMetaType<StunAllocate::Error>();
 
@@ -347,6 +452,17 @@ public:
 
 			if(!found)
 			{
+				// delete related channels
+				for(int j = 0; j < channels.count(); ++j)
+				{
+					if(channels[j]->addr == perms[n]->addr)
+					{
+						delete channels[j];
+						channels.removeAt(j);
+						--j; // adjust position
+					}
+				}
+
 				++freeCount;
 
 				delete perms[n];
@@ -358,11 +474,14 @@ public:
 		if(freeCount > 0)
 		{
 			// removals count as a change, so emit the signal
-			sess.defer(q, "permissionsChanged");
+			sess.deferExclusive(q, "permissionsChanged");
 
 			// wake up inactive perms now that we've freed space
 			for(int n = 0; n < perms.count(); ++n)
-				perms[n]->start();
+			{
+				if(!perms[n]->active)
+					perms[n]->start();
+			}
 		}
 
 		// added?
@@ -389,6 +508,148 @@ public:
 		}
 	}
 
+	void setChannels(const QList<StunAllocate::Channel> &newChannels)
+	{
+		int freeCount = 0;
+
+		// removed?
+		for(int n = 0; n < channels.count(); ++n)
+		{
+			bool found = false;
+			for(int k = 0; k < newChannels.count(); ++k)
+			{
+				if(newChannels[k].address == channels[n]->addr && newChannels[k].port == channels[n]->port)
+				{
+					found = true;
+					break;
+				}
+			}
+
+			if(!found)
+			{
+				++freeCount;
+
+				delete channels[n];
+				channels.removeAt(n);
+				--n; // adjust position
+			}
+		}
+
+		if(freeCount > 0)
+		{
+			// removals count as a change, so emit the signal
+			sess.deferExclusive(q, "channelsChanged");
+
+			// wake up inactive channels now that we've freed space
+			for(int n = 0; n < channels.count(); ++n)
+			{
+				if(!channels[n]->active)
+				{
+					int channelId = getFreeChannelNumber();
+
+					// out of channels?  give up
+					if(channelId == -1)
+						break;
+
+					channels[n]->channelId = channelId;
+					channels[n]->start();
+				}
+			}
+		}
+
+		// added?
+		for(int n = 0; n < newChannels.count(); ++n)
+		{
+			bool found = false;
+			for(int k = 0; k < channels.count(); ++k)
+			{
+				if(channels[k]->addr == newChannels[n].address && channels[k]->port == newChannels[n].port)
+				{
+					found = true;
+					break;
+				}
+			}
+
+			if(!found)
+			{
+				// look up the permission for this channel
+				int at = -1;
+				for(int k = 0; k < perms.count(); ++k)
+				{
+					if(perms[k]->addr == newChannels[n].address)
+					{
+						at = k;
+						break;
+					}
+				}
+
+				// only install a channel if we have a permission
+				if(at != -1)
+				{
+					int channelId = getFreeChannelNumber();
+
+					StunAllocateChannel *channel = new StunAllocateChannel(pool, channelId, newChannels[n].address, newChannels[n].port);
+					connect(channel, SIGNAL(ready()), SLOT(channel_ready()));
+					connect(channel, SIGNAL(error(int, const QString &)), SLOT(channel_error(int, const QString &)));
+					channels += channel;
+
+					if(channelId != -1)
+						channel->start();
+				}
+			}
+		}
+	}
+
+	int getFreeChannelNumber()
+	{
+		for(int tryId = 0x4000; tryId <= 0x7fff; ++tryId)
+		{
+			bool found = false;
+			for(int n = 0; n < channels.count(); ++n)
+			{
+				if(channels[n]->channelId == tryId)
+				{
+					found = true;
+					break;
+				}
+			}
+
+			if(!found)
+				return tryId;
+		}
+
+		return -1;
+	}
+
+	int getChannel(const QHostAddress &addr, int port)
+	{
+		for(int n = 0; n < channels.count(); ++n)
+		{
+			if(channels[n]->active && channels[n]->addr == addr && channels[n]->port == port)
+				return channels[n]->channelId;
+		}
+
+		return -1;
+	}
+
+	// note that this function works even for inactive channels, so that
+	//   incoming traffic that is received out-of-order with a
+	//   ChannelBind success response is still processable
+	bool getAddressPort(int channelId, QHostAddress *addr, int *port)
+	{
+		for(int n = 0; n < channels.count(); ++n)
+		{
+			if(channels[n]->channelId == channelId)
+			{
+				*addr = channels[n]->addr;
+				*port = channels[n]->port;
+				return true;
+			}
+		}
+
+		return false;
+	}
+
 private:
 	void cleanup()
 	{
@@ -399,10 +660,11 @@ private:
 
 		allocateRefreshTimer->stop();
 
-		pendingPerms.clear();
 		qDeleteAll(perms);
 		perms.clear();
-		permsAddrs.clear();
+		permsOut.clear();
+		channels.clear();
+		channelsOut.clear();
 
 		state = Stopped;
 	}
@@ -423,7 +685,7 @@ private:
 		allocateRefreshTimer->start((allocateLifetime - 60) * 1000);
 	}
 
-	bool updatePermsAddrs()
+	bool updatePermsOut()
 	{
 		QList<QHostAddress> newList;
 
@@ -433,10 +695,27 @@ private:
 				newList += perms[n]->addr;
 		}
 
-		if(newList == permsAddrs)
+		if(newList == permsOut)
 			return false;
 
-		permsAddrs = newList;
+		permsOut = newList;
+		return true;
+	}
+
+	bool updateChannelsOut()
+	{
+		QList<StunAllocate::Channel> newList;
+
+		for(int n = 0; n < channels.count(); ++n)
+		{
+			if(channels[n]->active)
+				newList += StunAllocate::Channel(channels[n]->addr, channels[n]->port);
+		}
+
+		if(newList == channelsOut)
+			return false;
+
+		channelsOut = newList;
 		return true;
 	}
 
@@ -698,7 +977,7 @@ private slots:
 
 	void perm_ready()
 	{
-		if(updatePermsAddrs())
+		if(updatePermsOut())
 			emit q->permissionsChanged();
 	}
 
@@ -710,6 +989,28 @@ private slots:
 			//   don't consider this an error.  the perm stays
 			//   in the list inactive.  we'll try it again if
 			//   any perms get removed.
+			return;
+		}
+
+		cleanup();
+		errorString = reason;
+		emit q->error((StunAllocate::Error)e);
+	}
+
+	void channel_ready()
+	{
+		if(updateChannelsOut())
+			emit q->channelsChanged();
+	}
+
+	void channel_error(int e, const QString &reason)
+	{
+		if(e == StunAllocate::ErrorCapacity)
+		{
+			// if we aren't allowed to make anymore channels,
+			//   don't consider this an error.  the channel stays
+			//   in the list inactive.  we'll try it again if
+			//   any channels get removed.
 			return;
 		}
 
@@ -792,7 +1093,7 @@ int StunAllocate::relayedPort() const
 
 QList<QHostAddress> StunAllocate::permissions() const
 {
-	return d->permsAddrs;
+	return d->permsOut;
 }
 
 void StunAllocate::setPermissions(const QList<QHostAddress> &perms)
@@ -800,49 +1101,112 @@ void StunAllocate::setPermissions(const QList<QHostAddress> &perms)
 	d->setPermissions(perms);
 }
 
-int StunAllocate::packetHeaderOverhead(const QHostAddress &addr) const
+QList<StunAllocate::Channel> StunAllocate::channels() const
 {
-	// TODO: support ChannelBind
-	Q_UNUSED(addr);
-	return 36; // overhead of STUN-based data packets
+	return d->channelsOut;
+}
+
+void StunAllocate::setChannels(const QList<Channel> &channels)
+{
+	d->setChannels(channels);
+}
+
+int StunAllocate::packetHeaderOverhead(const QHostAddress &addr, int port) const
+{
+	int channelId = d->getChannel(addr, port);
+
+	if(channelId != -1)
+	{
+		// overhead of ChannelData
+		return 4;
+	}
+	else
+	{
+		if(d->dfState == StunAllocate::Private::DF_Supported)
+		{
+			// overhead of STUN-based data, with DONT_FRAGMENT
+			return 40;
+		}
+		else
+		{
+			// overhead of STUN-based data, without DONT-FRAGMENT
+			return 36;
+		}
+	}
+
+	return -1;
 }
 
 QByteArray StunAllocate::encode(const QByteArray &datagram, const QHostAddress &addr, int port)
 {
-	StunMessage message;
-	message.setClass(StunMessage::Indication);
-	message.setMethod(StunTypes::Send);
-	QByteArray id = d->pool->generateId();
-	message.setId((const quint8 *)id.data());
+	int channelId = d->getChannel(addr, port);
 
-	QList<StunMessage::Attribute> list;
-
+	if(channelId != -1)
 	{
-		StunMessage::Attribute a;
-		a.type = StunTypes::XOR_PEER_ADDRESS;
-		a.value = StunTypes::createXorPeerAddress(addr, port, message.magic(), message.id());
-		list += a;
-	}
+		if(datagram.size() > 65535)
+			return QByteArray();
 
+		quint16 num = channelId;
+		quint16 len = datagram.size();
+
+		QByteArray out(4 + datagram.size(), 0);
+		StunUtil::write16((quint8 *)out.data(), num);
+		StunUtil::write16((quint8 *)out.data() + 2, len);
+		memcpy(out.data() + 4, datagram.data(), datagram.size());
+
+		return out;
+	}
+	else
 	{
-		StunMessage::Attribute a;
-		a.type = StunTypes::DATA;
-		a.value = datagram;
-		list += a;
+		StunMessage message;
+		message.setClass(StunMessage::Indication);
+		message.setMethod(StunTypes::Send);
+		QByteArray id = d->pool->generateId();
+		message.setId((const quint8 *)id.data());
+
+		QList<StunMessage::Attribute> list;
+
+		{
+			StunMessage::Attribute a;
+			a.type = StunTypes::XOR_PEER_ADDRESS;
+			a.value = StunTypes::createXorPeerAddress(addr, port, message.magic(), message.id());
+			list += a;
+		}
+
+		if(d->dfState == StunAllocate::Private::DF_Supported)
+		{
+			StunMessage::Attribute a;
+			a.type = StunTypes::DONT_FRAGMENT;
+			list += a;
+		}
+
+		{
+			StunMessage::Attribute a;
+			a.type = StunTypes::DATA;
+			a.value = datagram;
+			list += a;
+		}
+
+		message.setAttributes(list);
+
+		return message.toBinary();
 	}
-
-	message.setAttributes(list);
-
-	return message.toBinary();
 }
 
 QByteArray StunAllocate::decode(const QByteArray &encoded, QHostAddress *addr, int *port)
 {
-	// TODO: support ChannelBind
-	Q_UNUSED(encoded);
-	Q_UNUSED(addr);
-	Q_UNUSED(port);
-	return QByteArray();
+	if(encoded.size() < 4)
+		return QByteArray();
+
+	quint16 num = StunUtil::read16((const quint8 *)encoded.data());
+	quint16 len = StunUtil::read16((const quint8 *)encoded.data() + 2);
+	if(encoded.size() - 4 < (int)len)
+		return QByteArray();
+
+	if(!d->getAddressPort(num, addr, port))
+		return QByteArray();
+
+	return encoded.mid(4, len);
 }
 
 QByteArray StunAllocate::decode(const StunMessage &encoded, QHostAddress *addr, int *port)

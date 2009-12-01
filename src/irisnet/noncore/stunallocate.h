@@ -23,9 +23,9 @@
 
 #include <QObject>
 #include <QList>
+#include <QHostAddress>
 
 class QByteArray;
-class QHostAddress;
 
 namespace XMPP {
 
@@ -47,6 +47,32 @@ public:
 		ErrorMismatch
 	};
 
+	class Channel
+	{
+	public:
+		QHostAddress address;
+		int port;
+
+		Channel(const QHostAddress &_address, int _port) :
+			address(_address),
+			port(_port)
+		{
+		}
+
+		inline bool operator==(const Channel &other)
+		{
+			if(address == other.address && port == other.port)
+				return true;
+			else
+				return false;
+		}
+
+		inline bool operator!=(const Channel &other)
+		{
+			return !operator==(other);
+		}
+	};
+
 	StunAllocate(StunTransactionPool *pool);
 	~StunAllocate();
 
@@ -66,7 +92,10 @@ public:
 	QList<QHostAddress> permissions() const;
 	void setPermissions(const QList<QHostAddress> &perms);
 
-	int packetHeaderOverhead(const QHostAddress &addr) const;
+	QList<Channel> channels() const;
+	void setChannels(const QList<Channel> &channels);
+
+	int packetHeaderOverhead(const QHostAddress &addr, int port) const;
 
 	QByteArray encode(const QByteArray &datagram, const QHostAddress &addr, int port);
 	QByteArray decode(const QByteArray &encoded, QHostAddress *addr = 0, int *port = 0);
@@ -81,6 +110,9 @@ signals:
 
 	// emitted after calling setPermissions()
 	void permissionsChanged();
+
+	// emitted after calling setChannels()
+	void channelsChanged();
 
 private:
 	Q_DISABLE_COPY(StunAllocate)
