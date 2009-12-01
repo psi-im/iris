@@ -87,7 +87,9 @@ enum Error
 	WrongCredentials              = 441,
 	UnsupportedTransportProtocol  = 442,
 	AllocationQuotaReached        = 486,
-	InsufficientCapacity          = 508
+	InsufficientCapacity          = 508,
+
+	RoleConflict                  = 487
 };
 
 QByteArray createMappedAddress(const QHostAddress &addr, quint16 port);
