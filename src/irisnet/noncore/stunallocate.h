@@ -42,7 +42,9 @@ public:
 		ErrorGeneric,
 		ErrorTimeout,
 		ErrorRejected,
-		ErrorProtocol
+		ErrorProtocol,
+		ErrorCapacity,
+		ErrorMismatch
 	};
 
 	StunAllocate(StunTransactionPool *pool);
