@@ -515,9 +515,20 @@ public:
 	QString relayUser, relayPass, relayRealm;
 	QHostAddress peerAddr;
 	int peerPort;
-	QUdpSocket *sock;
+	QUdpSocket *udp;
+	QTcpSocket *tcp;
+	QCA::TLS *tls;
+	QByteArray inStream; // incoming stream
 	StunTransactionPool *pool;
 	StunAllocate *allocate;
+
+	TurnEcho() :
+		udp(0),
+		tcp(0),
+		tls(0),
+		allocate(0)
+	{
+	}
 
 	~TurnEcho()
 	{
@@ -528,17 +539,35 @@ public:
 public slots:
 	void start()
 	{
-		if(mode == 1 || mode == 2)
+		StunTransaction::Mode poolMode;
+
+		if(mode == 0)
 		{
-			printf("FIXME: tcp and tcp-tls modes are not supported yet.\n");
-			emit quit();
-			return;
+			poolMode = StunTransaction::Udp;
+
+			udp = new QUdpSocket(this);
+			connect(udp, SIGNAL(readyRead()), SLOT(udp_readyRead()));
+		}
+		else if(mode == 1 || mode == 2)
+		{
+			poolMode = StunTransaction::Tcp;
+
+			tcp = new QTcpSocket(this);
+			connect(tcp, SIGNAL(connected()), SLOT(tcp_connected()));
+			connect(tcp, SIGNAL(readyRead()), SLOT(tcp_readyRead()));
+			connect(tcp, SIGNAL(error(QAbstractSocket::SocketError)), SLOT(tcp_error(QAbstractSocket::SocketError)));
+
+			if(mode == 2)
+			{
+				tls = new QCA::TLS(this);
+				connect(tls, SIGNAL(handshaken()), SLOT(tls_handshaken()));
+				connect(tls, SIGNAL(readyRead()), SLOT(tls_readyRead()));
+				connect(tls, SIGNAL(readyReadOutgoing()), SLOT(tls_readyReadOutgoing()));
+				connect(tls, SIGNAL(error()), SLOT(tls_error()));
+			}
 		}
 
-		sock = new QUdpSocket(this);
-		connect(sock, SIGNAL(readyRead()), SLOT(sock_readyRead()));
-
-		pool = new StunTransactionPool(StunTransaction::Udp, this);
+		pool = new StunTransactionPool(poolMode, this);
 		connect(pool, SIGNAL(outgoingMessage(const QByteArray &, const QHostAddress &, int)), SLOT(pool_outgoingMessage(const QByteArray &, const QHostAddress &, int)));
 		connect(pool, SIGNAL(needAuthParams()), SLOT(pool_needAuthParams()));
 
@@ -551,13 +580,30 @@ public slots:
 				pool->setRealm(relayRealm);
 		}
 
-		if(!sock->bind())
+		if(udp)
 		{
-			printf("Error binding to local port.\n");
-			emit quit();
-			return;
-		}
+			if(!udp->bind())
+			{
+				printf("Error binding to local port.\n");
+				emit quit();
+				return;
+			}
 
+			doAllocate();
+		}
+		else
+		{
+			printf("TCP connecting...\n");
+			tcp->connectToHost(relayAddr, relayPort);
+		}
+	}
+
+signals:
+	void quit();
+
+private:
+	void doAllocate()
+	{
 		allocate = new StunAllocate(pool);
 		connect(allocate, SIGNAL(started()), SLOT(allocate_started()));
 		connect(allocate, SIGNAL(stopped()), SLOT(allocate_stopped()));
@@ -571,30 +617,34 @@ public slots:
 		allocate->start();
 	}
 
-signals:
-	void quit();
-
-private:
 	void sendTestPacket()
 	{
 		QByteArray buf = "Hello, world!";
 		QByteArray packet = allocate->encode(buf, peerAddr, peerPort);
 
-		printf("Relaying test packet of %d bytes (%d overhead) to %s;%d...\n", packet.size(), allocate->packetHeaderOverhead(peerAddr, peerPort), qPrintable(peerAddr.toString()), peerPort);
+		printf("Relaying test packet of %d bytes (<=%d overhead) to %s;%d...\n", packet.size(), allocate->packetHeaderOverhead(peerAddr, peerPort), qPrintable(peerAddr.toString()), peerPort);
 
-		sock->writeDatagram(packet, relayAddr, relayPort);
+		if(udp)
+			udp->writeDatagram(packet, relayAddr, relayPort);
+		else
+		{
+			if(tls)
+				tls->write(packet);
+			else
+				tcp->write(packet);
+		}
 	}
 
 private slots:
-	void sock_readyRead()
+	void udp_readyRead()
 	{
-		while(sock->hasPendingDatagrams())
+		while(udp->hasPendingDatagrams())
 		{
-			QByteArray buf(sock->pendingDatagramSize(), 0);
+			QByteArray buf(udp->pendingDatagramSize(), 0);
 			QHostAddress from;
 			quint16 fromPort;
 
-			sock->readDatagram(buf.data(), buf.size(), &from, &fromPort);
+			udp->readDatagram(buf.data(), buf.size(), &from, &fromPort);
 			if(from == relayAddr && fromPort == relayPort)
 			{
 				processDatagram(buf);
@@ -606,13 +656,76 @@ private slots:
 		}
 	}
 
+	void tcp_connected()
+	{
+		printf("TCP connected\n");
+
+		if(tls)
+		{
+			printf("TLS handshaking...\n");
+			tls->startClient();
+		}
+		else
+			doAllocate();
+	}
+
+	void tcp_readyRead()
+	{
+		QByteArray buf = tcp->readAll();
+
+		if(tls)
+			tls->writeIncoming(buf);
+		else
+			processStream(buf);
+	}
+
+	void tcp_error(QAbstractSocket::SocketError e)
+	{
+		Q_UNUSED(e);
+		printf("TCP error.\n");
+		emit quit();
+	}
+
+	void tls_handshaken()
+	{
+		printf("TLS handshake completed\n");
+
+		tls->continueAfterStep();
+
+		doAllocate();
+	}
+
+	void tls_readyRead()
+	{
+		processStream(tls->read());
+	}
+
+	void tls_readyReadOutgoing()
+	{
+		tcp->write(tls->readOutgoing());
+	}
+
+	void tls_error()
+	{
+		printf("TLS error.\n");
+		emit quit();
+	}
+
 	void pool_outgoingMessage(const QByteArray &packet, const QHostAddress &toAddress, int toPort)
 	{
 		// in this example, we aren't using IP-associated transactions
 		Q_UNUSED(toAddress);
 		Q_UNUSED(toPort);
 
-		sock->writeDatagram(packet, relayAddr, relayPort);
+		if(udp)
+			udp->writeDatagram(packet, relayAddr, relayPort);
+		else
+		{
+			if(tls)
+				tls->write(packet);
+			else
+				tcp->write(packet);
+		}
 	}
 
 	void pool_needAuthParams()
@@ -724,6 +837,29 @@ private:
 			}
 
 			printf("Warning: server responded with what doesn't seem to be a STUN or data packet, skipping.\n");
+		}
+	}
+
+	void processStream(const QByteArray &in)
+	{
+		inStream += in;
+
+		while(1)
+		{
+			QByteArray packet;
+
+			// try to extract ChannelData or a STUN message from
+			//   the stream
+			packet = StunAllocate::readChannelData((const quint8 *)inStream.data(), inStream.size());
+			if(packet.isNull())
+			{
+				packet = StunMessage::readStun((const quint8 *)inStream.data(), inStream.size());
+				if(packet.isNull())
+					break;
+			}
+
+			inStream = inStream.mid(packet.size());
+			processDatagram(in);
 		}
 	}
 
@@ -1049,9 +1185,9 @@ int main(int argc, char **argv)
 		int mode;
 		if(args[1] == "udp")
 			mode = 0;
-		else if(args[2] == "tcp")
+		else if(args[1] == "tcp")
 			mode = 1;
-		else if(args[3] == "tcp-tls")
+		else if(args[1] == "tcp-tls")
 			mode = 2;
 		else
 		{
@@ -1104,6 +1240,12 @@ int main(int argc, char **argv)
 		if(!QCA::isSupported("hmac(sha1)"))
 		{
 			printf("Error: Need hmac(sha1) support to use TURN.\n");
+			return 1;
+		}
+
+		if(mode == 2 && !QCA::isSupported("tls"))
+		{
+			printf("Error: Need tls support to use tcp-tls mode.\n");
 			return 1;
 		}
 

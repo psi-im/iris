@@ -409,7 +409,7 @@ StunMessage & StunMessage::operator=(const StunMessage &from)
 
 bool StunMessage::isNull() const
 {
-	return (d ? false: true);
+	return (d ? false : true);
 }
 
 StunMessage::Class StunMessage::mclass() const
@@ -685,7 +685,7 @@ StunMessage StunMessage::fromBinary(const QByteArray &a, ConvertResult *result, 
 
 bool StunMessage::isProbablyStun(const QByteArray &a)
 {
-	return (check_and_get_length(a) != -1 ? true: false);
+	return (check_and_get_length(a) != -1 ? true : false);
 }
 
 StunMessage::Class StunMessage::extractClass(const QByteArray &in)
@@ -712,6 +712,22 @@ StunMessage::Class StunMessage::extractClass(const QByteArray &in)
 		mclass = ErrorResponse;
 
 	return mclass;
+}
+
+bool StunMessage::containsStun(const quint8 *data, int size)
+{
+	// check_and_get_length does a full packet check so it works even on a stream
+	return (check_and_get_length(QByteArray::fromRawData((const char *)data, size)) != -1 ? true : false);
+}
+
+QByteArray StunMessage::readStun(const quint8 *data, int size)
+{
+	QByteArray in = QByteArray::fromRawData((const char *)data, size);
+	int mlen = check_and_get_length(in);
+	if(mlen != -1)
+		return QByteArray((const char *)data, mlen + 20);
+	else
+		return QByteArray();
 }
 
 }

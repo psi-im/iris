@@ -103,6 +103,9 @@ public:
 
 	QString errorString() const;
 
+	static bool containsChannelData(const quint8 *data, int size);
+	static QByteArray readChannelData(const quint8 *data, int size);
+
 signals:
 	void started();
 	void stopped();

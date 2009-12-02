@@ -47,6 +47,33 @@ void releaseAndDeleteLater(QObject *owner, QObject *obj)
 	obj->deleteLater();
 }
 
+// return size of channelData packet, or -1
+static int check_channelData(const quint8 *data, int size)
+{
+	// top two bits are never zero for ChannelData
+	if((data[0] & 0xc0) == 0)
+		return -1;
+
+	if(size < 4)
+		return -1;
+
+	quint16 len = StunUtil::read16(data + 2);
+	if(size - 4 < (int)len)
+		return -1;
+
+	// data from a stream must be 4 byte aligned
+	int plen = len;
+	int remainder = plen % 4;
+	if(remainder != 0)
+		plen += (4 - remainder);
+
+	int need = plen + 4;
+	if(size < need)
+		return -1;
+
+	return need;
+}
+
 class StunAllocatePermission : public QObject
 {
 	Q_OBJECT
@@ -1118,19 +1145,23 @@ int StunAllocate::packetHeaderOverhead(const QHostAddress &addr, int port) const
 	if(channelId != -1)
 	{
 		// overhead of ChannelData
-		return 4;
+		if(d->pool->mode() == StunTransaction::Udp)
+			return 4;
+		else // Tcp
+			return 4 + 3; // add 3 for potential padding
 	}
 	else
 	{
+		// we add 3 for potential padding
 		if(d->dfState == StunAllocate::Private::DF_Supported)
 		{
 			// overhead of STUN-based data, with DONT_FRAGMENT
-			return 40;
+			return 40 + 3;
 		}
 		else
 		{
 			// overhead of STUN-based data, without DONT-FRAGMENT
-			return 36;
+			return 36 + 3;
 		}
 	}
 
@@ -1149,7 +1180,17 @@ QByteArray StunAllocate::encode(const QByteArray &datagram, const QHostAddress &
 		quint16 num = channelId;
 		quint16 len = datagram.size();
 
-		QByteArray out(4 + datagram.size(), 0);
+		int plen = len;
+
+		// in tcp mode, round to up to nearest 4 bytes
+		if(d->pool->mode() == StunTransaction::Tcp)
+		{
+			int remainder = plen % 4;
+			if(remainder != 0)
+				plen += (4 - remainder);
+		}
+
+		QByteArray out(4 + plen, 0);
 		StunUtil::write16((quint8 *)out.data(), num);
 		StunUtil::write16((quint8 *)out.data() + 2, len);
 		memcpy(out.data() + 4, datagram.data(), datagram.size());
@@ -1229,6 +1270,20 @@ QByteArray StunAllocate::decode(const StunMessage &encoded, QHostAddress *addr, 
 QString StunAllocate::errorString() const
 {
 	return d->errorString;
+}
+
+bool StunAllocate::containsChannelData(const quint8 *data, int size)
+{
+	return (check_channelData(data, size) != -1 ? true : false);
+}
+
+QByteArray StunAllocate::readChannelData(const quint8 *data, int size)
+{
+	int len = check_channelData(data, size);
+	if(len != -1)
+		return QByteArray((const char *)data, len);
+	else
+		return QByteArray();
 }
 
 }
