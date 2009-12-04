@@ -315,7 +315,7 @@ public:
 	{
 		// this might be a ChannelData message.  check the first
 		//   two bits:
-		if(stunAllocate && alloc_started && buf.size() >= 1 && buf[0] & 0xC0 == 0x40)
+		if(stunAllocate && alloc_started && buf.size() >= 1 && (buf[0] & 0xC0) == 0x40)
 		{
 			QHostAddress fromAddr;
 			int fromPort;
