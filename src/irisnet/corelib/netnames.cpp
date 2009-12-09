@@ -74,6 +74,36 @@ NameRecord & NameRecord::operator=(const NameRecord &from)
 	return *this;
 }
 
+bool NameRecord::operator==(const NameRecord &o) {
+	if (isNull() != o.isNull() || owner() != o.owner() || ttl() != o.ttl() || type() != o.type()) {
+		return false;
+	}
+
+	switch (type()) {
+		case XMPP::NameRecord::A:
+		case XMPP::NameRecord::Aaaa:
+			return address() == o.address();
+		case XMPP::NameRecord::Mx:
+			return name() == o.name() && priority() == o.priority();
+		case XMPP::NameRecord::Srv:
+			return name() == o.name() && port() == o.port() && priority() == o.priority() && weight() == o.weight();
+		case XMPP::NameRecord::Cname:
+		case XMPP::NameRecord::Ptr:
+		case XMPP::NameRecord::Ns:
+			return name() == o.name();
+		case XMPP::NameRecord::Txt:
+			return texts() == o.texts();
+		case XMPP::NameRecord::Hinfo:
+			return cpu() == o.cpu() && os() == o.os();
+		case XMPP::NameRecord::Null:
+			return rawData() == o.rawData();
+		case XMPP::NameRecord::Any:
+			return false;
+	}
+
+	return false;
+}
+
 bool NameRecord::isNull() const
 {
 	return (d ? false : true);
@@ -232,6 +262,93 @@ void NameRecord::setNull(const QByteArray &rawData)
 	ENSURE_D
 	d->type = NameRecord::Null;
 	d->rawData = rawData;
+}
+
+QDebug operator<<(QDebug dbg, XMPP::NameRecord::Type type) {
+	dbg.nospace() << "XMPP::NameRecord::";
+
+	switch (type) {
+	case XMPP::NameRecord::A:
+		dbg.nospace() << "A";
+		break;
+	case XMPP::NameRecord::Aaaa:
+		dbg.nospace() << "Aaaa";
+		break;
+	case XMPP::NameRecord::Mx:
+		dbg.nospace() << "Mx";
+		break;
+	case XMPP::NameRecord::Srv:
+		dbg.nospace() << "Srv";
+		break;
+	case XMPP::NameRecord::Cname:
+		dbg.nospace() << "Cname";
+		break;
+	case XMPP::NameRecord::Ptr:
+		dbg.nospace() << "Ptr";
+		break;
+	case XMPP::NameRecord::Txt:
+		dbg.nospace() << "Txt";
+		break;
+	case XMPP::NameRecord::Hinfo:
+		dbg.nospace() << "Hinfo";
+		break;
+	case XMPP::NameRecord::Ns:
+		dbg.nospace() << "Ns";
+		break;
+	case XMPP::NameRecord::Null:
+		dbg.nospace() << "Null";
+		break;
+	case XMPP::NameRecord::Any:
+		dbg.nospace() << "Any";
+		break;
+	}
+
+	return dbg;
+}
+
+QDebug operator<<(QDebug dbg, const XMPP::NameRecord& record) {
+	dbg.nospace() << "XMPP::NameRecord("
+		<< "owner=" << record.owner()
+		<< ", ttl=" << record.ttl()
+		<< ", type=" << record.type();
+
+	switch (record.type()) {
+		case XMPP::NameRecord::A:
+		case XMPP::NameRecord::Aaaa:
+			dbg.nospace() << ", address=" << record.address();
+			break;
+		case XMPP::NameRecord::Mx:
+			dbg.nospace()
+				<< ", name=" << record.name()
+				<< ", priority=" << record.priority();
+			break;
+		case XMPP::NameRecord::Srv:
+			dbg.nospace()
+				<< ", name=" << record.name()
+				<< ", port=" << record.port()
+				<< ", priority=" << record.priority()
+				<< ", weight=" << record.weight();
+			break;
+		case XMPP::NameRecord::Cname:
+		case XMPP::NameRecord::Ptr:
+		case XMPP::NameRecord::Ns:
+			dbg.nospace() << ", name=" << record.name();
+			break;
+		case XMPP::NameRecord::Txt:
+			dbg.nospace() << ", texts={" << record.texts() << "}";
+			break;
+		case XMPP::NameRecord::Hinfo:
+			dbg.nospace() << ", cpu=" << record.cpu() << ", os=" << record.os();
+			break;
+		case XMPP::NameRecord::Null:
+		case XMPP::NameRecord::Any:
+			dbg.nospace() << ", <unknown>";
+			break;
+	}
+
+	dbg.nospace() << ")";
+
+	return dbg;
 }
 
 //----------------------------------------------------------------------------
@@ -845,6 +962,31 @@ void NameResolver::stop()
 		d = 0;
 	}
 }
+
+QDebug operator<<(QDebug dbg, XMPP::NameResolver::Error e) {
+	dbg.nospace() << "XMPP::NameResolver::";
+
+	switch (e) {
+	case XMPP::NameResolver::ErrorGeneric:
+		dbg.nospace() << "ErrorGeneric";
+		break;
+	case XMPP::NameResolver::ErrorNoName:
+		dbg.nospace() << "ErrorNoName";
+		break;
+	case XMPP::NameResolver::ErrorTimeout:
+		dbg.nospace() << "ErrorTimeout";
+		break;
+	case XMPP::NameResolver::ErrorNoLocal:
+		dbg.nospace() << "ErrorNoLocal";
+		break;
+	case XMPP::NameResolver::ErrorNoLongLived:
+		dbg.nospace() << "ErrorNoLongLive";
+		break;
+	}
+
+	return dbg;
+}
+
 
 //----------------------------------------------------------------------------
 // ServiceBrowser

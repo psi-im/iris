@@ -133,6 +133,11 @@ public:
 	NameRecord & operator=(const NameRecord &from);
 
 	/**
+	   \brief Compares \a other with this object
+	*/
+	bool operator==(const NameRecord &other);
+
+	/**
 	   \brief Returns true if this record object is null, otherwise returns false
 
 	   Be sure not to confuse a null object with the NULL type (NameRecord::Null).  Don't ask why DNS has a type called NULL that contains valid data.
@@ -293,6 +298,9 @@ private:
 	QSharedDataPointer<Private> d;
 };
 
+QDebug operator<<(QDebug, XMPP::NameRecord::Type);
+QDebug operator<<(QDebug, const XMPP::NameRecord&);
+
 class IRISNET_EXPORT ServiceInstance
 {
 public:
@@ -451,6 +459,8 @@ private:
 
 	friend class NameManager;
 };
+
+QDebug operator<<(QDebug, XMPP::NameResolver::Error);
 
 class IRISNET_EXPORT ServiceBrowser : public QObject
 {
