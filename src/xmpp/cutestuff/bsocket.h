@@ -24,6 +24,7 @@
 #include <QAbstractSocket>
 
 #include "bytestream.h"
+#include "netnames.h"
 
 class QString;
 class QObject;
@@ -31,20 +32,51 @@ class QByteArray;
 
 // CS_NAMESPACE_BEGIN
 
+
+/*
+	Socket with automatic hostname lookups, using SRV, AAAA and A DNS queries.
+
+	Flow:
+	1) SRV query for server
+		: answer = host[]
+		: failure -> (9)
+		2) Primary query for host[i] (usually AAAA)
+			: answer = address[]
+			: failure -> (5)
+			3) Connect to address[j]
+				: connect -> FINISHED
+				: failure -> j++, (3)
+			4) address[] empty -> (5)
+		5) Fallback query for host[i] (usually A)
+			: answer = address[]
+			: failure -> i++, (2)
+			6) Connect to address[j]
+			: connect -> FINISHED
+			: failure -> j++, (6)
+			7) address[] empty -> i++, (2)
+		8) host[] empty -> (9)
+	9) Try servername directly
+*/
 class BSocket : public ByteStream
 {
 	Q_OBJECT
 public:
 	enum Error { ErrConnectionRefused = ErrCustom, ErrHostNotFound };
 	enum State { Idle, HostLookup, Connecting, Connected, Closing };
+	/* Order of lookup / IP protocols to try */
+	enum Protocol { IPv6_IPv4, IPv4_IPv6, IPv6, IPv4 };
 	BSocket(QObject *parent=0);
 	~BSocket();
 
-	void connectToHost(const QString &host, quint16 port);
-	void connectToServer(const QString &srv, const QString &type);
+	void connectToHost(const QHostAddress &address, quint16 port);
+	void connectToHost(const QString &host, quint16 port, QAbstractSocket::NetworkLayerProtocol protocol = QAbstractSocket::UnknownNetworkLayerProtocol);
+	void connectToHost(const QString &service, const QString &transport, const QString &domain);
 	int socket() const;
 	void setSocket(int);
 	int state() const;
+	Protocol protocol() const; //!< IP protocol to use, defaults to IPv6_IPv4
+	void setProtocol(Protocol); //!< Set IP protocol to use, \sa protocol
+	void setFailsafeHost(const QString &host, quint16 port);
 
 	// from ByteStream
 	bool isOpen() const;
@@ -73,9 +105,13 @@ private slots:
 	void qs_readyRead();
 	void qs_bytesWritten(qint64);
 	void qs_error(QAbstractSocket::SocketError);
-	void srv_done();
-	void ndns_done();
-	void do_connect();
+
+	void handle_dns_srv_ready(const QList<XMPP::NameRecord> &r);
+	void handle_dns_srv_error(XMPP::NameResolver::Error e);
+	void handle_dns_host_ready(const QList<XMPP::NameRecord> &r);
+	void handle_dns_host_error(XMPP::NameResolver::Error e);
+	void handle_dns_host_fallback_error(XMPP::NameResolver::Error e);
+	void handle_connect_error(QAbstractSocket::SocketError);
 
 private:
 	class Private;
@@ -83,6 +119,10 @@ private:
 
 	void reset(bool clear=false);
 	void ensureSocket();
+	void cleanup_resolver(XMPP::NameResolver *resolver);
+	bool check_protocol_fallback();
+	void dns_srv_try_next();
+	bool connect_host_try_next();
 };
 
 // CS_NAMESPACE_END
