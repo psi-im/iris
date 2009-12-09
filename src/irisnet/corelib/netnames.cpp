@@ -24,6 +24,14 @@
 #include "irisnetplugin.h"
 #include "irisnetglobal_p.h"
 
+
+//#define NETNAMES_DEBUG
+
+#ifdef NETNAMES_DEBUG
+# define NNDEBUG (qDebug() << this << "#" << __FUNCTION__ << ":")
+#endif
+
+
 namespace XMPP {
 
 //----------------------------------------------------------------------------
@@ -570,6 +578,102 @@ private slots:
 			tryNext(); // FIXME: probably shouldn't share this
 	}
 };
+
+
+WeightedNameRecordList::WeightedNameRecordList()
+	: currentPriorityGroup(priorityGroups.end())
+{}
+
+WeightedNameRecordList::WeightedNameRecordList(const QList<XMPP::NameRecord> &list)
+{
+	foreach (const XMPP::NameRecord &record, list) {
+		WeightedNameRecordPriorityGroup group(priorityGroups.value(record.priority()));
+
+		group.insert(record.weight(), record);
+
+		if (!priorityGroups.contains(record.priority())) {
+			priorityGroups.insert(record.priority(), group);
+		}
+	}
+
+	currentPriorityGroup = priorityGroups.begin();
+}
+
+WeightedNameRecordList::~WeightedNameRecordList() {
+}
+
+bool WeightedNameRecordList::empty() const {
+	return currentPriorityGroup == priorityGroups.end();
+}
+
+XMPP::NameRecord WeightedNameRecordList::takeNext() {
+	/* Find the next useful priority group */
+	while (currentPriorityGroup != priorityGroups.end() && currentPriorityGroup->empty()) {
+		currentPriorityGroup++;
+	}
+	/* There are no priority groups left, return failure */
+	if (currentPriorityGroup == priorityGroups.end()) {
+#ifdef NETNAMES_DEBUG
+		NNDEBUG << "No more SRV records left";
+#endif
+		return XMPP::NameRecord();
+	}
+
+	/* Find the new total weight of this priority group */
+	int totalWeight = 0;
+	foreach (const XMPP::NameRecord &record, *currentPriorityGroup) {
+		totalWeight += record.weight();
+	}
+
+#ifdef NETNAMES_DEBUG
+	NNDEBUG << "Total weight:" << totalWeight;
+#endif
+
+	/* Pick a random entry */
+	int randomWeight = qrand()/static_cast<float>(RAND_MAX)*totalWeight;
+
+#ifdef NETNAMES_DEBUG
+	NNDEBUG << "Picked weight:" << totalWeight;
+#endif
+
+	/* Iterate through the priority group until we found the randomly selected entry */
+	WeightedNameRecordPriorityGroup::iterator it(currentPriorityGroup->begin());
+	for (int currentWeight = 0; currentWeight < randomWeight; currentWeight += it->weight()) {
+		it++;
+	}
+	Q_ASSERT(it != currentPriorityGroup->end());
+
+	/* We are going to delete the entry in the list, so save it */
+	XMPP::NameRecord result(*it);
+
+#ifdef NETNAMES_DEBUG
+	NNDEBUG << "Picked record:" << result;
+#endif
+
+	/* Delete the entry from list, to prevent it from being tried multiple times */
+	currentPriorityGroup->remove(it->weight(), *it);
+
+	return result;
+}
+
+QDebug operator<<(QDebug dbg, const XMPP::WeightedNameRecordList &list) {
+	dbg.nospace() << "XMPP::WeightedNameRecordList(\n";
+
+	/* operator(QDebug, QMap const&) has a bug which makes it crash when trying to print the dereferenced end() iterator */
+	if (list.currentPriorityGroup != list.priorityGroups.end()) {
+		dbg.nospace() << "current=" << *list.currentPriorityGroup << endl;
+	}
+
+	dbg.nospace() << "{";
+
+	foreach(int priority, list.priorityGroups.keys()) {
+		dbg.nospace() << "\t" << priority << "->" << list.priorityGroups.value(priority) << endl;
+	}
+
+	dbg.nospace() << "})";
+	return dbg;
+}
+
 
 class ServiceLocalPublisher::Private
 {

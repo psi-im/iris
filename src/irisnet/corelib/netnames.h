@@ -467,6 +467,29 @@ private:
 
 QDebug operator<<(QDebug, XMPP::NameResolver::Error);
 
+
+class IRISNET_EXPORT WeightedNameRecordList
+{
+	friend QDebug operator<<(QDebug, const XMPP::WeightedNameRecordList&);
+
+public:
+	WeightedNameRecordList();
+	WeightedNameRecordList(const QList<XMPP::NameRecord> &list);
+	~WeightedNameRecordList();
+	bool empty() const;
+	XMPP::NameRecord takeNext();
+
+private:
+	typedef QMultiMap<int /* weight */, XMPP::NameRecord> WeightedNameRecordPriorityGroup;
+	typedef QMap<int /* priority */, WeightedNameRecordPriorityGroup> WNRL;
+
+	WNRL priorityGroups;
+	WNRL::iterator currentPriorityGroup;
+};
+
+QDebug operator<<(QDebug, const XMPP::WeightedNameRecordList&);
+
+
 class IRISNET_EXPORT ServiceBrowser : public QObject
 {
 	Q_OBJECT
