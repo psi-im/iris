@@ -39,17 +39,24 @@
 #include "safedelete.h"
 #include <libidn/idna.h>
 
-#include "ndns.h"
-
 #include "bsocket.h"
 #include "httpconnect.h"
 #include "httppoll.h"
 #include "socks.h"
-#include "srvresolver.h"
 
 //#define XMPP_DEBUG
 
+#ifdef XMPP_DEBUG
+# define XDEBUG (qDebug() << this << "#" << __FUNCTION__ << ":")
+#endif
+
 using namespace XMPP;
+
+const int XMPP_DEFAULT_PORT = 5222;
+const int XMPP_LEGACY_PORT = 5223;
+const QString XMPP_CLIENT_SRV = "xmpp-client";
+const QString XMPP_CLIENT_TRANSPORT = "tcp";
+
 
 //----------------------------------------------------------------------------
 // Connector
@@ -195,36 +202,25 @@ void AdvancedConnector::Proxy::setPollInterval(int secs)
 //----------------------------------------------------------------------------
 // AdvancedConnector
 //----------------------------------------------------------------------------
-enum { Idle, Connecting, Connected };
+typedef enum { Idle, Connecting, Connected } Mode;
+typedef enum { Force, Probe, Never } LegacySSL;
+
 class AdvancedConnector::Private
 {
 public:
-	int mode;
-	ByteStream *bs;
-	NDns dns;
-	SrvResolver srv;
+	ByteStream *bs; //!< Socket to use
 
-	QString server;
-	QStringList opt_hosts;
-	int opt_port;
-	bool opt_probe, opt_ssl;
-	Proxy proxy;
+	/* configuration values / "options" */
+	QString opt_host; //!< explicit host from config
+	quint16 opt_port; //!< explicit port from config
+	LegacySSL opt_ssl; //!< Whether to use legacy SSL support
+	Proxy proxy; //!< Proxy configuration
 
-	QStringList hostsToTry;
-	QString host;
-	int port;
-	QList<Q3Dns::Server> servers;
-	int errorCode;
-	QString connectHost;
-
-	bool multi, using_srv;
-	bool will_be_ssl;
-	int probe_mode;
-
-	bool aaaa;
-	SafeDelete sd;
-
-	QTimer connectTimeout;
+	/* State tracking values */
+	Mode mode; //!< Idle, Connecting, Connected
+	QString host; //!< Host we currently try to connect to, set from connectToServer()
+	int port; //!< Port we currently try to connect to, set from connectToServer() and bs_error()
+	int errorCode; //!< Current error, if any
 };
 
 AdvancedConnector::AdvancedConnector(QObject *parent)
@@ -232,12 +228,7 @@ AdvancedConnector::AdvancedConnector(QObject *parent)
 {
 	d = new Private;
 	d->bs = 0;
-	connect(&d->dns, SIGNAL(resultsReady()), SLOT(dns_done()));
-	connect(&d->srv, SIGNAL(resultsReady()), SLOT(srv_done()));
-	connect(&d->connectTimeout, SIGNAL(timeout()), SLOT(t_timeout()));
-	d->connectTimeout.setSingleShot(true);
-	d->opt_probe = false;
-	d->opt_ssl = false;
+	d->opt_ssl = Never;
 	cleanup();
 	d->errorCode = 0;
 }
@@ -252,20 +243,9 @@ void AdvancedConnector::cleanup()
 {
 	d->mode = Idle;
 
-	// stop any dns
-	if(d->dns.isBusy())
-		d->dns.stop();
-	if(d->srv.isBusy())
-		d->srv.stop();
-
 	// destroy the bytestream, if there is one
 	delete d->bs;
 	d->bs = 0;
-
-	d->multi = false;
-	d->using_srv = false;
-	d->will_be_ssl = false;
-	d->probe_mode = -1;
 
 	setUseSSL(false);
 	setPeerAddressNone();
@@ -278,76 +258,77 @@ void AdvancedConnector::setProxy(const Proxy &proxy)
 	d->proxy = proxy;
 }
 
-void AdvancedConnector::setOptHostPort(const QString &host, quint16 _port)
+void AdvancedConnector::setOptHostPort(const QString &_host, quint16 _port)
 {
+#ifdef XMPP_DEBUG
+	XDEBUG << "h:" << _host << "p:" << _port;
+#endif
+
 	if(d->mode != Idle)
 		return;
+
 	// empty host means disable explicit host support
-	if(host.isEmpty()) {
-		d->opt_hosts.clear();
+	if(_host.isEmpty()) {
+		d->opt_host.clear();
 		return;
 	}
-	d->opt_hosts = QStringList() << host;
-	d->opt_port = _port;
-}
-
-void AdvancedConnector::setOptHostsPort(const QStringList &_hosts, quint16 _port)
-{
-	if(d->mode != Idle)
-		return;
-	d->opt_hosts = _hosts;
+	d->opt_host = _host;
 	d->opt_port = _port;
 }
 
 void AdvancedConnector::setOptProbe(bool b)
 {
+#ifdef XMPP_DEBUG
+	XDEBUG << "b:" << b;
+#endif
+
 	if(d->mode != Idle)
 		return;
-	d->opt_probe = b;
+	d->opt_ssl = (b ? Probe : Never);
 }
 
 void AdvancedConnector::setOptSSL(bool b)
 {
+#ifdef XMPP_DEBUG
+	XDEBUG << "b:" << b;
+#endif
+
 	if(d->mode != Idle)
 		return;
-	d->opt_ssl = b;
+	d->opt_ssl = (b ? Force : Never);
 }
 
 void AdvancedConnector::connectToServer(const QString &server)
 {
+#ifdef XMPP_DEBUG
+	XDEBUG << "s:" << server;
+#endif
+
 	if(d->mode != Idle)
 		return;
 	if(server.isEmpty())
 		return;
 
-	d->hostsToTry.clear();
 	d->errorCode = 0;
 	d->mode = Connecting;
-	d->aaaa = true;
-	d->connectHost.clear();
 
 	// Encode the servername
-	d->server = QUrl::toAce(server);
-	//char* server_encoded;
-	//if (!idna_to_ascii_8z(server.utf8().data(), &server_encoded, 0)) {
-	//	d->server = QString(server_encoded);
-	//	free(server_encoded);
-	//}
-	//else {
-	//	d->server = server;
-	//}
+	d->host = QUrl::toAce(server);
+	if (d->host == QByteArray()) {
+		/* server contains invalid characters for DNS name, but maybe valid characters for connecting, like "::1" */
+		d->host = server;
+	}
+	d->port = XMPP_DEFAULT_PORT;
 
 	if(d->proxy.type() == Proxy::HttpPoll) {
-		// need SHA1 here
-		//if(!QCA::isSupported(QCA::CAP_SHA1))
-		//	QCA::insertProvider(createProviderHash());
-
 		HttpPoll *s = new HttpPoll;
 		d->bs = s;
+
 		connect(s, SIGNAL(connected()), SLOT(bs_connected()));
 		connect(s, SIGNAL(syncStarted()), SLOT(http_syncStarted()));
 		connect(s, SIGNAL(syncFinished()), SLOT(http_syncFinished()));
 		connect(s, SIGNAL(error(int)), SLOT(bs_error(int)));
+
 		if(!d->proxy.user().isEmpty())
 			s->setAuth(d->proxy.user(), d->proxy.pass());
 		s->setPollInterval(d->proxy.pollInterval());
@@ -358,34 +339,53 @@ void AdvancedConnector::connectToServer(const QString &server)
 			s->connectToHost(d->proxy.host(), d->proxy.port(), d->proxy.url());
 	}
 	else if (d->proxy.type() == Proxy::HttpConnect) {
-		if(!d->opt_hosts.isEmpty()) {
-			d->hostsToTry = d->opt_hosts;
-			d->host = d->hostsToTry.takeFirst();
+		HttpConnect *s = new HttpConnect;
+		d->bs = s;
+
+		connect(s, SIGNAL(connected()), SLOT(bs_connected()));
+		connect(s, SIGNAL(error(int)), SLOT(bs_error(int)));
+
+		if(!d->opt_host.isEmpty()) {
+			d->host = d->opt_host;
 			d->port = d->opt_port;
 		}
-		else {
-			d->host = server;
-			d->port = 5222;
-		}
-		do_connect();
+
+		if(!d->proxy.user().isEmpty())
+			s->setAuth(d->proxy.user(), d->proxy.pass());
+
+		s->connectToHost(d->proxy.host(), d->proxy.port(), d->host, d->port);
+	}
+	else if (d->proxy.type() == Proxy::Socks) {
+		SocksClient *s = new SocksClient;
+		d->bs = s;
+
+		connect(s, SIGNAL(connected()), SLOT(bs_connected()));
+		connect(s, SIGNAL(error(int)), SLOT(bs_error(int)));
+
+		if(!d->proxy.user().isEmpty())
+			s->setAuth(d->proxy.user(), d->proxy.pass());
+
+		s->connectToHost(d->proxy.host(), d->proxy.port(), d->host, d->port);
 	}
 	else {
-		if(!d->opt_hosts.isEmpty()) {
-			d->hostsToTry = d->opt_hosts;
-			d->host = d->hostsToTry.takeFirst();
+		BSocket *s = new BSocket;
+		d->bs = s;
+#ifdef XMPP_DEBUG
+		XDEBUG << "Adding socket:" << s;
+#endif
+
+		connect(s, SIGNAL(connected()), SLOT(bs_connected()));
+		connect(s, SIGNAL(error(int)), SLOT(bs_error(int)));
+
+		if(!d->opt_host.isEmpty()) {
+			d->host = d->opt_host;
 			d->port = d->opt_port;
-			do_resolve();
+			s->connectToHost(d->host, d->port);
+			return;
 		}
-		else {
-			d->multi = true;
 
-			QPointer<QObject> self = this;
-			srvLookup(d->server);
-			if(!self)
-				return;
-
-			d->srv.resolveSrvOnly(d->server, "xmpp-client", "tcp");
-		}
+		s->setFailsafeHost(d->host, d->port);
+		s->connectToHost(XMPP_CLIENT_SRV, XMPP_CLIENT_TRANSPORT, d->host);
 	}
 }
 
@@ -415,184 +415,11 @@ int AdvancedConnector::errorCode() const
 	return d->errorCode;
 }
 
-void AdvancedConnector::do_resolve()
-{
-	d->dns.resolve(d->host);
-}
-
-void AdvancedConnector::dns_done()
-{
-	bool failed = false;
-	QHostAddress addr;
-
-	if(d->dns.result().isNull ())
-		failed = true;
-	else
-		addr = QHostAddress(d->dns.result());
-
-	if(failed) {
-#ifdef XMPP_DEBUG
-		printf("dns1\n");
-#endif
-		// using proxy?  then try the unresolved host through the proxy
-		if(d->proxy.type() != Proxy::None) {
-#ifdef XMPP_DEBUG
-			printf("dns1.1\n");
-#endif
-			do_connect();
-		}
-		else if(d->using_srv) {
-#ifdef XMPP_DEBUG
-			printf("dns1.2\n");
-#endif
-			if(d->servers.isEmpty()) {
-#ifdef XMPP_DEBUG
-				printf("dns1.2.1\n");
-#endif
-				cleanup();
-				d->errorCode = ErrConnectionRefused;
-				error();
-			}
-			else {
-#ifdef XMPP_DEBUG
-				printf("dns1.2.2\n");
-#endif
-				tryNextSrv();
-				return;
-			}
-		}
-		else {
-#ifdef XMPP_DEBUG
-			printf("dns1.3\n");
-#endif
-			if(!d->hostsToTry.isEmpty())
-			{
-				d->aaaa = true;
-				d->host = d->hostsToTry.takeFirst();
-				do_resolve();
-				return;
-			}
-
-			cleanup();
-			d->errorCode = ErrHostNotFound;
-			error();
-		}
-	}
-	else {
-#ifdef XMPP_DEBUG
-		printf("dns2\n");
-#endif
-		d->connectHost = d->host;
-		d->host = addr.toString();
-		do_connect();
-	}
-}
-
-void AdvancedConnector::do_connect()
-{
-	// 5 seconds to connect
-	d->connectTimeout.start(5000);
-
-#ifdef XMPP_DEBUG
-	printf("trying %s:%d\n", d->host.latin1(), d->port);
-#endif
-	int t = d->proxy.type();
-	if(t == Proxy::None) {
-#ifdef XMPP_DEBUG
-		printf("do_connect1\n");
-#endif
-		BSocket *s = new BSocket;
-		d->bs = s;
-		connect(s, SIGNAL(connected()), SLOT(bs_connected()));
-		connect(s, SIGNAL(error(int)), SLOT(bs_error(int)));
-		s->connectToHost(d->host, d->port);
-	}
-	else if(t == Proxy::HttpConnect) {
-#ifdef XMPP_DEBUG
-		printf("do_connect2\n");
-#endif
-		HttpConnect *s = new HttpConnect;
-		d->bs = s;
-		connect(s, SIGNAL(connected()), SLOT(bs_connected()));
-		connect(s, SIGNAL(error(int)), SLOT(bs_error(int)));
-		if(!d->proxy.user().isEmpty())
-			s->setAuth(d->proxy.user(), d->proxy.pass());
-		s->connectToHost(d->proxy.host(), d->proxy.port(), d->host, d->port);
-	}
-	else if(t == Proxy::Socks) {
-#ifdef XMPP_DEBUG
-		printf("do_connect3\n");
-#endif
-		SocksClient *s = new SocksClient;
-		d->bs = s;
-		connect(s, SIGNAL(connected()), SLOT(bs_connected()));
-		connect(s, SIGNAL(error(int)), SLOT(bs_error(int)));
-		if(!d->proxy.user().isEmpty())
-			s->setAuth(d->proxy.user(), d->proxy.pass());
-		s->connectToHost(d->proxy.host(), d->proxy.port(), d->host, d->port);
-	}
-}
-
-void AdvancedConnector::tryNextSrv()
-{
-#ifdef XMPP_DEBUG
-	printf("trying next srv\n");
-#endif
-	Q_ASSERT(!d->servers.isEmpty());
-	d->host = d->servers.first().name;
-	d->port = d->servers.first().port;
-	d->servers.takeFirst();
-	do_resolve();
-}
-
-void AdvancedConnector::srv_done()
-{
-	QPointer<QObject> self = this;
-#ifdef XMPP_DEBUG
-	printf("srv_done1\n");
-#endif
-	d->servers = d->srv.servers();
-	if(d->servers.isEmpty()) {
-		srvResult(false);
-		if(!self)
-			return;
-
-#ifdef XMPP_DEBUG
-		printf("srv_done1.1\n");
-#endif
-		// fall back to A record
-		d->using_srv = false;
-		d->host = d->server;
-		if(d->opt_probe) {
-#ifdef XMPP_DEBUG
-			printf("srv_done1.1.1\n");
-#endif
-			d->probe_mode = 0;
-			d->port = 5223;
-			d->will_be_ssl = true;
-		}
-		else {
-#ifdef XMPP_DEBUG
-			printf("srv_done1.1.2\n");
-#endif
-			d->probe_mode = 1;
-			d->port = 5222;
-		}
-		do_resolve();
-		return;
-	}
-
-	srvResult(true);
-	if(!self)
-		return;
-
-	d->using_srv = true;
-	tryNextSrv();
-}
-
 void AdvancedConnector::bs_connected()
 {
-	d->connectTimeout.stop();
+#ifdef XMPP_DEBUG
+	XDEBUG;
+#endif
 
 	if(d->proxy.type() == Proxy::None) {
 		QHostAddress h = (static_cast<BSocket*>(d->bs))->peerAddress();
@@ -600,21 +427,23 @@ void AdvancedConnector::bs_connected()
 		setPeerAddress(h, p);
 	}
 
-	// only allow ssl override if proxy==poll or host:port
-	if((d->proxy.type() == Proxy::HttpPoll || !d->opt_hosts.isEmpty()) && d->opt_ssl)
-		setUseSSL(true);
-	else if(d->will_be_ssl)
+	// only allow ssl override if proxy==poll or host:port or when probing legacy ssl port
+	if(d->proxy.type() == Proxy::HttpPoll || d->opt_ssl != Never)
 		setUseSSL(true);
 
 	d->mode = Connected;
-	connected();
+	emit connected();
 }
 
 void AdvancedConnector::bs_error(int x)
 {
+#ifdef XMPP_DEBUG
+	XDEBUG << "e:" << x;
+#endif
+
 	if(d->mode == Connected) {
 		d->errorCode = ErrStream;
-		error();
+		emit error();
 		return;
 	}
 
@@ -679,45 +508,34 @@ void AdvancedConnector::bs_error(int x)
 		}
 	}
 
-	// try next host, if any
-	if(!d->hostsToTry.isEmpty())
-	{
-		d->aaaa = true;
-		d->host = d->hostsToTry.takeFirst();
-		do_resolve();
-		return;
-	}
-
 	// no-multi or proxy error means we quit
-	if(!d->multi || proxyError) {
+	if(proxyError) {
 		cleanup();
 		d->errorCode = err;
-		error();
+		emit error();
 		return;
 	}
 
-	if(d->using_srv && !d->servers.isEmpty()) {
-#ifdef XMPP_DEBUG
-		printf("bse1.1\n");
-#endif
-		tryNextSrv();
-	}
-	else if(!d->using_srv && d->opt_probe && d->probe_mode == 0) {
+	/*
+		if we shall probe the ssl legacy port, and we just did that (port=legacy),
+		then try to connect to the normal port instead
+	*/
+	if(d->opt_ssl == Probe && d->port == XMPP_LEGACY_PORT) {
 #ifdef XMPP_DEBUG
 		printf("bse1.2\n");
 #endif
-		d->probe_mode = 1;
-		d->port = 5222;
-		d->will_be_ssl = false;
-		do_connect();
+		d->port = XMPP_DEFAULT_PORT;
+		static_cast<BSocket*>(d->bs)->setFailsafeHost(d->host, d->port);
+		static_cast<BSocket*>(d->bs)->connectToHost(XMPP_CLIENT_SRV, XMPP_CLIENT_TRANSPORT, d->host);
 	}
+	/* otherwise we have no fallbacks and must have failed to connect */
 	else {
 #ifdef XMPP_DEBUG
 		printf("bse1.3\n");
 #endif
 		cleanup();
 		d->errorCode = ErrConnectionRefused;
-		error();
+		emit error();
 	}
 }
 
@@ -733,19 +551,10 @@ void AdvancedConnector::http_syncFinished()
 
 void AdvancedConnector::t_timeout()
 {
-	// skip to next host, if there is one
-	if(!d->hostsToTry.isEmpty())
-	{
-		delete d->bs;
-		d->bs = 0;
-
-		d->aaaa = true;
-		d->host = d->hostsToTry.takeFirst();
-		do_resolve();
-	}
+	//bs_error(-1);
 }
 
 QString AdvancedConnector::host() const
 {
-	return d->connectHost;
+	return d->host;
 }
