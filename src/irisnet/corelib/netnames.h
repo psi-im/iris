@@ -323,6 +323,8 @@ private:
 
    NameResolver performs an asynchronous DNS lookup for a given domain name and record type.  Call start() to begin.  The resultsReady() signal is emitted on success, otherwise error() is emitted.  To cancel a lookup, call stop().
 
+   Each NameResolver object can only perform one DNS lookup at a time.  If start() is called while a lookup is already in progress, then the existing lookup is stopped before starting the new lookup.
+
    For example, here is how to obtain the IPv4 addresses of a domain name:
 \code
 NameResolver *resolver;
@@ -416,6 +418,8 @@ public:
 	   \brief Starts a lookup
 
 	   A lookup for \a name of \a type is started.  For normal queries, \a mode should be NameResolver::Single (this is the default).  For long-lived queries, use NameResolver::LongLived.
+
+	   If a lookup is already in progress, it is stopped before starting the new lookup.
 
 	   \sa stop
 	*/
