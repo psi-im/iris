@@ -222,7 +222,8 @@ static QStringList iceblock_read()
 	while(1)
 	{
 		QByteArray line(1024, 0);
-		fgets(line.data(), line.size(), fp);
+		if(fgets(line.data(), line.size(), fp) == NULL)
+			return QStringList();
 		if(feof(fp))
 			break;
 
@@ -241,7 +242,8 @@ static QStringList iceblock_read()
 static void wait_for_enter()
 {
 	QByteArray buf(1024, 0);
-	fgets(buf.data(), buf.size(), stdin);
+	if(fgets(buf.data(), buf.size(), stdin) == NULL)
+		return;
 }
 
 class App : public QObject

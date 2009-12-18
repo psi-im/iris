@@ -1034,16 +1034,14 @@ void S5BManager::queryProxy(Entry *e)
 void S5BManager::query_finished()
 {
 	JT_S5B *query = (JT_S5B *)sender();
-	bool found = false;
-	Entry* e;
+	Entry* e = 0;
 	foreach(Entry* i, d->activeList) {
 		if(i->query == query) {
 			e = i;
-			found = true;
 			break;
 		}
 	}
-	if(!found)
+	if(!e)
 		return;
 	e->query = 0;
 
