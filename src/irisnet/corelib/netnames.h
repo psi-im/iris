@@ -293,6 +293,9 @@ private:
 	QSharedDataPointer<Private> d;
 };
 
+IRISNET_EXPORT QDebug operator<<(QDebug, XMPP::NameRecord::Type);
+IRISNET_EXPORT QDebug operator<<(QDebug, const XMPP::NameRecord &);
+
 class IRISNET_EXPORT ServiceInstance
 {
 public:
@@ -451,6 +454,8 @@ private:
 
 	friend class NameManager;
 };
+
+IRISNET_EXPORT QDebug operator<<(QDebug, XMPP::NameResolver::Error);
 
 class IRISNET_EXPORT ServiceBrowser : public QObject
 {

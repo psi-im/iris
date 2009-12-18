@@ -234,6 +234,99 @@ void NameRecord::setNull(const QByteArray &rawData)
 	d->rawData = rawData;
 }
 
+QDebug operator<<(QDebug dbg, XMPP::NameRecord::Type type)
+{
+	dbg.nospace() << "XMPP::NameRecord::";
+
+	switch(type)
+	{
+		case XMPP::NameRecord::A:
+			dbg.nospace() << "A";
+			break;
+		case XMPP::NameRecord::Aaaa:
+			dbg.nospace() << "Aaaa";
+			break;
+		case XMPP::NameRecord::Mx:
+			dbg.nospace() << "Mx";
+			break;
+		case XMPP::NameRecord::Srv:
+			dbg.nospace() << "Srv";
+			break;
+		case XMPP::NameRecord::Cname:
+			dbg.nospace() << "Cname";
+			break;
+		case XMPP::NameRecord::Ptr:
+			dbg.nospace() << "Ptr";
+			break;
+		case XMPP::NameRecord::Txt:
+			dbg.nospace() << "Txt";
+			break;
+		case XMPP::NameRecord::Hinfo:
+			dbg.nospace() << "Hinfo";
+			break;
+		case XMPP::NameRecord::Ns:
+			dbg.nospace() << "Ns";
+			break;
+		case XMPP::NameRecord::Null:
+			dbg.nospace() << "Null";
+			break;
+		case XMPP::NameRecord::Any:
+			dbg.nospace() << "Any";
+			break;
+	}
+
+	return dbg;
+}
+
+QDebug operator<<(QDebug dbg, const XMPP::NameRecord &record)
+{
+	dbg.nospace() << "XMPP::NameRecord("
+		<< "owner=" << record.owner()
+		<< ", ttl=" << record.ttl()
+		<< ", type=" << record.type();
+
+	switch(record.type())
+	{
+		case XMPP::NameRecord::A:
+		case XMPP::NameRecord::Aaaa:
+			dbg.nospace() << ", address=" << record.address();
+			break;
+		case XMPP::NameRecord::Mx:
+			dbg.nospace()
+				<< ", name=" << record.name()
+				<< ", priority=" << record.priority();
+			break;
+		case XMPP::NameRecord::Srv:
+			dbg.nospace()
+				<< ", name=" << record.name()
+				<< ", port=" << record.port()
+				<< ", priority=" << record.priority()
+				<< ", weight=" << record.weight();
+			break;
+		case XMPP::NameRecord::Cname:
+		case XMPP::NameRecord::Ptr:
+		case XMPP::NameRecord::Ns:
+			dbg.nospace() << ", name=" << record.name();
+			break;
+		case XMPP::NameRecord::Txt:
+			dbg.nospace() << ", texts={" << record.texts() << "}";
+			break;
+		case XMPP::NameRecord::Hinfo:
+			dbg.nospace() << ", cpu=" << record.cpu() << ", os=" << record.os();
+			break;
+		case XMPP::NameRecord::Null:
+			dbg.nospace() << ", size=" << record.rawData().size();
+			break;
+		case XMPP::NameRecord::Any:
+			// can't happen
+			Q_ASSERT(0);
+			break;
+	}
+
+	dbg.nospace() << ")";
+	return dbg;
+}
+
 //----------------------------------------------------------------------------
 // ServiceInstance
 //----------------------------------------------------------------------------
@@ -844,6 +937,32 @@ void NameResolver::stop()
 		delete d;
 		d = 0;
 	}
+}
+
+QDebug operator<<(QDebug dbg, XMPP::NameResolver::Error e)
+{
+	dbg.nospace() << "XMPP::NameResolver::";
+
+	switch(e)
+	{
+		case XMPP::NameResolver::ErrorGeneric:
+			dbg.nospace() << "ErrorGeneric";
+			break;
+		case XMPP::NameResolver::ErrorNoName:
+			dbg.nospace() << "ErrorNoName";
+			break;
+		case XMPP::NameResolver::ErrorTimeout:
+			dbg.nospace() << "ErrorTimeout";
+			break;
+		case XMPP::NameResolver::ErrorNoLocal:
+			dbg.nospace() << "ErrorNoLocal";
+			break;
+		case XMPP::NameResolver::ErrorNoLongLived:
+			dbg.nospace() << "ErrorNoLongLived";
+			break;
+	}
+
+	return dbg;
 }
 
 //----------------------------------------------------------------------------
