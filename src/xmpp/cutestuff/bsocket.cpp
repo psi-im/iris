@@ -246,6 +246,9 @@ void BSocket::connectToHost(const QString &host, quint16 port, QAbstractSocket::
 	d->port = port;
 	d->state = HostLookup;
 
+	/* clear host list */
+	d->hostList.clear();
+
 	XMPP::NameRecord::Type querytype = chooseQuery(protocol, d->protocol);
 	XMPP::NameResolver *resolver = new XMPP::NameResolver;
 	connect(resolver, SIGNAL(resultsReady(QList<XMPP::NameRecord>)), this, SLOT(handle_dns_host_ready(QList<XMPP::NameRecord>)));
@@ -266,6 +269,12 @@ void BSocket::connectToHost(const QString &service, const QString &transport, co
 	d->domain = domain;
 	d->state = HostLookup;
 
+	/* clear SRV list */
+	d->srvList.clear();
+
+	/* after we tried all SRV hosts, try connecting directly */
+	d->srvList.append(d->failsafeHost.host.toLocal8Bit(), d->failsafeHost.port);
+
 	XMPP::NameResolver *resolver = new XMPP::NameResolver;
 	connect(resolver, SIGNAL(resultsReady(QList<XMPP::NameRecord>)), this, SLOT(handle_dns_srv_ready(QList<XMPP::NameRecord>)));
 	connect(resolver, SIGNAL(error(XMPP::NameResolver::Error)), this, SLOT(handle_dns_srv_error(XMPP::NameResolver::Error)));
@@ -280,21 +289,11 @@ void BSocket::handle_dns_srv_ready(const QList<XMPP::NameRecord> &r)
 	BSDEBUG << "sl:" << r;
 #endif
 
-	QList<XMPP::NameRecord> rl(r);
-
 	/* cleanup resolver */
 	cleanup_resolver(static_cast<XMPP::NameResolver*>(sender()));
 
-	/* After we tried all SRV hosts, try connecting directly */
-	XMPP::NameRecord failsafeHost(d->domain.toLocal8Bit(), std::numeric_limits<int>::max());
-	failsafeHost.setSrv(d->failsafeHost.host.toLocal8Bit(), d->failsafeHost.port, std::numeric_limits<int>::max(), std::numeric_limits<int>::max());
-#ifdef BS_DEBUG
-	BSDEBUG << "Adding failsafe:" << failsafeHost;
-#endif
-	rl << failsafeHost;
-
 	/* lookup srv pointers */
-	d->srvList = rl;
+	d->srvList << r;
 	dns_srv_try_next();
 }
 
@@ -308,8 +307,8 @@ void BSocket::handle_dns_srv_error(XMPP::NameResolver::Error e)
 	/* cleanup resolver */
 	cleanup_resolver(static_cast<XMPP::NameResolver*>(sender()));
 
-	/* try connecting directly */
-	connectToHost(d->failsafeHost.host, d->failsafeHost.port);
+	/* try connecting directly, srvList already contains failsafe host */
+	dns_srv_try_next();
 }
 
 /* hosts resolved, now try to connect to them */
@@ -323,7 +322,7 @@ void BSocket::handle_dns_host_ready(const QList<XMPP::NameRecord> &r)
 	cleanup_resolver(static_cast<XMPP::NameResolver*>(sender()));
 
 	/* connect to host */
-	d->hostList = r;
+	d->hostList << r;
 	connect_host_try_next();
 }
 
