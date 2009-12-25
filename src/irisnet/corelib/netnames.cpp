@@ -476,117 +476,25 @@ class ServiceResolver::Private : public QObject
 {
 	Q_OBJECT
 public:
-	ServiceResolver *q;
-
-	int id;
-
-	int mode;
-	NameResolver dns;
-	int port;
-
-	class Server
+	Private()
+	 : requestedProtocol(IPv6_IPv4), port(0), protocol(QAbstractSocket::IPv6Protocol)
 	{
-	public:
-		QByteArray host;
-		int port;
-		int priority;
-		int weight;
-	};
-
-	QList<Server> servers;
-	QList<QHostAddress> addrs;
-
-	Private(ServiceResolver *_q) : q(_q)
-	{
-		mode = 3;
-		connect(&dns, SIGNAL(resultsReady(const QList<XMPP::NameRecord> &)), SLOT(dns_resultsReady(const QList<XMPP::NameRecord> &)));
-		connect(&dns, SIGNAL(error(XMPP::NameResolver::Error)), SLOT(dns_error(XMPP::NameResolver::Error)));
 	}
 
-	void tryNext()
-	{
-		if(mode == 3)
-		{
-			QMetaObject::invokeMethod(q, "finished", Qt::QueuedConnection);
-		}
-		if(mode == 2)
-		{
-			if(!addrs.isEmpty())
-			{
-				QHostAddress addr = addrs.takeFirst();
-				QMetaObject::invokeMethod(q, "resultsReady", Qt::QueuedConnection, Q_ARG(QHostAddress, addr), Q_ARG(int, port));
-				return;
-			}
+	/* configuration */
+	Protocol requestedProtocol; //!< IP protocol requested by user
 
-			if(servers.isEmpty())
-			{
-				QMetaObject::invokeMethod(q, "finished", Qt::QueuedConnection);
-				return;
-			}
+	/* state trackers */
+	QString domain; //!< Domain we are currently looking up
+	QString host; //!< Hostname we are currently looking up
+	QHostAddress address; //!< IP address we are currently looking up
+	quint16 port; //!< Port we are currently looking up
+	QAbstractSocket::NetworkLayerProtocol protocol; //!< IP protocol we are currently looking up
 
-			Server serv = servers.takeFirst();
-			port = serv.port;
-			dns.start(serv.host, NameRecord::A); // TODO: ipv6!
-		}
-		else
-		{
-			if(addrs.isEmpty())
-			{
-				QMetaObject::invokeMethod(q, "finished", Qt::QueuedConnection);
-				return;
-			}
+	XMPP::WeightedNameRecordList srvList; //!< List of resolved SRV names
+	QList<XMPP::NameRecord> hostList; //!< List or resolved hostnames for current SRV name
+	QList<XMPP::NameResolver*> resolverList; //!< NameResolvers currently in use, needed for cleanup
 
-			QHostAddress addr = addrs.takeFirst();
-			QMetaObject::invokeMethod(q, "resultsReady", Qt::QueuedConnection, Q_ARG(QHostAddress, addr), Q_ARG(int, port));
-		}
-	}
-
-private slots:
-	void dns_resultsReady(const QList<XMPP::NameRecord> &results)
-	{
-		if(mode == 0)
-		{
-			mode = 2;
-			servers.clear();
-			for(int n = 0; n < results.count(); ++n)
-			{
-				Server serv;
-				serv.host = results[n].name();
-				serv.port = results[n].port();
-				serv.priority = results[n].priority();
-				serv.weight = results[n].weight();
-				servers += serv;
-			}
-			tryNext();
-		}
-		else if(mode == 1)
-		{
-			addrs.clear();
-
-			// TODO: don't forget about ipv6
-			for(int n = 0; n < results.count(); ++n)
-				addrs += results[n].address();
-
-			tryNext();
-		}
-		else
-		{
-			QList<QHostAddress> tmp;
-			for(int n = 0; n < results.count(); ++n)
-				tmp += results[n].address();
-
-			addrs += tmp;
-			tryNext();
-		}
-	}
-
-	void dns_error(XMPP::NameResolver::Error)
-	{
-		if(mode == 0 || mode == 1)
-			emit q->error();
-		else
-			tryNext(); // FIXME: probably shouldn't share this
-	}
 };
 
 
@@ -638,9 +546,7 @@ XMPP::NameRecord WeightedNameRecordList::takeNext() {
 
 	/* Iterate through the priority group until we found the randomly selected entry */
 	WeightedNameRecordPriorityGroup::iterator it(currentPriorityGroup->begin());
-	for (int currentWeight = 0; currentWeight < randomWeight; currentWeight += it->weight()) {
-		it++;
-	}
+	for (int currentWeight = it->weight(); currentWeight < randomWeight; currentWeight += (++it)->weight()) {}
 	Q_ASSERT(it != currentPriorityGroup->end());
 
 	/* We are going to delete the entry in the list, so save it */
@@ -911,11 +817,12 @@ public:
 			connect(p_serv, SIGNAL(resolve_resultsReady(int, const QList<XMPP::ServiceProvider::ResolveResult> &)), SLOT(provider_resolve_resultsReady(int, const QList<XMPP::ServiceProvider::ResolveResult> &)), Qt::QueuedConnection);
 		}
 
-		/*np->id = */
-
+		/*
+		  FIXME: WHAT IS THIS SUPPOSED TO DO?
 		np->id = p_serv->resolve_start(name);
 
 		sres_instances.insert(np->id, np);
+		*/
 	}
 
 	void publish_start(ServiceLocalPublisher::Private *np, const QString &instance, const QString &type, int port, const QMap<QString,QByteArray> &attribs)
@@ -1056,8 +963,11 @@ private slots:
 
 	void provider_resolve_resultsReady(int id, const QList<XMPP::ServiceProvider::ResolveResult> &results)
 	{
+		/*
+		  FIXME: WHAT IS THIS SUPPOSED TO DO?
 		ServiceResolver::Private *np = sres_instances.value(id);
 		emit np->q->resultsReady(results[0].address, results[0].port);
+		*/
 	}
 
 	void provider_publish_published(int id)
@@ -1190,14 +1100,18 @@ void ServiceBrowser::stop()
 {
 }
 
+
 //----------------------------------------------------------------------------
 // ServiceResolver
 //----------------------------------------------------------------------------
 ServiceResolver::ServiceResolver(QObject *parent)
-:QObject(parent)
+	: QObject(parent)
 {
-	qRegisterMetaType<QHostAddress>("QHostAddress");
-	d = new Private(this);
+#ifdef NETNAMES_DEBUG
+	NNDEBUG;
+#endif
+
+	d = new Private();
 }
 
 ServiceResolver::~ServiceResolver()
@@ -1205,32 +1119,242 @@ ServiceResolver::~ServiceResolver()
 	delete d;
 }
 
-void ServiceResolver::startFromInstance(const QByteArray &name)
+void ServiceResolver::clear_resolvers()
 {
-	NameManager::instance()->resolve_instance_start(d, name);
+#ifdef NETNAMES_DEBUG
+	NNDEBUG;
+#endif
+
+	/* cleanup all resolvers */
+	foreach (XMPP::NameResolver *resolver, d->resolverList) {
+		cleanup_resolver(resolver);
+	}
 }
 
-void ServiceResolver::startFromDomain(const QString &domain, const QString &type)
+void ServiceResolver::cleanup_resolver(XMPP::NameResolver *resolver)
 {
-	d->mode = 0;
-	d->dns.start(type.toLatin1() + '.' + domain.toLatin1(), NameRecord::Srv);
+#ifdef NETNAMES_DEBUG
+	NNDEBUG << "r:" << resolver;
+#endif
+
+	if (resolver) {
+		disconnect(resolver);
+		resolver->stop();
+		resolver->deleteLater();
+		d->resolverList.removeAll(resolver);
+	}
 }
 
-void ServiceResolver::startFromPlain(const QString &host, int port)
+ServiceResolver::Protocol ServiceResolver::protocol() const {
+	return d->requestedProtocol;
+}
+
+void ServiceResolver::setProtocol(ServiceResolver::Protocol p) {
+	d->requestedProtocol = p;
+}
+
+void ServiceResolver::start(const QString &host, int port)
 {
-	d->mode = 1;
+#ifdef NETNAMES_DEBUG
+	NNDEBUG << "h:" << host << "p:" << port;
+#endif
+
+	/* clear host list */
+	d->hostList.clear();
+
+	d->protocol = (d->requestedProtocol == IPv6_IPv4 || d->requestedProtocol == IPv6 ? QAbstractSocket::IPv6Protocol : QAbstractSocket::IPv4Protocol);
+	d->host = host;
 	d->port = port;
-	d->dns.start(host.toLatin1(), NameRecord::A); // TODO: try Aaaa first, fallback to A
+
+#ifdef NETNAMES_DEBUG
+	NNDEBUG << "d->p:" << d->protocol;
+#endif
+
+	XMPP::NameRecord::Type querytype = (d->protocol == QAbstractSocket::IPv6Protocol ? XMPP::NameRecord::Aaaa : XMPP::NameRecord::A);
+	XMPP::NameResolver *resolver = new XMPP::NameResolver;
+	connect(resolver, SIGNAL(resultsReady(QList<XMPP::NameRecord>)), this, SLOT(handle_host_ready(QList<XMPP::NameRecord>)));
+	connect(resolver, SIGNAL(error(XMPP::NameResolver::Error)), this, SLOT(handle_host_error(XMPP::NameResolver::Error)));
+	resolver->start(host.toLocal8Bit(), querytype);
+	d->resolverList << resolver;
 }
 
-void ServiceResolver::tryNext()
+void ServiceResolver::start(const QString &service, const QString &transport, const QString &domain, int port)
 {
-	d->tryNext();
+#ifdef NETNAMES_DEBUG
+	NNDEBUG << "s:" << service << "t:" << transport << "d:" << domain << "p:" << port;
+#endif
+
+	QString srv_request("_" + service + "._" + transport + "." + domain + ".");
+
+	/* clear SRV list */
+	d->srvList.clear();
+
+	d->domain = domain;
+
+	/* after we tried all SRV hosts, try connecting directly if requested */
+	if (port != std::numeric_limits<int>::max()) {
+		d->srvList.append(domain.toLocal8Bit(), port);
+	}
+
+	XMPP::NameResolver *resolver = new XMPP::NameResolver;
+	connect(resolver, SIGNAL(resultsReady(QList<XMPP::NameRecord>)), this, SLOT(handle_srv_ready(QList<XMPP::NameRecord>)));
+	connect(resolver, SIGNAL(error(XMPP::NameResolver::Error)), this, SLOT(handle_srv_error(XMPP::NameResolver::Error)));
+	resolver->start(srv_request.toLocal8Bit(), XMPP::NameRecord::Srv);
+	d->resolverList << resolver;
 }
 
-void ServiceResolver::stop()
+/* SRV request resolved, now try to connect to the hosts */
+void ServiceResolver::handle_srv_ready(const QList<XMPP::NameRecord> &r)
 {
+#ifdef NETNAMES_DEBUG
+	NNDEBUG << "sl:" << r;
+#endif
+
+	/* cleanup resolver */
+	cleanup_resolver(static_cast<XMPP::NameResolver*>(sender()));
+
+	/* lookup srv pointers */
+	d->srvList << r;
+	try_next_srv();
 }
+
+/* failed the srv lookup, fall back to simple lookup */
+void ServiceResolver::handle_srv_error(XMPP::NameResolver::Error e)
+{
+#ifdef NETNAMES_DEBUG
+	NNDEBUG << "e:" << e;
+#endif
+
+	/* cleanup resolver */
+	cleanup_resolver(static_cast<XMPP::NameResolver*>(sender()));
+
+	/* srvList already contains a failsafe host, try that */
+	try_next_srv();
+}
+
+/* hosts resolved, now try to connect to them */
+void ServiceResolver::handle_host_ready(const QList<XMPP::NameRecord> &r)
+{
+#ifdef NETNAMES_DEBUG
+	NNDEBUG << "hl:" << r;
+#endif
+
+	/* cleanup resolver */
+	cleanup_resolver(static_cast<XMPP::NameResolver*>(sender()));
+
+	/* connect to host */
+	d->hostList << r;
+	try_next_host();
+}
+
+/* failed to lookup the primary record (A or AAAA, depending on user choice) */
+void ServiceResolver::handle_host_error(XMPP::NameResolver::Error e)
+{
+#ifdef NETNAMES_DEBUG
+	NNDEBUG << "e:" << e;
+#endif
+
+	/* cleanup resolver */
+	cleanup_resolver(static_cast<XMPP::NameResolver*>(sender()));
+
+	/* try a fallback lookup if requested*/
+	if (!lookup_host_fallback()) {
+		/* no-fallback should behave the same as a failed fallback */
+		handle_host_fallback_error(e);
+	}
+}
+
+/* failed to lookup the fallback record (A or AAAA, depending on user choice) */
+void ServiceResolver::handle_host_fallback_error(XMPP::NameResolver::Error e)
+{
+#ifdef NETNAMES_DEBUG
+	NNDEBUG << "e:" << e;
+#endif
+
+	/* cleanup resolver */
+	cleanup_resolver(static_cast<XMPP::NameResolver*>(sender()));
+
+	/* lookup next SRV */
+	try_next_srv();
+}
+
+bool ServiceResolver::check_protocol_fallback()
+{
+	return (d->requestedProtocol == IPv6_IPv4 && d->protocol == QAbstractSocket::IPv6Protocol)
+		|| (d->requestedProtocol == IPv4_IPv6 && d->protocol == QAbstractSocket::IPv4Protocol);
+}
+
+bool ServiceResolver::lookup_host_fallback() {
+#ifdef NETNAMES_DEBUG
+	NNDEBUG;
+#endif
+
+	if (check_protocol_fallback()) {
+		d->protocol = (d->protocol == QAbstractSocket::IPv6Protocol ? QAbstractSocket::IPv4Protocol : QAbstractSocket::IPv6Protocol);
+
+#ifdef NETNAMES_DEBUG
+		NNDEBUG << "d->p:" << d->protocol;
+#endif
+
+		XMPP::NameRecord::Type querytype = (d->protocol == QAbstractSocket::IPv6Protocol ? XMPP::NameRecord::Aaaa : XMPP::NameRecord::A);
+		XMPP::NameResolver *resolver = new XMPP::NameResolver;
+		connect(resolver, SIGNAL(resultsReady(QList<XMPP::NameRecord>)), this, SLOT(handle_host_ready(QList<XMPP::NameRecord>)));
+		connect(resolver, SIGNAL(error(XMPP::NameResolver::Error)), this, SLOT(handle_host_fallback_error(XMPP::NameResolver::Error)));
+		resolver->start(d->host.toLocal8Bit(), querytype);
+		d->resolverList << resolver;
+		return true;
+	}
+
+	return false;
+}
+
+bool ServiceResolver::try_next_host() {
+#ifdef NETNAMES_DEBUG
+	NNDEBUG << "hl:" << d->hostList;
+#endif
+
+	if (!d->hostList.empty()) {
+		XMPP::NameRecord record(d->hostList.takeFirst());
+		/* emit found address and the port specified earlier */
+		emit resultReady(record.address(), d->port);
+		return true;
+	}
+
+	return lookup_host_fallback();
+}
+
+/* lookup the next SRV record in line */
+void ServiceResolver::try_next_srv()
+{
+#ifdef NETNAMES_DEBUG
+	NNDEBUG << "sl:" << d->srvList;
+#endif
+
+	if (!d->srvList.empty()) {
+		XMPP::NameRecord record(d->srvList.takeNext());
+		/* lookup host by name and specify port for later use */
+		start(record.name(), record.port());
+	}
+	else {
+#ifdef NETNAMES_DEBUG
+		NNDEBUG << "SRV list empty, failing";
+#endif
+		/* no more SRV hosts to try, fail */
+		emit error(NoHostLeft);
+	}
+}
+
+void ServiceResolver::tryNext() {
+	/* if the host cannot help, try the SRV list */
+	if (!try_next_host()) {
+		 try_next_srv();
+	}
+}
+
+void ServiceResolver::stop() {
+	clear_resolvers();
+}
+
 
 //----------------------------------------------------------------------------
 // ServiceLocalPublisher

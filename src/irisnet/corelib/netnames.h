@@ -23,6 +23,9 @@
 
 #include <QtCore>
 #include <QtNetwork>
+
+#include <limits>
+
 #include "irisnetglobal.h"
 
 namespace XMPP {
@@ -537,28 +540,45 @@ class IRISNET_EXPORT ServiceResolver : public QObject
 {
 	Q_OBJECT
 public:
-	enum Error
-	{
-		ErrorGeneric,
-		ErrorTimeout,
-		ErrorNoLocal
+	enum Error {
+		ServiceNotFound,
+		NoHostLeft, //!< we did all we could, none of the found host seemed to suffice the users needs
+		ErrorGeneric, ErrorTimeout, ErrorNoLocal // Stuff that netnames_jdns.cpp needs ...
 	};
+	/*! Order of lookup / IP protocols to try */
+	enum Protocol { IPv6_IPv4, IPv4_IPv6, IPv6, IPv4 };
 
 	ServiceResolver(QObject *parent = 0);
 	~ServiceResolver();
 
-	void startFromInstance(const QByteArray &name);
-	void startFromDomain(const QString &domain, const QString &type);
-	void startFromPlain(const QString &host, int port); // non-SRV
+	Protocol protocol() const; //!< IP protocol to use, defaults to IPv6_IPv4
+	void setProtocol(Protocol); //!< Set IP protocol to use, \sa protocol
+
+	void start(const QString &host, int port);
+	void start(const QString &service, const QString &transport, const QString &domain, int port = std::numeric_limits<int>::max());
+
 	void tryNext();
 	void stop();
 
 signals:
-	void resultsReady(const QHostAddress &address, int port);
-	void finished();
-	void error(); // SRV lookup failed
+	void resultReady(const QHostAddress &address, quint16 port);
+	void error(XMPP::ServiceResolver::Error);
+
+private slots:
+	void handle_srv_ready(const QList<XMPP::NameRecord>&);
+	void handle_srv_error(XMPP::NameResolver::Error);
+	void handle_host_ready(const QList<XMPP::NameRecord>&);
+	void handle_host_error(XMPP::NameResolver::Error);
+	void handle_host_fallback_error(XMPP::NameResolver::Error);
 
 private:
+	void clear_resolvers();
+	void cleanup_resolver(XMPP::NameResolver*);
+	bool check_protocol_fallback();
+	bool lookup_host_fallback();
+	bool try_next_host();
+	void try_next_srv();
+
 	class Private;
 	friend class Private;
 	Private *d;
