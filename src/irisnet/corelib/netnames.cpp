@@ -633,7 +633,7 @@ XMPP::NameRecord WeightedNameRecordList::takeNext() {
 	int randomWeight = qrand()/static_cast<float>(RAND_MAX)*totalWeight;
 
 #ifdef NETNAMES_DEBUG
-	NNDEBUG << "Picked weight:" << totalWeight;
+	NNDEBUG << "Picked weight:" << randomWeight;
 #endif
 
 	/* Iterate through the priority group until we found the randomly selected entry */
