@@ -298,8 +298,9 @@ private:
 	QSharedDataPointer<Private> d;
 };
 
-QDebug operator<<(QDebug, XMPP::NameRecord::Type);
-QDebug operator<<(QDebug, const XMPP::NameRecord&);
+IRISNET_EXPORT QDebug operator<<(QDebug, XMPP::NameRecord::Type);
+IRISNET_EXPORT QDebug operator<<(QDebug, const XMPP::NameRecord &);
+
 
 class IRISNET_EXPORT ServiceInstance
 {
@@ -328,7 +329,9 @@ private:
 
    NameResolver performs an asynchronous DNS lookup for a given domain name and record type.  Call start() to begin.  The resultsReady() signal is emitted on success, otherwise error() is emitted.  To cancel a lookup, call stop().
 
-   Each NameResolver should be used for just one DNS query and then be deleted.
+   Each NameResolver object can only perform one DNS lookup at a time.  If start() is called while a lookup is already in progress, then the existing lookup is stopped before starting the new lookup.
+
+   Each NameResolver object should be used for just one DNS query and then be deleted.
    Otherwise ambiguity might arise when receiving multiple answers to future queries.
 
    For example, here is how to obtain the IPv4 addresses of a domain name:
@@ -425,7 +428,7 @@ public:
 
 	   A lookup for \a name of \a type is started.  For normal queries, \a mode should be NameResolver::Single (this is the default).  For long-lived queries, use NameResolver::LongLived.
 
-	   If a query is already in progress, it is stopped before starting the new query.
+	   If a lookup is already in progress, it is stopped before starting the new lookup.
 
 	   \sa stop
 	*/
@@ -465,7 +468,7 @@ private:
 	friend class NameManager;
 };
 
-QDebug operator<<(QDebug, XMPP::NameResolver::Error);
+IRISNET_EXPORT QDebug operator<<(QDebug, XMPP::NameResolver::Error);
 
 
 class IRISNET_EXPORT WeightedNameRecordList

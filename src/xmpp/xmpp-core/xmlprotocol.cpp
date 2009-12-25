@@ -150,7 +150,7 @@ static void createRootXmlTags(const QDomElement &root, QString *xmlHeader, QStri
 // [2] Char ::= #x9 | #xA | #xD | [#x20-#xD7FF] | [#xE000-#xFFFD] | [#x10000-#x10FFFF]
 static inline bool validChar(const quint32 ch) 
 {
-	return  ch == 0x9 || ch == 0xA || ch == 0xD
+	return ch == 0x9 || ch == 0xA || ch == 0xD
 			|| (ch >= 0x20 && ch <= 0xD7FF)
 			|| (ch >= 0xE000 && ch <= 0xFFFD)
 			|| (ch >= 0x10000 && ch <= 0x10FFFF);

@@ -122,10 +122,12 @@ public:
 			SetConsoleCtrlHandler((PHANDLER_ROUTINE)winHandler, TRUE);
 #endif
 #ifdef Q_OS_UNIX
-		if (pipe(sig_pipe) == -1) {
-			// FIXME Need error handling
+		if(pipe(sig_pipe) == -1)
+		{
+			// no support then
 			return;
 		}
+
 		sig_notifier = new SafeSocketNotifier(sig_pipe[0], QSocketNotifier::Read, this);
 		connect(sig_notifier, SIGNAL(activated(int)), SLOT(sig_activated(int)));
 		unixWatchAdd(SIGINT);
@@ -164,8 +166,9 @@ public:
 	{
 		Q_UNUSED(sig);
 		unsigned char c = 0;
-		if (::write(g_pq->d->sig_pipe[1], &c, 1) == -1) {
-			// FIXME Need error handling
+		if(::write(g_pq->d->sig_pipe[1], &c, 1) == -1)
+		{
+			// TODO: error handling?
 			return;
 		}
 	}
@@ -211,10 +214,12 @@ public slots:
 	{
 #ifdef Q_OS_UNIX
 		unsigned char c;
-		if (::read(sig_pipe[0], &c, 1) == -1) {
-			// FIXME Need error handling
+		if(::read(sig_pipe[0], &c, 1) == -1)
+		{
+			// TODO: error handling?
 			return;
 		}
+
 		do_emit();
 #endif
 	}
