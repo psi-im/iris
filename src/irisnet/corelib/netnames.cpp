@@ -20,6 +20,8 @@
 
 #include "netnames.h"
 
+#include <limits>
+
 //#include <idna.h>
 #include "irisnetplugin.h"
 #include "irisnetglobal_p.h"
@@ -589,22 +591,12 @@ private slots:
 
 
 WeightedNameRecordList::WeightedNameRecordList()
-	: currentPriorityGroup(priorityGroups.end())
+	: currentPriorityGroup(priorityGroups.end()) /* void current state */
 {}
 
 WeightedNameRecordList::WeightedNameRecordList(const QList<XMPP::NameRecord> &list)
 {
-	foreach (const XMPP::NameRecord &record, list) {
-		WeightedNameRecordPriorityGroup group(priorityGroups.value(record.priority()));
-
-		group.insert(record.weight(), record);
-
-		if (!priorityGroups.contains(record.priority())) {
-			priorityGroups.insert(record.priority(), group);
-		}
-	}
-
-	currentPriorityGroup = priorityGroups.begin();
+	append(list);
 }
 
 WeightedNameRecordList::~WeightedNameRecordList() {
@@ -663,6 +655,79 @@ XMPP::NameRecord WeightedNameRecordList::takeNext() {
 
 	return result;
 }
+
+void WeightedNameRecordList::clear() {
+	priorityGroups.clear();
+
+	/* void current state */
+	currentPriorityGroup = priorityGroups.end();
+}
+
+void WeightedNameRecordList::append(const XMPP::WeightedNameRecordList &list) {
+	/* Copy over all records from all groups */
+	foreach (const WeightedNameRecordPriorityGroup &group, list.priorityGroups) {
+		foreach(const NameRecord& record, group) {
+			append(record);
+		}
+	}
+
+	/* Reset to beginning */
+	currentPriorityGroup = priorityGroups.begin();
+}
+
+void WeightedNameRecordList::append(const QList<XMPP::NameRecord> &list) {
+	foreach (const XMPP::NameRecord &record, list) {
+		WeightedNameRecordPriorityGroup group(priorityGroups.value(record.priority()));
+
+		group.insert(record.weight(), record);
+
+		if (!priorityGroups.contains(record.priority())) {
+			priorityGroups.insert(record.priority(), group);
+		}
+	}
+
+	/* Reset to beginning */
+	currentPriorityGroup = priorityGroups.begin();
+}
+
+void WeightedNameRecordList::append(const XMPP::NameRecord &record) {
+	WeightedNameRecordPriorityGroup group(priorityGroups.value(record.priority()));
+
+	group.insert(record.weight(), record);
+
+	if (!priorityGroups.contains(record.priority())) {
+		priorityGroups.insert(record.priority(), group);
+	}
+
+	/* Reset to beginning */
+	currentPriorityGroup = priorityGroups.begin();
+}
+
+void WeightedNameRecordList::append(const QString &hostname, quint16 port) {
+	NameRecord record(hostname.toLocal8Bit(), std::numeric_limits<int>::max());
+	record.setSrv(hostname.toLocal8Bit(), port, std::numeric_limits<int>::max(), std::numeric_limits<int>::max());
+
+	append(record);
+
+	/* Reset to beginning */
+	currentPriorityGroup = priorityGroups.begin();
+}
+
+XMPP::WeightedNameRecordList& WeightedNameRecordList::operator<<(const XMPP::WeightedNameRecordList &list) {
+	append(list);
+	return *this;
+}
+
+WeightedNameRecordList& WeightedNameRecordList::operator<<(const QList<NameRecord> &list) {
+	append(list);
+	return *this;
+}
+
+XMPP::WeightedNameRecordList& WeightedNameRecordList::operator<<(const XMPP::NameRecord &record) {
+	append(record);
+	return *this;
+}
+
 
 QDebug operator<<(QDebug dbg, const XMPP::WeightedNameRecordList &list) {
 	dbg.nospace() << "XMPP::WeightedNameRecordList(\n";

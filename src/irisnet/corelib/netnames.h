@@ -479,8 +479,18 @@ public:
 	WeightedNameRecordList();
 	WeightedNameRecordList(const QList<NameRecord> &list);
 	~WeightedNameRecordList();
-	bool empty() const;
-	NameRecord takeNext();
+	bool empty() const; //!< Returns true if the list contains no items; otherwise returns false.
+	NameRecord takeNext(); //!< Removes the next host to try from the list and returns it.
+
+	void clear(); //!< Removes all items from the list.
+	void append(const WeightedNameRecordList&);
+	void append(const QList<NameRecord>&);
+	void append(const NameRecord&);
+	void append(const QString &hostname, quint16 port);
+
+	WeightedNameRecordList& operator<<(const WeightedNameRecordList&);
+	WeightedNameRecordList& operator<<(const QList<NameRecord>&);
+	WeightedNameRecordList& operator<<(const NameRecord&);
 
 private:
 	typedef QMultiMap<int /* weight */, NameRecord> WeightedNameRecordPriorityGroup;
