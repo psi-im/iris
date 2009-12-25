@@ -127,7 +127,7 @@ public:
 	QTcpSocket *qsock;
 	QTcpSocketSignalRelay *qsock_relay;
 	int state;
-	Protocol protocol;
+	Protocol protocol; //!< IP protocol to use
 
 	QString domain; //!< Domain we are currently connected to
 	QString host; //!< Hostname we are currently connected to
