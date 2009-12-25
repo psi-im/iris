@@ -306,6 +306,7 @@ void BSocket::handle_dns_srv_error(XMPP::NameResolver::Error e)
 #endif
 
 	/* cleanup resolver */
+	cleanup_resolver(static_cast<XMPP::NameResolver*>(sender()));
 
 	/* try connecting directly */
 	connectToHost(d->failsafeHost.host, d->failsafeHost.port);
