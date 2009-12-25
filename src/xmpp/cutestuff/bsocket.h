@@ -23,6 +23,8 @@
 
 #include <QAbstractSocket>
 
+#include <limits>
+
 #include "bytestream.h"
 #include "netnames.h"
 
@@ -63,20 +65,15 @@ class BSocket : public ByteStream
 public:
 	enum Error { ErrConnectionRefused = ErrCustom, ErrHostNotFound };
 	enum State { Idle, HostLookup, Connecting, Connected, Closing };
-	/* Order of lookup / IP protocols to try */
-	enum Protocol { IPv6_IPv4, IPv4_IPv6, IPv6, IPv4 };
 	BSocket(QObject *parent=0);
 	~BSocket();
 
 	void connectToHost(const QHostAddress &address, quint16 port);
 	void connectToHost(const QString &host, quint16 port, QAbstractSocket::NetworkLayerProtocol protocol = QAbstractSocket::UnknownNetworkLayerProtocol);
-	void connectToHost(const QString &service, const QString &transport, const QString &domain);
+	void connectToHost(const QString &service, const QString &transport, const QString &domain, quint16 port = std::numeric_limits<int>::max());
 	int socket() const;
 	void setSocket(int);
 	int state() const;
-	Protocol protocol() const; //!< IP protocol to use, defaults to IPv6_IPv4
-	void setProtocol(Protocol); //!< Set IP protocol to use, \sa protocol
-	void setFailsafeHost(const QString &host, quint16 port);
 
 	// from ByteStream
 	bool isOpen() const;
@@ -106,11 +103,8 @@ private slots:
 	void qs_bytesWritten(qint64);
 	void qs_error(QAbstractSocket::SocketError);
 
-	void handle_dns_srv_ready(const QList<XMPP::NameRecord> &r);
-	void handle_dns_srv_error(XMPP::NameResolver::Error e);
-	void handle_dns_host_ready(const QList<XMPP::NameRecord> &r);
-	void handle_dns_host_error(XMPP::NameResolver::Error e);
-	void handle_dns_host_fallback_error(XMPP::NameResolver::Error e);
+	void handle_dns_ready(const QHostAddress&, quint16);
+	void handle_dns_error(XMPP::ServiceResolver::Error e);
 	void handle_connect_error(QAbstractSocket::SocketError);
 
 private:
@@ -119,7 +113,7 @@ private:
 
 	void reset(bool clear=false);
 	void ensureSocket();
-	void cleanup_resolver(XMPP::NameResolver *resolver);
+	void recreate_resolver();
 	bool check_protocol_fallback();
 	void dns_srv_try_next();
 	bool connect_host_try_next();

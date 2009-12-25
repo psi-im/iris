@@ -384,8 +384,7 @@ void AdvancedConnector::connectToServer(const QString &server)
 			return;
 		}
 
-		s->setFailsafeHost(d->host, d->port);
-		s->connectToHost(XMPP_CLIENT_SRV, XMPP_CLIENT_TRANSPORT, d->host);
+		s->connectToHost(XMPP_CLIENT_SRV, XMPP_CLIENT_TRANSPORT, d->host, d->port);
 	}
 }
 
@@ -524,9 +523,9 @@ void AdvancedConnector::bs_error(int x)
 #ifdef XMPP_DEBUG
 		printf("bse1.2\n");
 #endif
+		BSocket *s = static_cast<BSocket*>(d->bs);
 		d->port = XMPP_DEFAULT_PORT;
-		static_cast<BSocket*>(d->bs)->setFailsafeHost(d->host, d->port);
-		static_cast<BSocket*>(d->bs)->connectToHost(XMPP_CLIENT_SRV, XMPP_CLIENT_TRANSPORT, d->host);
+		s->connectToHost(XMPP_CLIENT_SRV, XMPP_CLIENT_TRANSPORT, d->host, d->port);
 	}
 	/* otherwise we have no fallbacks and must have failed to connect */
 	else {

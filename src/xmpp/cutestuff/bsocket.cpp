@@ -95,24 +95,6 @@ public slots:
 	}
 };
 
-static XMPP::NameRecord::Type chooseQuery(QAbstractSocket::NetworkLayerProtocol protocol, BSocket::Protocol defaultProtocol) {
-	switch (protocol) {
-		case QAbstractSocket::UnknownNetworkLayerProtocol:
-			if (defaultProtocol == BSocket::IPv6_IPv4 || defaultProtocol == BSocket::IPv6)
-				return XMPP::NameRecord::Aaaa;
-			else
-				return XMPP::NameRecord::A;
-			break;
-		case QAbstractSocket::IPv6Protocol:
-			return XMPP::NameRecord::Aaaa;
-			break;
-		case QAbstractSocket::IPv4Protocol:
-			return XMPP::NameRecord::A;
-			break;
-	}
-
-	return XMPP::NameRecord::Any;
-}
 
 class BSocket::Private
 {
@@ -121,29 +103,21 @@ public:
 	{
 		qsock = 0;
 		qsock_relay = 0;
-		protocol = IPv6_IPv4;
+		resolver = 0;
 	}
 
 	QTcpSocket *qsock;
 	QTcpSocketSignalRelay *qsock_relay;
 	int state;
-	Protocol protocol; //!< IP protocol to use
 
 	QString domain; //!< Domain we are currently connected to
 	QString host; //!< Hostname we are currently connected to
 	QHostAddress address; //!< IP address we are currently connected to
 	quint16 port; //!< Port we are currently connected to
 
-	struct {
-		QString host;
-		quint16 port;
-	} failsafeHost;
-
 	//SafeDelete sd;
 
-	XMPP::WeightedNameRecordList srvList; //!< List of resolved SRV names
-	QList<XMPP::NameRecord> hostList; //!< List or resolved hostnames for current SRV name
-	QList<XMPP::NameResolver*> resolverList; //!< NameResolvers currently in use, needed for cleanup
+	XMPP::ServiceResolver *resolver;
 };
 
 BSocket::BSocket(QObject *parent)
@@ -159,8 +133,21 @@ BSocket::~BSocket()
 	delete d;
 }
 
+void BSocket::recreate_resolver() {
+	if (d->resolver) {
+		disconnect(d->resolver);
+		d->resolver->stop();
+		d->resolver->deleteLater();
+	}
+
+	d->resolver = new XMPP::ServiceResolver;
+}
+
 void BSocket::reset(bool clear)
 {
+#ifdef BS_DEBUG
+	BSDEBUG;
+#endif
 	if(d->qsock) {
 		delete d->qsock_relay;
 		d->qsock_relay = 0;
@@ -183,11 +170,6 @@ void BSocket::reset(bool clear)
 			clearReadBuffer();
 	}
 
-	/* cleanup resolvers */
-	foreach (XMPP::NameResolver *resolver, d->resolverList) {
-		cleanup_resolver(resolver);
-	}
-
 	d->state = Idle;
 }
 
@@ -206,18 +188,6 @@ void BSocket::ensureSocket()
 		connect(d->qsock_relay, SIGNAL(bytesWritten(qint64)), SLOT(qs_bytesWritten(qint64)));
 		connect(d->qsock_relay, SIGNAL(error(QAbstractSocket::SocketError)), SLOT(qs_error(QAbstractSocket::SocketError)));
 	}
-}
-
-void BSocket::cleanup_resolver(XMPP::NameResolver *resolver) {
-	disconnect(resolver);
-	resolver->stop();
-	resolver->deleteLater();
-	d->resolverList.removeAll(resolver);
-}
-
-bool BSocket::check_protocol_fallback() {
-	return (d->protocol == IPv6_IPv4 && d->address.protocol() == QAbstractSocket::IPv6Protocol)
-		|| (d->protocol == IPv4_IPv6 && d->address.protocol() == QAbstractSocket::IPv4Protocol);
 }
 
 void BSocket::connectToHost(const QHostAddress &address, quint16 port)
@@ -246,188 +216,69 @@ void BSocket::connectToHost(const QString &host, quint16 port, QAbstractSocket::
 	d->port = port;
 	d->state = HostLookup;
 
-	/* clear host list */
-	d->hostList.clear();
+	/* cleanup resolver for the new query */
+	recreate_resolver();
 
-	XMPP::NameRecord::Type querytype = chooseQuery(protocol, d->protocol);
-	XMPP::NameResolver *resolver = new XMPP::NameResolver;
-	connect(resolver, SIGNAL(resultsReady(QList<XMPP::NameRecord>)), this, SLOT(handle_dns_host_ready(QList<XMPP::NameRecord>)));
-	connect(resolver, SIGNAL(error(XMPP::NameResolver::Error)), this, SLOT(handle_dns_host_error(XMPP::NameResolver::Error)));
-	resolver->start(host.toLocal8Bit(), querytype);
-	d->resolverList << resolver;
+	switch (protocol) {
+		case QAbstractSocket::IPv6Protocol:
+			d->resolver->setProtocol(XMPP::ServiceResolver::IPv6);
+			break;
+		case QAbstractSocket::IPv4Protocol:
+			d->resolver->setProtocol(XMPP::ServiceResolver::IPv4);
+			break;
+		case QAbstractSocket::UnknownNetworkLayerProtocol:
+			/* use ServiceResolver's default in this case */
+			break;
+	}
+
+	connect(d->resolver, SIGNAL(resultReady(const QHostAddress&, quint16)), this, SLOT(handle_dns_ready(const QHostAddress&, quint16)));
+	connect(d->resolver, SIGNAL(error(XMPP::ServiceResolver::Error)), this, SLOT(handle_dns_error(XMPP::ServiceResolver::Error)));
+	d->resolver->start(host, port);
 }
 
-void BSocket::connectToHost(const QString &service, const QString &transport, const QString &domain)
+void BSocket::connectToHost(const QString &service, const QString &transport, const QString &domain, quint16 port)
 {
 #ifdef BS_DEBUG
 	BSDEBUG << "s:" << service << "t:" << transport << "d:" << domain;
 #endif
 
-	QString srv_request("_" + service + "._" + transport + "." + domain + ".");
-
 	reset(true);
 	d->domain = domain;
 	d->state = HostLookup;
 
-	/* clear SRV list */
-	d->srvList.clear();
+	/* cleanup resolver for the new query */
+	recreate_resolver();
 
-	/* after we tried all SRV hosts, try connecting directly */
-	d->srvList.append(d->failsafeHost.host.toLocal8Bit(), d->failsafeHost.port);
-
-	XMPP::NameResolver *resolver = new XMPP::NameResolver;
-	connect(resolver, SIGNAL(resultsReady(QList<XMPP::NameRecord>)), this, SLOT(handle_dns_srv_ready(QList<XMPP::NameRecord>)));
-	connect(resolver, SIGNAL(error(XMPP::NameResolver::Error)), this, SLOT(handle_dns_srv_error(XMPP::NameResolver::Error)));
-	resolver->start(srv_request.toLocal8Bit(), XMPP::NameRecord::Srv);
-	d->resolverList << resolver;
+	connect(d->resolver, SIGNAL(resultReady(const QHostAddress&, quint16)), this, SLOT(handle_dns_ready(const QHostAddress&, quint16)));
+	connect(d->resolver, SIGNAL(error(XMPP::ServiceResolver::Error)), this, SLOT(handle_dns_error(XMPP::ServiceResolver::Error)));
+	d->resolver->start(service, transport, domain, port);
 }
 
-/* SRV request resolved, now try to connect to the hosts */
-void BSocket::handle_dns_srv_ready(const QList<XMPP::NameRecord> &r)
+/* host resolved, now try to connect to it */
+void BSocket::handle_dns_ready(const QHostAddress &address, quint16 port)
 {
 #ifdef BS_DEBUG
-	BSDEBUG << "sl:" << r;
+	BSDEBUG << "a:" << address << "p:" << port;
 #endif
 
-	/* cleanup resolver */
-	cleanup_resolver(static_cast<XMPP::NameResolver*>(sender()));
-
-	/* lookup srv pointers */
-	d->srvList << r;
-	dns_srv_try_next();
-}
-
-/* failed the srv lookup, fall back to simple lookup */
-void BSocket::handle_dns_srv_error(XMPP::NameResolver::Error e)
-{
-#ifdef BS_DEBUG
-	BSDEBUG << "e:" << e;
-#endif
-
-	/* cleanup resolver */
-	cleanup_resolver(static_cast<XMPP::NameResolver*>(sender()));
-
-	/* try connecting directly, srvList already contains failsafe host */
-	dns_srv_try_next();
-}
-
-/* hosts resolved, now try to connect to them */
-void BSocket::handle_dns_host_ready(const QList<XMPP::NameRecord> &r)
-{
-#ifdef BS_DEBUG
-	BSDEBUG << "hl:" << r;
-#endif
-
-	/* cleanup resolver */
-	cleanup_resolver(static_cast<XMPP::NameResolver*>(sender()));
-
-	/* connect to host */
-	d->hostList << r;
-	connect_host_try_next();
-}
-
-/* failed to lookup the primary record (A or AAAA, depending on user choice) */
-void BSocket::handle_dns_host_error(XMPP::NameResolver::Error e)
-{
-#ifdef BS_DEBUG
-	BSDEBUG << "e:" << e;
-#endif
-
-	/* cleanup resolver */
-	cleanup_resolver(static_cast<XMPP::NameResolver*>(sender()));
-
-	/* if a fallback is requested, try that */
-	if (d->protocol == IPv6_IPv4 || d->protocol == IPv4_IPv6) {
-		XMPP::NameRecord::Type querytype = (d->protocol == IPv6_IPv4 ? XMPP::NameRecord::A : XMPP::NameRecord::Aaaa);
-
-		XMPP::NameResolver *resolver = new XMPP::NameResolver;
-		connect(resolver, SIGNAL(resultsReady(QList<XMPP::NameRecord>)), this, SLOT(handle_dns_host_ready(QList<XMPP::NameRecord>)));
-		connect(resolver, SIGNAL(error(XMPP::NameResolver::Error)), this, SLOT(handle_dns_host_fallback_error(XMPP::NameResolver::Error)));
-		resolver->start(d->host.toLocal8Bit(), querytype);
-		d->resolverList << resolver;
-	}
-	/* there is no fallback requested */
-	else {
-		/* no-fallback should behave the same as a failed fallback */
-		handle_dns_host_fallback_error(e);
-	}
-}
-
-/* failed to lookup the fallback record (A or AAAA, depending on user choice) */
-void BSocket::handle_dns_host_fallback_error(XMPP::NameResolver::Error e)
-{
-#ifdef BS_DEBUG
-	BSDEBUG << "e:" << e;
-#endif
-
-	/* cleanup resolver */
-	cleanup_resolver(static_cast<XMPP::NameResolver*>(sender()));
-
-	/* lookup next host via SRV */
-	dns_srv_try_next();
+	connectToHost(address, port);
 }
 
 /* failed to connect to host */
-void BSocket::handle_connect_error(QAbstractSocket::SocketError e) {
+void BSocket::handle_dns_error(XMPP::ServiceResolver::Error e) {
 #ifdef BS_DEBUG
 	BSDEBUG << "e:" << e;
 #endif
 
-	if (check_protocol_fallback()) {
-		QAbstractSocket::NetworkLayerProtocol protocol =
-			(d->protocol == BSocket::IPv6_IPv4 ? QAbstractSocket::IPv4Protocol : QAbstractSocket::IPv6Protocol);
-		connectToHost(d->host, d->port, protocol);
-	}
-	/* connect to next host */
-	else if (!connect_host_try_next()) {
-		/* the DNS names are already resolved, we have some kind of network error here */
-		/* SRV department shall decide whether we quit here... */
-		dns_srv_try_next();
-	}
+	emit error(ErrConnectionRefused);
 }
 
-/* lookup the next SRV record in line */
-void BSocket::dns_srv_try_next()
-{
+void BSocket::handle_connect_error(QAbstractSocket::SocketError e) {
 #ifdef BS_DEBUG
-	BSDEBUG << "sl:" << d->srvList;
+	BSDEBUG << "d->r:" << d->resolver;
 #endif
-
-	if (!d->srvList.empty()) {
-		XMPP::NameRecord record(d->srvList.takeNext());
-		/* lookup host by name and specify port for later use */
-		connectToHost(record.name(), record.port());
-	}
-	else {
-#ifdef BS_DEBUG
-		BSDEBUG << "SRV list empty, failing";
-#endif
-		/* no more SRV hosts to try, fail */
-		emit error(ErrConnectionRefused);
-	}
-}
-
-/*!
-	connect to the next resolved host in line
-	\return true if found another host in list, false otherwise
-*/
-bool BSocket::connect_host_try_next() {
-#ifdef BS_DEBUG
-	BSDEBUG << "hl:" << d->hostList;
-#endif
-
-	if (!d->hostList.empty()) {
-		XMPP::NameRecord record(d->hostList.takeFirst());
-		/* connect to address directly on the port specified earlier */
-		connectToHost(record.address(), d->port);
-		return true;
-	}
-	else {
-#ifdef BS_DEBUG
-		BSDEBUG << "Host list empty, failing";
-#endif
-		return false;
-	}
+	Q_ASSERT(d->resolver);
+	d->resolver->tryNext();
 }
 
 int BSocket::socket() const
@@ -449,22 +300,6 @@ void BSocket::setSocket(int s)
 int BSocket::state() const
 {
 	return d->state;
-}
-
-BSocket::Protocol BSocket::protocol() const {
-	return d->protocol;
-}
-
-void BSocket::setProtocol(BSocket::Protocol p) {
-	d->protocol = p;
-}
-
-void BSocket::setFailsafeHost(const QString &host, quint16 port) {
-#ifdef BS_DEBUG
-	BSDEBUG << "h:" << host << "p:" << port;
-#endif
-	d->failsafeHost.host = host;
-	d->failsafeHost.port = port;
 }
 
 bool BSocket::isOpen() const
