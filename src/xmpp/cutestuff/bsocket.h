@@ -68,8 +68,11 @@ public:
 	BSocket(QObject *parent=0);
 	~BSocket();
 
+	/*! Connect to an already resolved host */
 	void connectToHost(const QHostAddress &address, quint16 port);
+	/*! Connect to a host via the specified protocol, or the default protocols if not specified */
 	void connectToHost(const QString &host, quint16 port, QAbstractSocket::NetworkLayerProtocol protocol = QAbstractSocket::UnknownNetworkLayerProtocol);
+	/*! Connect to the hosts for the specified service */
 	void connectToHost(const QString &service, const QString &transport, const QString &domain, quint16 port = std::numeric_limits<int>::max());
 	int socket() const;
 	void setSocket(int);

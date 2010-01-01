@@ -117,6 +117,10 @@ public:
 
 	//SafeDelete sd;
 
+	/*!
+	 * Resolver used for lookups,
+	 * will be destroyed and recreated after each lookup
+	 */
 	XMPP::ServiceResolver *resolver;
 };
 
@@ -133,6 +137,10 @@ BSocket::~BSocket()
 	delete d;
 }
 
+/*
+Recreate teh resolver,
+a safety measure in case the resolver behaves strange when doing multiple lookups in a row
+*/
 void BSocket::recreate_resolver() {
 	if (d->resolver) {
 		disconnect(d->resolver);
@@ -190,6 +198,7 @@ void BSocket::ensureSocket()
 	}
 }
 
+/* Connect to an already resolved host */
 void BSocket::connectToHost(const QHostAddress &address, quint16 port)
 {
 #ifdef BS_DEBUG
@@ -205,6 +214,7 @@ void BSocket::connectToHost(const QHostAddress &address, quint16 port)
 	d->qsock->connectToHost(address, port);
 }
 
+/* Connect to a host via the specified protocol, or the default protocols if not specified */
 void BSocket::connectToHost(const QString &host, quint16 port, QAbstractSocket::NetworkLayerProtocol protocol)
 {
 #ifdef BS_DEBUG
@@ -236,6 +246,7 @@ void BSocket::connectToHost(const QString &host, quint16 port, QAbstractSocket::
 	d->resolver->start(host, port);
 }
 
+/* Connect to the hosts for the specified service */
 void BSocket::connectToHost(const QString &service, const QString &transport, const QString &domain, quint16 port)
 {
 #ifdef BS_DEBUG
@@ -264,19 +275,22 @@ void BSocket::handle_dns_ready(const QHostAddress &address, quint16 port)
 	connectToHost(address, port);
 }
 
-/* failed to connect to host */
+/* resolver failed the dns lookup */
 void BSocket::handle_dns_error(XMPP::ServiceResolver::Error e) {
 #ifdef BS_DEBUG
 	BSDEBUG << "e:" << e;
 #endif
 
-	emit error(ErrConnectionRefused);
+	emit error(ErrHostNotFound);
 }
 
+/* failed to connect to host */
 void BSocket::handle_connect_error(QAbstractSocket::SocketError e) {
 #ifdef BS_DEBUG
 	BSDEBUG << "d->r:" << d->resolver;
 #endif
+
+	/* try the next host for this service */
 	Q_ASSERT(d->resolver);
 	d->resolver->tryNext();
 }
