@@ -540,28 +540,39 @@ class IRISNET_EXPORT ServiceResolver : public QObject
 {
 	Q_OBJECT
 public:
+	/*! Error codes for (SRV) lookups */
 	enum Error {
-		ServiceNotFound,
+		ServiceNotFound, //!< There is no service with the specified parameters
 		NoHostLeft, //!< we did all we could, none of the found host seemed to suffice the users needs
 		ErrorGeneric, ErrorTimeout, ErrorNoLocal // Stuff that netnames_jdns.cpp needs ...
 	};
 	/*! Order of lookup / IP protocols to try */
 	enum Protocol { IPv6_IPv4, IPv4_IPv6, IPv6, IPv4 };
 
+	/*!
+	 * Create a new ServiceResolver.
+	 * This resolver can be used for multiple lookups in a row, but not concurrently!
+	 */
 	ServiceResolver(QObject *parent = 0);
 	~ServiceResolver();
 
 	Protocol protocol() const; //!< IP protocol to use, defaults to IPv6_IPv4
 	void setProtocol(Protocol); //!< Set IP protocol to use, \sa protocol
 
+	/*! Start a lookup for host direclty */
 	void start(const QString &host, int port);
+	/*! Start an indirect (SRV) lookup for the service */
 	void start(const QString &service, const QString &transport, const QString &domain, int port = std::numeric_limits<int>::max());
 
+	/*! Announce the next resolved host to us via resultReady() */
 	void tryNext();
+	/*! Stop the current lookup */
 	void stop();
 
 signals:
+	/*! The lookup succeeded, tell the user to connect to address:port */
 	void resultReady(const QHostAddress &address, quint16 port);
+	/*! The lookup failed */
 	void error(XMPP::ServiceResolver::Error);
 
 private slots:

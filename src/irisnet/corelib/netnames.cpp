@@ -1138,9 +1138,15 @@ void ServiceResolver::cleanup_resolver(XMPP::NameResolver *resolver)
 #endif
 
 	if (resolver) {
+		/*
+		do not just "delete", because we might have been called from a slot
+		that was invoked by the resolver, and we do not want to create a mess
+		there.
+		*/
 		disconnect(resolver);
 		resolver->stop();
 		resolver->deleteLater();
+
 		d->resolverList.removeAll(resolver);
 	}
 }
@@ -1153,6 +1159,7 @@ void ServiceResolver::setProtocol(ServiceResolver::Protocol p) {
 	d->requestedProtocol = p;
 }
 
+/* normal host lookup */
 void ServiceResolver::start(const QString &host, int port)
 {
 #ifdef NETNAMES_DEBUG
@@ -1170,6 +1177,7 @@ void ServiceResolver::start(const QString &host, int port)
 	NNDEBUG << "d->p:" << d->protocol;
 #endif
 
+	/* initiate the host lookup */
 	XMPP::NameRecord::Type querytype = (d->protocol == QAbstractSocket::IPv6Protocol ? XMPP::NameRecord::Aaaa : XMPP::NameRecord::A);
 	XMPP::NameResolver *resolver = new XMPP::NameResolver;
 	connect(resolver, SIGNAL(resultsReady(QList<XMPP::NameRecord>)), this, SLOT(handle_host_ready(QList<XMPP::NameRecord>)));
@@ -1178,6 +1186,7 @@ void ServiceResolver::start(const QString &host, int port)
 	d->resolverList << resolver;
 }
 
+/* SRV lookup */
 void ServiceResolver::start(const QString &service, const QString &transport, const QString &domain, int port)
 {
 #ifdef NETNAMES_DEBUG
@@ -1191,11 +1200,12 @@ void ServiceResolver::start(const QString &service, const QString &transport, co
 
 	d->domain = domain;
 
-	/* after we tried all SRV hosts, try connecting directly if requested */
+	/* after we tried all SRV hosts, we shall connect directly (if requested) */
 	if (port != std::numeric_limits<int>::max()) {
 		d->srvList.append(domain.toLocal8Bit(), port);
 	}
 
+	/* initiate the SRV lookup */
 	XMPP::NameResolver *resolver = new XMPP::NameResolver;
 	connect(resolver, SIGNAL(resultsReady(QList<XMPP::NameRecord>)), this, SLOT(handle_srv_ready(QList<XMPP::NameRecord>)));
 	connect(resolver, SIGNAL(error(XMPP::NameResolver::Error)), this, SLOT(handle_srv_error(XMPP::NameResolver::Error)));
@@ -1218,7 +1228,7 @@ void ServiceResolver::handle_srv_ready(const QList<XMPP::NameRecord> &r)
 	try_next_srv();
 }
 
-/* failed the srv lookup, fall back to simple lookup */
+/* failed the srv lookup, but we might have a fallback host in the srvList */
 void ServiceResolver::handle_srv_error(XMPP::NameResolver::Error e)
 {
 #ifdef NETNAMES_DEBUG
@@ -1278,41 +1288,48 @@ void ServiceResolver::handle_host_fallback_error(XMPP::NameResolver::Error e)
 	try_next_srv();
 }
 
+/* check whether a fallback is needed in the current situation */
 bool ServiceResolver::check_protocol_fallback()
 {
 	return (d->requestedProtocol == IPv6_IPv4 && d->protocol == QAbstractSocket::IPv6Protocol)
 		|| (d->requestedProtocol == IPv4_IPv6 && d->protocol == QAbstractSocket::IPv4Protocol);
 }
 
+/* lookup the fallback host */
 bool ServiceResolver::lookup_host_fallback() {
 #ifdef NETNAMES_DEBUG
 	NNDEBUG;
 #endif
 
-	if (check_protocol_fallback()) {
-		d->protocol = (d->protocol == QAbstractSocket::IPv6Protocol ? QAbstractSocket::IPv4Protocol : QAbstractSocket::IPv6Protocol);
-
-#ifdef NETNAMES_DEBUG
-		NNDEBUG << "d->p:" << d->protocol;
-#endif
-
-		XMPP::NameRecord::Type querytype = (d->protocol == QAbstractSocket::IPv6Protocol ? XMPP::NameRecord::Aaaa : XMPP::NameRecord::A);
-		XMPP::NameResolver *resolver = new XMPP::NameResolver;
-		connect(resolver, SIGNAL(resultsReady(QList<XMPP::NameRecord>)), this, SLOT(handle_host_ready(QList<XMPP::NameRecord>)));
-		connect(resolver, SIGNAL(error(XMPP::NameResolver::Error)), this, SLOT(handle_host_fallback_error(XMPP::NameResolver::Error)));
-		resolver->start(d->host.toLocal8Bit(), querytype);
-		d->resolverList << resolver;
-		return true;
+	/* if a fallback is desired, otherwise we must fail immediately */
+	if (!check_protocol_fallback()) {
+		return false;
 	}
 
-	return false;
+	d->protocol = (d->protocol == QAbstractSocket::IPv6Protocol ? QAbstractSocket::IPv4Protocol : QAbstractSocket::IPv6Protocol);
+
+#ifdef NETNAMES_DEBUG
+	NNDEBUG << "d->p:" << d->protocol;
+#endif
+
+	/* initiate the fallback host lookup */
+	XMPP::NameRecord::Type querytype = (d->protocol == QAbstractSocket::IPv6Protocol ? XMPP::NameRecord::Aaaa : XMPP::NameRecord::A);
+	XMPP::NameResolver *resolver = new XMPP::NameResolver;
+	connect(resolver, SIGNAL(resultsReady(QList<XMPP::NameRecord>)), this, SLOT(handle_host_ready(QList<XMPP::NameRecord>)));
+	connect(resolver, SIGNAL(error(XMPP::NameResolver::Error)), this, SLOT(handle_host_fallback_error(XMPP::NameResolver::Error)));
+	resolver->start(d->host.toLocal8Bit(), querytype);
+	d->resolverList << resolver;
+
+	return true;
 }
 
+/* notify user about next host */
 bool ServiceResolver::try_next_host() {
 #ifdef NETNAMES_DEBUG
 	NNDEBUG << "hl:" << d->hostList;
 #endif
 
+	/* if there is a host left for current protocol (AAAA or A) */
 	if (!d->hostList.empty()) {
 		XMPP::NameRecord record(d->hostList.takeFirst());
 		/* emit found address and the port specified earlier */
@@ -1320,6 +1337,7 @@ bool ServiceResolver::try_next_host() {
 		return true;
 	}
 
+	/* otherwise try the fallback protocol */
 	return lookup_host_fallback();
 }
 
@@ -1330,6 +1348,7 @@ void ServiceResolver::try_next_srv()
 	NNDEBUG << "sl:" << d->srvList;
 #endif
 
+	/* if there are still hosts we did not try */
 	if (!d->srvList.empty()) {
 		XMPP::NameRecord record(d->srvList.takeNext());
 		/* lookup host by name and specify port for later use */
@@ -1345,7 +1364,7 @@ void ServiceResolver::try_next_srv()
 }
 
 void ServiceResolver::tryNext() {
-	/* if the host cannot help, try the SRV list */
+	/* if the host list cannot help, try the SRV list */
 	if (!try_next_host()) {
 		 try_next_srv();
 	}
