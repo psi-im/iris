@@ -477,10 +477,14 @@ class ServiceResolver::Private : public QObject
 {
 	Q_OBJECT
 public:
-	Private()
-	 : requestedProtocol(IPv6_IPv4), port(0), protocol(QAbstractSocket::IPv6Protocol)
+	Private(ServiceResolver *parent)
+	 : q(parent), dns_sd_resolve_id(0), requestedProtocol(IPv6_IPv4), port(0), protocol(QAbstractSocket::IPv6Protocol)
 	{
 	}
+
+	/* DNS-SD interaction with NameManager */
+	ServiceResolver *q; //!< Pointing upwards, so NameManager can call its signals
+	int dns_sd_resolve_id; //!< DNS-SD lookup id, set by NameManager
 
 	/* configuration */
 	Protocol requestedProtocol; //!< IP protocol requested by user
@@ -818,12 +822,10 @@ public:
 			connect(p_serv, SIGNAL(resolve_resultsReady(int, const QList<XMPP::ServiceProvider::ResolveResult> &)), SLOT(provider_resolve_resultsReady(int, const QList<XMPP::ServiceProvider::ResolveResult> &)), Qt::QueuedConnection);
 		}
 
-		/*
-		  FIXME: WHAT IS THIS SUPPOSED TO DO?
-		np->id = p_serv->resolve_start(name);
+		/* store the id so we can stop it later */
+		np->dns_sd_resolve_id = p_serv->resolve_start(name);
 
-		sres_instances.insert(np->id, np);
-		*/
+		sres_instances.insert(np->dns_sd_resolve_id, np);
 	}
 
 	void publish_start(ServiceLocalPublisher::Private *np, const QString &instance, const QString &type, int port, const QMap<QString,QByteArray> &attribs)
@@ -964,11 +966,8 @@ private slots:
 
 	void provider_resolve_resultsReady(int id, const QList<XMPP::ServiceProvider::ResolveResult> &results)
 	{
-		/*
-		  FIXME: WHAT IS THIS SUPPOSED TO DO?
 		ServiceResolver::Private *np = sres_instances.value(id);
-		emit np->q->resultsReady(results[0].address, results[0].port);
-		*/
+		emit np->q->resultReady(results[0].address, results[0].port);
 	}
 
 	void provider_publish_published(int id)
@@ -1112,7 +1111,7 @@ ServiceResolver::ServiceResolver(QObject *parent)
 	NNDEBUG;
 #endif
 
-	d = new Private();
+	d = new Private(this);
 }
 
 ServiceResolver::~ServiceResolver()
@@ -1158,6 +1157,11 @@ ServiceResolver::Protocol ServiceResolver::protocol() const {
 
 void ServiceResolver::setProtocol(ServiceResolver::Protocol p) {
 	d->requestedProtocol = p;
+}
+
+/* DNS-SD lookup */
+void ServiceResolver::start(const QByteArray &name) {
+	NameManager::instance()->resolve_instance_start(d, name);
 }
 
 /* normal host lookup */

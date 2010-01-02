@@ -585,6 +585,11 @@ public:
 	void setProtocol(Protocol); //!< Set IP protocol to use, \sa protocol
 
 	/*!
+	 * Start a DNS-SD lookup
+	 * \param name Instance to lookup
+	 */
+	void start(const QByteArray &name);
+	/*!
 	 * Start a lookup for host directly
 	 * Behaves like a NameResolver with IP protocol fallback
 	 * \param host Hostname to lookup
