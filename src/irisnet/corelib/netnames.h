@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2006,2008  Justin Karneges
+ * Copyright (C) 2009-2010  Dennis Schridde
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -536,6 +537,30 @@ private:
 	friend class NameManager;
 };
 
+
+/*! DNS resolver with DNS-SD/mDNS and recursive lookup support */
+/*
+Flow:
+1) SRV query for server
+	: answer = host[]
+	: failure -> (9)
+	2) Primary query for host[i] (usually AAAA)
+		: answer = address[]
+		: failure -> (5)
+		3) Connect to address[j]
+			: connect -> FINISHED
+			: failure -> j++, (3)
+		4) address[] empty -> (5)
+	5) Fallback query for host[i] (usually A)
+		: answer = address[]
+		: failure -> i++, (2)
+		6) Connect to address[j]
+		: connect -> FINISHED
+		: failure -> j++, (6)
+		7) address[] empty -> i++, (2)
+	8) host[] empty -> (9)
+9) Try servername directly
+*/
 class IRISNET_EXPORT ServiceResolver : public QObject
 {
 	Q_OBJECT
@@ -559,18 +584,33 @@ public:
 	Protocol protocol() const; //!< IP protocol to use, defaults to IPv6_IPv4
 	void setProtocol(Protocol); //!< Set IP protocol to use, \sa protocol
 
-	/*! Start a lookup for host direclty */
+	/*!
+	 * Start a lookup for host directly
+	 * Behaves like a NameResolver with IP protocol fallback
+	 * \param host Hostname to lookup
+	 * \param port Port to signal via resultReady (for convenience)
+	 */
 	void start(const QString &host, int port);
-	/*! Start an indirect (SRV) lookup for the service */
+	/*!
+	 * Start an indirect (SRV) lookup for the service
+	 * \param service Service type, like "ssh" or "ftp"
+	 * \param transport IP transport, like "tcp" or "udp"
+	 * \param domain Domainname to lookup
+	 * \param port Specify a valid port number to make ServiceResolver fallback to domain:port
+	 */
 	void start(const QString &service, const QString &transport, const QString &domain, int port = std::numeric_limits<int>::max());
 
-	/*! Announce the next resolved host to us via resultReady() */
+	/*! Announce the next resolved host, \sa resultReady */
 	void tryNext();
 	/*! Stop the current lookup */
 	void stop();
 
 signals:
-	/*! The lookup succeeded, tell the user to connect to address:port */
+	/*!
+	 * The lookup succeeded
+	 * \param address Resolved IP address
+	 * \param port Port the service resides on
+	 */
 	void resultReady(const QHostAddress &address, quint16 port);
 	/*! The lookup failed */
 	void error(XMPP::ServiceResolver::Error);

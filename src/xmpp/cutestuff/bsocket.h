@@ -1,6 +1,7 @@
 /*
  * bsocket.h - QSocket wrapper based on Bytestream with SRV DNS support
  * Copyright (C) 2003  Justin Karneges
+ * Copyright (C) 2009-2010  Dennis Schridde
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -35,29 +36,8 @@ class QByteArray;
 // CS_NAMESPACE_BEGIN
 
 
-/*
+/*!
 	Socket with automatic hostname lookups, using SRV, AAAA and A DNS queries.
-
-	Flow:
-	1) SRV query for server
-		: answer = host[]
-		: failure -> (9)
-		2) Primary query for host[i] (usually AAAA)
-			: answer = address[]
-			: failure -> (5)
-			3) Connect to address[j]
-				: connect -> FINISHED
-				: failure -> j++, (3)
-			4) address[] empty -> (5)
-		5) Fallback query for host[i] (usually A)
-			: answer = address[]
-			: failure -> i++, (2)
-			6) Connect to address[j]
-			: connect -> FINISHED
-			: failure -> j++, (6)
-			7) address[] empty -> i++, (2)
-		8) host[] empty -> (9)
-	9) Try servername directly
 */
 class BSocket : public ByteStream
 {
