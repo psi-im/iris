@@ -590,7 +590,7 @@ public:
 	 * \param host Hostname to lookup
 	 * \param port Port to signal via resultReady (for convenience)
 	 */
-	void start(const QString &host, int port);
+	void start(const QString &host, quint16 port);
 	/*!
 	 * Start an indirect (SRV) lookup for the service
 	 * \param service Service type, like "ssh" or "ftp"

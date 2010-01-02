@@ -1161,7 +1161,7 @@ void ServiceResolver::setProtocol(ServiceResolver::Protocol p) {
 }
 
 /* normal host lookup */
-void ServiceResolver::start(const QString &host, int port)
+void ServiceResolver::start(const QString &host, quint16 port)
 {
 #ifdef NETNAMES_DEBUG
 	NNDEBUG << "h:" << host << "p:" << port;
@@ -1202,8 +1202,12 @@ void ServiceResolver::start(const QString &service, const QString &transport, co
 	d->domain = domain;
 
 	/* after we tried all SRV hosts, we shall connect directly (if requested) */
-	if (port != std::numeric_limits<int>::max()) {
+	if (port < std::numeric_limits<quint16>::max()) {
 		d->srvList.append(domain.toLocal8Bit(), port);
+	}
+	else {
+		/* The only "valid" port above the valid port range is our specification of an invalid port */
+		Q_ASSERT(port == std::numeric_limits<int>::max());
 	}
 
 	/* initiate the SRV lookup */
