@@ -944,6 +944,12 @@ private slots:
 				return;
 			}
 
+			QString str;
+			if(StunTypes::parseSoftware(response.attribute(StunTypes::SOFTWARE), &str))
+			{
+				serverSoftware = str;
+			}
+
 			allocateLifetime = lifetime;
 			relayedAddress = raddr;
 			relayedPort = rport;
