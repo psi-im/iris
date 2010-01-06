@@ -11,6 +11,8 @@ else {
 
 INCLUDEPATH += $$PWD/../corelib
 
+include($$PWD/cutestuff/cutestuff.pri)
+
 HEADERS += \
 	$$PWD/processquit.h \
 	$$PWD/stunutil.h \
@@ -33,4 +35,5 @@ SOURCES += \
 	$$PWD/icelocaltransport.cpp \
 	$$PWD/ice176.cpp
 
+INCLUDEPATH += $$PWD/legacy
 include(legacy/legacy.pri)

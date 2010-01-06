@@ -4,7 +4,7 @@ include($$PWD/modules.pri)
 
 QT *= xml network
 
-INCLUDEPATH += $$PWD/../irisnet/corelib $$PWD/../irisnet/noncore $$PWD/../irisnet/noncore/legacy
+INCLUDEPATH += $$PWD/../irisnet/corelib $$PWD/../irisnet/noncore $$PWD/../irisnet/noncore/legacy $$PWD/../irisnet/noncore/cutestuff
 iris_bundle:{
 	include(../irisnet/noncore/noncore.pri)
 }
@@ -12,7 +12,6 @@ else {
 	LIBS += -L$$IRIS_BASE/lib -lirisnet
 }
 
-include($$PWD/cutestuff/cutestuff.pri)
 include($$IRIS_XMPP_BASE_MODULE)
 include($$IRIS_XMPP_BASE64_MODULE)
 include($$IRIS_XMPP_ZLIB_MODULE)
@@ -24,8 +23,8 @@ DEFINES += XMPP_TEST
 INCLUDEPATH += \
 	$$PWD/ \
 	$$PWD/.. \
-  $$PWD/xmpp-core \
-  $$PWD/xmpp-im
+	$$PWD/xmpp-core \
+	$$PWD/xmpp-im
 
 HEADERS += \
 	$$PWD/xmpp-core/securestream.h \
