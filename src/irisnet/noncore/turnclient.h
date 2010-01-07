@@ -32,8 +32,12 @@ namespace QCA {
 
 namespace XMPP {
 
+class StunAllocate;
+
 class TurnClient : public QObject
 {
+	Q_OBJECT
+
 public:
 	enum Error
 	{
@@ -48,11 +52,17 @@ public:
 		ErrorProxyNeg,
 		ErrorProxyAuth,
 		ErrorTls,
+		ErrorAuth,
 		ErrorRejected,
 		ErrorProtocol,
 		ErrorCapacity,
 
-		// only happens if we can't resolve the problem internally
+		// according to the TURN spec, a client should try three times
+		//   to correct a mismatch error before giving up.  this class
+		//   will perform the retries internally, and ErrorMismatch is
+		//   only emitted when it has given up.  note that if this
+		//   happens, the TURN spec says you should not connect to the
+		//   TURN server again for at least 2 minutes.
 		ErrorMismatch
 	};
 
@@ -109,21 +119,31 @@ public:
 
 	void close();
 
+	StunAllocate *stunAllocate();
+
+	void addChannelPeer(const QHostAddress &addr, int port);
+
 	int packetsToRead() const;
 	int packetsToWrite() const;
 
 	QByteArray read(QHostAddress *addr, int *port);
 	void write(const QByteArray &buf, const QHostAddress &addr, int port);
 
+	QString errorString() const;
+
 signals:
-	void connected();
+	void connected(); // tcp connected
 	void tlsHandshaken();
 	void closed();
 	void needAuthParams();
-	void activated();
+	void retrying(); // mismatch error received, starting all over
+	void activated(); // ready for read/write
 	void readyRead();
-	void packetsWritten(int count);
+	void packetsWritten(int count, const QHostAddress &addr, int port);
 	void error(XMPP::TurnClient::Error e);
+
+	// not DOR-SS
+	void debugLine(const QString &line);
 
 private:
 	class Private;

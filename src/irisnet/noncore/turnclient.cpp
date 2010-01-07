@@ -21,6 +21,7 @@
 #include "turnclient.h"
 
 #include <QtCrypto>
+#include "stunmessage.h"
 #include "stuntransaction.h"
 #include "stunallocate.h"
 #include "objectsession.h"
@@ -106,12 +107,15 @@ public:
 	ByteStream *bs;
 	QCA::TLS *tls;
 	bool tlsHandshaken;
-	QByteArray inStream; // incoming stream
+	QByteArray inStream;
 	StunTransactionPool *pool;
 	StunAllocate *allocate;
+	bool allocateStarted;
 	QString user;
 	QCA::SecureArray pass;
 	QString realm;
+	int retryCount;
+	QString errorString;
 
 	class WriteItem
 	{
@@ -124,16 +128,59 @@ public:
 
 		Type type;
 		int size;
+		QHostAddress addr;
+		int port;
 
-		WriteItem(Type _type, int _size)
+		WriteItem(int _size) :
+			type(Other),
+			size(_size),
+			port(-1)
 		{
-			type = _type;
-			size = _size;
+		}
+
+		WriteItem(int _size, const QHostAddress &_addr, int _port) :
+			type(Data),
+			size(_size),
+			addr(_addr),
+			port(_port)
+		{
 		}
 	};
 
 	QList<WriteItem> writeItems;
 	int writtenBytes;
+	bool stopping;
+
+	class Packet
+	{
+	public:
+		QHostAddress addr;
+		int port;
+		QByteArray data;
+
+		// for outbound
+		bool requireChannel;
+
+		Packet() :
+			port(-1),
+			requireChannel(false)
+		{
+		}
+	};
+
+	QList<Packet> in;
+	QList<Packet> outPendingPerms;
+	int outPendingWrite;
+	QList<QHostAddress> desiredPerms;
+	QList<StunAllocate::Channel> desiredChannels;
+
+	class Written
+	{
+	public:
+		QHostAddress addr;
+		int port;
+		int count;
+	};
 
 	Private(TurnClient *_q) :
 		QObject(_q),
@@ -142,13 +189,32 @@ public:
 		bs(0),
 		tls(0),
 		pool(0),
-		allocate(0)
+		allocate(0),
+		retryCount(0),
+		writtenBytes(0),
+		stopping(false),
+		outPendingWrite(0)
 	{
 	}
 
 	void cleanup()
 	{
-		// TODO
+		delete allocate;
+		allocate = 0;
+		delete pool;
+		pool = 0;
+		delete bs;
+		bs = 0;
+
+		sess.reset();
+
+		inStream.clear();
+		retryCount = 0;
+		writeItems.clear();
+		writtenBytes = 0;
+		stopping = false;
+		outPendingPerms.clear();
+		outPendingWrite = 0;
 	}
 
 	void do_connect()
@@ -190,10 +256,37 @@ public:
 
 	void do_close()
 	{
-		if(tls && tlsHandshaken)
-			tls->close();
+		stopping = true;
+
+		if(allocate && allocateStarted)
+		{
+			emit q->debugLine("Deallocating...");
+			allocate->stop();
+		}
 		else
+		{
+			delete allocate;
+			allocate = 0;
+			delete pool;
+			pool = 0;
+
+			do_transport_close();
+		}
+	}
+
+	void do_transport_close()
+	{
+		if(tls && tlsHandshaken)
+		{
+			tls->close();
+		}
+		else
+		{
+			delete tls;
+			tls = 0;
+
 			do_sock_close();
+		}
 	}
 
 	void do_sock_close()
@@ -204,7 +297,10 @@ public:
 
 		bs->close();
 		if(!waitForSignal)
+		{
+			cleanup();
 			sess.defer(q, "closed");
+		}
 	}
 
 	void after_connected()
@@ -213,14 +309,14 @@ public:
 		connect(pool, SIGNAL(outgoingMessage(const QByteArray &, const QHostAddress &, int)), SLOT(pool_outgoingMessage(const QByteArray &, const QHostAddress &, int)));
 		connect(pool, SIGNAL(needAuthParams()), SLOT(pool_needAuthParams()));
 
+		pool->setLongTermAuthEnabled(true);
 		if(!user.isEmpty())
 		{
 			pool->setUsername(user);
 			pool->setPassword(pass);
+			if(!realm.isEmpty())
+				pool->setRealm(realm);
 		}
-
-		if(!realm.isEmpty())
-			pool->setRealm(realm);
 
 		allocate = new StunAllocate(pool);
 		connect(allocate, SIGNAL(started()), SLOT(allocate_started()));
@@ -230,13 +326,185 @@ public:
 		connect(allocate, SIGNAL(channelsChanged()), SLOT(allocate_channelsChanged()));
 
 		allocate->setClientSoftwareNameAndVersion(clientSoftware);
+
+		allocateStarted = false;
+		emit q->debugLine("Allocating...");
 		allocate->start();
 	}
 
 	void processStream(const QByteArray &in)
 	{
-		// TODO
-		Q_UNUSED(in);
+		inStream += in;
+
+		while(1)
+		{
+			QByteArray packet;
+
+			// try to extract ChannelData or a STUN message from
+			//   the stream
+			packet = StunAllocate::readChannelData((const quint8 *)inStream.data(), inStream.size());
+			if(packet.isNull())
+			{
+				packet = StunMessage::readStun((const quint8 *)inStream.data(), inStream.size());
+				if(packet.isNull())
+					break;
+			}
+
+			inStream = inStream.mid(packet.size());
+			processDatagram(in);
+		}
+	}
+
+	void processDatagram(const QByteArray &buf)
+	{
+		QByteArray data;
+		QHostAddress fromAddr;
+		int fromPort;
+
+		bool notStun;
+		if(!pool->writeIncomingMessage(buf, &notStun))
+		{
+			if(notStun)
+			{
+				// not stun?  maybe it is a data packet
+				data = allocate->decode(buf, &fromAddr, &fromPort);
+				if(!data.isNull())
+				{
+					emit q->debugLine("Received ChannelData-based data packet");
+					processDataPacket(data, fromAddr, fromPort);
+					return;
+				}
+			}
+			else
+			{
+				// packet might be stun not owned by pool.
+				//   let's see
+				StunMessage message = StunMessage::fromBinary(buf);
+				if(!message.isNull())
+				{
+					data = allocate->decode(message, &fromAddr, &fromPort);
+
+					if(!data.isNull())
+					{
+						emit q->debugLine("Received STUN-based data packet");
+						processDataPacket(data, fromAddr, fromPort);
+					}
+					else
+						emit q->debugLine("Warning: server responded with an unexpected STUN packet, skipping.");
+
+					return;
+				}
+			}
+
+			emit q->debugLine("Warning: server responded with what doesn't seem to be a STUN or data packet, skipping.");
+		}
+	}
+
+	void processDataPacket(const QByteArray &buf, const QHostAddress &addr, int port)
+	{
+		Packet p;
+		p.addr = addr;
+		p.port = port;
+		p.data = buf;
+		in += p;
+
+		emit q->readyRead();
+	}
+
+	void writeOrQueue(const QByteArray &buf, const QHostAddress &addr, int port)
+	{
+		Q_ASSERT(allocateStarted);
+
+		StunAllocate::Channel c(addr, port);
+		bool writeImmediately = false;
+		bool requireChannel = desiredChannels.contains(c);
+
+		QList<QHostAddress> actualPerms = allocate->permissions();
+		if(actualPerms.contains(addr))
+		{
+			if(requireChannel)
+			{
+				QList<StunAllocate::Channel> actualChannels = allocate->channels();
+				if(actualChannels.contains(c))
+					writeImmediately = true;
+			}
+			else
+				writeImmediately = true;
+		}
+
+		if(writeImmediately)
+		{
+			write(buf, addr, port);
+		}
+		else
+		{
+			Packet p;
+			p.addr = addr;
+			p.port = port;
+			p.data = buf;
+			p.requireChannel = requireChannel;
+			outPendingPerms += p;
+
+			ensurePermission(addr);
+		}
+	}
+
+	void tryWriteQueued()
+	{
+		QList<QHostAddress> actualPerms = allocate->permissions();
+		QList<StunAllocate::Channel> actualChannels = allocate->channels();
+		for(int n = 0; n < outPendingPerms.count(); ++n)
+		{
+			const Packet &p = outPendingPerms[n];
+			if(actualPerms.contains(p.addr))
+			{
+				StunAllocate::Channel c(p.addr, p.port);
+				if(!p.requireChannel || actualChannels.contains(c))
+				{
+					Packet po = outPendingPerms[n];
+					outPendingPerms.removeAt(n);
+					--n; // adjust position
+
+					write(po.data, po.addr, po.port);
+				}
+			}
+		}
+	}
+
+	void write(const QByteArray &buf, const QHostAddress &addr, int port)
+	{
+		QByteArray packet = allocate->encode(buf, addr, port);
+		writeItems += WriteItem(packet.size(), addr, port);
+		++outPendingWrite;
+		if(tls)
+			tls->write(packet);
+		else
+			bs->write(packet);
+	}
+
+	void ensurePermission(const QHostAddress &addr)
+	{
+		if(!desiredPerms.contains(addr))
+		{
+			emit q->debugLine(QString("Setting permission for peer address %1").arg(addr.toString()));
+
+			desiredPerms += addr;
+			allocate->setPermissions(desiredPerms);
+		}
+	}
+
+	void addChannelPeer(const QHostAddress &addr, int port)
+	{
+		ensurePermission(addr);
+
+		StunAllocate::Channel c(addr, port);
+		if(!desiredChannels.contains(c))
+		{
+			emit q->debugLine(QString("Setting channel for peer address/port %1;%2").arg(c.address.toString()).arg(c.port));
+
+			desiredChannels += c;
+			allocate->setChannels(desiredChannels);
+		}
 	}
 
 private slots:
@@ -255,6 +523,7 @@ private slots:
 			connect(tls, SIGNAL(readyReadOutgoing()), SLOT(tls_readyReadOutgoing()));
 			connect(tls, SIGNAL(error()), SLOT(tls_error()));
 			tlsHandshaken = false;
+			emit q->debugLine("TLS handshaking...");
 			tls->startClient();
 		}
 		else
@@ -264,6 +533,7 @@ private slots:
 	void bs_connectionClosed()
 	{
 		cleanup();
+		errorString = "Server unexpectedly disconnected.";
 		emit q->error(TurnClient::ErrorStream);
 	}
 
@@ -286,21 +556,58 @@ private slots:
 	void bs_bytesWritten(int written)
 	{
 		if(tls)
-			written = tls->convertBytesWritten(written);
+		{
+			// convertBytesWritten() is unsafe to call unless
+			//   the TLS handshake is completed
+			if(!tlsHandshaken)
+				return;
 
-		int packets = 0;
+			written = tls->convertBytesWritten(written);
+		}
+
 		writtenBytes += written;
+
+		QList<Written> writtenDests;
 		while(!writeItems.isEmpty() && writtenBytes >= writeItems.first().size)
 		{
 			WriteItem wi = writeItems.takeFirst();
 			writtenBytes -= wi.size;
 
 			if(wi.type == WriteItem::Data)
-				++packets;
+			{
+				int at = -1;
+				for(int n = 0; n < writtenDests.count(); ++n)
+				{
+					if(writtenDests[n].addr == wi.addr && writtenDests[n].port == wi.port)
+					{
+						at = n;
+						break;
+					}
+				}
+
+				if(at != -1)
+				{
+					++writtenDests[at].count;
+				}
+				else
+				{
+					Written wr;
+					wr.addr = wi.addr;
+					wr.port = wi.port;
+					wr.count = 1;
+					writtenDests += wr;
+				}
+			}
 		}
 
-		if(packets > 0)
-			emit q->packetsWritten(packets);
+		ObjectSessionWatcher watch(&sess);
+
+		foreach(const Written &wr, writtenDests)
+		{
+			emit q->packetsWritten(wr.count, wr.addr, wr.port);
+			if(!watch.isValid())
+				return;
+		}
 	}
 
 	void bs_error(int e)
@@ -347,19 +654,20 @@ private slots:
 		}
 
 		cleanup();
+		errorString = "Transport error.";
 		emit q->error(te);
 	}
 
 	void tls_handshaken()
 	{
 		tlsHandshaken = true;
-		tls->continueAfterStep();
 
 		ObjectSessionWatcher watch(&sess);
 		emit q->tlsHandshaken();
 		if(!watch.isValid())
 			return;
 
+		tls->continueAfterStep();
 		after_connected();
 	}
 
@@ -377,12 +685,14 @@ private slots:
 	{
 		delete tls;
 		tls = 0;
+
 		do_sock_close();
 	}
 
 	void tls_error()
 	{
 		cleanup();
+		errorString = "TLS error.";
 		emit q->error(TurnClient::ErrorTls);
 	}
 
@@ -392,7 +702,7 @@ private slots:
 		Q_UNUSED(toAddress);
 		Q_UNUSED(toPort);
 
-		writeItems += WriteItem(WriteItem::Other, packet.size());
+		writeItems += WriteItem(packet.size());
 
 		if(tls)
 			tls->write(packet);
@@ -407,28 +717,69 @@ private slots:
 
 	void allocate_started()
 	{
-		// TODO
+		allocateStarted = true;
+		emit q->debugLine("Allocate started");
+
+		emit q->activated();
 	}
 
 	void allocate_stopped()
 	{
-		// TODO
+		delete allocate;
+		allocate = 0;
+		delete pool;
+		pool = 0;
+
+		do_transport_close();
 	}
 
 	void allocate_error(XMPP::StunAllocate::Error e)
 	{
-		// TODO
-		Q_UNUSED(e);
+		QString str = allocate->errorString();
+
+		TurnClient::Error te;
+		if(e == StunAllocate::ErrorAuth)
+			te = TurnClient::ErrorAuth;
+		else if(e == StunAllocate::ErrorRejected)
+			te = TurnClient::ErrorRejected;
+		else if(e == StunAllocate::ErrorProtocol)
+			te = TurnClient::ErrorProtocol;
+		else if(e == StunAllocate::ErrorCapacity)
+			te = TurnClient::ErrorCapacity;
+		else if(e == StunAllocate::ErrorMismatch)
+		{
+			++retryCount;
+			if(retryCount < 3 && !stopping)
+			{
+				// start completely over, but don't forget
+				//   the retryCount
+				int tmp = retryCount;
+				cleanup();
+				retryCount = tmp;
+				do_connect();
+				return;
+			}
+			else
+				te = TurnClient::ErrorMismatch;
+		}
+
+		cleanup();
+		errorString = str;
+		emit q->error(te);
 	}
 
 	void allocate_permissionsChanged()
 	{
-		// TODO
+		emit q->debugLine("PermissionsChanged");
+
+		tryWriteQueued();
 	}
 
 	void allocate_channelsChanged()
 	{
-		// TODO
+		emit q->debugLine("ChannelsChanged");
+
+		tryWriteQueued();
 	}
 };
 
@@ -458,6 +809,7 @@ void TurnClient::connectToHost(const QString &host, int port, Mode mode)
 	d->host = host;
 	d->port = port;
 	d->mode = mode;
+	d->in.clear();
 	d->do_connect();
 }
 
@@ -501,32 +853,47 @@ void TurnClient::close()
 	d->do_close();
 }
 
+StunAllocate *TurnClient::stunAllocate()
+{
+	return d->allocate;
+}
+
+void TurnClient::addChannelPeer(const QHostAddress &addr, int port)
+{
+	d->addChannelPeer(addr, port);
+}
+
 int TurnClient::packetsToRead() const
 {
-	// TODO
-	return 0;
+	return d->in.count();
 }
 
 int TurnClient::packetsToWrite() const
 {
-	// TODO
-	return 0;
+	return d->outPendingPerms.count() + d->outPendingWrite;
 }
 
 QByteArray TurnClient::read(QHostAddress *addr, int *port)
 {
-	// TODO
-	Q_UNUSED(addr);
-	Q_UNUSED(port);
-	return QByteArray();
+	if(!d->in.isEmpty())
+	{
+		Private::Packet p = d->in.takeFirst();
+		*addr = p.addr;
+		*port = p.port;
+		return p.data;
+	}
+	else
+		return QByteArray();
 }
 
 void TurnClient::write(const QByteArray &buf, const QHostAddress &addr, int port)
 {
-	// TODO
-	Q_UNUSED(buf);
-	Q_UNUSED(addr);
-	Q_UNUSED(port);
+	d->writeOrQueue(buf, addr, port);
+}
+
+QString TurnClient::errorString() const
+{
+	return d->errorString;
 }
 
 }
