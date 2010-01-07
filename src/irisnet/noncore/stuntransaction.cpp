@@ -367,6 +367,9 @@ private:
 		printf("matched incoming response to existing request.  elapsed=%d\n", time.elapsed());
 #endif
 
+		// will be set to true when receiving an Unauthorized error
+		bool unauthError = false;
+
 		if(msg.mclass() == StunMessage::ErrorResponse && pool->d->useLongTermAuth)
 		{
 			// we'll handle certain error codes at this layer
@@ -374,7 +377,10 @@ private:
 			QString reason;
 			if(StunTypes::parseErrorCode(msg.attribute(StunTypes::ERROR_CODE), &code, &reason))
 			{
-				if(code == StunTypes::Unauthorized && !pool->d->triedLongTermAuth)
+				if(code == StunTypes::Unauthorized)
+					unauthError = true;
+
+				if(unauthError && !pool->d->triedLongTermAuth)
 				{
 					QString realm;
 					QString nonce;
@@ -420,7 +426,7 @@ private:
 		}
 
 		// require message integrity when auth is used
-		if((!stuser.isEmpty() || pool->d->triedLongTermAuth) && !authed)
+		if(!unauthError && (!stuser.isEmpty() || pool->d->triedLongTermAuth) && !authed)
 			return;
 
 		pool->d->remove(q);
