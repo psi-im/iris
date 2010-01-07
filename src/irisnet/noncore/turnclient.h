@@ -32,6 +32,7 @@ namespace QCA {
 
 namespace XMPP {
 
+class StunTransactionPool;
 class StunAllocate;
 
 class TurnClient : public QObject
@@ -63,6 +64,8 @@ public:
 		//   only emitted when it has given up.  note that if this
 		//   happens, the TURN spec says you should not connect to the
 		//   TURN server again for at least 2 minutes.
+		// note: in UDP mode, this class does not perform retries and
+		//   will emit this error immediately.
 		ErrorMismatch
 	};
 
@@ -109,7 +112,22 @@ public:
 	void setProxy(const Proxy &proxy);
 	void setClientSoftwareNameAndVersion(const QString &str);
 
-	void connectToHost(const QString &host, int port, Mode mode = PlainMode);
+	// for UDP.  does not take ownership of the pool.  stun transaction
+	//   I/O occurs through the pool.  transfer of data packets occurs
+	//   via processIncomingDatagram(), outgoingDatagram(), and
+	//   outgoingDatagramsWritten().  authentication happens through the
+	//   pool and not through this class.
+	void connectToHost(StunTransactionPool *pool);
+
+	// for TCP and TCP-TLS
+	void connectToHost(const QHostAddress &addr, int port, Mode mode = PlainMode);
+
+	// for UDP, use this function to process incoming packets instead of
+	//   read().
+	QByteArray processIncomingDatagram(const QByteArray &buf, bool notStun, QHostAddress *addr, int *port);
+
+	// call after writing datagrams from outgoingDatagram.  not DOR-DS safe
+	void outgoingDatagramsWritten(int count);
 
 	QString realm() const;
 	void setUsername(const QString &username);
@@ -127,6 +145,9 @@ public:
 	int packetsToWrite() const;
 
 	QByteArray read(QHostAddress *addr, int *port);
+
+	// for UDP, this call may emit outgoingDatagram() immediately (not
+	//   DOR-DS safe)
 	void write(const QByteArray &buf, const QHostAddress &addr, int port);
 
 	QString errorString() const;
@@ -142,7 +163,10 @@ signals:
 	void packetsWritten(int count, const QHostAddress &addr, int port);
 	void error(XMPP::TurnClient::Error e);
 
-	// not DOR-SS
+	// data packets to be sent to the TURN server
+	void outgoingDatagram(const QByteArray &buf);
+
+	// not DOR-SS/DS safe
 	void debugLine(const QString &line);
 
 private:

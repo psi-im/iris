@@ -101,13 +101,14 @@ public:
 	Proxy proxy;
 	QString clientSoftware;
 	TurnClient::Mode mode;
-	QString host;
-	int port;
+	QHostAddress serverAddr;
+	int serverPort;
 	ObjectSession sess;
 	ByteStream *bs;
 	QCA::TLS *tls;
 	bool tlsHandshaken;
 	QByteArray inStream;
+	bool udp;
 	StunTransactionPool *pool;
 	StunAllocate *allocate;
 	bool allocateStarted;
@@ -169,7 +170,7 @@ public:
 	};
 
 	QList<Packet> in;
-	QList<Packet> outPendingPerms;
+	QList<Packet> outPending;
 	int outPendingWrite;
 	QList<QHostAddress> desiredPerms;
 	QList<StunAllocate::Channel> desiredChannels;
@@ -188,6 +189,7 @@ public:
 		sess(this),
 		bs(0),
 		tls(0),
+		udp(false),
 		pool(0),
 		allocate(0),
 		retryCount(0),
@@ -201,10 +203,19 @@ public:
 	{
 		delete allocate;
 		allocate = 0;
-		delete pool;
+
+		// in udp mode, we don't own the pool
+		if(!udp)
+			delete pool;
 		pool = 0;
+
+		delete tls;
+		tls = 0;
+
 		delete bs;
 		bs = 0;
+
+		udp = false;
 
 		sess.reset();
 
@@ -213,12 +224,18 @@ public:
 		writeItems.clear();
 		writtenBytes = 0;
 		stopping = false;
-		outPendingPerms.clear();
+		outPending.clear();
 		outPendingWrite = 0;
 	}
 
 	void do_connect()
 	{
+		if(udp)
+		{
+			after_connected();
+			return;
+		}
+
 		if(proxy.type() == Proxy::HttpConnect)
 		{
 			HttpConnect *s = new HttpConnect(this);
@@ -227,7 +244,7 @@ public:
 			connect(s, SIGNAL(error(int)), SLOT(bs_error(int)));
 			if(!proxy.user().isEmpty())
 				s->setAuth(proxy.user(), proxy.pass());
-			s->connectToHost(proxy.host(), proxy.port(), host, port);
+			s->connectToHost(proxy.host(), proxy.port(), serverAddr.toString(), serverPort);
 		}
 		else if(proxy.type() == Proxy::Socks)
 		{
@@ -237,7 +254,7 @@ public:
 			connect(s, SIGNAL(error(int)), SLOT(bs_error(int)));
 			if(!proxy.user().isEmpty())
 				s->setAuth(proxy.user(), proxy.pass());
-			s->connectToHost(proxy.host(), proxy.port(), host, port);
+			s->connectToHost(proxy.host(), proxy.port(), serverAddr.toString(), serverPort);
 		}
 		else
 		{
@@ -245,7 +262,7 @@ public:
 			bs = s;
 			connect(s, SIGNAL(connected()), SLOT(bs_connected()));
 			connect(s, SIGNAL(error(int)), SLOT(bs_error(int)));
-			s->connectToHost(host, port);
+			s->connectToHost(serverAddr.toString(), serverPort);
 		}
 
 		connect(bs, SIGNAL(connectionClosed()), SLOT(bs_connectionClosed()));
@@ -270,7 +287,10 @@ public:
 			delete pool;
 			pool = 0;
 
-			do_transport_close();
+			if(udp)
+				sess.defer(q, "closed");
+			else
+				do_transport_close();
 		}
 	}
 
@@ -305,17 +325,21 @@ public:
 
 	void after_connected()
 	{
-		pool = new StunTransactionPool(StunTransaction::Tcp, this);
-		connect(pool, SIGNAL(outgoingMessage(const QByteArray &, const QHostAddress &, int)), SLOT(pool_outgoingMessage(const QByteArray &, const QHostAddress &, int)));
-		connect(pool, SIGNAL(needAuthParams()), SLOT(pool_needAuthParams()));
-
-		pool->setLongTermAuthEnabled(true);
-		if(!user.isEmpty())
+		// when retrying, pool will be non-null because we reuse it
+		if(!udp && !pool)
 		{
-			pool->setUsername(user);
-			pool->setPassword(pass);
-			if(!realm.isEmpty())
-				pool->setRealm(realm);
+			pool = new StunTransactionPool(StunTransaction::Tcp, this);
+			connect(pool, SIGNAL(outgoingMessage(const QByteArray &, const QHostAddress &, int)), SLOT(pool_outgoingMessage(const QByteArray &, const QHostAddress &, int)));
+			connect(pool, SIGNAL(needAuthParams()), SLOT(pool_needAuthParams()));
+
+			pool->setLongTermAuthEnabled(true);
+			if(!user.isEmpty())
+			{
+				pool->setUsername(user);
+				pool->setPassword(pass);
+				if(!realm.isEmpty())
+					pool->setRealm(realm);
+			}
 		}
 
 		allocate = new StunAllocate(pool);
@@ -364,40 +388,47 @@ public:
 		bool notStun;
 		if(!pool->writeIncomingMessage(buf, &notStun))
 		{
-			if(notStun)
+			data = processNonPoolPacket(buf, notStun, &fromAddr, &fromPort);
+			if(!data.isNull())
+				processDataPacket(data, fromAddr, fromPort);
+		}
+	}
+
+	QByteArray processNonPoolPacket(const QByteArray &buf, bool notStun, QHostAddress *addr, int *port)
+	{
+		if(notStun)
+		{
+			// not stun?  maybe it is a data packet
+			QByteArray data = allocate->decode(buf, addr, port);
+			if(!data.isNull())
 			{
-				// not stun?  maybe it is a data packet
-				data = allocate->decode(buf, &fromAddr, &fromPort);
+				emit q->debugLine("Received ChannelData-based data packet");
+				return data;
+			}
+		}
+		else
+		{
+			// packet might be stun not owned by pool.
+			//   let's see
+			StunMessage message = StunMessage::fromBinary(buf);
+			if(!message.isNull())
+			{
+				QByteArray data = allocate->decode(message, addr, port);
+
 				if(!data.isNull())
 				{
-					emit q->debugLine("Received ChannelData-based data packet");
-					processDataPacket(data, fromAddr, fromPort);
-					return;
+					emit q->debugLine("Received STUN-based data packet");
+					return data;
 				}
+				else
+					emit q->debugLine("Warning: server responded with an unexpected STUN packet, skipping.");
+
+				return QByteArray();
 			}
-			else
-			{
-				// packet might be stun not owned by pool.
-				//   let's see
-				StunMessage message = StunMessage::fromBinary(buf);
-				if(!message.isNull())
-				{
-					data = allocate->decode(message, &fromAddr, &fromPort);
-
-					if(!data.isNull())
-					{
-						emit q->debugLine("Received STUN-based data packet");
-						processDataPacket(data, fromAddr, fromPort);
-					}
-					else
-						emit q->debugLine("Warning: server responded with an unexpected STUN packet, skipping.");
-
-					return;
-				}
-			}
-
-			emit q->debugLine("Warning: server responded with what doesn't seem to be a STUN or data packet, skipping.");
 		}
+
+		emit q->debugLine("Warning: server responded with what doesn't seem to be a STUN or data packet, skipping.");
+		return QByteArray();
 	}
 
 	void processDataPacket(const QByteArray &buf, const QHostAddress &addr, int port)
@@ -443,7 +474,7 @@ public:
 			p.port = port;
 			p.data = buf;
 			p.requireChannel = requireChannel;
-			outPendingPerms += p;
+			outPending += p;
 
 			ensurePermission(addr);
 		}
@@ -453,16 +484,16 @@ public:
 	{
 		QList<QHostAddress> actualPerms = allocate->permissions();
 		QList<StunAllocate::Channel> actualChannels = allocate->channels();
-		for(int n = 0; n < outPendingPerms.count(); ++n)
+		for(int n = 0; n < outPending.count(); ++n)
 		{
-			const Packet &p = outPendingPerms[n];
+			const Packet &p = outPending[n];
 			if(actualPerms.contains(p.addr))
 			{
 				StunAllocate::Channel c(p.addr, p.port);
 				if(!p.requireChannel || actualChannels.contains(c))
 				{
-					Packet po = outPendingPerms[n];
-					outPendingPerms.removeAt(n);
+					Packet po = outPending[n];
+					outPending.removeAt(n);
 					--n; // adjust position
 
 					write(po.data, po.addr, po.port);
@@ -476,10 +507,17 @@ public:
 		QByteArray packet = allocate->encode(buf, addr, port);
 		writeItems += WriteItem(packet.size(), addr, port);
 		++outPendingWrite;
-		if(tls)
-			tls->write(packet);
+		if(udp)
+		{
+			emit q->outgoingDatagram(packet);
+		}
 		else
-			bs->write(packet);
+		{
+			if(tls)
+				tls->write(packet);
+			else
+				bs->write(packet);
+		}
 	}
 
 	void ensurePermission(const QHostAddress &addr)
@@ -505,6 +543,82 @@ public:
 			desiredChannels += c;
 			allocate->setChannels(desiredChannels);
 		}
+	}
+
+	void udp_datagramsWritten(int count)
+	{
+		QList<Written> writtenDests;
+
+		while(count > 0)
+		{
+			Q_ASSERT(!writeItems.isEmpty());
+			WriteItem wi = writeItems.takeFirst();
+			--count;
+
+			if(wi.type == WriteItem::Data)
+			{
+				int at = -1;
+				for(int n = 0; n < writtenDests.count(); ++n)
+				{
+					if(writtenDests[n].addr == wi.addr && writtenDests[n].port == wi.port)
+					{
+						at = n;
+						break;
+					}
+				}
+
+				if(at != -1)
+				{
+					++writtenDests[at].count;
+				}
+				else
+				{
+					Written wr;
+					wr.addr = wi.addr;
+					wr.port = wi.port;
+					wr.count = 1;
+					writtenDests += wr;
+				}
+			}
+		}
+
+		emitPacketsWritten(writtenDests);
+	}
+
+	void emitPacketsWritten(const QList<Written> &writtenDests)
+	{
+		ObjectSessionWatcher watch(&sess);
+		foreach(const Written &wr, writtenDests)
+		{
+			emit q->packetsWritten(wr.count, wr.addr, wr.port);
+			if(!watch.isValid())
+				return;
+		}
+	}
+
+	// return true if we are retrying, false if we should error out
+	bool handleRetry()
+	{
+		++retryCount;
+		if(retryCount < 3 && !stopping)
+		{
+			// start completely over, but retain the same pool
+			//   so the user isn't asked to auth again
+
+			int tmp_retryCount = retryCount;
+			StunTransactionPool *tmp_pool = pool;
+			pool = 0;
+
+			cleanup();
+
+			retryCount = tmp_retryCount;
+			pool = tmp_pool;
+
+			do_connect();
+			return true;
+		}
+
+		return false;
 	}
 
 private slots:
@@ -568,8 +682,13 @@ private slots:
 		writtenBytes += written;
 
 		QList<Written> writtenDests;
-		while(!writeItems.isEmpty() && writtenBytes >= writeItems.first().size)
+
+		while(writtenBytes > 0)
 		{
+			Q_ASSERT(!writeItems.isEmpty());
+			if(writtenBytes < writeItems.first().size)
+				break;
+
 			WriteItem wi = writeItems.takeFirst();
 			writtenBytes -= wi.size;
 
@@ -600,14 +719,7 @@ private slots:
 			}
 		}
 
-		ObjectSessionWatcher watch(&sess);
-
-		foreach(const Written &wr, writtenDests)
-		{
-			emit q->packetsWritten(wr.count, wr.addr, wr.port);
-			if(!watch.isValid())
-				return;
-		}
+		emitPacketsWritten(writtenDests);
 	}
 
 	void bs_error(int e)
@@ -730,7 +842,10 @@ private slots:
 		delete pool;
 		pool = 0;
 
-		do_transport_close();
+		if(udp)
+			emit q->closed();
+		else
+			do_transport_close();
 	}
 
 	void allocate_error(XMPP::StunAllocate::Error e)
@@ -748,19 +863,10 @@ private slots:
 			te = TurnClient::ErrorCapacity;
 		else if(e == StunAllocate::ErrorMismatch)
 		{
-			++retryCount;
-			if(retryCount < 3 && !stopping)
-			{
-				// start completely over, but don't forget
-				//   the retryCount
-				int tmp = retryCount;
-				cleanup();
-				retryCount = tmp;
-				do_connect();
+			if(!udp && handleRetry())
 				return;
-			}
-			else
-				te = TurnClient::ErrorMismatch;
+
+			te = TurnClient::ErrorMismatch;
 		}
 
 		cleanup();
@@ -804,13 +910,32 @@ void TurnClient::setClientSoftwareNameAndVersion(const QString &str)
 	d->clientSoftware = str;
 }
 
-void TurnClient::connectToHost(const QString &host, int port, Mode mode)
+void TurnClient::connectToHost(StunTransactionPool *pool)
 {
-	d->host = host;
-	d->port = port;
+	d->udp = true;
+	d->pool = pool;
+	d->in.clear();
+	d->do_connect();
+}
+
+void TurnClient::connectToHost(const QHostAddress &addr, int port, Mode mode)
+{
+	d->serverAddr = addr;
+	d->serverPort = port;
+	d->udp = false;
 	d->mode = mode;
 	d->in.clear();
 	d->do_connect();
+}
+
+QByteArray TurnClient::processIncomingDatagram(const QByteArray &buf, bool notStun, QHostAddress *addr, int *port)
+{
+	return d->processNonPoolPacket(buf, notStun, addr, port);
+}
+
+void TurnClient::outgoingDatagramsWritten(int count)
+{
+	d->udp_datagramsWritten(count);
 }
 
 QString TurnClient::realm() const
@@ -870,7 +995,7 @@ int TurnClient::packetsToRead() const
 
 int TurnClient::packetsToWrite() const
 {
-	return d->outPendingPerms.count() + d->outPendingWrite;
+	return d->outPending.count() + d->outPendingWrite;
 }
 
 QByteArray TurnClient::read(QHostAddress *addr, int *port)
