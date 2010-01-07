@@ -905,6 +905,20 @@ private slots:
 					emit q->error(StunAllocate::ErrorCapacity);
 					return;
 				}
+				else if(code == StunTypes::Unauthorized)
+				{
+					cleanup();
+					errorString = "Unauthorized";
+					emit q->error(StunAllocate::ErrorAuth);
+					return;
+				}
+				else
+				{
+					cleanup();
+					errorString = reason;
+					emit q->error(StunAllocate::ErrorGeneric);
+					return;
+				}
 			}
 
 			quint32 lifetime;

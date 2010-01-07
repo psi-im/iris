@@ -41,6 +41,7 @@ public:
 	{
 		ErrorGeneric,
 		ErrorTimeout,
+		ErrorAuth,
 		ErrorRejected,
 		ErrorProtocol,
 		ErrorCapacity,
