@@ -27,6 +27,7 @@
 #include <iris/stuntransaction.h>
 #include <iris/stunbinding.h>
 #include <iris/stunallocate.h>
+#include <iris/turnclient.h>
 #include <QtCrypto>
 
 using namespace XMPP;
@@ -877,6 +878,149 @@ private:
 	}
 };
 
+class TurnClientTest : public QObject
+{
+	Q_OBJECT
+public:
+	int mode;
+	QString relayHost;
+	int relayPort;
+	QString relayUser, relayPass, relayRealm;
+	QHostAddress peerAddr;
+	int peerPort;
+	TurnClient *turn;
+
+	TurnClientTest() :
+		turn(0)
+	{
+	}
+
+public slots:
+	void start()
+	{
+		turn = new TurnClient(this);
+
+		connect(turn, SIGNAL(connected()), SLOT(turn_connected()));
+		connect(turn, SIGNAL(tlsHandshaken()), SLOT(turn_tlsHandshaken()));
+		connect(turn, SIGNAL(closed()), SLOT(turn_closed()));
+		connect(turn, SIGNAL(needAuthParams()), SLOT(turn_needAuthParams()));
+		connect(turn, SIGNAL(retrying()), SLOT(turn_retrying()));
+		connect(turn, SIGNAL(activated()), SLOT(turn_activated()));
+		connect(turn, SIGNAL(readyRead()), SLOT(turn_readyRead()));
+		connect(turn, SIGNAL(packetsWritten(int, const QHostAddress &, int)), SLOT(turn_packetsWritten(int, const QHostAddress &, int)));
+		connect(turn, SIGNAL(error(XMPP::TurnClient::Error)), SLOT(turn_error(XMPP::TurnClient::Error)));
+		connect(turn, SIGNAL(debugLine(const QString &)), SLOT(turn_debugLine(const QString &)));
+
+		turn->setClientSoftwareNameAndVersion("nettool (Iris)");
+
+		if(!relayUser.isEmpty())
+		{
+			turn->setUsername(relayUser);
+			turn->setPassword(relayPass.toUtf8());
+			if(!relayRealm.isEmpty())
+				turn->setRealm(relayRealm);
+		}
+
+		printf("TCP connecting...\n");
+		turn->connectToHost(relayHost, relayPort, mode == 2 ? TurnClient::TlsMode : TurnClient::PlainMode);
+	}
+
+signals:
+	void quit();
+
+private slots:
+	void turn_connected()
+	{
+		printf("TCP connected\n");
+	}
+
+	void turn_tlsHandshaken()
+	{
+		printf("TLS handshake completed\n");
+	}
+
+	void turn_closed()
+	{
+		printf("Done\n");
+		emit quit();
+	}
+
+	void turn_needAuthParams()
+	{
+		relayUser = prompt("Username:");
+		relayPass = prompt("Password:");
+
+		turn->setUsername(relayUser);
+		turn->setPassword(relayPass.toUtf8());
+
+		QString str = prompt(QString("Realm: [%1]").arg(turn->realm()));
+		if(!str.isEmpty())
+		{
+			relayRealm = str;
+			turn->setRealm(relayRealm);
+		}
+		else
+			relayRealm = turn->realm();
+
+		turn->continueAfterParams();
+	}
+
+	void turn_retrying()
+	{
+		printf("Mismatch error, retrying...");
+	}
+
+	void turn_activated()
+	{
+		StunAllocate *allocate = turn->stunAllocate();
+
+		QHostAddress saddr = allocate->reflexiveAddress();
+		quint16 sport = allocate->reflexivePort();
+		printf("Server says we are %s;%d\n", qPrintable(saddr.toString()), sport);
+		saddr = allocate->relayedAddress();
+		sport = allocate->relayedPort();
+		printf("Server relays via %s;%d\n", qPrintable(saddr.toString()), sport);
+
+		// optional: flag this destination to use a channelbind
+		turn->addChannelPeer(peerAddr, peerPort);
+
+		QByteArray buf = "Hello, world!";
+		printf("Relaying test packet of %d bytes [%s] to %s;%d...\n", buf.size(), buf.data(), qPrintable(peerAddr.toString()), peerPort);
+		turn->write(buf, peerAddr, peerPort);
+	}
+
+	void turn_readyRead()
+	{
+		QHostAddress addr;
+		int port;
+		QByteArray buf = turn->read(&addr, &port);
+
+		printf("Received %d bytes from %s:%d: [%s]\n", buf.size(), qPrintable(addr.toString()), port, buf.data());
+
+		turn->close();
+	}
+
+	void turn_packetsWritten(int count, const QHostAddress &addr, int port)
+	{
+		Q_UNUSED(addr);
+		Q_UNUSED(port);
+
+		printf("%d packet(s) written\n", count);
+	}
+
+	void turn_error(XMPP::TurnClient::Error e)
+	{
+		Q_UNUSED(e);
+		printf("Error: %s\n", qPrintable(turn->errorString()));
+		emit quit();
+	}
+
+	void turn_debugLine(const QString &line)
+	{
+		printf("%s\n", qPrintable(line));
+	}
+};
+
 void usage()
 {
 	printf("nettool: simple testing utility\n");
@@ -1254,18 +1398,36 @@ int main(int argc, char **argv)
 			return 1;
 		}
 
-		TurnEcho a;
-		a.mode = mode;
-		a.relayAddr = raddr;
-		a.relayPort = rport;
-		a.relayUser = user;
-		a.relayPass = pass;
-		a.relayRealm = realm;
-		a.peerAddr = paddr;
-		a.peerPort = pport;
-		QObject::connect(&a, SIGNAL(quit()), &qapp, SLOT(quit()));
-		QTimer::singleShot(0, &a, SLOT(start()));
-		qapp.exec();
+		if(mode == 0)
+		{
+			TurnEcho a;
+			a.mode = mode;
+			a.relayAddr = raddr;
+			a.relayPort = rport;
+			a.relayUser = user;
+			a.relayPass = pass;
+			a.relayRealm = realm;
+			a.peerAddr = paddr;
+			a.peerPort = pport;
+			QObject::connect(&a, SIGNAL(quit()), &qapp, SLOT(quit()));
+			QTimer::singleShot(0, &a, SLOT(start()));
+			qapp.exec();
+		}
+		else
+		{
+			TurnClientTest a;
+			a.mode = mode;
+			a.relayHost = raddr.toString();
+			a.relayPort = rport;
+			a.relayUser = user;
+			a.relayPass = pass;
+			a.relayRealm = realm;
+			a.peerAddr = paddr;
+			a.peerPort = pport;
+			QObject::connect(&a, SIGNAL(quit()), &qapp, SLOT(quit()));
+			QTimer::singleShot(0, &a, SLOT(start()));
+			qapp.exec();
+		}
 	}
 	else
 	{
