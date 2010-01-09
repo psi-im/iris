@@ -199,6 +199,11 @@ public:
 	{
 	}
 
+	~Private()
+	{
+		cleanup();
+	}
+
 	void cleanup()
 	{
 		delete allocate;
