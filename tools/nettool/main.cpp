@@ -1096,7 +1096,7 @@ private slots:
 
 	void turn_retrying()
 	{
-		printf("Mismatch error, retrying...");
+		printf("Mismatch error, retrying...\n");
 	}
 
 	void turn_activated()
