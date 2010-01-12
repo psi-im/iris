@@ -55,8 +55,6 @@ public:
 		connect(&turn, SIGNAL(packetsWritten(int, const QHostAddress &, int)), SLOT(turn_packetsWritten(int, const QHostAddress &, int)));
 		connect(&turn, SIGNAL(error(XMPP::TurnClient::Error)), SLOT(turn_error(XMPP::TurnClient::Error)));
 		connect(&turn, SIGNAL(debugLine(const QString &)), SLOT(turn_debugLine(const QString &)));
-
-		turn.setClientSoftwareNameAndVersion("Iris");
 	}
 
 	void start()
@@ -123,6 +121,8 @@ private slots:
 
 	void turn_error(XMPP::TurnClient::Error e)
 	{
+		printf("turn_error: %s\n", qPrintable(turn.errorString()));
+
 		turnErrorCode = e;
 		emit q->error(IceTurnTransport::ErrorTurn);
 	}
@@ -142,6 +142,11 @@ IceTurnTransport::IceTurnTransport(QObject *parent) :
 IceTurnTransport::~IceTurnTransport()
 {
 	delete d;
+}
+
+void IceTurnTransport::setClientSoftwareNameAndVersion(const QString &str)
+{
+	d->turn.setClientSoftwareNameAndVersion(str);
 }
 
 void IceTurnTransport::setUsername(const QString &user)

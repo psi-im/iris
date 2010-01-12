@@ -382,7 +382,7 @@ public:
 				stunType = XMPP::Ice176::Relay;
 			else
 				stunType = XMPP::Ice176::Basic;
-			ice->setStunService(stunType, stunAddr, opt_stunPort);
+			ice->setStunService(stunAddr, opt_stunPort, stunType);
 			if(!opt_user.isEmpty())
 			{
 				ice->setStunUsername(opt_user);

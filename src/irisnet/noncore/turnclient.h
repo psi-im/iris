@@ -144,6 +144,7 @@ public:
 	int packetsToRead() const;
 	int packetsToWrite() const;
 
+	// TCP mode only
 	QByteArray read(QHostAddress *addr, int *port);
 
 	// for UDP, this call may emit outgoingDatagram() immediately (not
@@ -159,11 +160,14 @@ signals:
 	void needAuthParams();
 	void retrying(); // mismatch error received, starting all over
 	void activated(); // ready for read/write
+
+	// TCP mode only
 	void readyRead();
+
 	void packetsWritten(int count, const QHostAddress &addr, int port);
 	void error(XMPP::TurnClient::Error e);
 
-	// data packets to be sent to the TURN server
+	// data packets to be sent to the TURN server, UDP mode only
 	void outgoingDatagram(const QByteArray &buf);
 
 	// not DOR-SS/DS safe

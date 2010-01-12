@@ -44,9 +44,12 @@ public:
 	IceTurnTransport(QObject *parent = 0);
 	~IceTurnTransport();
 
+	void setClientSoftwareNameAndVersion(const QString &str);
+
 	// set these before calling start()
 	void setUsername(const QString &user);
 	void setPassword(const QCA::SecureArray &pass);
+
 	void setProxy(const TurnClient::Proxy &proxy);
 
 	void start(const QHostAddress &addr, int port, TurnClient::Mode mode = TurnClient::PlainMode);

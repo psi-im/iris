@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009  Barracuda Networks, Inc.
+ * Copyright (C) 2009,2010  Barracuda Networks, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -21,6 +21,7 @@
 #include "ice176.h"
 
 #include <QTimer>
+#include <QUdpSocket>
 #include <QtCrypto>
 #include "stuntransaction.h"
 #include "stunbinding.h"
@@ -29,6 +30,12 @@
 #include "icelocaltransport.h"
 
 namespace XMPP {
+
+enum
+{
+	Direct,
+	Relayed
+};
 
 static QChar randomPrintableChar()
 {
@@ -352,21 +359,31 @@ public:
 					continue;
 				}
 
+				int port = (basePort != -1) ? basePort + n : 0;
+
+				QUdpSocket *qsock = new QUdpSocket(this);
+				if(!qsock->bind(localAddrs[i].addr, port))
+				{
+					delete qsock;
+					printf("warning: unable to bind to port %d\n", port);
+					continue;
+				}
+
 				LocalTransport *lt = new LocalTransport;
 				lt->sock = new IceLocalTransport(this);
 				connect(lt->sock, SIGNAL(started()), SLOT(lt_started()));
 				connect(lt->sock, SIGNAL(stopped()), SLOT(lt_stopped()));
 				connect(lt->sock, SIGNAL(stunFinished()), SLOT(lt_stunFinished()));
 				connect(lt->sock, SIGNAL(error(XMPP::IceLocalTransport::Error)), SLOT(lt_error(XMPP::IceLocalTransport::Error)));
-				connect(lt->sock, SIGNAL(readyRead(XMPP::IceLocalTransport::TransmitPath)), SLOT(lt_readyRead(XMPP::IceLocalTransport::TransmitPath)));
-				connect(lt->sock, SIGNAL(datagramsWritten(XMPP::IceLocalTransport::TransmitPath, int)), SLOT(lt_datagramsWritten(XMPP::IceLocalTransport::TransmitPath, int)));
+				connect(lt->sock, SIGNAL(readyRead(int)), SLOT(lt_readyRead(int)));
+				connect(lt->sock, SIGNAL(datagramsWritten(int, int, const QHostAddress &, int)), SLOT(lt_datagramsWritten(int, int, const QHostAddress &, int)));
 				lt->addrAt = i;
 				lt->network = localAddrs[i].network;
 				lt->isVpn = localAddrs[i].isVpn;
 				lt->componentId = n + 1;
 				localTransports += lt;
-				int port = (basePort != -1) ? basePort + n : -1;
-				lt->sock->start(localAddrs[i].addr, port);
+
+				lt->sock->start(qsock);
 
 				atLeastOneTransport = true;
 				printf("starting transport %s:%d for component %d\n", qPrintable(localAddrs[i].addr.toString()), port, lt->componentId);
@@ -644,10 +661,12 @@ public slots:
 		if(!stunAddr.isNull())
 		{
 			lt->use_stun = true;
-			if(stunType == Ice176::Relay)
-				lt->sock->setStunService(IceLocalTransport::Relay, stunAddr, stunPort);
-			else
-				lt->sock->setStunService(IceLocalTransport::Basic, stunAddr, stunPort);
+			if(stunType == Ice176::Basic)
+				lt->sock->setStunService(stunAddr, stunPort, IceLocalTransport::Basic);
+			else if(stunType == Ice176::Relay)
+				lt->sock->setStunService(stunAddr, stunPort, IceLocalTransport::Relay);
+			else // Auto
+				lt->sock->setStunService(stunAddr, stunPort, IceLocalTransport::Auto);
 
 			// reduce gathering of STUN candidates to 4 seconds
 			//   when trickle mode is disabled
@@ -732,7 +751,7 @@ public slots:
 		emit q->error();
 	}
 
-	void lt_readyRead(XMPP::IceLocalTransport::TransmitPath path)
+	void lt_readyRead(int path)
 	{
 		IceLocalTransport *sock = (IceLocalTransport *)sender();
 		int at = -1;
@@ -749,7 +768,7 @@ public slots:
 
 		LocalTransport *lt = localTransports[at];
 
-		if(path == IceLocalTransport::Direct)
+		if(path == Direct)
 		{
 			while(lt->sock->hasPendingDatagrams(path))
 			{
@@ -874,11 +893,13 @@ public slots:
 		}
 	}
 
-	void lt_datagramsWritten(XMPP::IceLocalTransport::TransmitPath path, int count)
+	void lt_datagramsWritten(int path, int count, const QHostAddress &addr, int port)
 	{
 		// TODO
 		Q_UNUSED(path);
 		Q_UNUSED(count);
+		Q_UNUSED(addr);
+		Q_UNUSED(port);
 	}
 
 	void lt_timeout()
@@ -939,7 +960,7 @@ public slots:
 		LocalTransport *lt = localTransports[at];
 
 		printf("connectivity check from %s:%d to %s:%d\n", qPrintable(pair.local.addr.addr.toString()), pair.local.addr.port, qPrintable(pair.remote.addr.addr.toString()), pair.remote.addr.port);
-		lt->sock->writeDatagram(IceLocalTransport::Direct, packet, pair.remote.addr.addr, pair.remote.addr.port);
+		lt->sock->writeDatagram(Direct, packet, pair.remote.addr.addr, pair.remote.addr.port);
 	}
 
 	void binding_success()
@@ -1030,11 +1051,11 @@ void Ice176::setExternalAddresses(const QList<ExternalAddress> &addrs)
 	}
 }
 
-void Ice176::setStunService(StunServiceType type, const QHostAddress &addr, int port)
+void Ice176::setStunService(const QHostAddress &addr, int port, StunServiceType type)
 {
-	d->stunType = type;
 	d->stunAddr = addr;
 	d->stunPort = port;
+	d->stunType = type;
 }
 
 void Ice176::setComponentCount(int count)
@@ -1123,7 +1144,7 @@ void Ice176::writeDatagram(int componentIndex, const QByteArray &datagram)
 
 	Private::LocalTransport *lt = d->localTransports[at];
 
-	lt->sock->writeDatagram(IceLocalTransport::Direct, datagram, pair.remote.addr.addr, pair.remote.addr.port);
+	lt->sock->writeDatagram(Direct, datagram, pair.remote.addr.addr, pair.remote.addr.port);
 
 	// DOR-SR?
 	QMetaObject::invokeMethod(this, "datagramsWritten", Qt::QueuedConnection, Q_ARG(int, componentIndex), Q_ARG(int, 1));

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009  Barracuda Networks, Inc.
+ * Copyright (C) 2009,2010  Barracuda Networks, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -44,6 +44,7 @@ public:
 
 	enum StunServiceType
 	{
+		Auto,
 		Basic,
 		Relay
 	};
@@ -134,7 +135,7 @@ public:
 	// one per local address.  you must set local addresses first.
 	void setExternalAddresses(const QList<ExternalAddress> &addrs);
 
-	void setStunService(StunServiceType type, const QHostAddress &addr, int port);
+	void setStunService(const QHostAddress &addr, int port, StunServiceType type = Auto);
 
 	void setComponentCount(int count);
 	void setLocalCandidateTrickle(bool enabled); // default false
