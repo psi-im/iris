@@ -231,6 +231,8 @@ public:
 		stopping = false;
 		outPending.clear();
 		outPendingWrite = 0;
+		desiredPerms.clear();
+		desiredChannels.clear();
 	}
 
 	void do_connect()
