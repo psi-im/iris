@@ -22,7 +22,9 @@ HEADERS += \
 	$$PWD/stunbinding.h \
 	$$PWD/stunallocate.h \
 	$$PWD/turnclient.h \
+	$$PWD/icetransport.h \
 	$$PWD/icelocaltransport.h \
+	$$PWD/iceturntransport.h \
 	$$PWD/ice176.h
 
 SOURCES += \
@@ -34,7 +36,9 @@ SOURCES += \
 	$$PWD/stunbinding.cpp \
 	$$PWD/stunallocate.cpp \
 	$$PWD/turnclient.cpp \
+	$$PWD/icetransport.cpp \
 	$$PWD/icelocaltransport.cpp \
+	$$PWD/iceturntransport.cpp \
 	$$PWD/ice176.cpp
 
 INCLUDEPATH += $$PWD/legacy
