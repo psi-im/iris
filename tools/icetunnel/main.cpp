@@ -263,7 +263,7 @@ public:
 	int opt_channels;
 	QString opt_stunHost;
 	int opt_stunPort;
-	bool opt_is_relay;
+	XMPP::Ice176::StunServiceType opt_stunType;
 	QString opt_user, opt_pass;
 
 	XMPP::NameResolver dns;
@@ -377,12 +377,7 @@ public:
 
 		if(!stunAddr.isNull())
 		{
-			XMPP::Ice176::StunServiceType stunType;
-			if(opt_is_relay)
-				stunType = XMPP::Ice176::Relay;
-			else
-				stunType = XMPP::Ice176::Basic;
-			ice->setStunService(stunAddr, opt_stunPort, stunType);
+			ice->setStunService(stunAddr, opt_stunPort, opt_stunType);
 			if(!opt_user.isEmpty())
 			{
 				ice->setStunUsername(opt_user);
@@ -537,10 +532,10 @@ void usage()
 	printf("       icetunnel responder (options)\n");
 	printf("\n");
 	printf(" --localbase=[n]     local base port (default=60000)\n");
-	printf(" --channels=[n]      number of channels to create (default=4)\n");
+	printf(" --channels=[n]      number of channels to create (default=1)\n");
 	printf(" --stunhost=[host]   STUN server to use\n");
 	printf(" --stunport=[n]      STUN server port to use (default=3478)\n");
-	printf(" --relay             set if STUN server supports relaying (TURN)\n");
+	printf(" --stuntype=[type]   auto, basic, or relay (default=auto)\n");
 	printf(" --user=[user]       STUN server username\n");
 	printf(" --pass=[pass]       STUN server password\n");
 	printf("\n");
@@ -555,10 +550,10 @@ int main(int argc, char **argv)
 	args.removeFirst();
 
 	int localBase = 60000;
-	int channels = 4;
+	int channels = 1;
 	QString stunHost;
 	int stunPort = 3478;
-	bool is_relay = false;
+	XMPP::Ice176::StunServiceType stunType = XMPP::Ice176::Auto;
 	QString user, pass;
 
 	for(int n = 0; n < args.count(); ++n)
@@ -596,8 +591,20 @@ int main(int argc, char **argv)
 			stunHost = val;
 		else if(var == "stunport")
 			stunPort = val.toInt();
-		else if(var == "relay")
-			is_relay = true;
+		else if(var == "stuntype")
+		{
+			if(val == "auto")
+				stunType = XMPP::Ice176::Auto;
+			else if(val == "basic")
+				stunType = XMPP::Ice176::Basic;
+			else if(val == "relay")
+				stunType = XMPP::Ice176::Relay;
+			else
+			{
+				usage();
+				return 1;
+			}
+		}
 		else if(var == "user")
 			user = val;
 		else if(var == "pass")
@@ -645,7 +652,7 @@ int main(int argc, char **argv)
 	app.opt_channels = channels;
 	app.opt_stunHost = stunHost;
 	app.opt_stunPort = stunPort;
-	app.opt_is_relay = is_relay;
+	app.opt_stunType = stunType;
 	app.opt_user = user;
 	app.opt_pass = pass;
 
