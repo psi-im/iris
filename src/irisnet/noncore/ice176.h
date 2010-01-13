@@ -61,19 +61,6 @@ public:
 			isVpn(false)
 		{
 		}
-
-		bool operator==(const LocalAddress &other) const
-		{
-			if(addr == other.addr && network == other.network)
-				return true;
-			else
-				return false;
-		}
-
-		inline bool operator!=(const LocalAddress &other) const
-		{
-			return !operator==(other);
-		}
 	};
 
 	class ExternalAddress
@@ -136,6 +123,8 @@ public:
 	void setExternalAddresses(const QList<ExternalAddress> &addrs);
 
 	void setStunService(const QHostAddress &addr, int port, StunServiceType type = Auto);
+	void setStunUsername(const QString &user);
+	void setStunPassword(const QCA::SecureArray &pass);
 
 	void setComponentCount(int count);
 	void setLocalCandidateTrickle(bool enabled); // default false
@@ -148,14 +137,19 @@ public:
 	void setPeerUfrag(const QString &ufrag);
 	void setPeerPassword(const QString &pass);
 
-	void setStunUsername(const QString &user);
-	void setStunPassword(const QCA::SecureArray &pass);
-
 	void addRemoteCandidates(const QList<Candidate> &list);
 
 	bool hasPendingDatagrams(int componentIndex) const;
 	QByteArray readDatagram(int componentIndex);
 	void writeDatagram(int componentIndex, const QByteArray &datagram);
+
+	// this call will ensure that TURN headers are minimized on this
+	//   component, with the drawback that packets might not be able to
+	//   be set as non-fragmentable.  use this on components that expect
+	//   to send lots of very small packets, where header overhead is the
+	//   most costly but also where fragmentation is impossible anyway.
+	//   in short, use this on audio, but not on video.
+	void flagComponentAsLowOverhead(int componentIndex);
 
 signals:
 	void started();

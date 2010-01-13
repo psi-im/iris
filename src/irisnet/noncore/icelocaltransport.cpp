@@ -184,6 +184,7 @@ public:
 
 	IceLocalTransport *q;
 	ObjectSession sess;
+	QUdpSocket *extSock;
 	SafeUdpSocket *sock;
 	StunTransactionPool *pool;
 	StunBinding *stunBinding;
@@ -242,10 +243,14 @@ public:
 
 		if(sock)
 		{
-			QUdpSocket *qsock = sock->release();
+			if(extSock)
+			{
+				sock->release();
+				extSock = 0;
+			}
+
 			delete sock;
 			sock = 0;
-			qsock->deleteLater();
 		}
 
 		addr = QHostAddress();
@@ -265,15 +270,9 @@ public:
 		stopping = false;
 	}
 
-	void start(QUdpSocket *qsock)
+	void start()
 	{
 		Q_ASSERT(!sock);
-
-		sock = new SafeUdpSocket(qsock, this);
-		addr = sock->localAddress();
-		port = sock->localPort();
-		connect(sock, SIGNAL(readyRead()), SLOT(sock_readyRead()));
-		connect(sock, SIGNAL(datagramsWritten(int)), SLOT(sock_datagramsWritten(int)));
 
 		sess.defer(this, "postStart");
 	}
@@ -349,14 +348,71 @@ public:
 	}
 
 private:
+	// note: emits signal on error
+	QUdpSocket *createSocket()
+	{
+		QUdpSocket *qsock = new QUdpSocket(this);
+		if(!qsock->bind(addr, 0))
+		{
+			delete qsock;
+			emit q->error(IceLocalTransport::ErrorBind);
+			return 0;
+		}
+
+		return qsock;
+	}
+
+	void prepareSocket()
+	{
+		addr = sock->localAddress();
+		port = sock->localPort();
+
+		connect(sock, SIGNAL(readyRead()), SLOT(sock_readyRead()));
+		connect(sock, SIGNAL(datagramsWritten(int)), SLOT(sock_datagramsWritten(int)));
+	}
+
 	// return true if we are retrying, false if we should error out
 	bool handleRetry()
 	{
+		// don't allow retrying if activated or stopping)
+		if(turnActivated || stopping)
+			return false;
+
 		++retryCount;
-		if(retryCount < 3 && !stopping)
+		if(retryCount)
 		{
 			printf("retrying...\n");
+
+			delete sock;
+			sock = 0;
+
+			// to receive this error, it is a Relay, so change
+			//   the mode
+			stunType = IceLocalTransport::Relay;
+
+			QUdpSocket *qsock = createSocket();
+			if(!qsock)
+			{
+				// signal emitted in this case.  bail.
+				//   (return true so caller takes no action)
+				return true;
+			}
+
+			sock = new SafeUdpSocket(qsock, this);
+
+			prepareSocket();
+
+			refAddr = QHostAddress();
+			refPort = -1;
+
+			relAddr = QHostAddress();
+			relPort = -1;
+
 			do_turn();
+
+			// tell the world that our local address probably
+			//   changed, and that we lost our reflexive address
+			emit q->addressesChanged();
 			return true;
 		}
 
@@ -391,6 +447,24 @@ private:
 private slots:
 	void postStart()
 	{
+		if(extSock)
+		{
+			sock = new SafeUdpSocket(extSock, this);
+		}
+		else
+		{
+			QUdpSocket *qsock = createSocket();
+			if(!qsock)
+			{
+				// signal emitted in this case.  bail
+				return;
+			}
+
+			sock = new SafeUdpSocket(qsock, this);
+		}
+
+		prepareSocket();
+
 		emit q->started();
 	}
 
@@ -529,7 +603,7 @@ private slots:
 		delete stunBinding;
 		stunBinding = 0;
 
-		emit q->stunFinished();
+		emit q->addressesChanged();
 	}
 
 	void binding_error(XMPP::StunBinding::Error e)
@@ -539,8 +613,8 @@ private slots:
 		delete stunBinding;
 		stunBinding = 0;
 
-		if(stunType == IceLocalTransport::Basic || (stunType == IceLocalTransport::Auto && !turn))
-			emit q->stunFinished();
+		//if(stunType == IceLocalTransport::Basic || (stunType == IceLocalTransport::Auto && !turn))
+		//	emit q->addressesChanged();
 	}
 
 	void turn_connected()
@@ -578,7 +652,7 @@ private slots:
 
 		turnActivated = true;
 
-		emit q->stunFinished();
+		emit q->addressesChanged();
 	}
 
 	void turn_packetsWritten(int count, const QHostAddress &addr, int port)
@@ -597,7 +671,7 @@ private slots:
 
 		if(e == TurnClient::ErrorMismatch)
 		{
-			if(handleRetry())
+			if(!extSock && handleRetry())
 				return;
 		}
 
@@ -606,8 +680,8 @@ private slots:
 		if(wasActivated)
 			return;
 
-		if(stunType == IceLocalTransport::Relay || (stunType == IceLocalTransport::Auto && !stunBinding))
-			emit q->stunFinished();
+		//if(stunType == IceLocalTransport::Relay || (stunType == IceLocalTransport::Auto && !stunBinding))
+		//	emit q->addressesChanged();
 	}
 
 	void turn_outgoingDatagram(const QByteArray &buf)
@@ -642,7 +716,14 @@ void IceLocalTransport::setClientSoftwareNameAndVersion(const QString &str)
 
 void IceLocalTransport::start(QUdpSocket *sock)
 {
-	d->start(sock);
+	d->extSock = sock;
+	d->start();
+}
+
+void IceLocalTransport::start(const QHostAddress &addr)
+{
+	d->addr = addr;
+	d->start();
 }
 
 void IceLocalTransport::stop()

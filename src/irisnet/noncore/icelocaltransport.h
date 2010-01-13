@@ -43,6 +43,11 @@ class IceLocalTransport : public IceTransport
 	Q_OBJECT
 
 public:
+	enum Error
+	{
+		ErrorBind = ErrorCustom
+	};
+
 	enum StunServiceType
 	{
 		Auto,
@@ -55,8 +60,13 @@ public:
 
 	void setClientSoftwareNameAndVersion(const QString &str);
 
-	// passed socket must already be bind()'ed
+	// passed socket must already be bind()'ed, don't support
+	//   ErrorMismatch retries
 	void start(QUdpSocket *sock);
+
+	// bind to this address on a random port, do support ErrorMismatch
+	//   retries
+	void start(const QHostAddress &addr);
 
 	void setStunService(const QHostAddress &addr, int port, StunServiceType type = Auto);
 	void setStunUsername(const QString &user);
@@ -83,8 +93,12 @@ public:
 	virtual void writeDatagram(int path, const QByteArray &buf, const QHostAddress &addr, int port);
 
 signals:
-	// may be emitted multiple times if Auto is used
-	void stunFinished();
+	// may be emitted multiple times.
+	// if handling internal ErrorMismatch, then local address may change
+	//   and server reflexive address may disappear.
+	// if start(QUdpSocket*) was used, then ErrorMismatch is not handled,
+	//   and this signal will only be emitted to add addresses
+	void addressesChanged();
 
 private:
 	class Private;

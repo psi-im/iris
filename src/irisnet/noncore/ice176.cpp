@@ -86,6 +86,14 @@ class Ice176::Private : public QObject
 	Q_OBJECT
 
 public:
+	enum CandidateType
+	{
+		HostType,
+		PeerReflexiveType,
+		ServerReflexiveType,
+		RelayedType
+	};
+
 	enum CandidatePairState
 	{
 		PWaiting,
@@ -93,14 +101,6 @@ public:
 		PSucceeded,
 		PFailed,
 		PFrozen
-	};
-
-	enum CandidateType
-	{
-		HostType,
-		PeerReflexiveType,
-		ServerReflexiveType,
-		RelayedType
 	};
 
 	enum CheckListState
@@ -206,6 +206,7 @@ public:
 	class LocalTransport
 	{
 	public:
+		QUdpSocket *qsock;
 		IceLocalTransport *sock;
 		QTimer *t; // for cutting stun request short
 		int addrAt; // for calculating foundation, not great
@@ -261,6 +262,7 @@ public:
 		for(int n = 0; n < localTransports.count(); ++n)
 		{
 			delete localTransports[n]->sock;
+			localTransports[n]->qsock->deleteLater();
 
 			QTimer *t = localTransports[n]->t;
 			if(t)
@@ -370,11 +372,12 @@ public:
 				}
 
 				LocalTransport *lt = new LocalTransport;
+				lt->qsock = qsock;
 				lt->sock = new IceLocalTransport(this);
 				connect(lt->sock, SIGNAL(started()), SLOT(lt_started()));
 				connect(lt->sock, SIGNAL(stopped()), SLOT(lt_stopped()));
-				connect(lt->sock, SIGNAL(stunFinished()), SLOT(lt_stunFinished()));
-				connect(lt->sock, SIGNAL(error(XMPP::IceLocalTransport::Error)), SLOT(lt_error(XMPP::IceLocalTransport::Error)));
+				connect(lt->sock, SIGNAL(addressesChanged()), SLOT(lt_addressesChanged()));
+				connect(lt->sock, SIGNAL(error(int)), SLOT(lt_error(int)));
 				connect(lt->sock, SIGNAL(readyRead(int)), SLOT(lt_readyRead(int)));
 				connect(lt->sock, SIGNAL(datagramsWritten(int, int, const QHostAddress &, int)), SLOT(lt_datagramsWritten(int, int, const QHostAddress &, int)));
 				lt->addrAt = i;
@@ -689,9 +692,9 @@ public slots:
 		printf("lt_stopped\n");
 	}
 
-	void lt_stunFinished()
+	void lt_addressesChanged()
 	{
-		printf("lt_stunFinished\n");
+		printf("lt_addressesChanged\n");
 
 		IceLocalTransport *sock = (IceLocalTransport *)sender();
 		int at = -1;
@@ -741,7 +744,7 @@ public slots:
 		tryFinishGather();
 	}
 
-	void lt_error(XMPP::IceLocalTransport::Error e)
+	void lt_error(int e)
 	{
 		// TODO
 		Q_UNUSED(e);
@@ -1046,7 +1049,17 @@ void Ice176::setExternalAddresses(const QList<ExternalAddress> &addrs)
 	d->extAddrs.clear();
 	foreach(const ExternalAddress &addr, addrs)
 	{
-		if(d->localAddrs.contains(addr.base))
+		bool found = false;
+		foreach(const LocalAddress &la, d->localAddrs)
+		{
+			if(la.addr == addr.base.addr)
+			{
+				found = true;
+				break;
+			}
+		}
+
+		if(found)
 			d->extAddrs += addrs;
 	}
 }
@@ -1056,6 +1069,16 @@ void Ice176::setStunService(const QHostAddress &addr, int port, StunServiceType 
 	d->stunAddr = addr;
 	d->stunPort = port;
 	d->stunType = type;
+}
+
+void Ice176::setStunUsername(const QString &user)
+{
+	d->stunUser = user;
+}
+
+void Ice176::setStunPassword(const QCA::SecureArray &pass)
+{
+	d->stunPass = pass;
 }
 
 void Ice176::setComponentCount(int count)
@@ -1087,16 +1110,6 @@ void Ice176::setPeerUfrag(const QString &ufrag)
 void Ice176::setPeerPassword(const QString &pass)
 {
 	d->peerPass = pass;
-}
-
-void Ice176::setStunUsername(const QString &user)
-{
-	d->stunUser = user;
-}
-
-void Ice176::setStunPassword(const QCA::SecureArray &pass)
-{
-	d->stunPass = pass;
 }
 
 void Ice176::addRemoteCandidates(const QList<Candidate> &list)
@@ -1148,6 +1161,12 @@ void Ice176::writeDatagram(int componentIndex, const QByteArray &datagram)
 
 	// DOR-SR?
 	QMetaObject::invokeMethod(this, "datagramsWritten", Qt::QueuedConnection, Q_ARG(int, componentIndex), Q_ARG(int, 1));
+}
+
+void Ice176::flagComponentAsLowOverhead(int componentIndex)
+{
+	// TODO
+	Q_UNUSED(componentIndex);
 }
 
 }
