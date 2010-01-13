@@ -545,7 +545,7 @@ public:
 public slots:
 	void start()
 	{
-		StunTransaction::Mode poolMode;
+		StunTransaction::Mode poolMode = StunTransaction::Udp;
 
 		if(mode == 0)
 		{
