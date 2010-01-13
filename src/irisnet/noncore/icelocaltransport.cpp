@@ -419,7 +419,7 @@ private slots:
 	void sock_datagramsWritten(int count)
 	{
 		QList<Written> dwrites;
-		int twrites;
+		int twrites = 0;
 
 		while(count > 0)
 		{
