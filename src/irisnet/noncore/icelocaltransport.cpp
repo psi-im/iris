@@ -204,6 +204,8 @@ public:
 	QList<Datagram> in;
 	QList<Datagram> inRelayed;
 	QList<WriteItem> pendingWrites;
+	int retryCount;
+	bool stopping;
 
 	Private(IceLocalTransport *_q) :
 		QObject(_q),
@@ -216,7 +218,9 @@ public:
 		turnActivated(false),
 		port(-1),
 		refPort(-1),
-		relPort(-1)
+		relPort(-1),
+		retryCount(0),
+		stopping(false)
 	{
 	}
 
@@ -256,6 +260,9 @@ public:
 		in.clear();
 		inRelayed.clear();
 		pendingWrites.clear();
+
+		retryCount = 0;
+		stopping = false;
 	}
 
 	void start(QUdpSocket *qsock)
@@ -274,6 +281,9 @@ public:
 	void stop()
 	{
 		Q_ASSERT(sock);
+		Q_ASSERT(!stopping);
+
+		stopping = true;
 
 		if(turn)
 			turn->close();
@@ -317,24 +327,42 @@ public:
 
 		if(useTurn)
 		{
-			turn = new TurnClient(this);
-			connect(turn, SIGNAL(connected()), SLOT(turn_connected()));
-			connect(turn, SIGNAL(tlsHandshaken()), SLOT(turn_tlsHandshaken()));
-			connect(turn, SIGNAL(closed()), SLOT(turn_closed()));
-			connect(turn, SIGNAL(retrying()), SLOT(turn_retrying()));
-			connect(turn, SIGNAL(activated()), SLOT(turn_activated()));
-			connect(turn, SIGNAL(packetsWritten(int, const QHostAddress &, int)), SLOT(turn_packetsWritten(int, const QHostAddress &, int)));
-			connect(turn, SIGNAL(error(XMPP::TurnClient::Error)), SLOT(turn_error(XMPP::TurnClient::Error)));
-			connect(turn, SIGNAL(outgoingDatagram(const QByteArray &)), SLOT(turn_outgoingDatagram(const QByteArray &)));
-			connect(turn, SIGNAL(debugLine(const QString &)), SLOT(turn_debugLine(const QString &)));
-
-			turn->setClientSoftwareNameAndVersion(clientSoftware);
-
-			turn->connectToHost(pool);
+			do_turn();
 		}
 	}
 
+	void do_turn()
+	{
+		turn = new TurnClient(this);
+		connect(turn, SIGNAL(connected()), SLOT(turn_connected()));
+		connect(turn, SIGNAL(tlsHandshaken()), SLOT(turn_tlsHandshaken()));
+		connect(turn, SIGNAL(closed()), SLOT(turn_closed()));
+		connect(turn, SIGNAL(activated()), SLOT(turn_activated()));
+		connect(turn, SIGNAL(packetsWritten(int, const QHostAddress &, int)), SLOT(turn_packetsWritten(int, const QHostAddress &, int)));
+		connect(turn, SIGNAL(error(XMPP::TurnClient::Error)), SLOT(turn_error(XMPP::TurnClient::Error)));
+		connect(turn, SIGNAL(outgoingDatagram(const QByteArray &)), SLOT(turn_outgoingDatagram(const QByteArray &)));
+		connect(turn, SIGNAL(debugLine(const QString &)), SLOT(turn_debugLine(const QString &)));
+
+		turn->setClientSoftwareNameAndVersion(clientSoftware);
+
+		turn->connectToHost(pool);
+	}
+
 private:
+	// return true if we are retrying, false if we should error out
+	bool handleRetry()
+	{
+		++retryCount;
+		if(retryCount < 3 && !stopping)
+		{
+			printf("retrying...\n");
+			do_turn();
+			return true;
+		}
+
+		return false;
+	}
+
 	// return true if data packet, false if pool or nothing
 	bool processIncomingStun(const QByteArray &buf, Datagram *dg)
 	{
@@ -536,11 +564,6 @@ private slots:
 		postStop();
 	}
 
-	void turn_retrying()
-	{
-		printf("turn_retrying\n");
-	}
-
 	void turn_activated()
 	{
 		StunAllocate *allocate = turn->stunAllocate();
@@ -565,14 +588,18 @@ private slots:
 
 	void turn_error(XMPP::TurnClient::Error e)
 	{
-		Q_UNUSED(e);
-
 		printf("turn_error: %s\n", qPrintable(turn->errorString()));
 
 		delete turn;
 		turn = 0;
 		bool wasActivated = turnActivated;
 		turnActivated = false;
+
+		if(e == TurnClient::ErrorMismatch)
+		{
+			if(handleRetry())
+				return;
+		}
 
 		// this means our relay died on us.  in the future we might
 		//   consider reporting this
