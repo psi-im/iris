@@ -296,6 +296,7 @@ public:
 
 		pool = new StunTransactionPool(StunTransaction::Udp, this);
 		connect(pool, SIGNAL(outgoingMessage(const QByteArray &, const QHostAddress &, int)), SLOT(pool_outgoingMessage(const QByteArray &, const QHostAddress &, int)));
+		connect(pool, SIGNAL(needAuthParams()), SLOT(pool_needAuthParams()));
 
 		pool->setLongTermAuthEnabled(true);
 		if(!stunUser.isEmpty())
@@ -593,6 +594,15 @@ private slots:
 		wi.type = WriteItem::Pool;
 		pendingWrites += wi;
 		sock->writeDatagram(packet, stunAddr, stunPort);
+	}
+
+	void pool_needAuthParams()
+	{
+		// we can get this signal if the user did not provide
+		//   creds to us.  however, since this class doesn't support
+		//   prompting just continue on as if we had a blank
+		//   user/pass
+		pool->continueAfterParams();
 	}
 
 	void binding_success()

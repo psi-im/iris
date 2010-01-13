@@ -49,6 +49,7 @@ public:
 		connect(&turn, SIGNAL(connected()), SLOT(turn_connected()));
 		connect(&turn, SIGNAL(tlsHandshaken()), SLOT(turn_tlsHandshaken()));
 		connect(&turn, SIGNAL(closed()), SLOT(turn_closed()));
+		connect(&turn, SIGNAL(needAuthParams()), SLOT(turn_needAuthParams()));
 		connect(&turn, SIGNAL(retrying()), SLOT(turn_retrying()));
 		connect(&turn, SIGNAL(activated()), SLOT(turn_activated()));
 		connect(&turn, SIGNAL(readyRead()), SLOT(turn_readyRead()));
@@ -85,6 +86,15 @@ private slots:
 		printf("turn_closed\n");
 
 		emit q->stopped();
+	}
+
+	void turn_needAuthParams()
+	{
+		// we can get this signal if the user did not provide
+		//   creds to us.  however, since this class doesn't support
+		//   prompting just continue on as if we had a blank
+		//   user/pass
+		turn.continueAfterParams();
 	}
 
 	void turn_retrying()
