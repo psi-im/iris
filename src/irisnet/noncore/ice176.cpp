@@ -360,22 +360,25 @@ public:
 		localUser = randomCredential(4);
 		localPass = randomCredential(22);
 
-		QList<QHostAddress> listenAddrs;
-		for(int n = 0; n < localAddrs.count(); ++n)
+		if(basePort != -1)
 		{
-			if(localAddrs[n].addr.protocol() != QAbstractSocket::IPv4Protocol)
+			QList<QHostAddress> listenAddrs;
+			for(int n = 0; n < localAddrs.count(); ++n)
 			{
-				printf("warning: skipping non-ipv4 address: %s\n", qPrintable(localAddrs[n].addr.toString()));
-				continue;
+				if(localAddrs[n].addr.protocol() != QAbstractSocket::IPv4Protocol)
+				{
+					printf("warning: skipping non-ipv4 address: %s\n", qPrintable(localAddrs[n].addr.toString()));
+					continue;
+				}
+
+				listenAddrs += localAddrs[n].addr;
 			}
 
-			listenAddrs += localAddrs[n].addr;
+			portReserver.setAddresses(listenAddrs);
+			portReserver.setPorts(basePort, componentCount);
+			if(!portReserver.reservedAll())
+				printf("warning: unable to bind to all local ports\n");
 		}
-
-		portReserver.setAddresses(listenAddrs);
-		portReserver.setPorts(basePort, componentCount);
-		if(!portReserver.reservedAll())
-			printf("warning: unable to bind to all local ports\n");
 
 		QList<QUdpSocket*> socketList = portReserver.borrowSockets(componentCount, this);
 
