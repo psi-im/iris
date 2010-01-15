@@ -211,23 +211,30 @@ public:
 	{
 		foreach(QUdpSocket *sock, sockList)
 		{
+			int at = -1;
 			for(int n = 0; n < items.count(); ++n)
 			{
-				Item &i = items[n];
-
-				Q_ASSERT(i.sockList.contains(sock));
-
-				QHostAddress a = sock->localAddress();
-
-				Q_ASSERT(i.lent);
-				Q_ASSERT(i.lentAddrs.contains(a));
-
-				sock->setParent(q);
-
-				i.lentAddrs.removeAll(a);
-				if(i.lentAddrs.isEmpty())
-					i.lent = false;
+				if(items[n].sockList.contains(sock))
+				{
+					at = n;
+					break;
+				}
 			}
+
+			Q_ASSERT(at != -1);
+
+			Item &i = items[at];
+
+			QHostAddress a = sock->localAddress();
+
+			Q_ASSERT(i.lent);
+			Q_ASSERT(i.lentAddrs.contains(a));
+
+			sock->setParent(q);
+
+			i.lentAddrs.removeAll(a);
+			if(i.lentAddrs.isEmpty())
+				i.lent = false;
 		}
 
 		tryCleanup();
