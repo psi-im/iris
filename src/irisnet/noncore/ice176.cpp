@@ -27,6 +27,7 @@
 #include "stunbinding.h"
 #include "stunallocate.h"
 #include "stunmessage.h"
+#include "udpportreserver.h"
 #include "icelocaltransport.h"
 
 namespace XMPP {
@@ -207,6 +208,7 @@ public:
 	{
 	public:
 		QUdpSocket *qsock;
+		bool borrowedSocket;
 		IceLocalTransport *sock;
 		QTimer *t; // for cutting stun request short
 		int addrAt; // for calculating foundation, not great
@@ -218,6 +220,8 @@ public:
 		bool stun_finished;
 
 		LocalTransport() :
+			qsock(0),
+			borrowedSocket(false),
 			sock(0),
 			t(0),
 			addrAt(-1),
@@ -234,6 +238,7 @@ public:
 	Ice176 *q;
 	Ice176::Mode mode;
 	int basePort;
+	UdpPortReserver portReserver;
 	int componentCount;
 	QList<Ice176::LocalAddress> localAddrs;
 	QList<Ice176::ExternalAddress> extAddrs;
@@ -253,16 +258,21 @@ public:
 		QObject(_q),
 		q(_q),
 		basePort(-1),
+		portReserver(this),
 		componentCount(0)
 	{
 	}
 
 	~Private()
 	{
+		QList<QUdpSocket*> socketList;
+
 		for(int n = 0; n < localTransports.count(); ++n)
 		{
 			delete localTransports[n]->sock;
-			localTransports[n]->qsock->deleteLater();
+
+			if(localTransports[n]->borrowedSocket)
+				socketList += localTransports[n]->qsock;
 
 			QTimer *t = localTransports[n]->t;
 			if(t)
@@ -272,6 +282,8 @@ public:
 				t->deleteLater();
 			}
 		}
+
+		portReserver.returnSockets(socketList);
 
 		qDeleteAll(localTransports);
 
@@ -348,6 +360,25 @@ public:
 		localUser = randomCredential(4);
 		localPass = randomCredential(22);
 
+		QList<QHostAddress> listenAddrs;
+		for(int n = 0; n < localAddrs.count(); ++n)
+		{
+			if(localAddrs[n].addr.protocol() != QAbstractSocket::IPv4Protocol)
+			{
+				printf("warning: skipping non-ipv4 address: %s\n", qPrintable(localAddrs[n].addr.toString()));
+				continue;
+			}
+
+			listenAddrs += localAddrs[n].addr;
+		}
+
+		portReserver.setAddresses(listenAddrs);
+		portReserver.setPorts(basePort, componentCount);
+		if(!portReserver.reservedAll())
+			printf("warning: unable to bind to all local ports\n");
+
+		QList<QUdpSocket*> socketList = portReserver.borrowSockets(componentCount, this);
+
 		bool atLeastOneTransport = false;
 		for(int n = 0; n < componentCount; ++n)
 		{
@@ -355,24 +386,42 @@ public:
 
 			for(int i = 0; i < localAddrs.count(); ++i)
 			{
+				// skip ipv6 here too, so that we iterate over
+				//   localAddrs identical to listenAddrs
 				if(localAddrs[i].addr.protocol() != QAbstractSocket::IPv4Protocol)
 				{
-					printf("warning: skipping non-ipv4 address: %s\n", qPrintable(localAddrs[i].addr.toString()));
 					continue;
 				}
 
-				int port = (basePort != -1) ? basePort + n : 0;
-
-				QUdpSocket *qsock = new QUdpSocket(this);
-				if(!qsock->bind(localAddrs[i].addr, port))
+				// try to use pre-bound port, else random
+				QUdpSocket *qsock;
+				bool borrowedSocket;
+				if(!socketList.isEmpty())
 				{
-					delete qsock;
-					printf("warning: unable to bind to port %d\n", port);
-					continue;
+					// localAddrs is in the same order as
+					//   listenAddrs, so the next socket
+					//   is always for the correct addr
+					qsock = socketList.takeFirst();
+					borrowedSocket = true;
 				}
+				else
+				{
+					qsock = new QUdpSocket(this);
+					if(!qsock->bind(localAddrs[i].addr, 0))
+					{
+						delete qsock;
+						printf("warning: unable to bind to random port\n");
+						continue;
+					}
+
+					borrowedSocket = false;
+				}
+
+				int port = qsock->localPort();
 
 				LocalTransport *lt = new LocalTransport;
 				lt->qsock = qsock;
+				lt->borrowedSocket = borrowedSocket;
 				lt->sock = new IceLocalTransport(this);
 				connect(lt->sock, SIGNAL(started()), SLOT(lt_started()));
 				connect(lt->sock, SIGNAL(stopped()), SLOT(lt_stopped()));
