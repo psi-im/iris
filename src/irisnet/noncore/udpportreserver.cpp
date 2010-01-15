@@ -24,8 +24,10 @@
 
 namespace XMPP {
 
-class UdpPortReserver::Private
+class UdpPortReserver::Private : public QObject
 {
+	Q_OBJECT
+
 public:
 	class Item
 	{
@@ -66,6 +68,7 @@ public:
 	QList<Item> items; // in order sorted by port
 
 	Private(UdpPortReserver *_q) :
+		QObject(_q),
 		q(_q)
 	{
 	}
@@ -125,7 +128,7 @@ public:
 
 		foreach(int x, added)
 		{
-			int insert_before = -1;
+			int insert_before = items.count();
 			for(int n = 0; n < items.count(); ++n)
 			{
 				if(x < items[n].port)
@@ -231,6 +234,7 @@ public:
 			Q_ASSERT(i.lentAddrs.contains(a));
 
 			sock->setParent(q);
+			connect(sock, SIGNAL(readyRead()), SLOT(sock_readyRead()));
 
 			i.lentAddrs.removeAll(a);
 			if(i.lentAddrs.isEmpty())
@@ -238,6 +242,16 @@ public:
 		}
 
 		tryCleanup();
+	}
+
+private slots:
+	void sock_readyRead()
+	{
+		QUdpSocket *sock = (QUdpSocket *)sender();
+
+		// eat all packets
+		while(sock->hasPendingDatagrams())
+			sock->readDatagram(0, 0);
 	}
 
 private:
@@ -261,11 +275,14 @@ private:
 			foreach(const QHostAddress &a, neededAddrs)
 			{
 				QUdpSocket *sock = new QUdpSocket(q);
+
 				if(!sock->bind(a, i.port))
 				{
 					delete sock;
 					continue;
 				}
+
+				connect(sock, SIGNAL(readyRead()), SLOT(sock_readyRead()));
 
 				i.sockList += sock;
 			}
@@ -360,6 +377,7 @@ private:
 		foreach(QUdpSocket *sock, i->sockList)
 		{
 			i->lentAddrs += sock->localAddress();
+			sock->disconnect(this);
 			sock->setParent(parent);
 			out += sock;
 		}
@@ -413,3 +431,5 @@ void UdpPortReserver::returnSockets(const QList<QUdpSocket*> &sockList)
 }
 
 }
+
+#include "udpportreserver.moc"
