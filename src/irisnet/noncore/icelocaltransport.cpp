@@ -212,6 +212,7 @@ public:
 		QObject(_q),
 		q(_q),
 		sess(this),
+		extSock(0),
 		sock(0),
 		pool(0),
 		stunBinding(0),
