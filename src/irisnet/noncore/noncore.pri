@@ -26,6 +26,7 @@ HEADERS += \
 	$$PWD/icetransport.h \
 	$$PWD/icelocaltransport.h \
 	$$PWD/iceturntransport.h \
+	$$PWD/icecomponent.h \
 	$$PWD/ice176.h
 
 SOURCES += \
@@ -41,6 +42,7 @@ SOURCES += \
 	$$PWD/icetransport.cpp \
 	$$PWD/icelocaltransport.cpp \
 	$$PWD/iceturntransport.cpp \
+	$$PWD/icecomponent.cpp \
 	$$PWD/ice176.cpp
 
 INCLUDEPATH += $$PWD/legacy
