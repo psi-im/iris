@@ -449,6 +449,9 @@ private:
 private slots:
 	void postStart()
 	{
+		if(stopping)
+			return;
+
 		if(extSock)
 		{
 			sock = new SafeUdpSocket(extSock, this);
