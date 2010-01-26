@@ -162,6 +162,14 @@ public:
 				if(findLocalAddr(la.addr) != -1)
 					continue;
 
+				if(!useLocal)
+				{
+					// skip out, but log the address in
+					//   case we need it for stun
+					config.localAddrs += la;
+					continue;
+				}
+
 				QUdpSocket *qsock = 0;
 				if(socketList)
 					qsock = takeFromSocketList(socketList, la.addr, this);
@@ -185,7 +193,7 @@ public:
 					borrowedSocket = false;
 				}
 
-				int port = qsock->localPort();
+				//int port = qsock->localPort();
 
 				config.localAddrs += la;
 
@@ -203,7 +211,7 @@ public:
 				localLeap += lt;
 
 				lt->sock->start(qsock);
-				printf("starting transport %s:%d for component %d\n", qPrintable(la.addr.toString()), port, id);
+				//printf("starting transport %s:%d for component %d\n", qPrintable(la.addr.toString()), port, id);
 			}
 		}
 
@@ -275,7 +283,7 @@ public:
 
 				lt->sock->setClientSoftwareNameAndVersion(clientSoftware);
 				lt->sock->start(la.addr);
-				printf("starting transport %s:(dyn) for component %d\n", qPrintable(la.addr.toString()), id);
+				//printf("starting transport %s:(dyn) for component %d\n", qPrintable(la.addr.toString()), id);
 			}
 		}
 
@@ -300,7 +308,7 @@ public:
 			tt->setPassword(config.stunPass);
 			tt->start(config.stunAddr, config.stunPort);
 
-			printf("starting TURN transport with server %s:%d for component %d\n", qPrintable(config.stunAddr.toString()), config.stunPort, id);
+			//printf("starting TURN transport with server %s:%d for component %d\n", qPrintable(config.stunAddr.toString()), config.stunPort, id);
 		}
 
 		if(localLeap.isEmpty() && localStun.isEmpty() && !local_finished)
@@ -576,28 +584,31 @@ private slots:
 		int addrAt = findLocalAddr(lt->addr);
 		Q_ASSERT(addrAt != -1);
 
-		CandidateInfo ci;
-		ci.addr.addr = lt->sock->localAddress();
-		ci.addr.port = lt->sock->localPort();
-		ci.type = HostType;
-		ci.componentId = id;
-		ci.priority = choose_default_priority(ci.type, 65535 - addrAt, lt->isVpn, ci.componentId);
-		ci.base = ci.addr;
-		ci.network = lt->network;
-
-		Candidate c;
-		c.id = getId();
-		c.info = ci;
-		c.iceTransport = sock;
-		c.path = 0;
-
-		localCandidates += c;
-
 		ObjectSessionWatcher watch(&sess);
 
-		emit q->candidateAdded(c);
-		if(!watch.isValid())
-			return;
+		if(useLocal)
+		{
+			CandidateInfo ci;
+			ci.addr.addr = lt->sock->localAddress();
+			ci.addr.port = lt->sock->localPort();
+			ci.type = HostType;
+			ci.componentId = id;
+			ci.priority = choose_default_priority(ci.type, 65535 - addrAt, lt->isVpn, ci.componentId);
+			ci.base = ci.addr;
+			ci.network = lt->network;
+
+			Candidate c;
+			c.id = getId();
+			c.info = ci;
+			c.iceTransport = sock;
+			c.path = 0;
+
+			localCandidates += c;
+
+			emit q->candidateAdded(c);
+			if(!watch.isValid())
+				return;
+		}
 
 		if(isLocalLeap)
 		{
