@@ -481,7 +481,7 @@ private slots:
 
 	void sock_readyRead()
 	{
-		ObjectSessionWatcher watcher(&sess);
+		ObjectSessionWatcher watch(&sess);
 
 		QList<Datagram> dreads;
 		QList<Datagram> rreads;
@@ -496,7 +496,14 @@ private slots:
 			QByteArray buf = sock->readDatagram(&from, &fromPort);
 			if(from == stunAddr && fromPort == stunPort)
 			{
-				if(processIncomingStun(buf, &dg))
+				bool haveData = processIncomingStun(buf, &dg);
+
+				// processIncomingStun could cause signals to
+				//   emit.  for example, stopped()
+				if(!watch.isValid())
+					return;
+
+				if(haveData)
 					rreads += dg;
 			}
 			else
@@ -512,7 +519,7 @@ private slots:
 		{
 			in += dreads;
 			emit q->readyRead(Direct);
-			if(!watcher.isValid())
+			if(!watch.isValid())
 				return;
 		}
 
