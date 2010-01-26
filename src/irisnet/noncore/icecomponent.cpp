@@ -296,7 +296,7 @@ public:
 			}
 		}
 
-		if(useStunRelayTcp && !config.stunAddr.isNull() && (config.stunType == Ice176::Relay || config.stunType == Ice176::Auto) && !tt)
+		if(useStunRelayTcp && !config.stunAddr.isNull() && !config.stunUser.isEmpty() && (config.stunType == Ice176::Relay || config.stunType == Ice176::Auto) && !tt)
 		{
 			tt = new IceTurnTransport(this);
 			connect(tt, SIGNAL(started()), SLOT(tt_started()));
@@ -713,7 +713,7 @@ private slots:
 			{
 				if(i->extAddr.isNull() && i->sock->localAddress() == lt->sock->localAddress())
 				{
-					i->extAddr = lt->sock->localAddress();
+					i->extAddr = lt->sock->serverReflexiveAddress();
 					if(i->started)
 					{
 						ensureExt(i, addrAt);
