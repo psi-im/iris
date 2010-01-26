@@ -97,7 +97,9 @@ public slots:
 class BSocket::Private
 {
 public:
-	Private()
+	Private(BSocket *_q) :
+		ndns(_q),
+		srv(_q)
 	{
 		qsock = 0;
 		qsock_relay = 0;
@@ -117,7 +119,7 @@ public:
 BSocket::BSocket(QObject *parent)
 :ByteStream(parent)
 {
-	d = new Private;
+	d = new Private(this);
 	connect(&d->ndns, SIGNAL(resultsReady()), SLOT(ndns_done()));
 	connect(&d->srv, SIGNAL(resultsReady()), SLOT(srv_done()));
 
@@ -164,11 +166,11 @@ void BSocket::reset(bool clear)
 void BSocket::ensureSocket()
 {
 	if(!d->qsock) {
-		d->qsock = new QTcpSocket;
+		d->qsock = new QTcpSocket(this);
 #if QT_VERSION >= 0x030200
 		d->qsock->setReadBufferSize(READBUFSIZE);
 #endif
-		d->qsock_relay = new QTcpSocketSignalRelay(d->qsock);
+		d->qsock_relay = new QTcpSocketSignalRelay(d->qsock, this);
 		connect(d->qsock_relay, SIGNAL(hostFound()), SLOT(qs_hostFound()));
 		connect(d->qsock_relay, SIGNAL(connected()), SLOT(qs_connected()));
 		connect(d->qsock_relay, SIGNAL(disconnected()), SLOT(qs_closed()));

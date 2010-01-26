@@ -95,7 +95,10 @@ static bool extractMainHeader(const QString &line, QString *proto, int *code, QS
 class HttpConnect::Private
 {
 public:
-	Private() {}
+	Private(HttpConnect *_q) :
+		sock(_q)
+	{
+	}
 
 	BSocket sock;
 	QString host;
@@ -116,7 +119,7 @@ public:
 HttpConnect::HttpConnect(QObject *parent)
 :ByteStream(parent)
 {
-	d = new Private;
+	d = new Private(this);
 	connect(&d->sock, SIGNAL(connected()), SLOT(sock_connected()));
 	connect(&d->sock, SIGNAL(connectionClosed()), SLOT(sock_connectionClosed()));
 	connect(&d->sock, SIGNAL(delayedCloseFinished()), SLOT(sock_delayedCloseFinished()));
