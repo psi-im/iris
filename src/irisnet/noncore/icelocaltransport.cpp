@@ -429,7 +429,7 @@ private:
 		int fromPort;
 
 		bool notStun;
-		if(!pool->writeIncomingMessage(buf, &notStun))
+		if(!pool->writeIncomingMessage(buf, &notStun) && turn)
 		{
 			data = turn->processIncomingDatagram(buf, notStun, &fromAddr, &fromPort);
 			if(!data.isNull())
