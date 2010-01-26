@@ -31,11 +31,18 @@ namespace QCA {
 
 namespace XMPP {
 
+class UdpPortReserver;
+
 class Ice176 : public QObject
 {
 	Q_OBJECT
 
 public:
+	enum Error
+	{
+		ErrorGeneric
+	};
+
 	enum Mode
 	{
 		Initiator,
@@ -84,7 +91,7 @@ public:
 		int generation;
 		QString id;
 		QHostAddress ip;
-		int network;
+		int network; // -1 = unknown
 		int port;
 		int priority;
 		QString protocol;
@@ -111,25 +118,33 @@ public:
 
 	void reset();
 
-	// default = -1 (unspecified)
-	// if a base port is specified, it is only considered for the initial
-	//   component count.  if components are later added, random ports
-	//   will be used.
-	void setBasePort(int port);
+	// if set, ports will be drawn from the reserver if possible, before
+	//   binding to random ports
+	// note: ownership is not passed
+	void setPortReserver(UdpPortReserver *portReserver);
 
 	void setLocalAddresses(const QList<LocalAddress> &addrs);
 
 	// one per local address.  you must set local addresses first.
 	void setExternalAddresses(const QList<ExternalAddress> &addrs);
 
-	void setStunService(const QHostAddress &addr, int port, StunServiceType type = Auto);
+	// call setStunService last here, as it will trigger stun connectivity
 	void setStunUsername(const QString &user);
 	void setStunPassword(const QCA::SecureArray &pass);
+	void setStunService(const QHostAddress &addr, int port, StunServiceType type = Auto);
+
+	// these all start out enabled, but can be disabled for diagnostic
+	//   purposes
+	void setUseLocal(bool enabled);
+	void setUseStunBasic(bool enabled);
+	void setUseStunRelayUdp(bool enabled);
+	void setUseStunRelayTcp(bool enabled);
 
 	void setComponentCount(int count);
 	void setLocalCandidateTrickle(bool enabled); // default false
 
 	void start(Mode mode);
+	void stop();
 
 	QString localUfrag() const;
 	QString localPassword() const;
@@ -151,9 +166,13 @@ public:
 	//   in short, use this on audio, but not on video.
 	void flagComponentAsLowOverhead(int componentIndex);
 
+	// FIXME: this should probably be in netinterface.h or such
+	static bool isIPv6LinkLocalAddress(const QHostAddress &addr);
+
 signals:
 	void started();
-	void error();
+	void stopped();
+	void error(XMPP::Ice176::Error e);
 
 	void localCandidatesReady(const QList<XMPP::Ice176::Candidate> &list);
 	void componentReady(int index);
