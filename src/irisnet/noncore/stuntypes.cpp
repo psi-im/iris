@@ -716,7 +716,7 @@ void print_packet(const StunMessage &message)
 				printf("\n");
 			}
 			else
-				printf("  Unknown attribute (%04x) of %d bytes\n", a.type, a.value.size());
+				printf("  Unknown attribute (0x%04x) of %d bytes\n", a.type, a.value.size());
 		}
 	}
 	else
