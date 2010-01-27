@@ -24,6 +24,7 @@
 #include <QObject>
 #include <QString>
 #include <QHostAddress>
+#include "turnclient.h"
 
 namespace QCA {
 	class SecureArray;
@@ -117,6 +118,8 @@ public:
 	~Ice176();
 
 	void reset();
+
+	void setProxy(const TurnClient::Proxy &proxy);
 
 	// if set, ports will be drawn from the reserver if possible, before
 	//   binding to random ports

@@ -200,6 +200,7 @@ public:
 	Ice176 *q;
 	Ice176::Mode mode;
 	State state;
+	TurnClient::Proxy proxy;
 	UdpPortReserver *portReserver;
 	int componentCount;
 	QList<Ice176::LocalAddress> localAddrs;
@@ -334,6 +335,7 @@ public:
 			connect(c.ic, SIGNAL(stopped()), SLOT(ic_stopped()));
 
 			c.ic->setClientSoftwareNameAndVersion("Iris");
+			c.ic->setProxy(proxy);
 			if(portReserver)
 				c.ic->setPortReserver(portReserver);
 			c.ic->setLocalAddresses(localAddrs);
@@ -1125,6 +1127,11 @@ Ice176::~Ice176()
 void Ice176::reset()
 {
 	d->reset();
+}
+
+void Ice176::setProxy(const TurnClient::Proxy &proxy)
+{
+	d->proxy = proxy;
 }
 
 void Ice176::setPortReserver(UdpPortReserver *portReserver)
