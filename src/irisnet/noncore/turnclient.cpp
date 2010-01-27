@@ -385,7 +385,7 @@ public:
 			}
 
 			inStream = inStream.mid(packet.size());
-			processDatagram(in);
+			processDatagram(packet);
 		}
 	}
 
