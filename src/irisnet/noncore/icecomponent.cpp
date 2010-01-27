@@ -228,10 +228,14 @@ public:
 				if(!lt->extAddr.isNull())
 					continue;
 
+				QHostAddress laddr = lt->sock->localAddress();
+				int lport = lt->sock->localPort();
+
 				int at = -1;
 				for(int n = 0; n < config.extAddrs.count(); ++n)
 				{
-					if(config.extAddrs[n].base.addr == lt->sock->localAddress() && (config.extAddrs[n].portBase == -1 || config.extAddrs[n].portBase == lt->sock->localPort()))
+					const Ice176::ExternalAddress &ea = config.extAddrs[n];
+					if(laddr.protocol() != QAbstractSocket::IPv6Protocol && ea.base.addr == laddr && (ea.portBase == -1 || ea.portBase == lport))
 					{
 						at = n;
 						break;
@@ -586,7 +590,7 @@ private slots:
 
 		ObjectSessionWatcher watch(&sess);
 
-		if(useLocal)
+		if(useLocal && isLocalLeap)
 		{
 			CandidateInfo ci;
 			ci.addr.addr = lt->sock->localAddress();
@@ -608,10 +612,7 @@ private slots:
 			emit q->candidateAdded(c);
 			if(!watch.isValid())
 				return;
-		}
 
-		if(isLocalLeap)
-		{
 			ensureExt(lt, addrAt);
 			if(!watch.isValid())
 				return;
