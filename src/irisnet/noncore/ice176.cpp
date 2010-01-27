@@ -90,6 +90,37 @@ static bool compare_candidates(const IceComponent::CandidateInfo &a, const IceCo
 		return false;
 }
 
+// scope values: 0 = local, 1 = link-local, 2 = private, 3 = public
+// FIXME: dry (this is in psi avcall also)
+static int getAddressScope(const QHostAddress &a)
+{
+	if(a.protocol() == QAbstractSocket::IPv6Protocol)
+	{
+		if(a == QHostAddress(QHostAddress::LocalHostIPv6))
+			return 0;
+		else if(XMPP::Ice176::isIPv6LinkLocalAddress(a))
+			return 1;
+	}
+	else if(a.protocol() == QAbstractSocket::IPv4Protocol)
+	{
+		quint32 v4 = a.toIPv4Address();
+		quint8 a0 = v4 >> 24;
+		quint8 a1 = (v4 >> 16) & 0xff;
+		if(a0 == 127)
+			return 0;
+		else if(a0 == 169 && a1 == 254)
+			return 1;
+		else if(a0 == 10)
+			return 2;
+		else if(a0 == 172 && a1 >= 16 && a1 <= 31)
+			return 2;
+		else if(a0 == 192 && a1 == 168)
+			return 2;
+	}
+
+	return 3;
+}
+
 class Ice176::Private : public QObject
 {
 	Q_OBJECT
@@ -390,6 +421,14 @@ public:
 				if(lc.addr.addr.protocol() != rc.addr.addr.protocol())
 					continue;
 
+				// don't relay to localhost.  turnserver
+				//   doesn't like it.  i don't know if this
+				//   should qualify as a HACK or not.
+				//   trying to relay to localhost is pretty
+				//   stupid anyway
+				if(lc.type == IceComponent::RelayedType && getAddressScope(rc.addr.addr) == 0)
+					continue;
+
 				CandidatePair pair;
 				pair.state = PFrozen; // FIXME: setting state here may be wrong
 				pair.local = lc;
@@ -681,6 +720,40 @@ private slots:
 	{
 		// TODO
 		printf("C%d: candidate removed: %s;%d\n", cc.info.componentId, qPrintable(cc.info.addr.addr.toString()), cc.info.addr.port);
+
+		QStringList idList;
+		for(int n = 0; n < localCandidates.count(); ++n)
+		{
+			if(localCandidates[n].id == cc.id && localCandidates[n].info.componentId == cc.info.componentId)
+			{
+				// FIXME: this is rather ridiculous I think
+				idList += localCandidates[n].info.id;
+
+				localCandidates.removeAt(n);
+				--n; // adjust position
+			}
+		}
+
+		for(int n = 0; n < checkList.pairs.count(); ++n)
+		{
+			if(idList.contains(checkList.pairs[n].local.id))
+			{
+				StunBinding *binding = checkList.pairs[n].binding;
+				StunTransactionPool *pool = checkList.pairs[n].pool;
+
+				delete binding;
+
+				if(pool)
+				{
+					pool->disconnect(this);
+					pool->setParent(0);
+					pool->deleteLater();
+				}
+
+				checkList.pairs.removeAt(n);
+				--n; // adjust position
+			}
+		}
 	}
 
 	void ic_localFinished()
