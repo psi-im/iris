@@ -878,6 +878,8 @@ private slots:
 
 			te = TurnClient::ErrorMismatch;
 		}
+		else
+			te = TurnClient::ErrorGeneric;
 
 		cleanup();
 		errorString = str;
