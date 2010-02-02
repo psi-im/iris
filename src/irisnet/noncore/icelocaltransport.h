@@ -84,13 +84,12 @@ public:
 	QHostAddress relayedAddress() const;
 	int relayedPort() const;
 
-	void addChannelPeer(const QHostAddress &addr, int port);
-
 	// reimplemented
 	virtual void stop();
 	virtual bool hasPendingDatagrams(int path) const;
 	virtual QByteArray readDatagram(int path, QHostAddress *addr, int *port);
 	virtual void writeDatagram(int path, const QByteArray &buf, const QHostAddress &addr, int port);
+	virtual void addChannelPeer(const QHostAddress &addr, int port);
 
 signals:
 	// may be emitted multiple times.

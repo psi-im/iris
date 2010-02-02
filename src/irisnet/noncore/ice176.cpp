@@ -189,10 +189,12 @@ public:
 		IceComponent *ic;
 		bool localFinished;
 		bool stopped;
+		bool lowOverhead;
 
 		Component() :
 			localFinished(false),
-			stopped(false)
+			stopped(false),
+			lowOverhead(false)
 		{
 		}
 	};
@@ -440,6 +442,9 @@ public:
 				pair.isDefault = false;
 				pair.isValid = false;
 				pair.isNominated = false;
+				// TODO: make sure leap candidates are checked first
+				//   we may need a heuristic here for remote candidates, like
+				//   find the first srflx
 				if(mode == Ice176::Initiator)
 					pair.priority = calc_pair_priority(lc.priority, rc.priority);
 				else
@@ -584,8 +589,11 @@ public:
 
 	void flagComponentAsLowOverhead(int componentIndex)
 	{
-		// TODO
-		Q_UNUSED(componentIndex);
+		// FIXME: ok to assume in order?
+		Component &c = components[componentIndex];
+		c.lowOverhead = true;
+
+		// FIXME: actually do something
 	}
 
 private:

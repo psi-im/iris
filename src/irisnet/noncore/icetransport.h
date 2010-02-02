@@ -47,6 +47,7 @@ public:
 	virtual bool hasPendingDatagrams(int path) const = 0;
 	virtual QByteArray readDatagram(int path, QHostAddress *addr, int *port) = 0;
 	virtual void writeDatagram(int path, const QByteArray &buf, const QHostAddress &addr, int port) = 0;
+	virtual void addChannelPeer(const QHostAddress &addr, int port) = 0;
 
 signals:
 	void started();

@@ -101,6 +101,7 @@ public:
 	QList<LocalTransport*> localStun;
 	IceTurnTransport *tt;
 	QList<Candidate> localCandidates;
+	QHash<int, QSet<TransportAddress> > channelPeers;
 	bool useLocal;
 	bool useStunBasic;
 	bool useStunRelayUdp;
@@ -370,6 +371,31 @@ public:
 		return choose_default_priority(PeerReflexiveType, 65535 - addrAt, false, id);
 	}
 
+	void flagPathAsLowOverhead(int id, const QHostAddress &addr, int port)
+	{
+		int at = -1;
+		for(int n = 0; n < localCandidates.count(); ++n)
+		{
+			if(localCandidates[n].id == id)
+			{
+				at = n;
+				break;
+			}
+		}
+
+		Q_ASSERT(at != -1);
+
+		Candidate &c = localCandidates[at];
+
+		TransportAddress ta(addr, port);
+		QSet<TransportAddress> &addrs = channelPeers[c.id];
+		if(!addrs.contains(ta))
+		{
+			addrs += ta;
+			c.iceTransport->addChannelPeer(ta.addr, ta.port);
+		}
+	}
+
 private:
 	// localPref is the priority of the network interface being used for
 	//   this candidate.  the value must be between 0-65535 and different
@@ -519,6 +545,8 @@ private:
 			{
 				Candidate tmp = localCandidates.takeAt(n);
 				--n; // adjust position
+
+				channelPeers.remove(tmp.id);
 
 				emit q->candidateRemoved(tmp);
 				if(!watch.isValid())
@@ -960,6 +988,11 @@ void IceComponent::stop()
 int IceComponent::peerReflexivePriority(const IceTransport *iceTransport, int path) const
 {
 	return d->peerReflexivePriority(iceTransport, path);
+}
+
+void IceComponent::flagPathAsLowOverhead(int id, const QHostAddress &addr, int port)
+{
+	return d->flagPathAsLowOverhead(id, addr, port);
 }
 
 }

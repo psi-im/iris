@@ -56,6 +56,12 @@ public:
 		{
 		}
 
+		TransportAddress(const QHostAddress &_addr, int _port) :
+			addr(_addr),
+			port(_port)
+		{
+		}
+
 		bool operator==(const TransportAddress &other) const
 		{
 			if(addr == other.addr && port == other.port)
@@ -138,6 +144,8 @@ public:
 	// prflx priority to use when replying from this transport/path
 	int peerReflexivePriority(const IceTransport *iceTransport, int path) const;
 
+	void flagPathAsLowOverhead(int id, const QHostAddress &addr, int port);
+
 signals:
 	// this is emitted in the same pass of the eventloop that a
 	//   transport/path becomes ready
@@ -157,6 +165,11 @@ private:
 	friend class Private;
 	Private *d;
 };
+
+inline uint qHash(const XMPP::IceComponent::TransportAddress &key)
+{
+	return ::qHash(key.addr) ^ ::qHash(key.port);
+}
 
 }
 
