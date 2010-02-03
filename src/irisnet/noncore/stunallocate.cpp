@@ -36,8 +36,6 @@
 // channels last 10 minutes, update them every 9 minutes
 #define CHAN_INTERVAL  (9 * 60 * 1000)
 
-Q_DECLARE_METATYPE(XMPP::StunAllocate::Error)
-
 namespace XMPP {
 
 void releaseAndDeleteLater(QObject *owner, QObject *obj)
@@ -85,6 +83,16 @@ public:
 	QHostAddress addr;
 	bool active;
 
+	enum Error
+	{
+		ErrorGeneric,
+		ErrorProtocol,
+		ErrorCapacity,
+		ErrorForbidden,
+		ErrorRejected,
+		ErrorTimeout
+	};
+
 	StunAllocatePermission(StunTransactionPool *_pool, const QHostAddress &_addr) :
 		QObject(_pool),
 		pool(_pool),
@@ -111,9 +119,27 @@ public:
 		doTransaction();
 	}
 
+	static StunAllocate::Error errorToStunAllocateError(Error e)
+	{
+		switch(e)
+		{
+			case ErrorProtocol:
+				return StunAllocate::ErrorProtocol;
+			case ErrorCapacity:
+				return StunAllocate::ErrorCapacity;
+			case ErrorForbidden:
+			case ErrorRejected:
+				return StunAllocate::ErrorRejected;
+			case ErrorTimeout:
+				return StunAllocate::ErrorTimeout;
+			default:
+				return StunAllocate::ErrorGeneric;
+		}
+	}
+
 signals:
 	void ready();
-	void error(int e, const QString &reason);
+	void error(XMPP::StunAllocatePermission::Error e, const QString &reason);
 
 private:
 	void cleanup()
@@ -180,7 +206,7 @@ private slots:
 			if(!StunTypes::parseErrorCode(response.attribute(StunTypes::ERROR_CODE), &code, &reason))
 			{
 				cleanup();
-				emit error(StunAllocate::ErrorProtocol, "Unable to parse ERROR-CODE in error response.");
+				emit error(ErrorProtocol, "Unable to parse ERROR-CODE in error response.");
 				return;
 			}
 
@@ -192,9 +218,11 @@ private slots:
 			cleanup();
 
 			if(code == StunTypes::InsufficientCapacity)
-				emit error(StunAllocate::ErrorCapacity, reason);
+				emit error(ErrorCapacity, reason);
+			else if(code == StunTypes::Forbidden)
+				emit error(ErrorForbidden, reason);
 			else
-				emit error(StunAllocate::ErrorRejected, reason);
+				emit error(ErrorRejected, reason);
 
 			return;
 		}
@@ -213,9 +241,9 @@ private slots:
 		cleanup();
 
 		if(e == XMPP::StunTransaction::ErrorTimeout)
-			emit error(StunAllocate::ErrorTimeout, "Request timed out.");
+			emit error(ErrorTimeout, "Request timed out.");
 		else
-			emit error(StunAllocate::ErrorGeneric, "Generic transaction error.");
+			emit error(ErrorGeneric, "Generic transaction error.");
 	}
 
 	void timer_timeout()
@@ -236,6 +264,16 @@ public:
 	QHostAddress addr;
 	int port;
 	bool active;
+
+	enum Error
+	{
+		ErrorGeneric,
+		ErrorProtocol,
+		ErrorCapacity,
+		ErrorForbidden,
+		ErrorRejected,
+		ErrorTimeout
+	};
 
 	StunAllocateChannel(StunTransactionPool *_pool, int _channelId, const QHostAddress &_addr, int _port) :
 		QObject(_pool),
@@ -265,9 +303,27 @@ public:
 		doTransaction();
 	}
 
+	static StunAllocate::Error errorToStunAllocateError(Error e)
+	{
+		switch(e)
+		{
+			case ErrorProtocol:
+				return StunAllocate::ErrorProtocol;
+			case ErrorCapacity:
+				return StunAllocate::ErrorCapacity;
+			case ErrorForbidden:
+			case ErrorRejected:
+				return StunAllocate::ErrorRejected;
+			case ErrorTimeout:
+				return StunAllocate::ErrorTimeout;
+			default:
+				return StunAllocate::ErrorGeneric;
+		}
+	}
+
 signals:
 	void ready();
-	void error(int e, const QString &reason);
+	void error(XMPP::StunAllocateChannel::Error e, const QString &reason);
 
 private:
 	void cleanup()
@@ -338,7 +394,7 @@ private slots:
 			if(!StunTypes::parseErrorCode(response.attribute(StunTypes::ERROR_CODE), &code, &reason))
 			{
 				cleanup();
-				emit error(StunAllocate::ErrorProtocol, "Unable to parse ERROR-CODE in error response.");
+				emit error(ErrorProtocol, "Unable to parse ERROR-CODE in error response.");
 				return;
 			}
 
@@ -350,9 +406,11 @@ private slots:
 			cleanup();
 
 			if(code == StunTypes::InsufficientCapacity)
-				emit error(StunAllocate::ErrorCapacity, reason);
+				emit error(ErrorCapacity, reason);
+			else if(code == StunTypes::Forbidden)
+				emit error(ErrorForbidden, reason);
 			else
-				emit error(StunAllocate::ErrorRejected, reason);
+				emit error(ErrorRejected, reason);
 
 			return;
 		}
@@ -371,9 +429,9 @@ private slots:
 		cleanup();
 
 		if(e == XMPP::StunTransaction::ErrorTimeout)
-			emit error(StunAllocate::ErrorTimeout, "Request timed out.");
+			emit error(ErrorTimeout, "Request timed out.");
 		else
-			emit error(StunAllocate::ErrorGeneric, "Generic transaction error.");
+			emit error(ErrorGeneric, "Generic transaction error.");
 	}
 
 	void timer_timeout()
@@ -400,7 +458,8 @@ public:
 		Starting,
 		Started,
 		Refreshing,
-		Stopping
+		Stopping,
+		Erroring // like stopping, but emits error when finished
 	};
 
 	StunAllocate *q;
@@ -420,6 +479,8 @@ public:
 	QList<StunAllocateChannel*> channels;
 	QList<QHostAddress> permsOut;
 	QList<StunAllocate::Channel> channelsOut;
+	int erroringCode;
+	QString erroringString;
 
 	Private(StunAllocate *_q) :
 		QObject(_q),
@@ -428,10 +489,9 @@ public:
 		pool(0),
 		trans(0),
 		state(Stopped),
-		dfState(DF_Unknown)
+		dfState(DF_Unknown),
+		erroringCode(-1)
 	{
-		qRegisterMetaType<StunAllocate::Error>();
-
 		allocateRefreshTimer = new QTimer(this);
 		connect(allocateRefreshTimer, SIGNAL(timeout()), SLOT(refresh()));
 		allocateRefreshTimer->setSingleShot(true);
@@ -454,14 +514,36 @@ public:
 
 	void stop()
 	{
+		// erroring already?  no need to do anything
+		if(state == Erroring)
+			return;
+
 		Q_ASSERT(state == Started);
 
+		cleanupTasks();
 		state = Stopping;
+		doTransaction();
+	}
+
+	void stopWithError(int code, const QString &str)
+	{
+		Q_ASSERT(state == Started);
+
+		cleanupTasks();
+		erroringCode = code;
+		erroringString = str;
+		state = Erroring;
 		doTransaction();
 	}
 
 	void setPermissions(const QList<QHostAddress> &newPerms)
 	{
+		// if currently erroring out, skip
+		if(state == Erroring)
+			return;
+
+		Q_ASSERT(state == Started);
+
 		int freeCount = 0;
 
 		// removed?
@@ -528,7 +610,7 @@ public:
 			{
 				StunAllocatePermission *perm = new StunAllocatePermission(pool, newPerms[n]);
 				connect(perm, SIGNAL(ready()), SLOT(perm_ready()));
-				connect(perm, SIGNAL(error(int, const QString &)), SLOT(perm_error(int, const QString &)));
+				connect(perm, SIGNAL(error(XMPP::StunAllocatePermission::Error, const QString &)), SLOT(perm_error(XMPP::StunAllocatePermission::Error, const QString &)));
 				perms += perm;
 				perm->start();
 			}
@@ -537,6 +619,12 @@ public:
 
 	void setChannels(const QList<StunAllocate::Channel> &newChannels)
 	{
+		// if currently erroring out, skip
+		if(state == Erroring)
+			return;
+
+		Q_ASSERT(state == Started);
+
 		int freeCount = 0;
 
 		// removed?
@@ -617,7 +705,7 @@ public:
 
 					StunAllocateChannel *channel = new StunAllocateChannel(pool, channelId, newChannels[n].address, newChannels[n].port);
 					connect(channel, SIGNAL(ready()), SLOT(channel_ready()));
-					connect(channel, SIGNAL(error(int, const QString &)), SLOT(channel_error(int, const QString &)));
+					connect(channel, SIGNAL(error(XMPP::StunAllocateChannel::Error, const QString &)), SLOT(channel_error(XMPP::StunAllocateChannel::Error, const QString &)));
 					channels += channel;
 
 					if(channelId != -1)
@@ -682,18 +770,29 @@ private:
 	{
 		sess.reset();
 
+		cleanupTasks();
+
+		erroringCode = -1;
+		erroringString.clear();
+
+		state = Stopped;
+	}
+
+	// stop refreshing, permissions, and channelbinds
+	void cleanupTasks()
+	{
 		delete trans;
 		trans = 0;
 
 		allocateRefreshTimer->stop();
 
-		qDeleteAll(perms);
-		perms.clear();
-		permsOut.clear();
+		qDeleteAll(channels);
 		channels.clear();
 		channelsOut.clear();
 
-		state = Stopped;
+		qDeleteAll(perms);
+		perms.clear();
+		permsOut.clear();
 	}
 
 	void doTransaction()
@@ -799,7 +898,7 @@ private slots:
 
 			trans->setMessage(message);
 		}
-		else if(state == Stopping)
+		else if(state == Stopping || state == Erroring)
 		{
 			StunMessage message;
 			message.setMethod(StunTypes::Refresh);
@@ -930,14 +1029,6 @@ private slots:
 				return;
 			}
 
-			if(lifetime < 120)
-			{
-				cleanup();
-				errorString = "LIFETIME is less than two minutes.  That is ridiculous.";
-				emit q->error(StunAllocate::ErrorProtocol);
-				return;
-			}
-
 			QHostAddress raddr;
 			quint16 rport;
 			if(!StunTypes::parseXorRelayedAddress(response.attribute(StunTypes::XOR_RELAYED_ADDRESS), response.magic(), response.id(), &raddr, &rport))
@@ -955,6 +1046,14 @@ private slots:
 				cleanup();
 				errorString = "Unable to parse XOR-MAPPED-ADDRESS.";
 				emit q->error(StunAllocate::ErrorProtocol);
+				return;
+			}
+
+			if(lifetime < 120)
+			{
+				state = Started; // stopWithError requires this
+				stopWithError(StunAllocate::ErrorProtocol,
+					"LIFETIME is less than two minutes.  That is ridiculous.");
 				return;
 			}
 
@@ -978,7 +1077,7 @@ private slots:
 
 			emit q->started();
 		}
-		else if(state == Stopping)
+		else if(state == Stopping || state == Erroring)
 		{
 			if(error)
 			{
@@ -992,9 +1091,22 @@ private slots:
 				}
 			}
 
-			// cleanup will set the state to Stopped
-			cleanup();
-			emit q->stopped();
+			if(state == Stopping)
+			{
+				// cleanup will set the state to Stopped
+				cleanup();
+				emit q->stopped();
+			}
+			else // Erroring
+			{
+				int code = erroringCode;
+				QString str = erroringString;
+
+				// cleanup will set the state to Stopped
+				cleanup();
+				errorString = str;
+				emit q->error((StunAllocate::Error)code);
+			}
 		}
 		else if(state == Refreshing)
 		{
@@ -1028,9 +1140,9 @@ private slots:
 			emit q->permissionsChanged();
 	}
 
-	void perm_error(int e, const QString &reason)
+	void perm_error(XMPP::StunAllocatePermission::Error e, const QString &reason)
 	{
-		if(e == StunAllocate::ErrorCapacity)
+		if(e == StunAllocatePermission::ErrorCapacity)
 		{
 			// if we aren't allowed to make anymore permissions,
 			//   don't consider this an error.  the perm stays
@@ -1038,10 +1150,20 @@ private slots:
 			//   any perms get removed.
 			return;
 		}
+		else if(e == StunAllocatePermission::ErrorForbidden)
+		{
+			// silently discard the permission request
+			StunAllocatePermission *perm = (StunAllocatePermission *)sender();
+			QHostAddress addr = perm->addr;
+			delete perm;
+			perms.removeAll(perm);
+			emit q->debugLine(QString("Warning: permission forbidden to %1").arg(addr.toString()));
+			return;
+		}
 
 		cleanup();
 		errorString = reason;
-		emit q->error((StunAllocate::Error)e);
+		emit q->error(StunAllocatePermission::errorToStunAllocateError(e));
 	}
 
 	void channel_ready()
@@ -1050,9 +1172,9 @@ private slots:
 			emit q->channelsChanged();
 	}
 
-	void channel_error(int e, const QString &reason)
+	void channel_error(XMPP::StunAllocateChannel::Error e, const QString &reason)
 	{
-		if(e == StunAllocate::ErrorCapacity)
+		if(e == StunAllocateChannel::ErrorCapacity)
 		{
 			// if we aren't allowed to make anymore channels,
 			//   don't consider this an error.  the channel stays
@@ -1063,7 +1185,7 @@ private slots:
 
 		cleanup();
 		errorString = reason;
-		emit q->error((StunAllocate::Error)e);
+		emit q->error(StunAllocateChannel::errorToStunAllocateError(e));
 	}
 
 	void trans_error(XMPP::StunTransaction::Error e)
