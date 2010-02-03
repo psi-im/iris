@@ -40,11 +40,13 @@ public:
 	int relayPort;
 	TurnClient turn;
 	int turnErrorCode;
+	int debugLevel;
 
 	Private(IceTurnTransport *_q) :
 		QObject(_q),
 		q(_q),
-		turn(this)
+		turn(this),
+		debugLevel(IceTransport::DL_None)
 	{
 		connect(&turn, SIGNAL(connected()), SLOT(turn_connected()));
 		connect(&turn, SIGNAL(tlsHandshaken()), SLOT(turn_tlsHandshaken()));
@@ -73,17 +75,20 @@ public:
 private slots:
 	void turn_connected()
 	{
-		printf("turn_connected\n");
+		if(debugLevel >= IceTransport::DL_Info)
+			emit q->debugLine("turn_connected");
 	}
 
 	void turn_tlsHandshaken()
 	{
-		printf("turn_tlsHandshaken\n");
+		if(debugLevel >= IceTransport::DL_Info)
+			emit q->debugLine("turn_tlsHandshaken");
 	}
 
 	void turn_closed()
 	{
-		printf("turn_closed\n");
+		if(debugLevel >= IceTransport::DL_Info)
+			emit q->debugLine("turn_closed");
 
 		emit q->stopped();
 	}
@@ -99,7 +104,8 @@ private slots:
 
 	void turn_retrying()
 	{
-		printf("turn_retrying\n");
+		if(debugLevel >= IceTransport::DL_Info)
+			emit q->debugLine("turn_retrying");
 	}
 
 	void turn_activated()
@@ -108,10 +114,12 @@ private slots:
 
 		QHostAddress saddr = allocate->reflexiveAddress();
 		quint16 sport = allocate->reflexivePort();
-		printf("Server says we are %s;%d\n", qPrintable(saddr.toString()), sport);
+		if(debugLevel >= IceTransport::DL_Info)
+			emit q->debugLine(QString("Server says we are ") + saddr.toString() + ';' + QString::number(sport));
 		saddr = allocate->relayedAddress();
 		sport = allocate->relayedPort();
-		printf("Server relays via %s;%d\n", qPrintable(saddr.toString()), sport);
+		if(debugLevel >= IceTransport::DL_Info)
+			emit q->debugLine(QString("Server relays via ") + saddr.toString() + ';' + QString::number(sport));
 
 		relayAddr = saddr;
 		relayPort = sport;
@@ -131,7 +139,8 @@ private slots:
 
 	void turn_error(XMPP::TurnClient::Error e)
 	{
-		printf("turn_error: %s\n", qPrintable(turn.errorString()));
+		if(debugLevel >= IceTransport::DL_Info)
+			emit q->debugLine(QString("turn_error: ") + turn.errorString());
 
 		turnErrorCode = e;
 		emit q->error(IceTurnTransport::ErrorTurn);
@@ -139,7 +148,7 @@ private slots:
 
 	void turn_debugLine(const QString &line)
 	{
-		printf("turn_debugLine: %s\n", qPrintable(line));
+		emit q->debugLine(line);
 	}
 };
 
@@ -229,6 +238,12 @@ void IceTurnTransport::writeDatagram(int path, const QByteArray &buf, const QHos
 	Q_UNUSED(path);
 
 	d->turn.write(buf, addr, port);
+}
+
+void IceTurnTransport::setDebugLevel(DebugLevel level)
+{
+	d->debugLevel = level;
+	d->turn.setDebugLevel((TurnClient::DebugLevel)level);
 }
 
 }

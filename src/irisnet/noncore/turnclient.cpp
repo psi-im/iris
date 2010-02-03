@@ -21,6 +21,7 @@
 #include "turnclient.h"
 
 #include <QtCrypto>
+#include "stuntypes.h"
 #include "stunmessage.h"
 #include "stuntransaction.h"
 #include "stunallocate.h"
@@ -117,6 +118,7 @@ public:
 	QString realm;
 	int retryCount;
 	QString errorString;
+	int debugLevel;
 
 	class WriteItem
 	{
@@ -193,6 +195,7 @@ public:
 		pool(0),
 		allocate(0),
 		retryCount(0),
+		debugLevel(TurnClient::DL_None),
 		writtenBytes(0),
 		stopping(false),
 		outPendingWrite(0)
@@ -285,7 +288,8 @@ public:
 
 		if(allocate && allocateStarted)
 		{
-			emit q->debugLine("Deallocating...");
+			if(debugLevel >= TurnClient::DL_Info)
+				emit q->debugLine("Deallocating...");
 			allocate->stop();
 		}
 		else
@@ -340,8 +344,10 @@ public:
 		if(!udp && !pool)
 		{
 			pool = new StunTransactionPool(StunTransaction::Tcp, this);
+			pool->setDebugLevel((StunTransactionPool::DebugLevel)debugLevel);
 			connect(pool, SIGNAL(outgoingMessage(const QByteArray &, const QHostAddress &, int)), SLOT(pool_outgoingMessage(const QByteArray &, const QHostAddress &, int)));
 			connect(pool, SIGNAL(needAuthParams()), SLOT(pool_needAuthParams()));
+			connect(pool, SIGNAL(debugLine(const QString &)), SLOT(pool_debugLine(const QString &)));
 
 			pool->setLongTermAuthEnabled(true);
 			if(!user.isEmpty())
@@ -364,7 +370,8 @@ public:
 		allocate->setClientSoftwareNameAndVersion(clientSoftware);
 
 		allocateStarted = false;
-		emit q->debugLine("Allocating...");
+		if(debugLevel >= TurnClient::DL_Info)
+			emit q->debugLine("Allocating...");
 		allocate->start();
 	}
 
@@ -414,7 +421,8 @@ public:
 			QByteArray data = allocate->decode(buf, addr, port);
 			if(!data.isNull())
 			{
-				emit q->debugLine("Received ChannelData-based data packet");
+				if(debugLevel >= TurnClient::DL_Packet)
+					emit q->debugLine("Received ChannelData-based data packet");
 				return data;
 			}
 		}
@@ -429,17 +437,22 @@ public:
 
 				if(!data.isNull())
 				{
-					emit q->debugLine("Received STUN-based data packet");
+					if(debugLevel >= TurnClient::DL_Packet)
+						emit q->debugLine("Received STUN-based data packet");
 					return data;
 				}
 				else
-					emit q->debugLine("Warning: server responded with an unexpected STUN packet, skipping.");
+				{
+					if(debugLevel >= TurnClient::DL_Packet)
+						emit q->debugLine("Warning: server responded with an unexpected STUN packet, skipping.");
+				}
 
 				return QByteArray();
 			}
 		}
 
-		emit q->debugLine("Warning: server responded with what doesn't seem to be a STUN or data packet, skipping.");
+		if(debugLevel >= TurnClient::DL_Packet)
+			emit q->debugLine("Warning: server responded with what doesn't seem to be a STUN or data packet, skipping.");
 		return QByteArray();
 	}
 
@@ -538,6 +551,19 @@ public:
 	void write(const QByteArray &buf, const QHostAddress &addr, int port)
 	{
 		QByteArray packet = allocate->encode(buf, addr, port);
+
+		if(debugLevel >= TurnClient::DL_Packet)
+		{
+			StunMessage msg = StunMessage::fromBinary(packet);
+			if(!msg.isNull())
+			{
+				emit q->debugLine("STUN SEND");
+				emit q->debugLine(StunTypes::print_packet_str(msg));
+			}
+			else
+				emit q->debugLine("Sending ChannelData-based data packet");
+		}
+
 		writeItems += WriteItem(packet.size(), addr, port);
 		++outPendingWrite;
 		if(udp)
@@ -557,7 +583,8 @@ public:
 	{
 		if(!desiredPerms.contains(addr))
 		{
-			emit q->debugLine(QString("Setting permission for peer address %1").arg(addr.toString()));
+			if(debugLevel >= TurnClient::DL_Info)
+				emit q->debugLine(QString("Setting permission for peer address %1").arg(addr.toString()));
 
 			desiredPerms += addr;
 			allocate->setPermissions(desiredPerms);
@@ -572,7 +599,8 @@ public:
 		{
 			if(!desiredChannels.contains(c))
 			{
-				emit q->debugLine(QString("Setting channel for peer address/port %1;%2").arg(c.address.toString()).arg(c.port));
+				if(debugLevel >= TurnClient::DL_Info)
+					emit q->debugLine(QString("Setting channel for peer address/port %1;%2").arg(c.address.toString()).arg(c.port));
 
 				desiredChannels += c;
 				changed = true;
@@ -653,6 +681,9 @@ public:
 		++retryCount;
 		if(retryCount < 3 && !stopping)
 		{
+			if(debugLevel >= TurnClient::DL_Info)
+				emit q->debugLine("retrying...");
+
 			// start completely over, but retain the same pool
 			//   so the user isn't asked to auth again
 
@@ -688,7 +719,8 @@ private slots:
 			connect(tls, SIGNAL(readyReadOutgoing()), SLOT(tls_readyReadOutgoing()));
 			connect(tls, SIGNAL(error()), SLOT(tls_error()));
 			tlsHandshaken = false;
-			emit q->debugLine("TLS handshaking...");
+			if(debugLevel >= TurnClient::DL_Info)
+				emit q->debugLine("TLS handshaking...");
 			tls->startClient();
 		}
 		else
@@ -878,10 +910,16 @@ private slots:
 		emit q->needAuthParams();
 	}
 
+	void pool_debugLine(const QString &line)
+	{
+		emit q->debugLine(line);
+	}
+
 	void allocate_started()
 	{
 		allocateStarted = true;
-		emit q->debugLine("Allocate started");
+		if(debugLevel >= TurnClient::DL_Info)
+			emit q->debugLine("Allocate started");
 
 		emit q->activated();
 	}
@@ -929,7 +967,8 @@ private slots:
 
 	void allocate_permissionsChanged()
 	{
-		emit q->debugLine("PermissionsChanged");
+		if(debugLevel >= TurnClient::DL_Info)
+			emit q->debugLine("PermissionsChanged");
 
 		tryChannelQueued();
 		tryWriteQueued();
@@ -937,7 +976,8 @@ private slots:
 
 	void allocate_channelsChanged()
 	{
-		emit q->debugLine("ChannelsChanged");
+		if(debugLevel >= TurnClient::DL_Info)
+			emit q->debugLine("ChannelsChanged");
 
 		tryWriteQueued();
 	}
@@ -1078,6 +1118,13 @@ void TurnClient::write(const QByteArray &buf, const QHostAddress &addr, int port
 QString TurnClient::errorString() const
 {
 	return d->errorString;
+}
+
+void TurnClient::setDebugLevel(DebugLevel level)
+{
+	d->debugLevel = level;
+	if(d->pool)
+		d->pool->setDebugLevel((StunTransactionPool::DebugLevel)level);
 }
 
 }

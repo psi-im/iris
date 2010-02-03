@@ -75,6 +75,13 @@ public:
 		TlsMode
 	};
 
+	enum DebugLevel
+	{
+		DL_None,
+		DL_Info,
+		DL_Packet
+	};
+
 	// adapted from XMPP::AdvancedConnector
 	class Proxy
 	{
@@ -152,6 +159,8 @@ public:
 	void write(const QByteArray &buf, const QHostAddress &addr, int port);
 
 	QString errorString() const;
+
+	void setDebugLevel(DebugLevel level); // default DL_None
 
 signals:
 	void connected(); // tcp connected

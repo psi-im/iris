@@ -108,6 +108,13 @@ public:
 		int path;
 	};
 
+	enum DebugLevel
+	{
+		DL_None,
+		DL_Info,
+		DL_Packet
+	};
+
 	IceComponent(int id, QObject *parent = 0);
 	~IceComponent();
 
@@ -146,6 +153,8 @@ public:
 
 	void flagPathAsLowOverhead(int id, const QHostAddress &addr, int port);
 
+	void setDebugLevel(DebugLevel level);
+
 signals:
 	// this is emitted in the same pass of the eventloop that a
 	//   transport/path becomes ready
@@ -159,6 +168,9 @@ signals:
 	void localFinished();
 
 	void stopped();
+
+	// reports debug of iceTransports as well.  not DOR-SS/DS safe
+	void debugLine(const QString &line);
 
 private:
 	class Private;

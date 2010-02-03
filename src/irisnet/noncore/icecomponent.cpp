@@ -107,6 +107,7 @@ public:
 	bool useStunRelayUdp;
 	bool useStunRelayTcp;
 	bool local_finished;
+	int debugLevel;
 
 	Private(IceComponent *_q) :
 		QObject(_q),
@@ -119,7 +120,8 @@ public:
 		useStunBasic(true),
 		useStunRelayUdp(true),
 		useStunRelayTcp(true),
-		local_finished(false)
+		local_finished(false),
+		debugLevel(DL_None)
 	{
 	}
 
@@ -187,14 +189,14 @@ public:
 					if(!qsock->bind(la.addr, 0))
 					{
 						delete qsock;
-						printf("warning: unable to bind to random port\n");
+						emit q->debugLine("Warning: unable to bind to random port.");
 						continue;
 					}
 
 					borrowedSocket = false;
 				}
 
-				//int port = qsock->localPort();
+				int port = qsock->localPort();
 
 				config.localAddrs += la;
 
@@ -203,16 +205,18 @@ public:
 				lt->qsock = qsock;
 				lt->borrowedSocket = borrowedSocket;
 				lt->sock = new IceLocalTransport(this);
+				lt->sock->setDebugLevel((IceTransport::DebugLevel)debugLevel);
 				lt->network = la.network;
 				lt->isVpn = la.isVpn;
 				connect(lt->sock, SIGNAL(started()), SLOT(lt_started()));
 				connect(lt->sock, SIGNAL(stopped()), SLOT(lt_stopped()));
 				connect(lt->sock, SIGNAL(addressesChanged()), SLOT(lt_addressesChanged()));
 				connect(lt->sock, SIGNAL(error(int)), SLOT(lt_error(int)));
+				connect(lt->sock, SIGNAL(debugLine(const QString &)), SLOT(lt_debugLine(const QString &)));
 				localLeap += lt;
 
 				lt->sock->start(qsock);
-				//printf("starting transport %s:%d for component %d\n", qPrintable(la.addr.toString()), port, id);
+				emit q->debugLine(QString("starting transport ") + la.addr.toString() + ';' + QString::number(port) + " for component " + QString::number(id));
 			}
 		}
 
@@ -278,17 +282,19 @@ public:
 				LocalTransport *lt = new LocalTransport;
 				lt->addr = la.addr;
 				lt->sock = new IceLocalTransport(this);
+				lt->sock->setDebugLevel((IceTransport::DebugLevel)debugLevel);
 				lt->network = la.network;
 				lt->isVpn = la.isVpn;
 				connect(lt->sock, SIGNAL(started()), SLOT(lt_started()));
 				connect(lt->sock, SIGNAL(stopped()), SLOT(lt_stopped()));
 				connect(lt->sock, SIGNAL(addressesChanged()), SLOT(lt_addressesChanged()));
 				connect(lt->sock, SIGNAL(error(int)), SLOT(lt_error(int)));
+				connect(lt->sock, SIGNAL(debugLine(const QString &)), SLOT(lt_debugLine(const QString &)));
 				localStun += lt;
 
 				lt->sock->setClientSoftwareNameAndVersion(clientSoftware);
 				lt->sock->start(la.addr);
-				//printf("starting transport %s:(dyn) for component %d\n", qPrintable(la.addr.toString()), id);
+				emit q->debugLine(QString("starting transport ") + la.addr.toString() + ";(dyn)" + " for component " + QString::number(id));
 			}
 		}
 
@@ -304,16 +310,18 @@ public:
 		if(useStunRelayTcp && !config.stunAddr.isNull() && !config.stunUser.isEmpty() && (config.stunType == Ice176::Relay || config.stunType == Ice176::Auto) && !tt)
 		{
 			tt = new IceTurnTransport(this);
+			tt->setDebugLevel((IceTransport::DebugLevel)debugLevel);
 			connect(tt, SIGNAL(started()), SLOT(tt_started()));
 			connect(tt, SIGNAL(stopped()), SLOT(tt_stopped()));
 			connect(tt, SIGNAL(error(int)), SLOT(tt_error(int)));
+			connect(tt, SIGNAL(debugLine(const QString &)), SLOT(tt_debugLine(const QString &)));
 			tt->setClientSoftwareNameAndVersion(clientSoftware);
 			tt->setProxy(proxy);
 			tt->setUsername(config.stunUser);
 			tt->setPassword(config.stunPass);
 			tt->start(config.stunAddr, config.stunPort);
 
-			//printf("starting TURN transport with server %s:%d for component %d\n", qPrintable(config.stunAddr.toString()), config.stunPort, id);
+			emit q->debugLine(QString("starting TURN transport with server ") + config.stunAddr.toString() + ';' + QString::number(config.stunPort) + " for component " + QString::number(id));
 		}
 
 		if(localLeap.isEmpty() && localStun.isEmpty() && !local_finished)
@@ -842,6 +850,11 @@ private slots:
 		}
 	}
 
+	void lt_debugLine(const QString &line)
+	{
+		emit q->debugLine(line);
+	}
+
 	void tt_started()
 	{
 		// lower priority by making it seem like the last nic
@@ -893,6 +906,11 @@ private slots:
 
 		delete tt;
 		tt = 0;
+	}
+
+	void tt_debugLine(const QString &line)
+	{
+		emit q->debugLine(line);
 	}
 };
 
@@ -993,6 +1011,17 @@ int IceComponent::peerReflexivePriority(const IceTransport *iceTransport, int pa
 void IceComponent::flagPathAsLowOverhead(int id, const QHostAddress &addr, int port)
 {
 	return d->flagPathAsLowOverhead(id, addr, port);
+}
+
+void IceComponent::setDebugLevel(DebugLevel level)
+{
+	d->debugLevel = level;
+	foreach(const Private::LocalTransport *lt, d->localLeap)
+		lt->sock->setDebugLevel((IceTransport::DebugLevel)level);
+	foreach(const Private::LocalTransport *lt, d->localStun)
+		lt->sock->setDebugLevel((IceTransport::DebugLevel)level);
+	if(d->tt)
+		d->tt->setDebugLevel((IceTransport::DebugLevel)level);
 }
 
 }

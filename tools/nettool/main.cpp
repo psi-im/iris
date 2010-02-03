@@ -883,6 +883,7 @@ class TurnClientTest : public QObject
 	Q_OBJECT
 public:
 	int mode;
+	bool debug;
 	QHostAddress relayAddr;
 	int relayPort;
 	QString relayUser, relayPass, relayRealm;
@@ -912,6 +913,10 @@ public slots:
 		connect(ProcessQuit::instance(), SIGNAL(quit()), SLOT(do_quit()));
 
 		turn = new TurnClient(this);
+		if(debug)
+			turn->setDebugLevel(TurnClient::DL_Packet);
+		else
+			turn->setDebugLevel(TurnClient::DL_Info);
 
 		connect(turn, SIGNAL(connected()), SLOT(turn_connected()));
 		connect(turn, SIGNAL(tlsHandshaken()), SLOT(turn_tlsHandshaken()));
@@ -937,8 +942,13 @@ public slots:
 				Qt::QueuedConnection);
 
 			pool = new StunTransactionPool(StunTransaction::Udp, this);
+			if(debug)
+				pool->setDebugLevel(StunTransactionPool::DL_Packet);
+			else
+				pool->setDebugLevel(StunTransactionPool::DL_Info);
 			connect(pool, SIGNAL(outgoingMessage(const QByteArray &, const QHostAddress &, int)), SLOT(pool_outgoingMessage(const QByteArray &, const QHostAddress &, int)));
 			connect(pool, SIGNAL(needAuthParams()), SLOT(pool_needAuthParams()));
+			connect(pool, SIGNAL(debugLine(const QString &)), SLOT(pool_debugLine(const QString &)));
 
 			pool->setLongTermAuthEnabled(true);
 			if(!relayUser.isEmpty())
@@ -1067,6 +1077,11 @@ private slots:
 		pool->continueAfterParams();
 	}
 
+	void pool_debugLine(const QString &line)
+	{
+		turn_debugLine(line);
+	}
+
 	void turn_connected()
 	{
 		printf("TCP connected\n");
@@ -1167,7 +1182,7 @@ void usage()
 {
 	printf("nettool: simple testing utility\n");
 	printf("usage: nettool (options) [command]\n");
-	printf("  options: --user=x, --pass=x, --realm=x\n");
+	printf("  options: --debug, --user=x, --pass=x, --realm=x\n");
 	printf("\n");
 	printf(" netmon                                            monitor network interfaces\n");
 	printf(" rname (-r) [domain] (record type)                 look up record (default = a)\n");
@@ -1198,6 +1213,7 @@ int main(int argc, char **argv)
 	args.removeFirst();
 
 	QString user, pass, realm;
+	bool debug = false;
 
 	for(int n = 0; n < args.count(); ++n)
 	{
@@ -1219,7 +1235,9 @@ int main(int argc, char **argv)
 
 		bool known = true;
 
-		if(var == "user")
+		if(var == "debug")
+			debug = true;
+		else if(var == "user")
 			user = val;
 		else if(var == "pass")
 			pass = val;
@@ -1543,6 +1561,7 @@ int main(int argc, char **argv)
 		//TurnEcho a;
 		TurnClientTest a;
 		a.mode = mode;
+		a.debug = debug;
 		a.relayAddr = raddr;
 		a.relayPort = rport;
 		a.relayUser = user;

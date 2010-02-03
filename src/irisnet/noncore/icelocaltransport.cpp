@@ -207,6 +207,7 @@ public:
 	QList<WriteItem> pendingWrites;
 	int retryCount;
 	bool stopping;
+	int debugLevel;
 
 	Private(IceLocalTransport *_q) :
 		QObject(_q),
@@ -222,7 +223,8 @@ public:
 		refPort(-1),
 		relPort(-1),
 		retryCount(0),
-		stopping(false)
+		stopping(false),
+		debugLevel(IceTransport::DL_None)
 	{
 	}
 
@@ -296,6 +298,7 @@ public:
 		Q_ASSERT(!pool);
 
 		pool = new StunTransactionPool(StunTransaction::Udp, this);
+		pool->setDebugLevel((StunTransactionPool::DebugLevel)debugLevel);
 		connect(pool, SIGNAL(outgoingMessage(const QByteArray &, const QHostAddress &, int)), SLOT(pool_outgoingMessage(const QByteArray &, const QHostAddress &, int)));
 		connect(pool, SIGNAL(needAuthParams()), SLOT(pool_needAuthParams()));
 
@@ -335,6 +338,7 @@ public:
 	void do_turn()
 	{
 		turn = new TurnClient(this);
+		turn->setDebugLevel((TurnClient::DebugLevel)debugLevel);
 		connect(turn, SIGNAL(connected()), SLOT(turn_connected()));
 		connect(turn, SIGNAL(tlsHandshaken()), SLOT(turn_tlsHandshaken()));
 		connect(turn, SIGNAL(closed()), SLOT(turn_closed()));
@@ -381,9 +385,10 @@ private:
 			return false;
 
 		++retryCount;
-		if(retryCount)
+		if(retryCount < 3)
 		{
-			printf("retrying...\n");
+			if(debugLevel >= IceTransport::DL_Info)
+				emit q->debugLine("retrying...");
 
 			delete sock;
 			sock = 0;
@@ -440,7 +445,10 @@ private:
 				return true;
 			}
 			else
-				printf("Warning: server responded with what doesn't seem to be a STUN or data packet, skipping.\n");
+			{
+				if(debugLevel >= IceTransport::DL_Packet)
+					emit q->debugLine("Warning: server responded with what doesn't seem to be a STUN or data packet, skipping.");
+			}
 		}
 
 		return false;
@@ -640,17 +648,20 @@ private slots:
 
 	void turn_connected()
 	{
-		printf("turn_connected\n");
+		if(debugLevel >= IceTransport::DL_Info)
+			emit q->debugLine("turn_connected");
 	}
 
 	void turn_tlsHandshaken()
 	{
-		printf("turn_tlsHandshaken\n");
+		if(debugLevel >= IceTransport::DL_Info)
+			emit q->debugLine("turn_tlsHandshaken");
 	}
 
 	void turn_closed()
 	{
-		printf("turn_closed\n");
+		if(debugLevel >= IceTransport::DL_Info)
+			emit q->debugLine("turn_closed");
 
 		delete turn;
 		turn = 0;
@@ -665,11 +676,13 @@ private slots:
 
 		refAddr = allocate->reflexiveAddress();
 		refPort = allocate->reflexivePort();
-		printf("Server says we are %s;%d\n", qPrintable(refAddr.toString()), refPort);
+		if(debugLevel >= IceTransport::DL_Info)
+			emit q->debugLine(QString("Server says we are ") + refAddr.toString() + ';' + QString::number(refPort));
 
 		relAddr = allocate->relayedAddress();
 		relPort = allocate->relayedPort();
-		printf("Server relays via %s;%d\n", qPrintable(relAddr.toString()), relPort);
+		if(debugLevel >= IceTransport::DL_Info)
+			emit q->debugLine(QString("Server relays via ") + relAddr.toString() + ';' + QString::number(relPort));
 
 		turnActivated = true;
 
@@ -683,7 +696,8 @@ private slots:
 
 	void turn_error(XMPP::TurnClient::Error e)
 	{
-		printf("turn_error: %s\n", qPrintable(turn->errorString()));
+		if(debugLevel >= IceTransport::DL_Info)
+			emit q->debugLine(QString("turn_error: ") + turn->errorString());
 
 		delete turn;
 		turn = 0;
@@ -715,7 +729,7 @@ private slots:
 
 	void turn_debugLine(const QString &line)
 	{
-		printf("turn_debugLine: %s\n", qPrintable(line));
+		emit q->debugLine(line);
 	}
 };
 
@@ -862,6 +876,15 @@ void IceLocalTransport::writeDatagram(int path, const QByteArray &buf, const QHo
 	}
 	else
 		Q_ASSERT(0);
+}
+
+void IceLocalTransport::setDebugLevel(DebugLevel level)
+{
+	d->debugLevel = level;
+	if(d->pool)
+		d->pool->setDebugLevel((StunTransactionPool::DebugLevel)level);
+	if(d->turn)
+		d->turn->setDebugLevel((TurnClient::DebugLevel)level);
 }
 
 }

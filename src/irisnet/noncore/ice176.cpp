@@ -20,6 +20,7 @@
 
 #include "ice176.h"
 
+#include <QSet>
 #include <QTimer>
 #include <QUdpSocket>
 #include <QtCrypto>
@@ -216,6 +217,7 @@ public:
 	QString peerUser, peerPass;
 	QList<Component> components;
 	QList<IceComponent::Candidate> localCandidates;
+	QSet<IceTransport*> iceTransports;
 	CheckList checkList;
 	QList< QList<QByteArray> > in;
 	bool useLocal;
@@ -331,10 +333,12 @@ public:
 			Component c;
 			c.id = n + 1;
 			c.ic = new IceComponent(c.id, this);
+			c.ic->setDebugLevel(IceComponent::DL_Info);
 			connect(c.ic, SIGNAL(candidateAdded(const XMPP::IceComponent::Candidate &)), SLOT(ic_candidateAdded(const XMPP::IceComponent::Candidate &)));
 			connect(c.ic, SIGNAL(candidateRemoved(const XMPP::IceComponent::Candidate &)), SLOT(ic_candidateRemoved(const XMPP::IceComponent::Candidate &)));
 			connect(c.ic, SIGNAL(localFinished()), SLOT(ic_localFinished()));
 			connect(c.ic, SIGNAL(stopped()), SLOT(ic_stopped()));
+			connect(c.ic, SIGNAL(debugLine(const QString &)), SLOT(ic_debugLine(const QString &)));
 
 			c.ic->setClientSoftwareNameAndVersion("Iris");
 			c.ic->setProxy(proxy);
@@ -688,8 +692,13 @@ private slots:
 
 		printf("C%d: candidate added: %s;%d\n", cc.info.componentId, qPrintable(cc.info.addr.addr.toString()), cc.info.addr.port);
 
-		connect(cc.iceTransport, SIGNAL(readyRead(int)), SLOT(it_readyRead(int)));
-		connect(cc.iceTransport, SIGNAL(datagramsWritten(int, int, const QHostAddress &, int)), SLOT(it_datagramsWritten(int, int, const QHostAddress &, int)));
+		if(!iceTransports.contains(cc.iceTransport))
+		{
+			connect(cc.iceTransport, SIGNAL(readyRead(int)), SLOT(it_readyRead(int)));
+			connect(cc.iceTransport, SIGNAL(datagramsWritten(int, int, const QHostAddress &, int)), SLOT(it_datagramsWritten(int, int, const QHostAddress &, int)));
+
+			iceTransports += cc.iceTransport;
+		}
 
 		if(state == Started && !collectTimer && !useTrickle)
 		{
@@ -742,6 +751,21 @@ private slots:
 				localCandidates.removeAt(n);
 				--n; // adjust position
 			}
+		}
+
+		bool iceTransportInUse = false;
+		foreach(const IceComponent::Candidate &lc, localCandidates)
+		{
+			if(lc.iceTransport == cc.iceTransport)
+			{
+				iceTransportInUse = true;
+				break;
+			}
+		}
+		if(!iceTransportInUse)
+		{
+			cc.iceTransport->disconnect(this);
+			iceTransports.remove(cc.iceTransport);
 		}
 
 		for(int n = 0; n < checkList.pairs.count(); ++n)
@@ -858,6 +882,16 @@ private slots:
 
 		if(allStopped)
 			postStop();
+	}
+
+	void ic_debugLine(const QString &line)
+	{
+		IceComponent *ic = (IceComponent *)sender();
+		int at = findComponent(ic);
+		Q_ASSERT(at != -1);
+
+		// FIXME: components are always sorted?
+		printf("C%d: %s\n", at + 1, qPrintable(line));
 	}
 
 	void collect_timeout()

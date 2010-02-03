@@ -65,6 +65,7 @@ public:
 	virtual QByteArray readDatagram(int path, QHostAddress *addr, int *port);
 	virtual void writeDatagram(int path, const QByteArray &buf, const QHostAddress &addr, int port);
 	virtual void addChannelPeer(const QHostAddress &addr, int port);
+	virtual void setDebugLevel(DebugLevel level);
 
 private:
 	class Private;
