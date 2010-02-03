@@ -173,7 +173,7 @@ public:
 	QList<Packet> outPending;
 	int outPendingWrite;
 	QList<QHostAddress> desiredPerms;
-	QList<StunAllocate::Channel> desiredChannels;
+	QList<StunAllocate::Channel> pendingChannels, desiredChannels;
 
 	class Written
 	{
@@ -232,6 +232,7 @@ public:
 		outPending.clear();
 		outPendingWrite = 0;
 		desiredPerms.clear();
+		pendingChannels.clear();
 		desiredChannels.clear();
 	}
 
@@ -358,6 +359,7 @@ public:
 		connect(allocate, SIGNAL(error(XMPP::StunAllocate::Error)), SLOT(allocate_error(XMPP::StunAllocate::Error)));
 		connect(allocate, SIGNAL(permissionsChanged()), SLOT(allocate_permissionsChanged()));
 		connect(allocate, SIGNAL(channelsChanged()), SLOT(allocate_channelsChanged()));
+		connect(allocate, SIGNAL(debugLine(const QString &)), SLOT(allocate_debugLine(const QString &)));
 
 		allocate->setClientSoftwareNameAndVersion(clientSoftware);
 
@@ -458,7 +460,7 @@ public:
 
 		StunAllocate::Channel c(addr, port);
 		bool writeImmediately = false;
-		bool requireChannel = desiredChannels.contains(c);
+		bool requireChannel = pendingChannels.contains(c) || desiredChannels.contains(c);
 
 		QList<QHostAddress> actualPerms = allocate->permissions();
 		if(actualPerms.contains(addr))
@@ -512,6 +514,27 @@ public:
 		}
 	}
 
+	void tryChannelQueued()
+	{
+		if(!pendingChannels.isEmpty())
+		{
+			QList<QHostAddress> actualPerms = allocate->permissions();
+			QList<StunAllocate::Channel> list;
+			for(int n = 0; n < pendingChannels.count(); ++n)
+			{
+				if(actualPerms.contains(pendingChannels[n].address))
+				{
+					list += pendingChannels[n];
+					pendingChannels.removeAt(n);
+					--n; // adjust position
+				}
+			}
+
+			if(!list.isEmpty())
+				ensureChannels(list);
+		}
+	}
+
 	void write(const QByteArray &buf, const QHostAddress &addr, int port)
 	{
 		QByteArray packet = allocate->encode(buf, addr, port);
@@ -541,17 +564,35 @@ public:
 		}
 	}
 
+	// assumes we have perms for all input already
+	void ensureChannels(const QList<StunAllocate::Channel> &channels)
+	{
+		bool changed = false;
+		foreach(const StunAllocate::Channel &c, channels)
+		{
+			if(!desiredChannels.contains(c))
+			{
+				emit q->debugLine(QString("Setting channel for peer address/port %1;%2").arg(c.address.toString()).arg(c.port));
+
+				desiredChannels += c;
+				changed = true;
+			}
+		}
+
+		if(changed)
+			allocate->setChannels(desiredChannels);
+	}
+
 	void addChannelPeer(const QHostAddress &addr, int port)
 	{
 		ensurePermission(addr);
 
 		StunAllocate::Channel c(addr, port);
-		if(!desiredChannels.contains(c))
+		if(!pendingChannels.contains(c) && !desiredChannels.contains(c))
 		{
-			emit q->debugLine(QString("Setting channel for peer address/port %1;%2").arg(c.address.toString()).arg(c.port));
+			pendingChannels += c;
 
-			desiredChannels += c;
-			allocate->setChannels(desiredChannels);
+			tryChannelQueued();
 		}
 	}
 
@@ -890,6 +931,7 @@ private slots:
 	{
 		emit q->debugLine("PermissionsChanged");
 
+		tryChannelQueued();
 		tryWriteQueued();
 	}
 
@@ -898,6 +940,11 @@ private slots:
 		emit q->debugLine("ChannelsChanged");
 
 		tryWriteQueued();
+	}
+
+	void allocate_debugLine(const QString &line)
+	{
+		emit q->debugLine(line);
 	}
 };
 
