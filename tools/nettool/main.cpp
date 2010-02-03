@@ -909,6 +909,8 @@ public:
 public slots:
 	void start()
 	{
+		connect(ProcessQuit::instance(), SIGNAL(quit()), SLOT(do_quit()));
+
 		turn = new TurnClient(this);
 
 		connect(turn, SIGNAL(connected()), SLOT(turn_connected()));
@@ -1000,6 +1002,13 @@ private:
 	}
 
 private slots:
+	void do_quit()
+	{
+		ProcessQuit::cleanup();
+
+		turn->close();
+	}
+
 	void udp_readyRead()
 	{
 		while(udp->hasPendingDatagrams())
