@@ -417,6 +417,9 @@ int AdvancedConnector::errorCode() const
 
 void AdvancedConnector::do_resolve()
 {
+#ifdef XMPP_DEBUG
+	printf("resolving [%s]\n", qPrintable(d->host));
+#endif
 	d->dns.resolve(d->host);
 }
 
