@@ -302,6 +302,7 @@ public:
 		pool->setDebugLevel((StunTransactionPool::DebugLevel)debugLevel);
 		connect(pool, SIGNAL(outgoingMessage(const QByteArray &, const QHostAddress &, int)), SLOT(pool_outgoingMessage(const QByteArray &, const QHostAddress &, int)));
 		connect(pool, SIGNAL(needAuthParams()), SLOT(pool_needAuthParams()));
+		connect(pool, SIGNAL(debugLine(const QString &)), SLOT(pool_debugLine(const QString &)));
 
 		pool->setLongTermAuthEnabled(true);
 		if(!stunUser.isEmpty())
@@ -416,20 +417,20 @@ private:
 	}
 
 	// return true if data packet, false if pool or nothing
-	bool processIncomingStun(const QByteArray &buf, Datagram *dg)
+	bool processIncomingStun(const QByteArray &buf, const QHostAddress &fromAddr, int fromPort, Datagram *dg)
 	{
 		QByteArray data;
-		QHostAddress fromAddr;
-		int fromPort;
+		QHostAddress dataAddr;
+		int dataPort;
 
 		bool notStun;
-		if(!pool->writeIncomingMessage(buf, &notStun) && turn)
+		if(!pool->writeIncomingMessage(buf, &notStun, fromAddr, fromPort) && turn)
 		{
-			data = turn->processIncomingDatagram(buf, notStun, &fromAddr, &fromPort);
+			data = turn->processIncomingDatagram(buf, notStun, &dataAddr, &dataPort);
 			if(!data.isNull())
 			{
-				dg->addr = fromAddr;
-				dg->port = fromPort;
+				dg->addr = dataAddr;
+				dg->port = dataPort;
 				dg->buf = data;
 				return true;
 			}
@@ -493,7 +494,7 @@ private slots:
 			QByteArray buf = sock->readDatagram(&from, &fromPort);
 			if((from == stunBindAddr && fromPort == stunBindPort) || (from == stunRelayAddr && fromPort == stunRelayPort))
 			{
-				bool haveData = processIncomingStun(buf, &dg);
+				bool haveData = processIncomingStun(buf, from, fromPort, &dg);
 
 				// processIncomingStun could cause signals to
 				//   emit.  for example, stopped()
@@ -607,6 +608,11 @@ private slots:
 		//   prompting just continue on as if we had a blank
 		//   user/pass
 		pool->continueAfterParams();
+	}
+
+	void pool_debugLine(const QString &line)
+	{
+		emit q->debugLine(line);
 	}
 
 	void binding_success()
