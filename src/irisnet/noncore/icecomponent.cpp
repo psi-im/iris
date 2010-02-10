@@ -500,16 +500,21 @@ private:
 	void tryStun(int at)
 	{
 		LocalTransport *lt = localStun[at];
-		IceLocalTransport::StunServiceType stunType;
+
 		if(config.stunType == Ice176::Basic || (useStunBasic && !useStunRelayUdp) || config.stunUser.isEmpty())
-			stunType = IceLocalTransport::Basic;
+		{
+			lt->sock->setStunBindService(config.stunAddr, config.stunPort);
+		}
 		else if(config.stunType == Ice176::Relay)
-			stunType = IceLocalTransport::Relay;
+		{
+			lt->sock->setStunRelayService(config.stunAddr, config.stunPort, config.stunUser, config.stunPass);
+		}
 		else // Auto
-			stunType = IceLocalTransport::Auto;
-		lt->sock->setStunService(config.stunAddr, config.stunPort, stunType);
-		lt->sock->setStunUsername(config.stunUser);
-		lt->sock->setStunPassword(config.stunPass);
+		{
+			lt->sock->setStunBindService(config.stunAddr, config.stunPort);
+			lt->sock->setStunRelayService(config.stunAddr, config.stunPort, config.stunUser, config.stunPass);
+		}
+
 		lt->stun_started = true;
 		lt->sock->stunStart();
 	}
@@ -766,8 +771,12 @@ private slots:
 			ci.type = ServerReflexiveType;
 			ci.componentId = id;
 			ci.priority = choose_default_priority(ci.type, 65535 - addrAt, lt->isVpn, ci.componentId);
-			ci.base.addr = lt->sock->localAddress();
-			ci.base.port = lt->sock->localPort();
+			// stun is only used on non-leap sockets, but we don't
+			//   announce non-leap local candidates, so make the
+			//   base the same as the srflx
+			//ci.base.addr = lt->sock->localAddress();
+			//ci.base.port = lt->sock->localPort();
+			ci.base = ci.addr;
 			ci.network = lt->network;
 
 			Candidate c;

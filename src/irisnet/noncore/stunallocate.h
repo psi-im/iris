@@ -80,6 +80,7 @@ public:
 	void setClientSoftwareNameAndVersion(const QString &str);
 
 	void start();
+	void start(const QHostAddress &addr, int port); // use addr association
 	void stop();
 
 	QString serverSoftwareNameAndVersion() const;

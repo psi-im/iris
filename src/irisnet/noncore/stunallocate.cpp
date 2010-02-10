@@ -80,6 +80,8 @@ public:
 	QTimer *timer;
 	StunTransactionPool *pool;
 	StunTransaction *trans;
+	QHostAddress stunAddr;
+	int stunPort;
 	QHostAddress addr;
 	bool active;
 
@@ -113,9 +115,13 @@ public:
 		releaseAndDeleteLater(this, timer);
 	}
 
-	void start()
+	void start(const QHostAddress &_addr, int _port)
 	{
 		Q_ASSERT(!active);
+
+		stunAddr = _addr;
+		stunPort = _port;
+
 		doTransaction();
 	}
 
@@ -159,7 +165,7 @@ private:
 		connect(trans, SIGNAL(createMessage(const QByteArray &)), SLOT(trans_createMessage(const QByteArray &)));
 		connect(trans, SIGNAL(finished(const XMPP::StunMessage &)), SLOT(trans_finished(const XMPP::StunMessage &)));
 		connect(trans, SIGNAL(error(XMPP::StunTransaction::Error)), SLOT(trans_error(XMPP::StunTransaction::Error)));
-		trans->start(pool);
+		trans->start(pool, stunAddr, stunPort);
 	}
 
 	void restartTimer()
@@ -260,6 +266,8 @@ public:
 	QTimer *timer;
 	StunTransactionPool *pool;
 	StunTransaction *trans;
+	QHostAddress stunAddr;
+	int stunPort;
 	int channelId;
 	QHostAddress addr;
 	int port;
@@ -297,9 +305,13 @@ public:
 		releaseAndDeleteLater(this, timer);
 	}
 
-	void start()
+	void start(const QHostAddress &_addr, int _port)
 	{
 		Q_ASSERT(!active);
+
+		stunAddr = _addr;
+		stunPort = _port;
+
 		doTransaction();
 	}
 
@@ -344,7 +356,7 @@ private:
 		connect(trans, SIGNAL(createMessage(const QByteArray &)), SLOT(trans_createMessage(const QByteArray &)));
 		connect(trans, SIGNAL(finished(const XMPP::StunMessage &)), SLOT(trans_finished(const XMPP::StunMessage &)));
 		connect(trans, SIGNAL(error(XMPP::StunTransaction::Error)), SLOT(trans_error(XMPP::StunTransaction::Error)));
-		trans->start(pool);
+		trans->start(pool, stunAddr, stunPort);
 	}
 
 	void restartTimer()
@@ -466,6 +478,8 @@ public:
 	ObjectSession sess;
 	StunTransactionPool *pool;
 	StunTransaction *trans;
+	QHostAddress stunAddr;
+	int stunPort;
 	State state;
 	QString errorString;
 	DontFragmentState dfState;
@@ -504,9 +518,12 @@ public:
 		releaseAndDeleteLater(this, allocateRefreshTimer);
 	}
 
-	void start()
+	void start(const QHostAddress &_addr = QHostAddress(), int _port = -1)
 	{
 		Q_ASSERT(state == Stopped);
+
+		stunAddr = _addr;
+		stunPort = _port;
 
 		state = Starting;
 		doTransaction();
@@ -589,7 +606,7 @@ public:
 			for(int n = 0; n < perms.count(); ++n)
 			{
 				if(!perms[n]->active)
-					perms[n]->start();
+					perms[n]->start(stunAddr, stunPort);
 			}
 		}
 
@@ -612,7 +629,7 @@ public:
 				connect(perm, SIGNAL(ready()), SLOT(perm_ready()));
 				connect(perm, SIGNAL(error(XMPP::StunAllocatePermission::Error, const QString &)), SLOT(perm_error(XMPP::StunAllocatePermission::Error, const QString &)));
 				perms += perm;
-				perm->start();
+				perm->start(stunAddr, stunPort);
 			}
 		}
 	}
@@ -667,7 +684,7 @@ public:
 						break;
 
 					channels[n]->channelId = channelId;
-					channels[n]->start();
+					channels[n]->start(stunAddr, stunPort);
 				}
 			}
 		}
@@ -709,7 +726,7 @@ public:
 					channels += channel;
 
 					if(channelId != -1)
-						channel->start();
+						channel->start(stunAddr, stunPort);
 				}
 			}
 		}
@@ -802,7 +819,7 @@ private:
 		connect(trans, SIGNAL(createMessage(const QByteArray &)), SLOT(trans_createMessage(const QByteArray &)));
 		connect(trans, SIGNAL(finished(const XMPP::StunMessage &)), SLOT(trans_finished(const XMPP::StunMessage &)));
 		connect(trans, SIGNAL(error(XMPP::StunTransaction::Error)), SLOT(trans_error(XMPP::StunTransaction::Error)));
-		trans->start(pool);
+		trans->start(pool, stunAddr, stunPort);
 	}
 
 	void restartRefreshTimer()
@@ -1228,6 +1245,11 @@ void StunAllocate::setClientSoftwareNameAndVersion(const QString &str)
 void StunAllocate::start()
 {
 	d->start();
+}
+
+void StunAllocate::start(const QHostAddress &addr, int port)
+{
+	d->start(addr, port);
 }
 
 void StunAllocate::stop()

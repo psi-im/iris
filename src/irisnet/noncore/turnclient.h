@@ -123,8 +123,9 @@ public:
 	//   I/O occurs through the pool.  transfer of data packets occurs
 	//   via processIncomingDatagram(), outgoingDatagram(), and
 	//   outgoingDatagramsWritten().  authentication happens through the
-	//   pool and not through this class.
-	void connectToHost(StunTransactionPool *pool);
+	//   pool and not through this class.  the turn addr/port is optional,
+	//   and used only for addr association with the pool
+	void connectToHost(StunTransactionPool *pool, const QHostAddress &addr = QHostAddress(), int port = -1);
 
 	// for TCP and TCP-TLS
 	void connectToHost(const QHostAddress &addr, int port, Mode mode = PlainMode);

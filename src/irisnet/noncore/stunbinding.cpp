@@ -35,6 +35,8 @@ public:
 	StunBinding *q;
 	StunTransactionPool *pool;
 	StunTransaction *trans;
+	QHostAddress stunAddr;
+	int stunPort;
 	QHostAddress addr;
 	int port;
 	QString errorString;
@@ -63,9 +65,12 @@ public:
 		delete trans;
 	}
 
-	void start()
+	void start(const QHostAddress &_addr = QHostAddress(), int _port = -1)
 	{
 		Q_ASSERT(!trans);
+
+		stunAddr = _addr;
+		stunPort = _port;
 
 		trans = new StunTransaction(this);
 		connect(trans, SIGNAL(createMessage(const QByteArray &)), SLOT(trans_createMessage(const QByteArray &)));
@@ -80,7 +85,7 @@ public:
 
 		trans->setFingerprintRequired(fpRequired);
 
-		trans->start(pool);
+		trans->start(pool, stunAddr, stunPort);
 	}
 
 private slots:
@@ -268,6 +273,11 @@ void StunBinding::setFingerprintRequired(bool enabled)
 void StunBinding::start()
 {
 	d->start();
+}
+
+void StunBinding::start(const QHostAddress &addr, int port)
+{
+	d->start(addr, port);
 }
 
 QHostAddress StunBinding::reflexiveAddress() const

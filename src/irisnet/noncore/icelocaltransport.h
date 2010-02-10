@@ -48,13 +48,6 @@ public:
 		ErrorBind = ErrorCustom
 	};
 
-	enum StunServiceType
-	{
-		Auto,
-		Basic,
-		Relay
-	};
-
 	IceLocalTransport(QObject *parent = 0);
 	~IceLocalTransport();
 
@@ -68,9 +61,8 @@ public:
 	//   retries
 	void start(const QHostAddress &addr);
 
-	void setStunService(const QHostAddress &addr, int port, StunServiceType type = Auto);
-	void setStunUsername(const QString &user);
-	void setStunPassword(const QCA::SecureArray &pass);
+	void setStunBindService(const QHostAddress &addr, int port);
+	void setStunRelayService(const QHostAddress &addr, int port, const QString &user, const QCA::SecureArray &pass);
 
 	// obtain relay / reflexive
 	void stunStart();

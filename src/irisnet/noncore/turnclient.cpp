@@ -372,7 +372,11 @@ public:
 		allocateStarted = false;
 		if(debugLevel >= TurnClient::DL_Info)
 			emit q->debugLine("Allocating...");
-		allocate->start();
+		// only use addr association in udp mode
+		if(udp)
+			allocate->start(serverAddr, serverPort);
+		else
+			allocate->start();
 	}
 
 	void processStream(const QByteArray &in)
@@ -1009,8 +1013,10 @@ void TurnClient::setClientSoftwareNameAndVersion(const QString &str)
 	d->clientSoftware = str;
 }
 
-void TurnClient::connectToHost(StunTransactionPool *pool)
+void TurnClient::connectToHost(StunTransactionPool *pool, const QHostAddress &addr, int port)
 {
+	d->serverAddr = addr;
+	d->serverPort = port;
 	d->udp = true;
 	d->pool = pool;
 	d->in.clear();
