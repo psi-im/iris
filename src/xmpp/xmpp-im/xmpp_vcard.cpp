@@ -216,8 +216,6 @@ VCard::~VCard()
 QDomElement VCard::toXml(QDomDocument *doc) const
 {
 	QDomElement v = doc->createElement("vCard");
-	v.setAttribute("version", "2.0");
-	v.setAttribute("prodid", "-//HandGen//NONSGML vGen v1.0//EN");
 	v.setAttribute("xmlns", "vcard-temp");
 
 	if ( !d->version.isEmpty() )

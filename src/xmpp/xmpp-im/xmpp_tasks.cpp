@@ -1006,8 +1006,6 @@ void JT_VCard::get(const Jid &_jid)
 	d->iq = createIQ(doc(), "get", type == 1 ? Jid().full() : d->jid.full(), id());
 	QDomElement v = doc()->createElement("vCard");
 	v.setAttribute("xmlns", "vcard-temp");
-	v.setAttribute("version", "2.0");
-	v.setAttribute("prodid", "-//HandGen//NONSGML vGen v1.0//EN");
 	d->iq.appendChild(v);
 }
 
