@@ -444,9 +444,6 @@ public:
 				pair.isDefault = false;
 				pair.isValid = false;
 				pair.isNominated = false;
-				// TODO: make sure leap candidates are checked first
-				//   we may need a heuristic here for remote candidates, like
-				//   find the first srflx
 				if(mode == Ice176::Initiator)
 					pair.priority = calc_pair_priority(lc.priority, rc.priority);
 				else
@@ -460,22 +457,16 @@ public:
 		// combine pairs with existing, and sort
 		pairs = checkList.pairs + pairs;
 		checkList.pairs.clear();
-		while(!pairs.isEmpty())
+		foreach(const CandidatePair &pair, pairs)
 		{
-			int at = -1;
-			qint64 highest_priority = -1;
-			for(int n = 0; n < pairs.count(); ++n)
+			int at;
+			for(at = 0; at < checkList.pairs.count(); ++at)
 			{
-				if(n == 0 || pairs[n].priority > highest_priority)
-				{
-					at = n;
-					highest_priority = pairs[n].priority;
-				}
+				if(compare_pair(pair, checkList.pairs[at]) < 0)
+					break;
 			}
 
-			CandidatePair pair = pairs[at];
-			pairs.removeAt(at);
-			checkList.pairs += pair;
+			checkList.pairs.insert(at, pair);
 		}
 
 		// pruning
@@ -509,8 +500,9 @@ public:
 			}
 		}
 
-		// max pairs is 100
-		while(checkList.pairs.count() > 100)
+		// max pairs is 100 * number of components
+		int max_pairs = 100 * components.count();
+		while(checkList.pairs.count() > max_pairs)
 			checkList.pairs.removeLast();
 
 		printf("%d after pruning\n", checkList.pairs.count());
@@ -677,6 +669,22 @@ private:
 			return -1;
 	}
 
+	static int compare_pair(const CandidatePair &a, const CandidatePair &b)
+	{
+		// prefer remote srflx, for leap
+		if(a.remote.type == IceComponent::ServerReflexiveType && b.remote.type != IceComponent::ServerReflexiveType && b.remote.addr.addr.protocol() != QAbstractSocket::IPv6Protocol)
+			return -1;
+		else if(b.remote.type == IceComponent::ServerReflexiveType && a.remote.type != IceComponent::ServerReflexiveType && a.remote.addr.addr.protocol() != QAbstractSocket::IPv6Protocol)
+			return 1;
+
+		if(a.priority > b.priority)
+			return -1;
+		else if(b.priority > a.priority)
+			return 1;
+
+		return 0;
+	}
+
 private slots:
 	void postStop()
 	{
@@ -702,7 +710,7 @@ private slots:
 			iceTransports += cc.iceTransport;
 		}
 
-		if(state == Started && !collectTimer && !useTrickle)
+		if(state == Started && useTrickle)
 		{
 			QList<Ice176::Candidate> list;
 
@@ -1246,9 +1254,7 @@ void Ice176::setComponentCount(int count)
 
 void Ice176::setLocalCandidateTrickle(bool enabled)
 {
-	// FIXME
-	Q_UNUSED(enabled);
-	//d->useTrickle = enabled;
+	d->useTrickle = enabled;
 }
 
 void Ice176::start(Mode mode)

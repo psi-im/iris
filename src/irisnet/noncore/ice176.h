@@ -165,7 +165,10 @@ public:
 	static bool isIPv6LinkLocalAddress(const QHostAddress &addr);
 
 signals:
+	// indicates that the ice engine is started and is ready to receive
+	//   peer creds and remote candidates
 	void started();
+
 	void stopped();
 	void error(XMPP::Ice176::Error e);
 
