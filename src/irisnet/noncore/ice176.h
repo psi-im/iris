@@ -50,13 +50,6 @@ public:
 		Responder
 	};
 
-	enum StunServiceType
-	{
-		Auto,
-		Basic,
-		Relay
-	};
-
 	class LocalAddress
 	{
 	public:
@@ -131,15 +124,14 @@ public:
 	// one per local address.  you must set local addresses first.
 	void setExternalAddresses(const QList<ExternalAddress> &addrs);
 
-	// call setStunService last here, as it will trigger stun connectivity
-	void setStunUsername(const QString &user);
-	void setStunPassword(const QCA::SecureArray &pass);
-	void setStunService(const QHostAddress &addr, int port, StunServiceType type = Auto);
+	void setStunBindService(const QHostAddress &addr, int port);
+	void setStunRelayUdpService(const QHostAddress &addr, int port, const QString &user, const QCA::SecureArray &pass);
+	void setStunRelayTcpService(const QHostAddress &addr, int port, const QString &user, const QCA::SecureArray &pass);
 
 	// these all start out enabled, but can be disabled for diagnostic
 	//   purposes
 	void setUseLocal(bool enabled);
-	void setUseStunBasic(bool enabled);
+	void setUseStunBind(bool enabled);
 	void setUseStunRelayUdp(bool enabled);
 	void setUseStunRelayTcp(bool enabled);
 

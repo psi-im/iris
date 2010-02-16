@@ -51,11 +51,19 @@ public:
 	public:
 		QList<Ice176::LocalAddress> localAddrs;
 		QList<Ice176::ExternalAddress> extAddrs;
-		Ice176::StunServiceType stunType;
-		QHostAddress stunAddr;
-		int stunPort;
-		QString stunUser;
-		QCA::SecureArray stunPass;
+
+		QHostAddress stunBindAddr;
+		int stunBindPort;
+
+		QHostAddress stunRelayUdpAddr;
+		int stunRelayUdpPort;
+		QString stunRelayUdpUser;
+		QCA::SecureArray stunRelayUdpPass;
+
+		QHostAddress stunRelayTcpAddr;
+		int stunRelayTcpPort;
+		QString stunRelayTcpUser;
+		QCA::SecureArray stunRelayTcpPass;
 	};
 
 	class LocalTransport
@@ -103,7 +111,7 @@ public:
 	QList<Candidate> localCandidates;
 	QHash<int, QSet<TransportAddress> > channelPeers;
 	bool useLocal;
-	bool useStunBasic;
+	bool useStunBind;
 	bool useStunRelayUdp;
 	bool useStunRelayTcp;
 	bool local_finished;
@@ -117,7 +125,7 @@ public:
 		stopping(false),
 		tt(0),
 		useLocal(true),
-		useStunBasic(true),
+		useStunBind(true),
 		useStunRelayUdp(true),
 		useStunRelayTcp(true),
 		local_finished(false),
@@ -260,18 +268,23 @@ public:
 		}
 
 		// only allow setting stun stuff once
-		if(!pending.stunAddr.isNull() && config.stunAddr.isNull())
+		if(!pending.stunBindAddr.isNull() && config.stunBindAddr.isNull())
 		{
-			config.stunAddr = pending.stunAddr;
-			config.stunPort = pending.stunPort;
-			config.stunType = pending.stunType;
-			config.stunUser = pending.stunUser;
-			config.stunPass = pending.stunPass;
+			config.stunBindAddr = pending.stunBindAddr;
+			config.stunBindPort = pending.stunBindPort;
+			config.stunRelayUdpAddr = pending.stunRelayUdpAddr;
+			config.stunRelayUdpPort = pending.stunRelayUdpPort;
+			config.stunRelayUdpUser = pending.stunRelayUdpUser;
+			config.stunRelayUdpPass = pending.stunRelayUdpPass;
+			config.stunRelayTcpAddr = pending.stunRelayTcpAddr;
+			config.stunRelayTcpPort = pending.stunRelayTcpPort;
+			config.stunRelayTcpUser = pending.stunRelayTcpUser;
+			config.stunRelayTcpPass = pending.stunRelayTcpPass;
 		}
 
 		// localStun sockets created on demand if stun settings are
 		//   present, but only once (cannot be changed, for now)
-		if((useStunBasic || useStunRelayUdp) && !config.stunAddr.isNull() && !config.localAddrs.isEmpty() && localStun.isEmpty())
+		if(((useStunBind && !config.stunBindAddr.isNull()) || (useStunRelayUdp && !config.stunRelayUdpAddr.isNull() && !config.stunRelayUdpUser.isEmpty())) && !config.localAddrs.isEmpty() && localStun.isEmpty())
 		{
 			foreach(const Ice176::LocalAddress &la, config.localAddrs)
 			{
@@ -298,7 +311,7 @@ public:
 			}
 		}
 
-		if(!config.stunAddr.isNull() && !localStun.isEmpty())
+		if((!config.stunBindAddr.isNull() || !config.stunRelayUdpAddr.isNull()) && !localStun.isEmpty())
 		{
 			for(int n = 0; n < localStun.count(); ++n)
 			{
@@ -307,7 +320,7 @@ public:
 			}
 		}
 
-		if(useStunRelayTcp && !config.stunAddr.isNull() && !config.stunUser.isEmpty() && (config.stunType == Ice176::Relay || config.stunType == Ice176::Auto) && !tt)
+		if(useStunRelayTcp && !config.stunRelayTcpAddr.isNull() && !config.stunRelayTcpUser.isEmpty() && !tt)
 		{
 			tt = new IceTurnTransport(this);
 			tt->setDebugLevel((IceTransport::DebugLevel)debugLevel);
@@ -317,11 +330,11 @@ public:
 			connect(tt, SIGNAL(debugLine(const QString &)), SLOT(tt_debugLine(const QString &)));
 			tt->setClientSoftwareNameAndVersion(clientSoftware);
 			tt->setProxy(proxy);
-			tt->setUsername(config.stunUser);
-			tt->setPassword(config.stunPass);
-			tt->start(config.stunAddr, config.stunPort);
+			tt->setUsername(config.stunRelayTcpUser);
+			tt->setPassword(config.stunRelayTcpPass);
+			tt->start(config.stunRelayTcpAddr, config.stunRelayTcpPort);
 
-			emit q->debugLine(QString("starting TURN transport with server ") + config.stunAddr.toString() + ';' + QString::number(config.stunPort) + " for component " + QString::number(id));
+			emit q->debugLine(QString("starting TURN transport with server ") + config.stunRelayTcpAddr.toString() + ';' + QString::number(config.stunRelayTcpPort) + " for component " + QString::number(id));
 		}
 
 		if(localLeap.isEmpty() && localStun.isEmpty() && !local_finished)
@@ -501,19 +514,19 @@ private:
 	{
 		LocalTransport *lt = localStun[at];
 
-		if(config.stunType == Ice176::Basic || (useStunBasic && !useStunRelayUdp) || config.stunUser.isEmpty())
+		bool atLeastOne = false;
+		if(useStunBind && !config.stunBindAddr.isNull())
 		{
-			lt->sock->setStunBindService(config.stunAddr, config.stunPort);
+			atLeastOne = true;
+			lt->sock->setStunBindService(config.stunBindAddr, config.stunBindPort);
 		}
-		else if(config.stunType == Ice176::Relay)
+		if(useStunRelayUdp && !config.stunRelayUdpAddr.isNull() && !config.stunRelayUdpUser.isEmpty())
 		{
-			lt->sock->setStunRelayService(config.stunAddr, config.stunPort, config.stunUser, config.stunPass);
+			atLeastOne = true;
+			lt->sock->setStunRelayService(config.stunRelayUdpAddr, config.stunRelayUdpPort, config.stunRelayUdpUser, config.stunRelayUdpPass);
 		}
-		else // Auto
-		{
-			lt->sock->setStunBindService(config.stunAddr, config.stunPort);
-			lt->sock->setStunRelayService(config.stunAddr, config.stunPort, config.stunUser, config.stunPass);
-		}
+
+		Q_ASSERT(atLeastOne);
 
 		lt->stun_started = true;
 		lt->sock->stunStart();
@@ -748,7 +761,7 @@ private slots:
 
 		ObjectSessionWatcher watch(&sess);
 
-		if(useStunBasic && !lt->sock->serverReflexiveAddress().isNull() && !lt->stun_finished)
+		if(useStunBind && !lt->sock->serverReflexiveAddress().isNull() && !lt->stun_finished)
 		{
 			// automatically assign ext to related leaps, if possible
 			foreach(LocalTransport *i, localLeap)
@@ -965,21 +978,26 @@ void IceComponent::setExternalAddresses(const QList<Ice176::ExternalAddress> &ad
 	d->pending.extAddrs = addrs;
 }
 
-void IceComponent::setStunService(const QHostAddress &addr, int port, Ice176::StunServiceType type)
+void IceComponent::setStunBindService(const QHostAddress &addr, int port)
 {
-	d->pending.stunAddr = addr;
-	d->pending.stunPort = port;
-	d->pending.stunType = type;
+	d->pending.stunBindAddr = addr;
+	d->pending.stunBindPort = port;
 }
 
-void IceComponent::setStunUsername(const QString &user)
+void IceComponent::setStunRelayUdpService(const QHostAddress &addr, int port, const QString &user, const QCA::SecureArray &pass)
 {
-	d->pending.stunUser = user;
+	d->pending.stunRelayUdpAddr = addr;
+	d->pending.stunRelayUdpPort = port;
+	d->pending.stunRelayUdpUser = user;
+	d->pending.stunRelayUdpPass = pass;
 }
 
-void IceComponent::setStunPassword(const QCA::SecureArray &pass)
+void IceComponent::setStunRelayTcpService(const QHostAddress &addr, int port, const QString &user, const QCA::SecureArray &pass)
 {
-	d->pending.stunPass = pass;
+	d->pending.stunRelayTcpAddr = addr;
+	d->pending.stunRelayTcpPort = port;
+	d->pending.stunRelayTcpUser = user;
+	d->pending.stunRelayTcpPass = pass;
 }
 
 void IceComponent::setUseLocal(bool enabled)
@@ -987,9 +1005,9 @@ void IceComponent::setUseLocal(bool enabled)
 	d->useLocal = enabled;
 }
 
-void IceComponent::setUseStunBasic(bool enabled)
+void IceComponent::setUseStunBind(bool enabled)
 {
-	d->useStunBasic = enabled;
+	d->useStunBind = enabled;
 }
 
 void IceComponent::setUseStunRelayUdp(bool enabled)

@@ -72,21 +72,11 @@ static qint64 calc_pair_priority(int a, int b)
 	return priority;
 }
 
+// see if candidates are considered the same for pruning purposes
 static bool compare_candidates(const IceComponent::CandidateInfo &a, const IceComponent::CandidateInfo &b)
 {
-	// FIXME: probably we shouldn't do a full compare like this, since some
-	//   fields are optional/informational
-	if(a.addr == b.addr &&
-		a.type == b.type &&
-		a.priority == b.priority &&
-		a.foundation == b.foundation &&
-		a.componentId == b.componentId &&
-		a.base == b.base &&
-		a.related == b.related &&
-		a.network == b.network)
-	{
+	if(a.addr == b.addr && a.componentId == b.componentId)
 		return true;
-	}
 	else
 		return false;
 }
@@ -208,11 +198,16 @@ public:
 	int componentCount;
 	QList<Ice176::LocalAddress> localAddrs;
 	QList<Ice176::ExternalAddress> extAddrs;
-	Ice176::StunServiceType stunType;
-	QHostAddress stunAddr;
-	int stunPort;
-	QString stunUser;
-	QCA::SecureArray stunPass;
+	QHostAddress stunBindAddr;
+	int stunBindPort;
+	QHostAddress stunRelayUdpAddr;
+	int stunRelayUdpPort;
+	QString stunRelayUdpUser;
+	QCA::SecureArray stunRelayUdpPass;
+	QHostAddress stunRelayTcpAddr;
+	int stunRelayTcpPort;
+	QString stunRelayTcpUser;
+	QCA::SecureArray stunRelayTcpPass;
 	QString localUser, localPass;
 	QString peerUser, peerPass;
 	QList<Component> components;
@@ -221,7 +216,7 @@ public:
 	CheckList checkList;
 	QList< QList<QByteArray> > in;
 	bool useLocal;
-	bool useStunBasic;
+	bool useStunBind;
 	bool useStunRelayUdp;
 	bool useStunRelayTcp;
 	bool useTrickle;
@@ -234,7 +229,7 @@ public:
 		portReserver(0),
 		componentCount(0),
 		useLocal(true),
-		useStunBasic(true),
+		useStunBind(true),
 		useStunRelayUdp(true),
 		useStunRelayTcp(true),
 		useTrickle(false),
@@ -346,12 +341,15 @@ public:
 				c.ic->setPortReserver(portReserver);
 			c.ic->setLocalAddresses(localAddrs);
 			c.ic->setExternalAddresses(extAddrs);
-			c.ic->setStunService(stunAddr, stunPort, stunType);
-			c.ic->setStunUsername(stunUser);
-			c.ic->setStunPassword(stunPass);
+			if(!stunBindAddr.isNull())
+				c.ic->setStunBindService(stunBindAddr, stunBindPort);
+			if(!stunRelayUdpAddr.isNull())
+				c.ic->setStunRelayUdpService(stunRelayUdpAddr, stunRelayUdpPort, stunRelayUdpUser, stunRelayUdpPass);
+			if(!stunRelayTcpAddr.isNull())
+				c.ic->setStunRelayTcpService(stunRelayTcpAddr, stunRelayTcpPort, stunRelayTcpUser, stunRelayTcpPass);
 
 			c.ic->setUseLocal(useLocal);
-			c.ic->setUseStunBasic(useStunBasic);
+			c.ic->setUseStunBind(useStunBind);
 			c.ic->setUseStunRelayUdp(useStunRelayUdp);
 			c.ic->setUseStunRelayTcp(useStunRelayTcp);
 
@@ -504,12 +502,16 @@ public:
 				}
 			}
 
-			if(found)
+			if(found )
 			{
 				checkList.pairs.removeAt(n);
 				--n; // adjust position
 			}
 		}
+
+		// max pairs is 100
+		while(checkList.pairs.count() > 100)
+			checkList.pairs.removeLast();
 
 		printf("%d after pruning\n", checkList.pairs.count());
 
@@ -1193,21 +1195,26 @@ void Ice176::setExternalAddresses(const QList<ExternalAddress> &addrs)
 	d->updateExternalAddresses(addrs);
 }
 
-void Ice176::setStunUsername(const QString &user)
+void Ice176::setStunBindService(const QHostAddress &addr, int port)
 {
-	d->stunUser = user;
+	d->stunBindAddr = addr;
+	d->stunBindPort = port;
 }
 
-void Ice176::setStunPassword(const QCA::SecureArray &pass)
+void Ice176::setStunRelayUdpService(const QHostAddress &addr, int port, const QString &user, const QCA::SecureArray &pass)
 {
-	d->stunPass = pass;
+	d->stunRelayUdpAddr = addr;
+	d->stunRelayUdpPort = port;
+	d->stunRelayUdpUser = user;
+	d->stunRelayUdpPass = pass;
 }
 
-void Ice176::setStunService(const QHostAddress &addr, int port, StunServiceType type)
+void Ice176::setStunRelayTcpService(const QHostAddress &addr, int port, const QString &user, const QCA::SecureArray &pass)
 {
-	d->stunAddr = addr;
-	d->stunPort = port;
-	d->stunType = type;
+	d->stunRelayTcpAddr = addr;
+	d->stunRelayTcpPort = port;
+	d->stunRelayTcpUser = user;
+	d->stunRelayTcpPass = pass;
 }
 
 void Ice176::setUseLocal(bool enabled)
@@ -1215,9 +1222,9 @@ void Ice176::setUseLocal(bool enabled)
 	d->useLocal = enabled;
 }
 
-void Ice176::setUseStunBasic(bool enabled)
+void Ice176::setUseStunBind(bool enabled)
 {
-	d->useStunBasic = enabled;
+	d->useStunBind = enabled;
 }
 
 void Ice176::setUseStunRelayUdp(bool enabled)

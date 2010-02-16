@@ -426,13 +426,20 @@ public:
 		bool ready;
 	};
 
+	enum StunServiceType
+	{
+		Auto,
+		Basic,
+		Relay
+	};
+
 	int opt_mode;
 	int opt_localBase;
 	int opt_iceBase;
 	int opt_channels;
 	QString opt_stunHost;
 	int opt_stunPort;
-	XMPP::Ice176::StunServiceType opt_stunType;
+	StunServiceType opt_stunType;
 	QString opt_user, opt_pass;
 	bool opt_ipv6_only, opt_relay_udp_only, opt_relay_tcp_only;
 
@@ -567,6 +574,10 @@ public:
 					if(opt_ipv6_only && h.protocol() != QAbstractSocket::IPv6Protocol)
 						continue;
 
+					// skip localhost
+					if(getAddressScope(h) == 0)
+						continue;
+
 					// don't put the same address in twice.
 					//   this also means that if there are
 					//   two link-local ipv6 interfaces
@@ -621,11 +632,12 @@ public:
 
 		if(!stunAddr.isNull())
 		{
-			ice->setStunService(stunAddr, opt_stunPort, opt_stunType);
-			if(!opt_user.isEmpty())
+			if(opt_stunType == Basic || opt_stunType == Auto)
+				ice->setStunBindService(stunAddr, opt_stunPort);
+			if((opt_stunType == Relay || opt_stunType == Auto) && !opt_user.isEmpty())
 			{
-				ice->setStunUsername(opt_user);
-				ice->setStunPassword(opt_pass.toUtf8());
+				ice->setStunRelayUdpService(stunAddr, opt_stunPort, opt_user, opt_pass.toUtf8());
+				ice->setStunRelayTcpService(stunAddr, opt_stunPort, opt_user, opt_pass.toUtf8());
 			}
 
 			printf("STUN service: %s\n", qPrintable(stunAddr.toString()));
@@ -634,7 +646,7 @@ public:
 		if(opt_relay_udp_only)
 		{
 			ice->setUseLocal(false);
-			ice->setUseStunBasic(false);
+			ice->setUseStunBind(false);
 			ice->setUseStunRelayTcp(false);
 		}
 
@@ -891,7 +903,7 @@ int main(int argc, char **argv)
 	int channels = 1;
 	QString stunHost;
 	int stunPort = 3478;
-	XMPP::Ice176::StunServiceType stunType = XMPP::Ice176::Auto;
+	App::StunServiceType stunType = App::Auto;
 	QString user, pass;
 	bool ipv6_only = false;
 	bool relay_udp_only = false;
@@ -937,11 +949,11 @@ int main(int argc, char **argv)
 		else if(var == "stuntype")
 		{
 			if(val == "auto")
-				stunType = XMPP::Ice176::Auto;
+				stunType = App::Auto;
 			else if(val == "basic")
-				stunType = XMPP::Ice176::Basic;
+				stunType = App::Basic;
 			else if(val == "relay")
-				stunType = XMPP::Ice176::Relay;
+				stunType = App::Relay;
 			else
 			{
 				usage();
