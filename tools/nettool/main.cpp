@@ -23,6 +23,7 @@
 #include <iris/netinterface.h>
 #include <iris/netavailability.h>
 #include <iris/netnames.h>
+#include <iris/addressresolver.h>
 #include <iris/stunmessage.h>
 #include <iris/stuntransaction.h>
 #include <iris/stunbinding.h>
@@ -262,6 +263,51 @@ private slots:
 	}
 };
 
+class ResolveAddr : public QObject
+{
+	Q_OBJECT
+public:
+	QString name;
+	AddressResolver dns;
+
+public slots:
+	void start()
+	{
+		connect(ProcessQuit::instance(), SIGNAL(quit()), SIGNAL(quit()));
+
+		connect(&dns, SIGNAL(resultsReady(const QList<QHostAddress> &)),
+			SLOT(dns_resultsReady(const QList<QHostAddress> &)));
+		connect(&dns, SIGNAL(error(XMPP::AddressResolver::Error)),
+			SLOT(dns_error(XMPP::AddressResolver::Error)));
+
+		dns.start(name.toLatin1());
+	}
+
+signals:
+	void quit();
+
+private slots:
+	void dns_resultsReady(const QList<QHostAddress> &list)
+	{
+		for(int n = 0; n < list.count(); ++n)
+			printf("%s\n", qPrintable(list[n].toString()));
+
+		emit quit();
+	}
+
+	void dns_error(XMPP::AddressResolver::Error e)
+	{
+		Q_UNUSED(e);
+
+		QString str;
+		//else // ErrorGeneric, or anything else
+			str = "ErrorGeneric";
+
+		printf("Error: %s\n", qPrintable(str));
+		emit quit();
+	}
+};
+
 class BrowseServices : public QObject
 {
 	Q_OBJECT
@@ -356,6 +402,8 @@ private slots:
 
 	void dns_error()
 	{
+		printf("Error\n");
+		emit quit();
 	}
 };
 
@@ -831,6 +879,7 @@ void usage()
 	printf(" netmon                                            monitor network interfaces\n");
 	printf(" rname (-r) [domain] (record type)                 look up record (default = a)\n");
 	printf(" rnamel [domain] [record type]                     look up record (long-lived)\n");
+	printf(" raddr [domain]                                    look up AAAA/A\n");
 	printf(" browse [service type]                             browse for local services\n");
 	printf(" rservi [instance] [service type]                  look up browsed instance\n");
 	printf(" rservd [domain] [service type]                    look up normal SRV\n");
@@ -952,6 +1001,20 @@ int main(int argc, char **argv)
 		a.longlived = (args[0] == "rnamel") ? true : false;
 		if(args[0] == "rname" && null_dump)
 			a.null_dump = true;
+		QObject::connect(&a, SIGNAL(quit()), &qapp, SLOT(quit()));
+		QTimer::singleShot(0, &a, SLOT(start()));
+		qapp.exec();
+	}
+	else if(args[0] == "raddr")
+	{
+		if(args.count() < 2)
+		{
+			usage();
+			return 1;
+		}
+
+		ResolveAddr a;
+		a.name = args[1];
 		QObject::connect(&a, SIGNAL(quit()), &qapp, SLOT(quit()));
 		QTimer::singleShot(0, &a, SLOT(start()));
 		qapp.exec();
