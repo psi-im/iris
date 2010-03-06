@@ -15,7 +15,8 @@ HEADERS += \
 	$$PWD/irisnetglobal_p.h \
 	$$PWD/netinterface.h \
 	$$PWD/netavailability.h \
-	$$PWD/netnames.h
+	$$PWD/netnames.h \
+	$$PWD/addressresolver.h
 
 SOURCES += \
 	$$PWD/jdnsshared.cpp \
@@ -24,7 +25,8 @@ SOURCES += \
 	$$PWD/irisnetglobal.cpp \
 	$$PWD/netinterface.cpp \
 	$$PWD/netavailability.cpp \
-	$$PWD/netnames.cpp
+	$$PWD/netnames.cpp \
+	$$PWD/addressresolver.cpp
 
 unix {
 	SOURCES += \
