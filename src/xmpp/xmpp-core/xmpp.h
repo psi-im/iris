@@ -29,6 +29,7 @@
 #include <qxml.h>
 #include <qdom.h>
 
+#include "addressresolver.h"
 #include "xmpp/jid/jid.h"
 #include "xmpp_stanza.h"
 #include "xmpp_stream.h"
@@ -161,7 +162,8 @@ namespace XMPP
 		void httpSyncFinished();
 
 	private slots:
-		void dns_done();
+		void dns_resultsReady(const QList<QHostAddress> &results);
+		void dns_error(XMPP::AddressResolver::Error e);
 		void srv_done();
 		void bs_connected();
 		void bs_error(int);

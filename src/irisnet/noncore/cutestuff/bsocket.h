@@ -41,6 +41,7 @@ public:
 	~BSocket();
 
 	void connectToHost(const QString &host, quint16 port);
+	void connectToHost(const QHostAddress &addr, quint16 port);
 	void connectToServer(const QString &srv, const QString &type);
 	int socket() const;
 	void setSocket(int);

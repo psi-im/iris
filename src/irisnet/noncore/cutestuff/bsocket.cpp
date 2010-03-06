@@ -113,6 +113,7 @@ public:
 	SrvResolver srv;
 	QString host;
 	int port;
+	QHostAddress addr;
 	//SafeDelete sd;
 };
 
@@ -161,6 +162,7 @@ void BSocket::reset(bool clear)
 	if(d->ndns.isBusy())
 		d->ndns.stop();
 	d->state = Idle;
+	d->addr = QHostAddress();
 }
 
 void BSocket::ensureSocket()
@@ -187,6 +189,16 @@ void BSocket::connectToHost(const QString &host, quint16 port)
 	d->port = port;
 	d->state = HostLookup;
 	d->ndns.resolve(d->host);
+}
+
+void BSocket::connectToHost(const QHostAddress &addr, quint16 port)
+{
+	reset(true);
+	d->host = addr.toString();
+	d->addr = addr;
+	d->port = port;
+	d->state = Connecting;
+	do_connect();
 }
 
 void BSocket::connectToServer(const QString &srv, const QString &type)
@@ -359,7 +371,10 @@ void BSocket::do_connect()
 	fprintf(stderr, "BSocket: Connecting to %s:%d\n", d->host.latin1(), d->port);
 #endif
 	ensureSocket();
-	d->qsock->connectToHost(d->host, d->port);
+	if(!d->addr.isNull())
+		d->qsock->connectToHost(d->addr, d->port);
+	else
+		d->qsock->connectToHost(d->host, d->port);
 }
 
 void BSocket::qs_hostFound()

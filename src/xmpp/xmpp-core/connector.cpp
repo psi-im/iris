@@ -36,11 +36,8 @@
 #include <QList>
 #include <QUrl>
 #include <QTimer>
-#include "safedelete.h"
 #include <libidn/idna.h>
-
-#include "ndns.h"
-
+#include "safedelete.h"
 #include "bsocket.h"
 #include "httpconnect.h"
 #include "httppoll.h"
@@ -201,7 +198,7 @@ class AdvancedConnector::Private
 public:
 	int mode;
 	ByteStream *bs;
-	NDns dns;
+	AddressResolver dns;
 	SrvResolver srv;
 
 	QString server;
@@ -216,15 +213,16 @@ public:
 	QList<Q3Dns::Server> servers;
 	int errorCode;
 	QString connectHost;
+	QList<QHostAddress> addrList;
+	QHostAddress curAddr;
 
 	bool multi, using_srv;
 	bool will_be_ssl;
 	int probe_mode;
 
-	bool aaaa;
 	SafeDelete sd;
 
-	QTimer connectTimeout;
+	QTimer *connectTimeout;
 };
 
 AdvancedConnector::AdvancedConnector(QObject *parent)
@@ -232,10 +230,12 @@ AdvancedConnector::AdvancedConnector(QObject *parent)
 {
 	d = new Private;
 	d->bs = 0;
-	connect(&d->dns, SIGNAL(resultsReady()), SLOT(dns_done()));
+	d->connectTimeout = new QTimer(this);
+	connect(&d->dns, SIGNAL(resultsReady(const QList<QHostAddress> &)), SLOT(dns_resultsReady(const QList<QHostAddress> &)));
+	connect(&d->dns, SIGNAL(error(XMPP::AddressResolver::Error)), SLOT(dns_error(XMPP::AddressResolver::Error)));
 	connect(&d->srv, SIGNAL(resultsReady()), SLOT(srv_done()));
-	connect(&d->connectTimeout, SIGNAL(timeout()), SLOT(t_timeout()));
-	d->connectTimeout.setSingleShot(true);
+	connect(d->connectTimeout, SIGNAL(timeout()), SLOT(t_timeout()));
+	d->connectTimeout->setSingleShot(true);
 	d->opt_probe = false;
 	d->opt_ssl = false;
 	cleanup();
@@ -245,6 +245,9 @@ AdvancedConnector::AdvancedConnector(QObject *parent)
 AdvancedConnector::~AdvancedConnector()
 {
 	cleanup();
+	d->connectTimeout->disconnect(this);
+	d->connectTimeout->setParent(0);
+	d->connectTimeout->deleteLater();
 	delete d;
 }
 
@@ -253,10 +256,12 @@ void AdvancedConnector::cleanup()
 	d->mode = Idle;
 
 	// stop any dns
-	if(d->dns.isBusy())
+	//if(d->dns.isBusy())
 		d->dns.stop();
 	if(d->srv.isBusy())
 		d->srv.stop();
+
+	d->connectTimeout->stop();
 
 	// destroy the bytestream, if there is one
 	delete d->bs;
@@ -266,6 +271,9 @@ void AdvancedConnector::cleanup()
 	d->using_srv = false;
 	d->will_be_ssl = false;
 	d->probe_mode = -1;
+
+	d->addrList.clear();
+	d->curAddr = QHostAddress();
 
 	setUseSSL(false);
 	setPeerAddressNone();
@@ -323,7 +331,6 @@ void AdvancedConnector::connectToServer(const QString &server)
 	d->hostsToTry.clear();
 	d->errorCode = 0;
 	d->mode = Connecting;
-	d->aaaa = true;
 	d->connectHost.clear();
 
 	// Encode the servername
@@ -420,20 +427,12 @@ void AdvancedConnector::do_resolve()
 #ifdef XMPP_DEBUG
 	printf("resolving [%s]\n", qPrintable(d->host));
 #endif
-	d->dns.resolve(d->host);
+	d->dns.start(d->host.toLatin1());
 }
 
-void AdvancedConnector::dns_done()
+void AdvancedConnector::dns_resultsReady(const QList<QHostAddress> &results)
 {
-	bool failed = false;
-	QHostAddress addr;
-
-	if(d->dns.result().isNull ())
-		failed = true;
-	else
-		addr = QHostAddress(d->dns.result());
-
-	if(failed) {
+	if(results.isEmpty()) {
 #ifdef XMPP_DEBUG
 		printf("dns1\n");
 #endif
@@ -470,7 +469,6 @@ void AdvancedConnector::dns_done()
 #endif
 			if(!d->hostsToTry.isEmpty())
 			{
-				d->aaaa = true;
 				d->host = d->hostsToTry.takeFirst();
 				do_resolve();
 				return;
@@ -485,16 +483,25 @@ void AdvancedConnector::dns_done()
 #ifdef XMPP_DEBUG
 		printf("dns2\n");
 #endif
+		d->addrList = results;
 		d->connectHost = d->host;
-		d->host = addr.toString();
+		d->curAddr = d->addrList.takeFirst();
 		do_connect();
 	}
+}
+
+void AdvancedConnector::dns_error(XMPP::AddressResolver::Error)
+{
+	dns_resultsReady(QList<QHostAddress>());
 }
 
 void AdvancedConnector::do_connect()
 {
 	// 5 seconds to connect
-	d->connectTimeout.start(5000);
+	d->connectTimeout->start(5000);
+
+	if(!d->curAddr.isNull())
+		d->host = d->curAddr.toString();
 
 #ifdef XMPP_DEBUG
 	printf("trying %s:%d\n", qPrintable(d->host), d->port);
@@ -508,7 +515,10 @@ void AdvancedConnector::do_connect()
 		d->bs = s;
 		connect(s, SIGNAL(connected()), SLOT(bs_connected()));
 		connect(s, SIGNAL(error(int)), SLOT(bs_error(int)));
-		s->connectToHost(d->host, d->port);
+		if(!d->curAddr.isNull())
+			s->connectToHost(d->curAddr, d->port);
+		else
+			s->connectToHost(d->host, d->port);
 	}
 	else if(t == Proxy::HttpConnect) {
 #ifdef XMPP_DEBUG
@@ -595,7 +605,7 @@ void AdvancedConnector::srv_done()
 
 void AdvancedConnector::bs_connected()
 {
-	d->connectTimeout.stop();
+	d->connectTimeout->stop();
 
 	if(d->proxy.type() == Proxy::None) {
 		QHostAddress h = (static_cast<BSocket*>(d->bs))->peerAddress();
@@ -685,7 +695,6 @@ void AdvancedConnector::bs_error(int x)
 	// try next host, if any
 	if(!d->hostsToTry.isEmpty())
 	{
-		d->aaaa = true;
 		d->host = d->hostsToTry.takeFirst();
 		do_resolve();
 		return;
@@ -718,6 +727,18 @@ void AdvancedConnector::bs_error(int x)
 #ifdef XMPP_DEBUG
 		printf("bse1.3\n");
 #endif
+		// try next address, if any
+		if(!d->addrList.isEmpty()) {
+			if(d->opt_probe && d->probe_mode == 1) {
+				d->probe_mode = 0;
+				d->port = 5223;
+				d->will_be_ssl = true;
+			}
+			d->curAddr = d->addrList.takeFirst();
+			do_connect();
+			return;
+		}
+
 		cleanup();
 		d->errorCode = ErrConnectionRefused;
 		error();
@@ -742,7 +763,6 @@ void AdvancedConnector::t_timeout()
 		delete d->bs;
 		d->bs = 0;
 
-		d->aaaa = true;
 		d->host = d->hostsToTry.takeFirst();
 		do_resolve();
 	}
