@@ -932,7 +932,10 @@ private slots:
 	{
 		delete allocate;
 		allocate = 0;
-		delete pool;
+
+		// in udp mode, we don't own the pool
+		if(!udp)
+			delete pool;
 		pool = 0;
 
 		if(udp)
