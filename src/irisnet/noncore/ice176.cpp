@@ -1156,6 +1156,17 @@ private slots:
 
 		if(at == -1)
 		{
+			int at = findComponent(pair.local.componentId);
+			Component &c = components[at];
+			if(c.lowOverhead)
+			{
+				printf("component is flagged for low overhead.  setting up for %s;%d -> %s;%d\n",
+					qPrintable(pair.local.addr.addr.toString()), pair.local.addr.port, qPrintable(pair.remote.addr.addr.toString()), pair.remote.addr.port);
+				at = findLocalCandidate(pair.local.addr.addr, pair.local.addr.port);
+				IceComponent::Candidate &cc = localCandidates[at];
+				c.ic->flagPathAsLowOverhead(cc.id, pair.remote.addr.addr, pair.remote.addr.port);
+			}
+
 			emit q->componentReady(pair.local.componentId - 1);
 		}
 		else
