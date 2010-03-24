@@ -457,12 +457,16 @@ public:
 		int type;
 		bool longLived;
 		ObjectSession sess;
+		bool useLocal;
 		bool localResult;
+		NameResolver::Error error;
+		NameResolver::Error localError;
 
 		Item(QObject *parent = 0) :
 			id(-1),
 			req(0),
 			sess(parent),
+			useLocal(false),
 			localResult(false)
 		{
 		}
@@ -531,6 +535,18 @@ public:
 		delete i;
 	}
 
+	void tryError(Item *i)
+	{
+		// if we are doing dual resolves, make sure both are done
+		if(!i->longLived && (i->req || (i->useLocal && !i->localResult)))
+			return;
+
+		int id = i->id;
+		NameResolver::Error error = i->error;
+		releaseItem(i);
+		emit resolve_error(id, error);
+	}
+
 	virtual bool supportsSingle() const
 	{
 		return true;
@@ -555,8 +571,12 @@ public:
 	{
 		if(mode == Internet)
 		{
-			// if query ends in .local, switch to local resolver
+			bool isLocalName = false;
 			if(name.right(6) == ".local" || name.right(7) == ".local.")
+				isLocalName = true;
+
+			// if query ends in .local, switch to local resolver
+			/*if(isLocalName)
 			{
 				Item *i = new Item(this);
 				i->id = idman.reserveId();
@@ -564,11 +584,23 @@ public:
 				items += i;
 				i->sess.defer(this, "do_local", Q_ARG(int, i->id), Q_ARG(QByteArray, name));
 				return i->id;
-			}
+			}*/
 
 			// we don't support long-lived internet queries
 			if(longLived)
 			{
+				// but we do support long-lived local queries
+				if(isLocalName)
+				{
+					Item *i = new Item(this);
+					i->id = idman.reserveId();
+					i->longLived = longLived;
+					i->useLocal = true;
+					items += i;
+					i->sess.defer(this, "do_local", Q_ARG(int, i->id), Q_ARG(QByteArray, name));
+					return i->id;
+				}
+
 				Item *i = new Item(this);
 				i->id = idman.reserveId();
 				items += i;
@@ -584,8 +616,13 @@ public:
 			connect(i->req, SIGNAL(resultsReady()), SLOT(req_resultsReady()));
 			i->type = qType;
 			i->longLived = false;
+			if(isLocalName)
+				i->useLocal = true;
 			items += i;
 			i->req->query(name, qType);
+			// if query ends in .local, simultaneously do local resolve
+			if(isLocalName)
+				i->sess.defer(this, "do_local", Q_ARG(int, i->id), Q_ARG(QByteArray, name));
 			return i->id;
 		}
 		else
@@ -659,6 +696,8 @@ private slots:
 
 		int id = i->id;
 
+		NameResolver::Error error;
+
 		if(req->success())
 		{
 			QList<NameRecord> out;
@@ -681,20 +720,22 @@ private slots:
 			// only emit success if we have at least 1 result
 			if(!out.isEmpty())
 			{
+				// FIXME: need a way to cancel related local
+				//   query if still active
+
 				if(!i->longLived)
 					releaseItem(i);
 				emit resolve_resultsReady(id, out);
+				return;
 			}
 			else
 			{
-				releaseItem(i);
-				emit resolve_error(id, NameResolver::ErrorGeneric);
+				error = NameResolver::ErrorGeneric;
 			}
 		}
 		else
 		{
 			JDnsSharedRequest::Error e = req->error();
-			releaseItem(i);
 
 			NameResolver::Error error = NameResolver::ErrorGeneric;
 			if(e == JDnsSharedRequest::ErrorNXDomain)
@@ -703,8 +744,12 @@ private slots:
 				error = NameResolver::ErrorTimeout;
 			else // ErrorGeneric or ErrorNoNet
 				error = NameResolver::ErrorGeneric;
-			emit resolve_error(id, error);
 		}
+
+		delete i->req;
+		i->req = 0;
+		i->error = error;
+		tryError(i);
 	}
 
 	void do_error(int id, XMPP::NameResolver::Error e)
@@ -712,21 +757,24 @@ private slots:
 		Item *i = getItemById(id);
 		Q_ASSERT(i);
 
+		// note: for an internet resolve, this slot is not called in
+		//   any case where a local subquery is invoked as well (yet?)
+
 		releaseItem(i);
 		emit resolve_error(id, e);
 	}
 
 	void do_local(int id, const QByteArray &name)
 	{
-		Item *i = getItemById(id);
-		Q_ASSERT(i);
+		//Item *i = getItemById(id);
+		//Q_ASSERT(i);
 
-		// resolve_useLocal has two behaviors:
+		/*// resolve_useLocal has two behaviors:
 		// - if longlived, then it indicates a hand-off
 		// - if non-longlived, then it indicates we want a subquery
 
 		if(i->longLived)
-			releaseItem(i);
+			releaseItem(i);*/
 		emit resolve_useLocal(id, name);
 	}
 
@@ -735,8 +783,16 @@ private slots:
 		Item *i = getItemById(id);
 		Q_ASSERT(i);
 
-		// only non-longlived queries come through here, so we're done
-		releaseItem(i);
+		if(!i->longLived)
+		{
+			// stop any simultaneous internet resolve
+			if(i->req)
+				i->req->cancel();
+
+			// for non-longlived, we're done
+			releaseItem(i);
+		}
+
 		emit resolve_resultsReady(id, results);
 	}
 
@@ -745,8 +801,8 @@ private slots:
 		Item *i = getItemById(id);
 		Q_ASSERT(i);
 
-		releaseItem(i);
-		emit resolve_error(id, e);
+		i->localError = e;
+		tryError(i);
 	}
 };
 
