@@ -666,10 +666,16 @@ private slots:
 	{
 		StunAllocate *allocate = turn->stunAllocate();
 
-		refAddr = allocate->reflexiveAddress();
-		refPort = allocate->reflexivePort();
+		// take reflexive address from TURN only if we are not using a
+		//   separate STUN server
+		if(stunBindAddr.isNull() || stunBindAddr == stunRelayAddr)
+		{
+			refAddr = allocate->reflexiveAddress();
+			refPort = allocate->reflexivePort();
+		}
+
 		if(debugLevel >= IceTransport::DL_Info)
-			emit q->debugLine(QString("Server says we are ") + refAddr.toString() + ';' + QString::number(refPort));
+			emit q->debugLine(QString("Server says we are ") + allocate->reflexiveAddress().toString() + ';' + QString::number(allocate->reflexivePort()));
 
 		relAddr = allocate->relayedAddress();
 		relPort = allocate->relayedPort();
