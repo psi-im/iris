@@ -19,6 +19,7 @@
 
 #include "addressresolver.h"
 
+#include "objectsession.h"
 #include "netnames.h"
 
 namespace XMPP {
@@ -35,6 +36,7 @@ public:
 	};
 
 	AddressResolver *q;
+	ObjectSession sess;
 	State state;
 	NameResolver req6;
 	NameResolver req4;
@@ -47,6 +49,7 @@ public:
 	Private(AddressResolver *_q) :
 		QObject(_q),
 		q(_q),
+		sess(this),
 		req6(this),
 		req4(this)
 	{
@@ -72,6 +75,22 @@ public:
 	{
 		state = AddressWait;
 
+		// was an IP address used as input?
+		QHostAddress addr;
+		if(addr.setAddress(QString::fromLatin1(hostName)))
+		{
+			// use this as the result, no need to perform dns query
+			done6 = true;
+			done4 = true;
+			if(addr.protocol() == QAbstractSocket::IPv6Protocol)
+				addrs6 += addr;
+			else
+				addrs4 += addr;
+
+			sess.defer(this, "ipAddress_input");
+			return;
+		}
+
 		done6 = false;
 		done4 = false;
 
@@ -91,6 +110,8 @@ public:
 private:
 	void cleanup()
 	{
+		sess.reset();
+
 		req6.stop();
 		req4.stop();
 		opTimer->stop();
@@ -158,6 +179,11 @@ private slots:
 
 		if(done6 || done4)
 			tryDone();
+	}
+
+	void ipAddress_input()
+	{
+		tryDone();
 	}
 };
 
