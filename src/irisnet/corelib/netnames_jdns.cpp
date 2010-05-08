@@ -737,7 +737,7 @@ private slots:
 		{
 			JDnsSharedRequest::Error e = req->error();
 
-			NameResolver::Error error = NameResolver::ErrorGeneric;
+			error = NameResolver::ErrorGeneric;
 			if(e == JDnsSharedRequest::ErrorNXDomain)
 				error = NameResolver::ErrorNoName;
 			else if(e == JDnsSharedRequest::ErrorTimeout)
