@@ -1,1 +1,1 @@
-#include "../../src/xmpp/cutestuff/httppoll.h"
+#include "../../src/irisnet/noncore/cutestuff/httppoll.h"

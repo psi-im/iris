@@ -58,6 +58,7 @@ public:
 	void setFingerprintRequired(bool enabled);
 
 	void start();
+	void start(const QHostAddress &addr, int port); // use addr association
 
 	QHostAddress reflexiveAddress() const;
 	int reflexivePort() const;

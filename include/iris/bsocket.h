@@ -1,1 +1,1 @@
-#include "../../src/xmpp/cutestuff/bsocket.h"
+#include "../../src/irisnet/noncore/cutestuff/bsocket.h"

@@ -180,16 +180,20 @@ void BSocket::reset(bool clear)
 	}
 
 	d->state = Idle;
+	d->domain = "";
+	d->host = "";
+	d->address = QHostAddress();
+	d->port = 0;
 }
 
 void BSocket::ensureSocket()
 {
 	if(!d->qsock) {
-		d->qsock = new QTcpSocket;
+		d->qsock = new QTcpSocket(this);
 #if QT_VERSION >= 0x030200
 		d->qsock->setReadBufferSize(READBUFSIZE);
 #endif
-		d->qsock_relay = new QTcpSocketSignalRelay(d->qsock);
+		d->qsock_relay = new QTcpSocketSignalRelay(d->qsock, this);
 		connect(d->qsock_relay, SIGNAL(hostFound()), SLOT(qs_hostFound()));
 		connect(d->qsock_relay, SIGNAL(connected()), SLOT(qs_connected()));
 		connect(d->qsock_relay, SIGNAL(disconnected()), SLOT(qs_closed()));

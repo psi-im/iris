@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009  Barracuda Networks, Inc.
+ * Copyright (C) 2009,2010  Barracuda Networks, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -23,8 +23,10 @@
 
 #include <QObject>
 #include <QByteArray>
+#include "icetransport.h"
 
 class QHostAddress;
+class QUdpSocket;
 
 namespace QCA {
 	class SecureArray;
@@ -34,39 +36,33 @@ namespace XMPP {
 
 // this class manages a single port on a single interface, including the
 //   relationship with an associated STUN/TURN server.  if TURN is used, this
-//   class offers two UDP channels (direct or relayed), otherwise it offers
-//   just one UDP channel (direct).
-class IceLocalTransport : public QObject
+//   class offers two paths (0=direct and 1=relayed), otherwise it offers
+//   just one path (0=direct)
+class IceLocalTransport : public IceTransport
 {
 	Q_OBJECT
 
 public:
 	enum Error
 	{
-		ErrorGeneric
-	};
-
-	enum StunServiceType
-	{
-		Basic,
-		Relay
-	};
-
-	enum TransmitPath
-	{
-		Direct,
-		Relayed
+		ErrorBind = ErrorCustom
 	};
 
 	IceLocalTransport(QObject *parent = 0);
 	~IceLocalTransport();
 
-	void start(const QHostAddress &addr, int port = -1);
-	void stop();
+	void setClientSoftwareNameAndVersion(const QString &str);
 
-	void setStunService(StunServiceType type, const QHostAddress &addr, int port);
-	void setStunUsername(const QString &user);
-	void setStunPassword(const QCA::SecureArray &pass);
+	// passed socket must already be bind()'ed, don't support
+	//   ErrorMismatch retries
+	void start(QUdpSocket *sock);
+
+	// bind to this address on a random port, do support ErrorMismatch
+	//   retries
+	void start(const QHostAddress &addr);
+
+	void setStunBindService(const QHostAddress &addr, int port);
+	void setStunRelayService(const QHostAddress &addr, int port, const QString &user, const QCA::SecureArray &pass);
 
 	// obtain relay / reflexive
 	void stunStart();
@@ -80,18 +76,21 @@ public:
 	QHostAddress relayedAddress() const;
 	int relayedPort() const;
 
-	bool hasPendingDatagrams(TransmitPath path) const;
-	QByteArray readDatagram(TransmitPath path, QHostAddress *addr, int *port);
-	void writeDatagram(TransmitPath path, const QByteArray &buf, const QHostAddress &addr, int port);
+	// reimplemented
+	virtual void stop();
+	virtual bool hasPendingDatagrams(int path) const;
+	virtual QByteArray readDatagram(int path, QHostAddress *addr, int *port);
+	virtual void writeDatagram(int path, const QByteArray &buf, const QHostAddress &addr, int port);
+	virtual void addChannelPeer(const QHostAddress &addr, int port);
+	virtual void setDebugLevel(DebugLevel level);
 
 signals:
-	void started();
-	void stopped();
-	void stunFinished();
-	void error(XMPP::IceLocalTransport::Error e);
-
-	void readyRead(XMPP::IceLocalTransport::TransmitPath path);
-	void datagramsWritten(XMPP::IceLocalTransport::TransmitPath path, int count);
+	// may be emitted multiple times.
+	// if handling internal ErrorMismatch, then local address may change
+	//   and server reflexive address may disappear.
+	// if start(QUdpSocket*) was used, then ErrorMismatch is not handled,
+	//   and this signal will only be emitted to add addresses
+	void addressesChanged();
 
 private:
 	class Private;

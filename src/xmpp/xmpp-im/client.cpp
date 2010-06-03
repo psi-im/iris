@@ -780,7 +780,7 @@ void Client::updateSelfPresence(const Jid &j, const Status &s)
 			debug(QString("Client: Updating self resource: name=[%1]\n").arg(j.resource()));
 		}
 
-		resourceAvailable(j, r);
+		emit resourceAvailable(j, r);
 	}
 }
 
@@ -822,7 +822,7 @@ void Client::updatePresence(LiveRosterItem *i, const Jid &j, const Status &s)
 			debug(QString("Client: Updating resource to [%1]: name=[%2]\n").arg(i->jid().full()).arg(j.resource()));
 		}
 
-		resourceAvailable(j, r);
+		emit resourceAvailable(j, r);
 	}
 }
 
@@ -893,9 +893,11 @@ void Client::slotRosterRequestFinished()
 
 void Client::importRoster(const Roster &r)
 {
+	emit beginImportRoster();
 	for(Roster::ConstIterator it = r.begin(); it != r.end(); ++it) {
 		importRosterItem(*it);
 	}
+	emit endImportRoster();
 }
 
 void Client::importRosterItem(const RosterItem &item)
@@ -916,7 +918,7 @@ void Client::importRosterItem(const RosterItem &item)
 	}
 
 	QString dstr, str;
-	str.sprintf("  %s %-32s", substr.toLatin1().data(), item.jid().full().toLatin1().data());
+	str.sprintf("  %s %-32s", qPrintable(substr), qPrintable(item.jid().full()));
 	if(!item.name().isEmpty())
 		str += QString(" [") + item.name() + "]";
 	str += '\n';

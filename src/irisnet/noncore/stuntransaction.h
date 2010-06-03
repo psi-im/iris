@@ -135,6 +135,13 @@ class StunTransactionPool : public QObject
 	Q_OBJECT
 
 public:
+	enum DebugLevel
+	{
+		DL_None,
+		DL_Info,
+		DL_Packet
+	};
+
 	StunTransactionPool(StunTransaction::Mode mode, QObject *parent = 0);
 	~StunTransactionPool();
 
@@ -165,6 +172,8 @@ public:
 	// for use with stun indications
 	QByteArray generateId() const;
 
+	void setDebugLevel(DebugLevel level); // default DL_None
+
 signals:
 	// note: not DOR-SS safe.  writeIncomingMessage() must not be called
 	//   during this signal.
@@ -179,6 +188,9 @@ signals:
 	void outgoingMessage(const QByteArray &packet, const QHostAddress &addr, int port);
 
 	void needAuthParams();
+
+	// not DOR-SS/DS safe
+	void debugLine(const QString &line);
 
 private:
 	Q_DISABLE_COPY(StunTransactionPool)

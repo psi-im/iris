@@ -60,7 +60,10 @@ static QString hpk(int n, const QString &s)
 class HttpPoll::Private
 {
 public:
-	Private() {}
+	Private(HttpPoll *_q) :
+		http(_q)
+	{
+	}
 
 	HttpProxyPost http;
 	QString host;
@@ -86,11 +89,11 @@ public:
 HttpPoll::HttpPoll(QObject *parent)
 :ByteStream(parent)
 {
-	d = new Private;
+	d = new Private(this);
 
 	d->polltime = 30;
-	d->t = new QTimer;
-  d->t->setSingleShot(true);
+	d->t = new QTimer(this);
+	d->t->setSingleShot(true);
 	connect(d->t, SIGNAL(timeout()), SLOT(do_sync()));
 
 	connect(&d->http, SIGNAL(result()), SLOT(http_result()));
@@ -430,7 +433,10 @@ static bool extractMainHeader(const QString &line, QString *proto, int *code, QS
 class HttpProxyPost::Private
 {
 public:
-	Private() {}
+	Private(HttpProxyPost *_q) :
+		sock(_q)
+	{
+	}
 
 	BSocket sock;
 	QByteArray postdata, recvBuf, body;
@@ -445,7 +451,7 @@ public:
 HttpProxyPost::HttpProxyPost(QObject *parent)
 :QObject(parent)
 {
-	d = new Private;
+	d = new Private(this);
 	connect(&d->sock, SIGNAL(connected()), SLOT(sock_connected()));
 	connect(&d->sock, SIGNAL(connectionClosed()), SLOT(sock_connectionClosed()));
 	connect(&d->sock, SIGNAL(readyRead()), SLOT(sock_readyRead()));
@@ -667,7 +673,10 @@ void HttpProxyPost::sock_error(int x)
 class HttpProxyGetStream::Private
 {
 public:
-	Private() {}
+	Private(HttpProxyGetStream *_q) :
+		sock(_q)
+	{
+	}
 
 	BSocket sock;
 	QByteArray recvBuf;
@@ -686,7 +695,7 @@ public:
 HttpProxyGetStream::HttpProxyGetStream(QObject *parent)
 :QObject(parent)
 {
-	d = new Private;
+	d = new Private(this);
 	d->tls = 0;
 	connect(&d->sock, SIGNAL(connected()), SLOT(sock_connected()));
 	connect(&d->sock, SIGNAL(connectionClosed()), SLOT(sock_connectionClosed()));
@@ -775,7 +784,7 @@ void HttpProxyGetStream::sock_connected()
 	fprintf(stderr, "HttpProxyGetStream: Connected\n");
 #endif
 	if(d->use_ssl) {
-		d->tls = new QCA::TLS;
+		d->tls = new QCA::TLS(this);
 		connect(d->tls, SIGNAL(readyRead()), SLOT(tls_readyRead()));
 		connect(d->tls, SIGNAL(readyReadOutgoing()), SLOT(tls_readyReadOutgoing()));
 		connect(d->tls, SIGNAL(error()), SLOT(tls_error()));

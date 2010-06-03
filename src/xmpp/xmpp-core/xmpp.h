@@ -29,6 +29,7 @@
 #include <qxml.h>
 #include <qdom.h>
 
+#include "addressresolver.h"
 #include "xmpp/jid/jid.h"
 #include "xmpp_stanza.h"
 #include "xmpp_stream.h"

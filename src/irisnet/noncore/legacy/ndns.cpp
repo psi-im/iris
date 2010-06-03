@@ -63,7 +63,7 @@
 //!
 //! Constructs an NDns object with parent \a parent.
 NDns::NDns(QObject *parent)
-:QObject(parent)
+:QObject(parent),dns(this)
 {
 	busy = false;
 

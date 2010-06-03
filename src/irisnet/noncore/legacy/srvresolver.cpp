@@ -53,7 +53,14 @@ static void sortSRVList(QList<Q3Dns::Server> &list)
 class SrvResolver::Private
 {
 public:
-	Private() {}
+	Private(SrvResolver *_q) :
+		nndns(_q),
+#ifndef NO_NDNS
+		ndns(_q),
+#endif
+		t(_q)
+	{
+	}
 
 	XMPP::NameResolver nndns;
 	XMPP::NameRecord::Type nntype;
@@ -78,7 +85,7 @@ public:
 SrvResolver::SrvResolver(QObject *parent)
 :QObject(parent)
 {
-	d = new Private;
+	d = new Private(this);
 	d->nndns_busy = false;
 
 	connect(&d->nndns, SIGNAL(resultsReady(const QList<XMPP::NameRecord> &)), SLOT(nndns_resultsReady(const QList<XMPP::NameRecord> &)));

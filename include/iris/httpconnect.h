@@ -1,1 +1,1 @@
-#include "../../src/xmpp/cutestuff/httpconnect.h"
+#include "../../src/irisnet/noncore/cutestuff/httpconnect.h"

@@ -36,7 +36,6 @@
 #include <QList>
 #include <QUrl>
 #include <QTimer>
-#include "safedelete.h"
 #include <libidn/idna.h>
 
 #include "bsocket.h"

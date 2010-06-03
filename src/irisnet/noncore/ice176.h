@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009  Barracuda Networks, Inc.
+ * Copyright (C) 2009,2010  Barracuda Networks, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -24,6 +24,7 @@
 #include <QObject>
 #include <QString>
 #include <QHostAddress>
+#include "turnclient.h"
 
 namespace QCA {
 	class SecureArray;
@@ -31,21 +32,22 @@ namespace QCA {
 
 namespace XMPP {
 
+class UdpPortReserver;
+
 class Ice176 : public QObject
 {
 	Q_OBJECT
 
 public:
+	enum Error
+	{
+		ErrorGeneric
+	};
+
 	enum Mode
 	{
 		Initiator,
 		Responder
-	};
-
-	enum StunServiceType
-	{
-		Basic,
-		Relay
 	};
 
 	class LocalAddress
@@ -59,19 +61,6 @@ public:
 			network(-1),
 			isVpn(false)
 		{
-		}
-
-		bool operator==(const LocalAddress &other) const
-		{
-			if(addr == other.addr && network == other.network)
-				return true;
-			else
-				return false;
-		}
-
-		inline bool operator!=(const LocalAddress &other) const
-		{
-			return !operator==(other);
 		}
 	};
 
@@ -96,7 +85,7 @@ public:
 		int generation;
 		QString id;
 		QHostAddress ip;
-		int network;
+		int network; // -1 = unknown
 		int port;
 		int priority;
 		QString protocol;
@@ -123,23 +112,34 @@ public:
 
 	void reset();
 
-	// default = -1 (unspecified)
-	// if a base port is specified, it is only considered for the initial
-	//   component count.  if components are later added, random ports
-	//   will be used.
-	void setBasePort(int port);
+	void setProxy(const TurnClient::Proxy &proxy);
+
+	// if set, ports will be drawn from the reserver if possible, before
+	//   binding to random ports
+	// note: ownership is not passed
+	void setPortReserver(UdpPortReserver *portReserver);
 
 	void setLocalAddresses(const QList<LocalAddress> &addrs);
 
 	// one per local address.  you must set local addresses first.
 	void setExternalAddresses(const QList<ExternalAddress> &addrs);
 
-	void setStunService(StunServiceType type, const QHostAddress &addr, int port);
+	void setStunBindService(const QHostAddress &addr, int port);
+	void setStunRelayUdpService(const QHostAddress &addr, int port, const QString &user, const QCA::SecureArray &pass);
+	void setStunRelayTcpService(const QHostAddress &addr, int port, const QString &user, const QCA::SecureArray &pass);
+
+	// these all start out enabled, but can be disabled for diagnostic
+	//   purposes
+	void setUseLocal(bool enabled);
+	void setUseStunBind(bool enabled);
+	void setUseStunRelayUdp(bool enabled);
+	void setUseStunRelayTcp(bool enabled);
 
 	void setComponentCount(int count);
 	void setLocalCandidateTrickle(bool enabled); // default false
 
 	void start(Mode mode);
+	void stop();
 
 	QString localUfrag() const;
 	QString localPassword() const;
@@ -147,18 +147,30 @@ public:
 	void setPeerUfrag(const QString &ufrag);
 	void setPeerPassword(const QString &pass);
 
-	void setStunUsername(const QString &user);
-	void setStunPassword(const QCA::SecureArray &pass);
-
 	void addRemoteCandidates(const QList<Candidate> &list);
 
 	bool hasPendingDatagrams(int componentIndex) const;
 	QByteArray readDatagram(int componentIndex);
 	void writeDatagram(int componentIndex, const QByteArray &datagram);
 
+	// this call will ensure that TURN headers are minimized on this
+	//   component, with the drawback that packets might not be able to
+	//   be set as non-fragmentable.  use this on components that expect
+	//   to send lots of very small packets, where header overhead is the
+	//   most costly but also where fragmentation is impossible anyway.
+	//   in short, use this on audio, but not on video.
+	void flagComponentAsLowOverhead(int componentIndex);
+
+	// FIXME: this should probably be in netinterface.h or such
+	static bool isIPv6LinkLocalAddress(const QHostAddress &addr);
+
 signals:
+	// indicates that the ice engine is started and is ready to receive
+	//   peer creds and remote candidates
 	void started();
-	void error();
+
+	void stopped();
+	void error(XMPP::Ice176::Error e);
 
 	void localCandidatesReady(const QList<XMPP::Ice176::Candidate> &list);
 	void componentReady(int index);

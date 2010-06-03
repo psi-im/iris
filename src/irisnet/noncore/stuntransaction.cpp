@@ -29,8 +29,6 @@
 #include "stunmessage.h"
 #include "stuntypes.h"
 
-//#define STUNTRANSACTION_DEBUG
-
 Q_DECLARE_METATYPE(XMPP::StunTransaction::Error)
 
 namespace XMPP {
@@ -108,13 +106,15 @@ public:
 	QCA::SecureArray pass;
 	QString realm;
 	QString nonce;
+	int debugLevel;
 
 	StunTransactionPoolPrivate(StunTransactionPool *_q) :
 		QObject(_q),
 		q(_q),
 		useLongTermAuth(false),
 		needLongTermAuth(false),
-		triedLongTermAuth(false)
+		triedLongTermAuth(false),
+		debugLevel(StunTransactionPool::DL_None)
 	{
 	}
 
@@ -152,9 +152,7 @@ public:
 	QString stpass;
 	bool fpRequired;
 	QByteArray key;
-#ifdef STUNTRANSACTION_DEBUG
 	QTime time;
-#endif
 
 	StunTransactionPrivate(StunTransaction *_q) :
 		QObject(_q),
@@ -302,9 +300,7 @@ public:
 		else
 			Q_ASSERT(0);
 
-#ifdef STUNTRANSACTION_DEBUG
 		time.start();
-#endif
 		pool->d->insert(q);
 		transmit();
 	}
@@ -336,14 +332,17 @@ private slots:
 private:
 	void transmit()
 	{
-#ifdef STUNTRANSACTION_DEBUG
-		printf("STUN SEND: elapsed=%d", time.elapsed());
-		if(!to_addr.isNull())
-			printf(" to=(%s;%d)", qPrintable(to_addr.toString()), to_port);
-		printf("\n");
-		StunMessage msg = StunMessage::fromBinary(packet);
-		StunTypes::print_packet(msg);
-#endif
+		if(pool->d->debugLevel >= StunTransactionPool::DL_Packet)
+		{
+			QString str = QString("STUN SEND: elapsed=") + QString::number(time.elapsed());
+			if(!to_addr.isNull())
+				str += QString(" to=(") + to_addr.toString() + ';' + QString::number(to_port) + ')';
+			emit pool->debugLine(str);
+
+			StunMessage msg = StunMessage::fromBinary(packet);
+			emit pool->debugLine(StunTypes::print_packet_str(msg));
+		}
+
 		pool->d->transmit(q);
 	}
 
@@ -363,9 +362,11 @@ private:
 		active = false;
 		t->stop();
 
-#ifdef STUNTRANSACTION_DEBUG
-		printf("matched incoming response to existing request.  elapsed=%d\n", time.elapsed());
-#endif
+		if(pool->d->debugLevel >= StunTransactionPool::DL_Packet)
+			emit pool->debugLine(QString("matched incoming response to existing request.  elapsed=") + QString::number(time.elapsed()));
+
+		// will be set to true when receiving an Unauthorized error
+		bool unauthError = false;
 
 		if(msg.mclass() == StunMessage::ErrorResponse && pool->d->useLongTermAuth)
 		{
@@ -374,7 +375,10 @@ private:
 			QString reason;
 			if(StunTypes::parseErrorCode(msg.attribute(StunTypes::ERROR_CODE), &code, &reason))
 			{
-				if(code == StunTypes::Unauthorized && !pool->d->triedLongTermAuth)
+				if(code == StunTypes::Unauthorized)
+					unauthError = true;
+
+				if(unauthError && !pool->d->triedLongTermAuth)
 				{
 					QString realm;
 					QString nonce;
@@ -420,7 +424,7 @@ private:
 		}
 
 		// require message integrity when auth is used
-		if((!stuser.isEmpty() || pool->d->triedLongTermAuth) && !authed)
+		if(!unauthError && (!stuser.isEmpty() || pool->d->triedLongTermAuth) && !authed)
 			return;
 
 		pool->d->remove(q);
@@ -597,13 +601,14 @@ StunTransaction::Mode StunTransactionPool::mode() const
 
 bool StunTransactionPool::writeIncomingMessage(const StunMessage &msg, const QHostAddress &addr, int port)
 {
-#ifdef STUNTRANSACTION_DEBUG
-	printf("STUN RECV");
-	if(!addr.isNull())
-		printf(" from=(%s;%d)", qPrintable(addr.toString()), port);
-	printf("\n");
-	StunTypes::print_packet(msg);
-#endif
+	if(d->debugLevel >= DL_Packet)
+	{
+		QString str = "STUN RECV";
+		if(!addr.isNull())
+			str += QString(" from=(") + addr.toString() + ';' + QString::number(port) + ')';
+		emit debugLine(str);
+		emit debugLine(StunTypes::print_packet_str(msg));
+	}
 
 	QByteArray id = QByteArray::fromRawData((const char *)msg.id(), 12);
 	StunMessage::Class mclass = msg.mclass();
@@ -628,14 +633,15 @@ bool StunTransactionPool::writeIncomingMessage(const QByteArray &packet, bool *n
 		return false;
 	}
 
-#ifdef STUNTRANSACTION_DEBUG
-	StunMessage msg = StunMessage::fromBinary(packet);
-	printf("STUN RECV");
-	if(!addr.isNull())
-		printf(" from=(%s;%d)", qPrintable(addr.toString()), port);
-	printf("\n");
-	StunTypes::print_packet(msg);
-#endif
+	if(d->debugLevel >= DL_Packet)
+	{
+		StunMessage msg = StunMessage::fromBinary(packet);
+		QString str = "STUN RECV";
+		if(!addr.isNull())
+			str += QString(" from=(") + addr.toString() + ';' + QString::number(port) + ')';
+		emit debugLine(str);
+		emit debugLine(StunTypes::print_packet_str(msg));
+	}
 
 	// isProbablyStun ensures the packet is 20 bytes long, so we can safely
 	//   safely extract out the transaction id from the raw packet
@@ -694,13 +700,14 @@ void StunTransactionPool::setRealm(const QString &realm)
 
 void StunTransactionPool::continueAfterParams()
 {
-#ifdef STUNTRANSACTION_DEBUG
-	printf("continue after params:\n");
-	printf("  U=[%s]\n", qPrintable(d->user));
-	printf("  P=[%s]\n", d->pass.data());
-	printf("  R=[%s]\n", qPrintable(d->realm));
-	printf("  N=[%s]\n", qPrintable(d->nonce));
-#endif
+	if(d->debugLevel >= DL_Info)
+	{
+		emit debugLine("continue after params:");
+		emit debugLine(QString("  U=[%1]").arg(d->user));
+		emit debugLine(QString("  P=[%1]").arg(d->pass.data()));
+		emit debugLine(QString("  R=[%1]").arg(d->realm));
+		emit debugLine(QString("  N=[%1]").arg(d->nonce));
+	}
 
 	Q_ASSERT(d->useLongTermAuth);
 	Q_ASSERT(d->needLongTermAuth);
@@ -726,6 +733,11 @@ void StunTransactionPool::continueAfterParams()
 QByteArray StunTransactionPool::generateId() const
 {
 	return d->generateId();
+}
+
+void StunTransactionPool::setDebugLevel(DebugLevel level)
+{
+	d->debugLevel = level;
 }
 
 }

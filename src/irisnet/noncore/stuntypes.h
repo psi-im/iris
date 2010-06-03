@@ -136,6 +136,7 @@ QString methodToString(int method);
 QString attributeTypeToString(int type);
 QString attributeValueToString(int type, const QByteArray &val, const quint8 *magic, const quint8 *id);
 
+QString print_packet_str(const StunMessage &message);
 void print_packet(const StunMessage &message);
 
 }

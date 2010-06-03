@@ -164,6 +164,69 @@ static const char *_qtype2str(int qtype)
 	return str;
 }
 
+static int _cmp_rdata(const jdns_rr_t *a, const jdns_rr_t *b)
+{
+	if(a->rdlength != b->rdlength)
+		return 0;
+	if(memcmp(a->rdata, b->rdata, a->rdlength) != 0)
+		return 0;
+	return 1;
+}
+
+static int _cmp_rr(const jdns_rr_t *a, const jdns_rr_t *b)
+{
+	if(a->type != b->type)
+		return 0;
+	if(!jdns_domain_cmp(a->owner, b->owner))
+		return 0;
+	switch(a->type)
+	{
+		case JDNS_RTYPE_A:
+			if(!jdns_address_cmp(a->data.address, b->data.address))
+				return 0;
+			break;
+		case JDNS_RTYPE_AAAA:
+			if(!_cmp_rdata(a, b))
+				return 0;
+			break;
+		case JDNS_RTYPE_MX:
+			// unsupported
+			return 0;
+		case JDNS_RTYPE_SRV:
+			if(a->data.server->port != b->data.server->port
+				|| a->data.server->priority != b->data.server->priority
+				|| a->data.server->weight != b->data.server->weight
+				|| !jdns_domain_cmp(a->data.server->name, b->data.server->name)
+			)
+				return 0;
+			break;
+		case JDNS_RTYPE_CNAME:
+			if(!jdns_domain_cmp(a->data.name, b->data.name))
+				return 0;
+			break;
+		case JDNS_RTYPE_PTR:
+			if(!jdns_domain_cmp(a->data.name, b->data.name))
+				return 0;
+			break;
+		case JDNS_RTYPE_TXT:
+			if(!_cmp_rdata(a, b))
+				return 0;
+			break;
+		case JDNS_RTYPE_HINFO:
+			if(!_cmp_rdata(a, b))
+				return 0;
+			break;
+		case JDNS_RTYPE_NS:
+			// unsupported
+			return 0;
+		default:
+			if(!_cmp_rdata(a, b))
+				return 0;
+			break;
+	}
+	return 1;
+}
+
 static jdns_response_t *_packet2response(const jdns_packet_t *packet, const unsigned char *qname, int qtype, int classmask)
 {
 	int n;
@@ -653,6 +716,9 @@ typedef struct query
 	//  down.
 	int retrying;
 
+	// flag to indicate if we've received nxdomain as an error so far
+	int nxdomain;
+
 	// holds a timeout for the next step (time_start == -1 means no timer)
 	int time_start;
 	int time_next;
@@ -683,6 +749,7 @@ query_t *query_new()
 	q->servers_tried = 0;
 	q->servers_failed_count = 0;
 	q->servers_failed = 0;
+	q->nxdomain = 0;
 	q->cname_chain_count = 0;
 	q->cname_parent = 0;
 	q->cname_child = 0;
@@ -1557,7 +1624,7 @@ void _remove_query_datagrams(jdns_session_t *s, const query_t *q)
 void _process_message(jdns_session_t *s, jdns_packet_t *p, int now, query_t *q, name_server_t *ns);
 
 // return 1 if 'q' should be deleted, 0 if not
-int _process_response(jdns_session_t *s, jdns_response_t *r, int nxdomain, query_t *q);
+int _process_response(jdns_session_t *s, jdns_response_t *r, int nxdomain, int now, query_t *q);
 
 jdns_response_t *_cache_get_response(jdns_session_t *s, const unsigned char *qname, int qtype, int *_lowest_timeleft)
 {
@@ -1867,7 +1934,7 @@ int _unicast_do_writes(jdns_session_t *s, int now)
 				}
 
 				nxdomain = r->answerCount == 0 ? 1 : 0;
-				if(_process_response(s, r, nxdomain, q))
+				if(_process_response(s, r, nxdomain, -1, q))
 				{
 					_remove_query_datagrams(s, q);
 					list_remove(s->queries, q);
@@ -2115,6 +2182,36 @@ void _cache_remove_all_of_kind(jdns_session_t *s, const unsigned char *qname, in
 	}
 }
 
+void _cache_remove_all_of_record(jdns_session_t *s, const jdns_rr_t *record)
+{
+	int n;
+	for(n = 0; n < s->cache->count; ++n)
+	{
+		cache_item_t *i = (cache_item_t *)s->cache->item[n];
+		if(_cmp_rr(i->record, record))
+		{
+			jdns_string_t *str = _make_printable_cstr((const char *)i->qname);
+			_debug_line(s, "cache del [%s]", str->data);
+			jdns_string_delete(str);
+			list_remove(s->cache, i);
+			--n; // adjust position
+		}
+	}
+}
+
+// same as _cache_add, but make sure the exact same record (name AND value)
+//   isn't stored twice, and make sure no more than one cname record per name
+//   is stored.
+void _cache_add_no_dups(jdns_session_t *s, const unsigned char *qname, int qtype, int time_start, int ttl, const jdns_rr_t *record)
+{
+	if(qtype == JDNS_RTYPE_CNAME)
+		_cache_remove_all_of_kind(s, qname, qtype);
+	else
+		_cache_remove_all_of_record(s, record);
+
+	_cache_add(s, qname, qtype, time_start, ttl, record);
+}
+
 int _unicast_do_reads(jdns_session_t *s, int now)
 {
 	int need_read;
@@ -2254,7 +2351,6 @@ void _process_message(jdns_session_t *s, jdns_packet_t *packet, int now, query_t
 	int truncated;
 	int recursion_desired;
 	int answer_section_ok;
-	int nxdomain;
 	jdns_response_t *r;
 
 	if(packet->opts.opcode != 0)
@@ -2272,22 +2368,20 @@ void _process_message(jdns_session_t *s, jdns_packet_t *packet, int now, query_t
 	answer_section_ok = 0;
 	if(packet->qdcount == packet->questions->count && packet->ancount == packet->answerRecords->count)
 		answer_section_ok = 1;
-	nxdomain = 0;
 
 	r = 0;
 
 	// nxdomain
 	if(packet->opts.rcode == 3)
 	{
-		// FIXME: treat nxdomain as a generic error.  this is a simple
-		//   solution to ensuring resolving keeps going, in case the
-		//   user has multiple dns servers and one of them reports
-		//   nxdomain when a later one would succeed.  this has the
-		//   side-effect of nxdomain errors being reported as generic
-		//   errors, but, as exhibited by the need for this fix, the
-		//   distinction is not all that useful.
-		//r = jdns_response_new();
-		//nxdomain = 1;
+		// treat nxdomain as a generic error, but at the same time flag
+		//   the fact that it was received.  this ensures that
+		//   resolving keeps going, in case the user has multiple dns
+		//   servers and one of them reports nxdomain when a later one
+		//   would succeed.  if all of the servers fail then this flag
+		//   can be used at the end to report nxdomain instead of a
+		//   generic error.
+		q->nxdomain = 1;
 	}
 	// normal
 	else if(packet->opts.rcode == 0)
@@ -2323,50 +2417,38 @@ void _process_message(jdns_session_t *s, jdns_packet_t *packet, int now, query_t
 	// caching
 	if(r)
 	{
-		if(nxdomain)
+		int cache_answers;
+		int cache_additional;
+
+		// clear past items
+		_cache_remove_all_of_kind(s, q->qname, q->qtype);
+
+		cache_answers = 1;
+		cache_additional = 1;
+
+		// if truncated, we may not want to cache
+		if(truncated)
 		{
-			// cache nxdomain for 1 minute
-			if(q->qtype != JDNS_RTYPE_ANY)
+			cache_additional = 0;
+			if(!answer_section_ok)
+				cache_answers = 0;
+		}
+
+		if(cache_answers)
+		{
+			for(n = 0; n < r->answerCount; ++n)
 			{
-				_cache_remove_all_of_kind(s, q->qname, q->qtype);
-				_cache_add(s, q->qname, q->qtype, now, 60, 0);
+				jdns_rr_t *record = r->answerRecords[n];
+				_cache_add_no_dups(s, q->qname, record->type, now, _min(record->ttl, JDNS_TTL_MAX), record);
 			}
 		}
-		else
+
+		if(cache_additional)
 		{
-			int cache_answers;
-			int cache_additional;
-
-			// clear past items
-			_cache_remove_all_of_kind(s, q->qname, q->qtype);
-
-			cache_answers = 1;
-			cache_additional = 1;
-
-			// if truncated, we may not want to cache
-			if(truncated)
+			for(n = 0; n < r->additionalCount; ++n)
 			{
-				cache_additional = 0;
-				if(!answer_section_ok)
-					cache_answers = 0;
-			}
-
-			if(cache_answers)
-			{
-				for(n = 0; n < r->answerCount; ++n)
-				{
-					jdns_rr_t *record = r->answerRecords[n];
-					_cache_add(s, q->qname, record->type, now, _min(record->ttl, JDNS_TTL_MAX), record);
-				}
-			}
-
-			if(cache_additional)
-			{
-				for(n = 0; n < r->additionalCount; ++n)
-				{
-					jdns_rr_t *record = r->additionalRecords[n];
-					_cache_add(s, record->owner, record->type, now, _min(record->ttl, JDNS_TTL_MAX), record);
-				}
+				jdns_rr_t *record = r->additionalRecords[n];
+				_cache_add_no_dups(s, record->owner, record->type, now, _min(record->ttl, JDNS_TTL_MAX), record);
 			}
 		}
 	}
@@ -2388,7 +2470,7 @@ void _process_message(jdns_session_t *s, jdns_packet_t *packet, int now, query_t
 		query_add_server_failed(q, ns->id);
 	}
 
-	if(_process_response(s, r, nxdomain, q))
+	if(_process_response(s, r, 0, now, q))
 	{
 		_remove_query_datagrams(s, q);
 		list_remove(s->queries, q);
@@ -2397,9 +2479,13 @@ void _process_message(jdns_session_t *s, jdns_packet_t *packet, int now, query_t
 	jdns_response_delete(r);
 }
 
-int _process_response(jdns_session_t *s, jdns_response_t *r, int nxdomain, query_t *q)
+// 'r' can be null, for processing an error
+// 'now' can be -1, if processing a cached response ('r' always non-null)
+int _process_response(jdns_session_t *s, jdns_response_t *r, int nxdomain, int now, query_t *q)
 {
 	int k;
+	int do_error = 0;
+	int do_nxdomain = 0;
 
 	// error
 	if(!r)
@@ -2420,36 +2506,28 @@ int _process_response(jdns_session_t *s, jdns_response_t *r, int nxdomain, query
 		if(!all_errored)
 			return 0;
 
-		// report event to any requests listening
-		for(k = 0; k < q->req_ids_count; ++k)
-		{
-			jdns_event_t *event = jdns_event_new();
-			event->type = JDNS_EVENT_RESPONSE;
-			event->id = q->req_ids[k];
-			event->status = JDNS_STATUS_ERROR;
-			_append_event_and_hold_id(s, event);
-		}
+		do_error = 1;
 
-		// report error to parent
-		if(q->cname_parent)
+		// if we picked up an nxdomain along the way, act on it now
+		if(q->nxdomain)
 		{
-			// report event to any requests listening
-			query_t *cq = q->cname_parent;
-			for(k = 0; k < cq->req_ids_count; ++k)
+			do_nxdomain = 1;
+
+			// cache nxdomain for 1 minute
+			if(q->qtype != JDNS_RTYPE_ANY && now != -1)
 			{
-				jdns_event_t *event = jdns_event_new();
-				event->type = JDNS_EVENT_RESPONSE;
-				event->id = cq->req_ids[k];
-				event->status = JDNS_STATUS_ERROR;
-				_append_event_and_hold_id(s, event);
+				_cache_remove_all_of_kind(s, q->qname, q->qtype);
+				_cache_add(s, q->qname, q->qtype, now, 60, 0);
 			}
-			list_remove(s->queries, cq);
 		}
-
-		return 1;
 	}
-	// nxdomain
 	else if(nxdomain)
+	{
+		do_error = 1;
+		do_nxdomain = 1;
+	}
+
+	if(do_error)
 	{
 		// report event to any requests listening
 		for(k = 0; k < q->req_ids_count; ++k)
@@ -2457,7 +2535,10 @@ int _process_response(jdns_session_t *s, jdns_response_t *r, int nxdomain, query
 			jdns_event_t *event = jdns_event_new();
 			event->type = JDNS_EVENT_RESPONSE;
 			event->id = q->req_ids[k];
-			event->status = JDNS_STATUS_NXDOMAIN;
+			if(do_nxdomain)
+				event->status = JDNS_STATUS_NXDOMAIN;
+			else
+				event->status = JDNS_STATUS_ERROR;
 			_append_event_and_hold_id(s, event);
 		}
 
@@ -2681,69 +2762,6 @@ static jdns_rr_t *_mdnsda2rr(mdnsda a)
 	}
 
 	return rr;
-}
-
-static int _cmp_rdata(const jdns_rr_t *a, const jdns_rr_t *b)
-{
-	if(a->rdlength != b->rdlength)
-		return 0;
-	if(memcmp(a->rdata, b->rdata, a->rdlength) != 0)
-		return 0;
-	return 1;
-}
-
-static int _cmp_rr(const jdns_rr_t *a, const jdns_rr_t *b)
-{
-	if(a->type != b->type)
-		return 0;
-	if(!jdns_domain_cmp(a->owner, b->owner))
-		return 0;
-	switch(a->type)
-	{
-		case JDNS_RTYPE_A:
-			if(!jdns_address_cmp(a->data.address, b->data.address))
-				return 0;
-			break;
-		case JDNS_RTYPE_AAAA:
-			if(!_cmp_rdata(a, b))
-				return 0;
-			break;
-		case JDNS_RTYPE_MX:
-			// unsupported
-			return 0;
-		case JDNS_RTYPE_SRV:
-			if(a->data.server->port != b->data.server->port
-				|| a->data.server->priority != b->data.server->priority
-				|| a->data.server->weight != b->data.server->weight
-				|| !jdns_domain_cmp(a->data.server->name, b->data.server->name)
-			)
-				return 0;
-			break;
-		case JDNS_RTYPE_CNAME:
-			if(!jdns_domain_cmp(a->data.name, b->data.name))
-				return 0;
-			break;
-		case JDNS_RTYPE_PTR:
-			if(!jdns_domain_cmp(a->data.name, b->data.name))
-				return 0;
-			break;
-		case JDNS_RTYPE_TXT:
-			if(!_cmp_rdata(a, b))
-				return 0;
-			break;
-		case JDNS_RTYPE_HINFO:
-			if(!_cmp_rdata(a, b))
-				return 0;
-			break;
-		case JDNS_RTYPE_NS:
-			// unsupported
-			return 0;
-		default:
-			if(!_cmp_rdata(a, b))
-				return 0;
-			break;
-	}
-	return 1;
 }
 
 int _multicast_query_ans(mdnsda a, void *arg)

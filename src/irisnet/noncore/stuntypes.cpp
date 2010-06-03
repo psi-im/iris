@@ -680,8 +680,10 @@ QString attributeValueToString(int type, const QByteArray &val, const quint8 *ma
 	return QString();
 }
 
-void print_packet(const StunMessage &message)
+QString print_packet_str(const StunMessage &message)
 {
+	QString out;
+
 	QString mclass;
 	if(message.mclass() == StunMessage::Request)
 		mclass = "Request";
@@ -694,15 +696,17 @@ void print_packet(const StunMessage &message)
 	else
 		Q_ASSERT(0);
 
-	printf("Class: %s\n", qPrintable(mclass));
-	printf("Method: %s\n", qPrintable(methodToString(message.method())));
-	printf("Transaction id: %s\n", qPrintable(QCA::arrayToHex(QByteArray((const char *)message.id(), 12))));
-	printf("Attributes:\n");
+	out += QString("Class: %1\n").arg(mclass);
+	out += QString("Method: %1\n").arg(methodToString(message.method()));
+	out += QString("Transaction id: %1\n").arg(QCA::arrayToHex(QByteArray((const char *)message.id(), 12)));
+	out += "Attributes:";
 	QList<StunMessage::Attribute> attribs = message.attributes();
 	if(!attribs.isEmpty())
 	{
 		foreach(const StunMessage::Attribute &a, attribs)
 		{
+			out += '\n';
+
 			QString name = attributeTypeToString(a.type);
 			if(!name.isNull())
 			{
@@ -710,17 +714,23 @@ void print_packet(const StunMessage &message)
 				if(val.isNull())
 					val = QString("Unable to parse %1 bytes").arg(a.value.size());
 
-				printf("  %s", qPrintable(name));
+				out += QString("  %1").arg(name);
 				if(!val.isEmpty())
-					printf(" = %s", qPrintable(val));
-				printf("\n");
+					out += QString(" = %1").arg(val);
 			}
 			else
-				printf("  Unknown attribute (%04x) of %d bytes\n", a.type, a.value.size());
+				out += QString().sprintf("  Unknown attribute (0x%04x) of %d bytes", a.type, a.value.size());
 		}
 	}
 	else
-		printf("  (None)\n");
+		out += "\n  (None)";
+
+	return out;
+}
+
+void print_packet(const StunMessage &message)
+{
+	printf("%s\n", qPrintable(print_packet_str(message)));
 }
 
 }

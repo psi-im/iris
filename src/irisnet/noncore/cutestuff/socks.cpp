@@ -72,7 +72,7 @@ SocksUDP::SocksUDP(SocksClient *sc, const QString &host, int port, const QHostAd
 {
 	d = new Private;
 	d->sc = sc;
-	d->sd = new QUdpSocket();
+	d->sd = new QUdpSocket(this);
 	connect(d->sd, SIGNAL(readyRead()), SLOT(sd_readyRead()));
 	d->host = host;
 	d->port = port;
@@ -412,7 +412,10 @@ enum { StepVersion, StepAuth, StepRequest };
 class SocksClient::Private
 {
 public:
-	Private() {}
+	Private(SocksClient *_q) :
+		sock(_q)
+	{
+	}
 
 	BSocket sock;
 	QString host;
@@ -457,7 +460,7 @@ SocksClient::SocksClient(int s, QObject *parent)
 
 void SocksClient::init()
 {
-	d = new Private;
+	d = new Private(this);
 	connect(&d->sock, SIGNAL(connected()), SLOT(sock_connected()));
 	connect(&d->sock, SIGNAL(connectionClosed()), SLOT(sock_connectionClosed()));
 	connect(&d->sock, SIGNAL(delayedCloseFinished()), SLOT(sock_delayedCloseFinished()));
@@ -1011,7 +1014,10 @@ SocksUDP *SocksClient::createUDP(const QString &host, int port, const QHostAddre
 class SocksServer::Private
 {
 public:
-	Private() {}
+	Private(SocksServer *_q) :
+		serv(_q)
+	{
+	}
 
 	ServSock serv;
 	QList<SocksClient*> incomingConns;
@@ -1021,7 +1027,7 @@ public:
 SocksServer::SocksServer(QObject *parent)
 :QObject(parent)
 {
-	d = new Private;
+	d = new Private(this);
 	d->sd = 0;
 	connect(&d->serv, SIGNAL(connectionReady(int)), SLOT(connectionReady(int)));
 }
@@ -1046,7 +1052,7 @@ bool SocksServer::listen(quint16 port, bool udp)
 	if(!d->serv.listen(port))
 		return false;
 	if(udp) {
-		d->sd = new QUdpSocket();
+		d->sd = new QUdpSocket(this);
 		if(!d->sd->bind(QHostAddress::LocalHost, port)) {
 			delete d->sd;
 			d->sd = 0;

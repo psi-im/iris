@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009  Barracuda Networks, Inc.
+ * Copyright (C) 2009,2010  Barracuda Networks, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -20,15 +20,25 @@
 
 #include "ice176.h"
 
+#include <QSet>
 #include <QTimer>
+#include <QUdpSocket>
 #include <QtCrypto>
 #include "stuntransaction.h"
 #include "stunbinding.h"
-#include "stunallocate.h"
 #include "stunmessage.h"
+#include "udpportreserver.h"
 #include "icelocaltransport.h"
+#include "iceturntransport.h"
+#include "icecomponent.h"
 
 namespace XMPP {
+
+enum
+{
+	Direct,
+	Relayed
+};
 
 static QChar randomPrintableChar()
 {
@@ -53,18 +63,6 @@ static QString randomCredential(int len)
 	return out;
 }
 
-static int calc_priority(int typePref, int localPref, int componentId)
-{
-	Q_ASSERT(typePref >= 0 && typePref <= 126);
-	Q_ASSERT(localPref >= 0 && localPref <= 65535);
-	Q_ASSERT(componentId >= 1 && componentId <= 256);
-
-	int priority = (1 << 24) * typePref;
-	priority += (1 << 8) * localPref;
-	priority += (256 - componentId);
-	return priority;
-}
-
 static qint64 calc_pair_priority(int a, int b)
 {
 	qint64 priority = ((qint64)1 << 32) * qMin(a, b);
@@ -74,11 +72,59 @@ static qint64 calc_pair_priority(int a, int b)
 	return priority;
 }
 
+// see if candidates are considered the same for pruning purposes
+static bool compare_candidates(const IceComponent::CandidateInfo &a, const IceComponent::CandidateInfo &b)
+{
+	if(a.addr == b.addr && a.componentId == b.componentId)
+		return true;
+	else
+		return false;
+}
+
+// scope values: 0 = local, 1 = link-local, 2 = private, 3 = public
+// FIXME: dry (this is in psi avcall also)
+static int getAddressScope(const QHostAddress &a)
+{
+	if(a.protocol() == QAbstractSocket::IPv6Protocol)
+	{
+		if(a == QHostAddress(QHostAddress::LocalHostIPv6))
+			return 0;
+		else if(XMPP::Ice176::isIPv6LinkLocalAddress(a))
+			return 1;
+	}
+	else if(a.protocol() == QAbstractSocket::IPv4Protocol)
+	{
+		quint32 v4 = a.toIPv4Address();
+		quint8 a0 = v4 >> 24;
+		quint8 a1 = (v4 >> 16) & 0xff;
+		if(a0 == 127)
+			return 0;
+		else if(a0 == 169 && a1 == 254)
+			return 1;
+		else if(a0 == 10)
+			return 2;
+		else if(a0 == 172 && a1 >= 16 && a1 <= 31)
+			return 2;
+		else if(a0 == 192 && a1 == 168)
+			return 2;
+	}
+
+	return 3;
+}
+
 class Ice176::Private : public QObject
 {
 	Q_OBJECT
 
 public:
+	enum State
+	{
+		Stopped,
+		Starting,
+		Started,
+		Stopping
+	};
+
 	enum CandidatePairState
 	{
 		PWaiting,
@@ -88,14 +134,6 @@ public:
 		PFrozen
 	};
 
-	enum CandidateType
-	{
-		HostType,
-		PeerReflexiveType,
-		ServerReflexiveType,
-		RelayedType
-	};
-
 	enum CheckListState
 	{
 		LRunning,
@@ -103,71 +141,10 @@ public:
 		LFailed
 	};
 
-	class TransportAddress
-	{
-	public:
-		QHostAddress addr;
-		int port;
-
-		TransportAddress() :
-			port(-1)
-		{
-		}
-
-		bool operator==(const TransportAddress &other) const
-		{
-			if(addr == other.addr && port == other.port)
-				return true;
-			else
-				return false;
-		}
-
-		inline bool operator!=(const TransportAddress &other) const
-		{
-			return !operator==(other);
-		}
-	};
-
-	class CandidateInfo
-	{
-	public:
-		TransportAddress addr;
-		CandidateType type;
-		int priority;
-		QString foundation;
-		int componentId;
-		TransportAddress base;
-		TransportAddress related;
-		QString id;
-		int network;
-
-		bool operator==(const CandidateInfo &other) const
-		{
-			if(addr == other.addr &&
-				type == other.type &&
-				priority == other.priority &&
-				foundation == other.foundation &&
-				componentId == other.componentId &&
-				base == other.base &&
-				related == other.related &&
-				network == other.network)
-			{
-				return true;
-			}
-			else
-				return false;
-		}
-
-		inline bool operator!=(const CandidateInfo &other) const
-		{
-			return !operator==(other);
-		}
-	};
-
 	class CandidatePair
 	{
 	public:
-		CandidateInfo local, remote;
+		IceComponent::CandidateInfo local, remote;
 		bool isDefault;
 		bool isValid;
 		bool isNominated;
@@ -196,75 +173,80 @@ public:
 		CheckListState state;
 	};
 
-	class LocalTransport
+	class Component
 	{
 	public:
-		IceLocalTransport *sock;
-		QTimer *t; // for cutting stun request short
-		int addrAt; // for calculating foundation, not great
-		int network;
-		bool isVpn;
-		int componentId;
-		bool started;
-		bool use_stun;
-		bool stun_finished;
+		int id;
+		IceComponent *ic;
+		bool localFinished;
+		bool stopped;
+		bool lowOverhead;
 
-		LocalTransport() :
-			sock(0),
-			t(0),
-			addrAt(-1),
-			network(-1),
-			isVpn(false),
-			componentId(-1),
-			started(false),
-			use_stun(false),
-			stun_finished(false)
+		Component() :
+			localFinished(false),
+			stopped(false),
+			lowOverhead(false)
 		{
 		}
 	};
 
 	Ice176 *q;
 	Ice176::Mode mode;
-	int basePort;
+	State state;
+	TurnClient::Proxy proxy;
+	UdpPortReserver *portReserver;
 	int componentCount;
 	QList<Ice176::LocalAddress> localAddrs;
 	QList<Ice176::ExternalAddress> extAddrs;
-	Ice176::StunServiceType stunType;
-	QHostAddress stunAddr;
-	int stunPort;
-	QString stunUser;
-	QCA::SecureArray stunPass;
+	QHostAddress stunBindAddr;
+	int stunBindPort;
+	QHostAddress stunRelayUdpAddr;
+	int stunRelayUdpPort;
+	QString stunRelayUdpUser;
+	QCA::SecureArray stunRelayUdpPass;
+	QHostAddress stunRelayTcpAddr;
+	int stunRelayTcpPort;
+	QString stunRelayTcpUser;
+	QCA::SecureArray stunRelayTcpPass;
 	QString localUser, localPass;
 	QString peerUser, peerPass;
-	QList<LocalTransport*> localTransports;
-	QList<CandidateInfo> localCandidates;
+	QList<Component> components;
+	QList<IceComponent::Candidate> localCandidates;
+	QSet<IceTransport*> iceTransports;
 	CheckList checkList;
 	QList< QList<QByteArray> > in;
+	bool useLocal;
+	bool useStunBind;
+	bool useStunRelayUdp;
+	bool useStunRelayTcp;
+	bool useTrickle;
+	QTimer *collectTimer;
 
 	Private(Ice176 *_q) :
 		QObject(_q),
 		q(_q),
-		basePort(-1),
-		componentCount(0)
+		state(Stopped),
+		portReserver(0),
+		componentCount(0),
+		useLocal(true),
+		useStunBind(true),
+		useStunRelayUdp(true),
+		useStunRelayTcp(true),
+		useTrickle(false),
+		collectTimer(0)
 	{
 	}
 
 	~Private()
 	{
-		for(int n = 0; n < localTransports.count(); ++n)
+		if(collectTimer)
 		{
-			delete localTransports[n]->sock;
-
-			QTimer *t = localTransports[n]->t;
-			if(t)
-			{
-				t->disconnect(this);
-				t->setParent(0);
-				t->deleteLater();
-			}
+			collectTimer->disconnect(this);
+			collectTimer->deleteLater();
 		}
 
-		qDeleteAll(localTransports);
+		foreach(const Component &c, components)
+			delete c.ic;
 
 		for(int n = 0; n < checkList.pairs.count(); ++n)
 		{
@@ -282,166 +264,146 @@ public:
 		}
 	}
 
-	// localPref is the priority of the network interface being used for
-	//   this candidate.  the value must be between 0-65535 and different
-	//   interfaces must have different values.  if there is only one
-	//   interface, the value should be 65535.
-	static int choose_default_priority(CandidateType type, int localPref, bool isVpn, int componentId)
+	void reset()
 	{
-		int typePref;
-		if(type == HostType)
-		{
-			if(isVpn)
-				typePref = 0;
-			else
-				typePref = 126;
-		}
-		else if(type == PeerReflexiveType)
-			typePref = 110;
-		else if(type == ServerReflexiveType)
-			typePref = 100;
-		else // RelayedType
-			typePref = 0;
-
-		return calc_priority(typePref, localPref, componentId);
+		// TODO
 	}
 
-	static QString candidateType_to_string(CandidateType type)
+	int findLocalAddress(const QHostAddress &addr)
 	{
-		QString out;
-		switch(type)
+		for(int n = 0; n < localAddrs.count(); ++n)
 		{
-			case HostType: out = "host"; break;
-			case PeerReflexiveType: out = "prflx"; break;
-			case ServerReflexiveType: out = "srflx"; break;
-			case RelayedType: out = "relay"; break;
-			default: Q_ASSERT(0);
+			if(localAddrs[n].addr == addr)
+				return n;
 		}
-		return out;
+
+		return -1;
 	}
 
-	static int string_to_candidateType(const QString &in)
+	void updateLocalAddresses(const QList<LocalAddress> &addrs)
 	{
-		if(in == "host")
-			return HostType;
-		else if(in == "prflx")
-			return PeerReflexiveType;
-		else if(in == "srflx")
-			return ServerReflexiveType;
-		else if(in == "relay")
-			return RelayedType;
-		else
-			return -1;
+		// for now, ignore address changes during operation
+		if(state != Stopped)
+			return;
+
+		localAddrs.clear();
+		foreach(const LocalAddress &la, addrs)
+		{
+			int at = findLocalAddress(la.addr);
+			if(at == -1)
+				localAddrs += la;
+		}
+	}
+
+	void updateExternalAddresses(const QList<ExternalAddress> &addrs)
+	{
+		// for now, ignore address changes during operation
+		if(state != Stopped)
+			return;
+
+		extAddrs.clear();
+		foreach(const ExternalAddress &ea, addrs)
+		{
+			int at = findLocalAddress(ea.base.addr);
+			if(at != -1)
+				extAddrs += ea;
+		}
 	}
 
 	void start()
 	{
+		Q_ASSERT(state == Stopped);
+
+		state = Starting;
+
 		localUser = randomCredential(4);
 		localPass = randomCredential(22);
 
-		bool atLeastOneTransport = false;
+		QList<QUdpSocket*> socketList;
+		if(portReserver)
+			socketList = portReserver->borrowSockets(componentCount, this);
+
 		for(int n = 0; n < componentCount; ++n)
 		{
+			Component c;
+			c.id = n + 1;
+			c.ic = new IceComponent(c.id, this);
+			c.ic->setDebugLevel(IceComponent::DL_Info);
+			connect(c.ic, SIGNAL(candidateAdded(const XMPP::IceComponent::Candidate &)), SLOT(ic_candidateAdded(const XMPP::IceComponent::Candidate &)));
+			connect(c.ic, SIGNAL(candidateRemoved(const XMPP::IceComponent::Candidate &)), SLOT(ic_candidateRemoved(const XMPP::IceComponent::Candidate &)));
+			connect(c.ic, SIGNAL(localFinished()), SLOT(ic_localFinished()));
+			connect(c.ic, SIGNAL(stopped()), SLOT(ic_stopped()));
+			connect(c.ic, SIGNAL(debugLine(const QString &)), SLOT(ic_debugLine(const QString &)));
+
+			c.ic->setClientSoftwareNameAndVersion("Iris");
+			c.ic->setProxy(proxy);
+			if(portReserver)
+				c.ic->setPortReserver(portReserver);
+			c.ic->setLocalAddresses(localAddrs);
+			c.ic->setExternalAddresses(extAddrs);
+			if(!stunBindAddr.isNull())
+				c.ic->setStunBindService(stunBindAddr, stunBindPort);
+			if(!stunRelayUdpAddr.isNull())
+				c.ic->setStunRelayUdpService(stunRelayUdpAddr, stunRelayUdpPort, stunRelayUdpUser, stunRelayUdpPass);
+			if(!stunRelayTcpAddr.isNull())
+				c.ic->setStunRelayTcpService(stunRelayTcpAddr, stunRelayTcpPort, stunRelayTcpUser, stunRelayTcpPass);
+
+			c.ic->setUseLocal(useLocal);
+			c.ic->setUseStunBind(useStunBind);
+			c.ic->setUseStunRelayUdp(useStunRelayUdp);
+			c.ic->setUseStunRelayTcp(useStunRelayTcp);
+
+			// create an inbound queue for this component
 			in += QList<QByteArray>();
 
-			for(int i = 0; i < localAddrs.count(); ++i)
-			{
-				if(localAddrs[i].addr.protocol() != QAbstractSocket::IPv4Protocol)
-				{
-					printf("warning: skipping non-ipv4 address: %s\n", qPrintable(localAddrs[i].addr.toString()));
-					continue;
-				}
+			components += c;
 
-				LocalTransport *lt = new LocalTransport;
-				lt->sock = new IceLocalTransport(this);
-				connect(lt->sock, SIGNAL(started()), SLOT(lt_started()));
-				connect(lt->sock, SIGNAL(stopped()), SLOT(lt_stopped()));
-				connect(lt->sock, SIGNAL(stunFinished()), SLOT(lt_stunFinished()));
-				connect(lt->sock, SIGNAL(error(XMPP::IceLocalTransport::Error)), SLOT(lt_error(XMPP::IceLocalTransport::Error)));
-				connect(lt->sock, SIGNAL(readyRead(XMPP::IceLocalTransport::TransmitPath)), SLOT(lt_readyRead(XMPP::IceLocalTransport::TransmitPath)));
-				connect(lt->sock, SIGNAL(datagramsWritten(XMPP::IceLocalTransport::TransmitPath, int)), SLOT(lt_datagramsWritten(XMPP::IceLocalTransport::TransmitPath, int)));
-				lt->addrAt = i;
-				lt->network = localAddrs[i].network;
-				lt->isVpn = localAddrs[i].isVpn;
-				lt->componentId = n + 1;
-				localTransports += lt;
-				int port = (basePort != -1) ? basePort + n : -1;
-				lt->sock->start(localAddrs[i].addr, port);
-
-				atLeastOneTransport = true;
-				printf("starting transport %s:%d for component %d\n", qPrintable(localAddrs[i].addr.toString()), port, lt->componentId);
-			}
+			c.ic->update(&socketList);
 		}
 
-		if(!atLeastOneTransport)
-			QMetaObject::invokeMethod(q, "error", Qt::QueuedConnection);
+		// socketList should always empty here, but might not be if
+		//   the app provided a different address list to
+		//   UdpPortReserver and Ice176.  and that would really be
+		//   a dumb thing to do but I'm not going to Q_ASSERT it
+		if(!socketList.isEmpty())
+			portReserver->returnSockets(socketList);
 	}
 
-	void tryFinishGather()
+	void stop()
 	{
-		bool allReady = true;
-		foreach(const LocalTransport *lt, localTransports)
+		Q_ASSERT(state == Starting || state == Started);
+
+		state = Stopping;
+
+		if(!components.isEmpty())
 		{
-			if(!lt->started || (lt->use_stun && !lt->stun_finished))
-			{
-				allReady = false;
-				break;
-			}
+			for(int n = 0; n < components.count(); ++n)
+				components[n].ic->stop();
 		}
-
-		if(allReady)
+		else
 		{
-			emit q->started();
-
-			// FIXME: DOR-SS
-			QList<Ice176::Candidate> list;
-			foreach(const CandidateInfo &ci, localCandidates)
-			{
-				Ice176::Candidate c;
-				c.component = ci.componentId;
-				c.foundation = ci.foundation;
-				c.generation = 0;
-				c.id = ci.id;
-				c.ip = ci.addr.addr;
-				c.network = ci.network;
-				c.port = ci.addr.port;
-				c.priority = ci.priority;
-				c.protocol = "udp";
-				if(ci.type != HostType)
-				{
-					c.rel_addr = ci.base.addr;
-					c.rel_port = ci.base.port;
-				}
-				else
-				{
-					c.rel_addr = QHostAddress();
-					c.rel_port = -1;
-				}
-				c.rem_addr = QHostAddress();
-				c.rem_port = -1;
-				c.type = candidateType_to_string(ci.type);
-				list += c;
-			}
-			if(!list.isEmpty())
-				emit q->localCandidatesReady(list);
+			// TODO: hmm, is it possible to have no components?
+			QMetaObject::invokeMethod(this, "postStop", Qt::QueuedConnection);
 		}
 	}
 
 	void addRemoteCandidates(const QList<Candidate> &list)
 	{
-		QList<CandidateInfo> remoteCandidates;
+		QList<IceComponent::CandidateInfo> remoteCandidates;
 		foreach(const Candidate &c, list)
 		{
-			CandidateInfo ci;
+			IceComponent::CandidateInfo ci;
 			ci.addr.addr = c.ip;
+			ci.addr.addr.setScopeId(QString());
 			ci.addr.port = c.port;
-			ci.type = (CandidateType)string_to_candidateType(c.type); // TODO: handle error
+			ci.type = (IceComponent::CandidateType)string_to_candidateType(c.type); // TODO: handle error
 			ci.componentId = c.component;
 			ci.priority = c.priority;
 			ci.foundation = c.foundation;
 			if(!c.rel_addr.isNull())
 			{
 				ci.base.addr = c.rel_addr;
+				ci.base.addr.setScopeId(QString());
 				ci.base.port = c.rel_port;
 			}
 			ci.network = c.network;
@@ -452,17 +414,33 @@ public:
 		printf("adding %d remote candidates\n", remoteCandidates.count());
 
 		QList<CandidatePair> pairs;
-		foreach(const CandidateInfo &lc, localCandidates)
+		foreach(const IceComponent::Candidate &cc, localCandidates)
 		{
-			foreach(const CandidateInfo &rc, remoteCandidates)
+			const IceComponent::CandidateInfo &lc = cc.info;
+
+			foreach(const IceComponent::CandidateInfo &rc, remoteCandidates)
 			{
 				if(lc.componentId != rc.componentId)
+					continue;
+
+				// don't pair ipv4 with ipv6.  FIXME: is this right?
+				if(lc.addr.addr.protocol() != rc.addr.addr.protocol())
+					continue;
+
+				// don't relay to localhost.  turnserver
+				//   doesn't like it.  i don't know if this
+				//   should qualify as a HACK or not.
+				//   trying to relay to localhost is pretty
+				//   stupid anyway
+				if(lc.type == IceComponent::RelayedType && getAddressScope(rc.addr.addr) == 0)
 					continue;
 
 				CandidatePair pair;
 				pair.state = PFrozen; // FIXME: setting state here may be wrong
 				pair.local = lc;
 				pair.remote = rc;
+				if(pair.local.addr.addr.protocol() == QAbstractSocket::IPv6Protocol && isIPv6LinkLocalAddress(pair.local.addr.addr))
+					pair.remote.addr.addr.setScopeId(pair.local.addr.addr.scopeId());
 				pair.isDefault = false;
 				pair.isValid = false;
 				pair.isNominated = false;
@@ -479,22 +457,16 @@ public:
 		// combine pairs with existing, and sort
 		pairs = checkList.pairs + pairs;
 		checkList.pairs.clear();
-		while(!pairs.isEmpty())
+		foreach(const CandidatePair &pair, pairs)
 		{
-			int at = -1;
-			qint64 highest_priority = -1;
-			for(int n = 0; n < pairs.count(); ++n)
+			int at;
+			for(at = 0; at < checkList.pairs.count(); ++at)
 			{
-				if(n == 0 || pairs[n].priority > highest_priority)
-				{
-					at = n;
-					highest_priority = pairs[n].priority;
-				}
+				if(compare_pair(pair, checkList.pairs[at]) < 0)
+					break;
 			}
 
-			CandidatePair pair = pairs[at];
-			pairs.removeAt(at);
-			checkList.pairs += pair;
+			checkList.pairs.insert(at, pair);
 		}
 
 		// pruning
@@ -502,7 +474,7 @@ public:
 		for(int n = 0; n < checkList.pairs.count(); ++n)
 		{
 			CandidatePair &pair = checkList.pairs[n];
-			if(pair.local.type == ServerReflexiveType)
+			if(pair.local.type == IceComponent::ServerReflexiveType)
 				pair.local.addr = pair.local.base;
 		}
 
@@ -514,19 +486,24 @@ public:
 			bool found = false;
 			for(int i = n - 1; i >= 0; --i)
 			{
-				if(pair.local == checkList.pairs[i].local && pair.remote == checkList.pairs[i].remote)
+				if(compare_candidates(pair.local, checkList.pairs[i].local) && compare_candidates(pair.remote, checkList.pairs[i].remote))
 				{
 					found = true;
 					break;
 				}
 			}
 
-			if(found)
+			if(found )
 			{
 				checkList.pairs.removeAt(n);
 				--n; // adjust position
 			}
 		}
+
+		// max pairs is 100 * number of components
+		int max_pairs = 100 * components.count();
+		while(checkList.pairs.count() > max_pairs)
+			checkList.pairs.removeLast();
 
 		printf("%d after pruning\n", checkList.pairs.count());
 
@@ -544,18 +521,12 @@ public:
 			// FIXME: for now we just do checks to everything immediately
 			pair.state = PInProgress;
 
-			int at = -1;
-			for(int i = 0; i < localTransports.count(); ++i)
-			{
-				if(localTransports[i]->sock->localAddress() == pair.local.addr.addr && localTransports[i]->sock->localPort() == pair.local.addr.port)
-				{
-					at = i;
-					break;
-				}
-			}
+			int at = findLocalCandidate(pair.local.addr.addr, pair.local.addr.port);
 			Q_ASSERT(at != -1);
 
-			LocalTransport *lt = localTransports[at];
+			IceComponent::Candidate &lc = localCandidates[at];
+
+			Component &c = components[findComponent(lc.info.componentId)];
 
 			pair.pool = new StunTransactionPool(StunTransaction::Udp, this);
 			connect(pair.pool, SIGNAL(outgoingMessage(const QByteArray &, const QHostAddress &, int)), SLOT(pool_outgoingMessage(const QByteArray &, const QHostAddress &, int)));
@@ -565,7 +536,7 @@ public:
 			pair.binding = new StunBinding(pair.pool);
 			connect(pair.binding, SIGNAL(success()), SLOT(binding_success()));
 
-			int prflx_priority = choose_default_priority(PeerReflexiveType, 65535 - lt->addrAt, lt->isVpn, pair.local.componentId);
+			int prflx_priority = c.ic->peerReflexivePriority(lc.iceTransport, lc.path);
 			pair.binding->setPriority(prflx_priority);
 
 			if(mode == Ice176::Initiator)
@@ -583,16 +554,12 @@ public:
 		}
 	}
 
-public slots:
-	void lt_started()
+	void write(int componentIndex, const QByteArray &datagram)
 	{
-		printf("lt_started\n");
-
-		IceLocalTransport *sock = (IceLocalTransport *)sender();
 		int at = -1;
-		for(int n = 0; n < localTransports.count(); ++n)
+		for(int n = 0; n < checkList.pairs.count(); ++n)
 		{
-			if(localTransports[n]->sock == sock)
+			if(checkList.pairs[n].local.componentId - 1 == componentIndex && checkList.pairs[n].isValid)
 			{
 				at = n;
 				break;
@@ -601,307 +568,518 @@ public slots:
 		if(at == -1)
 			return;
 
-		LocalTransport *lt = localTransports[at];
-		lt->started = true;
+		CandidatePair &pair = checkList.pairs[at];
 
-		CandidateInfo ci;
-		ci.addr.addr = lt->sock->localAddress();
-		ci.addr.port = lt->sock->localPort();
-		ci.type = HostType;
-		ci.componentId = lt->componentId;
-		ci.priority = choose_default_priority(ci.type, 65535 - lt->addrAt, lt->isVpn, ci.componentId);
-		ci.foundation = QString::number(lt->addrAt);
-		ci.base = ci.addr;
-		ci.network = lt->network;
-		ci.id = randomCredential(10); // FIXME: ensure unique
-		localCandidates += ci;
+		at = findLocalCandidate(pair.local.addr.addr, pair.local.addr.port);
+		if(at == -1) // FIXME: assert?
+			return;
 
-		int extAt = -1;
-		for(int n = 0; n < extAddrs.count(); ++n)
+		IceComponent::Candidate &lc = localCandidates[at];
+
+		IceTransport *sock = lc.iceTransport;
+		int path = lc.path;
+
+		sock->writeDatagram(path, datagram, pair.remote.addr.addr, pair.remote.addr.port);
+
+		// DOR-SR?
+		QMetaObject::invokeMethod(q, "datagramsWritten", Qt::QueuedConnection, Q_ARG(int, componentIndex), Q_ARG(int, 1));
+	}
+
+	void flagComponentAsLowOverhead(int componentIndex)
+	{
+		// FIXME: ok to assume in order?
+		Component &c = components[componentIndex];
+		c.lowOverhead = true;
+
+		// FIXME: actually do something
+	}
+
+private:
+	int findComponent(const IceComponent *ic) const
+	{
+		for(int n = 0; n < components.count(); ++n)
 		{
-			if(extAddrs[n].base.addr == lt->sock->localAddress() && (extAddrs[n].portBase == -1 || extAddrs[n].portBase == lt->sock->localPort()))
+			if(components[n].ic == ic)
+				return n;
+		}
+
+		return -1;
+	}
+
+	int findComponent(int id) const
+	{
+		for(int n = 0; n < components.count(); ++n)
+		{
+			if(components[n].id == id)
+				return n;
+		}
+
+		return -1;
+	}
+
+	int findLocalCandidate(const IceTransport *iceTransport, int path) const
+	{
+		for(int n = 0; n < localCandidates.count(); ++n)
+		{
+			const IceComponent::Candidate &cc = localCandidates[n];
+			if(cc.iceTransport == iceTransport && cc.path == path)
+				return n;
+		}
+
+		return -1;
+	}
+
+	int findLocalCandidate(const QHostAddress &fromAddr, int fromPort)
+	{
+		for(int n = 0; n < localCandidates.count(); ++n)
+		{
+			const IceComponent::Candidate &cc = localCandidates[n];
+			if(cc.info.addr.addr == fromAddr && cc.info.addr.port == fromPort)
+				return n;
+		}
+
+		return -1;
+	}
+
+	static QString candidateType_to_string(IceComponent::CandidateType type)
+	{
+		QString out;
+		switch(type)
+		{
+			case IceComponent::HostType: out = "host"; break;
+			case IceComponent::PeerReflexiveType: out = "prflx"; break;
+			case IceComponent::ServerReflexiveType: out = "srflx"; break;
+			case IceComponent::RelayedType: out = "relay"; break;
+			default: Q_ASSERT(0);
+		}
+		return out;
+	}
+
+	static int string_to_candidateType(const QString &in)
+	{
+		if(in == "host")
+			return IceComponent::HostType;
+		else if(in == "prflx")
+			return IceComponent::PeerReflexiveType;
+		else if(in == "srflx")
+			return IceComponent::ServerReflexiveType;
+		else if(in == "relay")
+			return IceComponent::RelayedType;
+		else
+			return -1;
+	}
+
+	static int compare_pair(const CandidatePair &a, const CandidatePair &b)
+	{
+		// prefer remote srflx, for leap
+		if(a.remote.type == IceComponent::ServerReflexiveType && b.remote.type != IceComponent::ServerReflexiveType && b.remote.addr.addr.protocol() != QAbstractSocket::IPv6Protocol)
+			return -1;
+		else if(b.remote.type == IceComponent::ServerReflexiveType && a.remote.type != IceComponent::ServerReflexiveType && a.remote.addr.addr.protocol() != QAbstractSocket::IPv6Protocol)
+			return 1;
+
+		if(a.priority > b.priority)
+			return -1;
+		else if(b.priority > a.priority)
+			return 1;
+
+		return 0;
+	}
+
+private slots:
+	void postStop()
+	{
+		state = Stopped;
+		emit q->stopped();
+	}
+
+	void ic_candidateAdded(const XMPP::IceComponent::Candidate &_cc)
+	{
+		IceComponent::Candidate cc = _cc;
+		cc.info.id = randomCredential(10); // FIXME: ensure unique
+		cc.info.foundation = "0"; // FIXME
+		// TODO
+		localCandidates += cc;
+
+		printf("C%d: candidate added: %s;%d\n", cc.info.componentId, qPrintable(cc.info.addr.addr.toString()), cc.info.addr.port);
+
+		if(!iceTransports.contains(cc.iceTransport))
+		{
+			connect(cc.iceTransport, SIGNAL(readyRead(int)), SLOT(it_readyRead(int)));
+			connect(cc.iceTransport, SIGNAL(datagramsWritten(int, int, const QHostAddress &, int)), SLOT(it_datagramsWritten(int, int, const QHostAddress &, int)));
+
+			iceTransports += cc.iceTransport;
+		}
+
+		if(state == Started && useTrickle)
+		{
+			QList<Ice176::Candidate> list;
+
+			Ice176::Candidate c;
+			c.component = cc.info.componentId;
+			c.foundation = cc.info.foundation;
+			c.generation = 0; // TODO
+			c.id = cc.info.id;
+			c.ip = cc.info.addr.addr;
+			c.ip.setScopeId(QString());
+			c.network = cc.info.network;
+			c.port = cc.info.addr.port;
+			c.priority = cc.info.priority;
+			c.protocol = "udp";
+			if(cc.info.type != IceComponent::HostType)
 			{
-				extAt = n;
-				break;
+				c.rel_addr = cc.info.base.addr;
+				c.rel_addr.setScopeId(QString());
+				c.rel_port = cc.info.base.port;
 			}
-		}
-		if(extAt != -1)
-		{
-			CandidateInfo ci;
-			ci.addr.addr = extAddrs[extAt].addr;
-			ci.addr.port = (extAddrs[extAt].portBase != -1) ? extAddrs[extAt].portBase : lt->sock->localPort();
-			ci.type = ServerReflexiveType;
-			ci.componentId = lt->componentId;
-			ci.priority = choose_default_priority(ci.type, 65535 - lt->addrAt, lt->isVpn, ci.componentId);
-			ci.foundation = QString::number(lt->addrAt) + 'e';
-			ci.base.addr = lt->sock->localAddress();
-			ci.base.port = lt->sock->localPort();
-			ci.network = lt->network;
-			ci.id = randomCredential(10); // FIXME: ensure unique
-			localCandidates += ci;
-		}
-
-		if(!stunAddr.isNull())
-		{
-			lt->use_stun = true;
-			if(stunType == Ice176::Relay)
-				lt->sock->setStunService(IceLocalTransport::Relay, stunAddr, stunPort);
 			else
-				lt->sock->setStunService(IceLocalTransport::Basic, stunAddr, stunPort);
+			{
+				c.rel_addr = QHostAddress();
+				c.rel_port = -1;
+			}
+			c.rem_addr = QHostAddress();
+			c.rem_port = -1;
+			c.type = candidateType_to_string(cc.info.type);
+			list += c;
 
-			// reduce gathering of STUN candidates to 4 seconds
-			//   when trickle mode is disabled
-			lt->t = new QTimer(this);
-			connect(lt->t, SIGNAL(timeout()), SLOT(lt_timeout()));
-			lt->t->setSingleShot(true);
-			lt->t->start(4000);
-
-			printf("starting stun\n");
-			lt->sock->stunStart();
-			return;
+			emit q->localCandidatesReady(list);
 		}
-
-		tryFinishGather();
 	}
 
-	void lt_stopped()
+	void ic_candidateRemoved(const XMPP::IceComponent::Candidate &cc)
 	{
 		// TODO
-		printf("lt_stopped\n");
-	}
+		printf("C%d: candidate removed: %s;%d\n", cc.info.componentId, qPrintable(cc.info.addr.addr.toString()), cc.info.addr.port);
 
-	void lt_stunFinished()
-	{
-		printf("lt_stunFinished\n");
-
-		IceLocalTransport *sock = (IceLocalTransport *)sender();
-		int at = -1;
-		for(int n = 0; n < localTransports.count(); ++n)
+		QStringList idList;
+		for(int n = 0; n < localCandidates.count(); ++n)
 		{
-			if(localTransports[n]->sock == sock)
+			if(localCandidates[n].id == cc.id && localCandidates[n].info.componentId == cc.info.componentId)
 			{
-				at = n;
+				// FIXME: this is rather ridiculous I think
+				idList += localCandidates[n].info.id;
+
+				localCandidates.removeAt(n);
+				--n; // adjust position
+			}
+		}
+
+		bool iceTransportInUse = false;
+		foreach(const IceComponent::Candidate &lc, localCandidates)
+		{
+			if(lc.iceTransport == cc.iceTransport)
+			{
+				iceTransportInUse = true;
 				break;
 			}
 		}
-		if(at == -1)
-			return;
-
-		LocalTransport *lt = localTransports[at];
-
-		// already marked as finished?  this can happen if we timed
-		//   out the operation from earlier.  in that case just
-		//   ignore the event
-		if(lt->stun_finished)
+		if(!iceTransportInUse)
 		{
-			printf("ignoring\n");
-			return;
+			cc.iceTransport->disconnect(this);
+			iceTransports.remove(cc.iceTransport);
 		}
 
-		lt->t->stop();
-		lt->stun_finished = true;
-
-		if(!lt->sock->serverReflexiveAddress().isNull())
+		for(int n = 0; n < checkList.pairs.count(); ++n)
 		{
-			CandidateInfo ci;
-			ci.addr.addr = lt->sock->serverReflexiveAddress();
-			ci.addr.port = lt->sock->serverReflexivePort();
-			ci.type = ServerReflexiveType;
-			ci.componentId = lt->componentId;
-			ci.priority = choose_default_priority(ci.type, 65535 - lt->addrAt, lt->isVpn, ci.componentId);
-			ci.foundation = QString::number(lt->addrAt) + 's';
-			ci.base.addr = lt->sock->localAddress();
-			ci.base.port = lt->sock->localPort();
-			ci.network = lt->network;
-			ci.id = randomCredential(10); // FIXME: ensure unique
-			localCandidates += ci;
-		}
-
-		// TODO: relayed candidate
-
-		tryFinishGather();
-	}
-
-	void lt_error(XMPP::IceLocalTransport::Error e)
-	{
-		// TODO
-		Q_UNUSED(e);
-		printf("lt_error\n");
-		for(int n = 0; n < localTransports.count(); ++n)
-			localTransports[n]->sock->disconnect(this);
-		emit q->error();
-	}
-
-	void lt_readyRead(XMPP::IceLocalTransport::TransmitPath path)
-	{
-		IceLocalTransport *sock = (IceLocalTransport *)sender();
-		int at = -1;
-		for(int n = 0; n < localTransports.count(); ++n)
-		{
-			if(localTransports[n]->sock == sock)
+			if(idList.contains(checkList.pairs[n].local.id))
 			{
-				at = n;
-				break;
-			}
-		}
-		if(at == -1)
-			return;
+				StunBinding *binding = checkList.pairs[n].binding;
+				StunTransactionPool *pool = checkList.pairs[n].pool;
 
-		LocalTransport *lt = localTransports[at];
+				delete binding;
 
-		if(path == IceLocalTransport::Direct)
-		{
-			while(lt->sock->hasPendingDatagrams(path))
-			{
-				QHostAddress fromAddr;
-				int fromPort;
-				QByteArray buf = lt->sock->readDatagram(path, &fromAddr, &fromPort);
-
-				//printf("port %d: received packet (%d bytes)\n", lt->sock->localPort(), buf.size());
-
-				QString requser = localUser + ':' + peerUser;
-				QByteArray reqkey = localPass.toUtf8();
-
-				StunMessage::ConvertResult result;
-				StunMessage msg = StunMessage::fromBinary(buf, &result, StunMessage::MessageIntegrity | StunMessage::Fingerprint, reqkey);
-				if(!msg.isNull() && (msg.mclass() == StunMessage::Request || msg.mclass() == StunMessage::Indication))
+				if(pool)
 				{
-					printf("received validated request or indication\n");
-					QString user = QString::fromUtf8(msg.attribute(0x0006)); // USERNAME
-					if(requser != user)
-					{
-						printf("user [%s] is wrong.  it should be [%s].  skipping\n", qPrintable(user), qPrintable(requser));
-						continue;
-					}
+					pool->disconnect(this);
+					pool->setParent(0);
+					pool->deleteLater();
+				}
 
-					if(msg.method() != 0x001)
-					{
-						printf("not a binding request.  skipping\n");
-						continue;
-					}
+				checkList.pairs.removeAt(n);
+				--n; // adjust position
+			}
+		}
+	}
 
-					StunMessage response;
-					response.setClass(StunMessage::SuccessResponse);
-					response.setMethod(0x001);
-					response.setId(msg.id());
+	void ic_localFinished()
+	{
+		IceComponent *ic = (IceComponent *)sender();
+		int at = findComponent(ic);
+		Q_ASSERT(at != -1);
 
-					quint16 port16 = fromPort;
-					quint32 addr4 = fromAddr.toIPv4Address();
-					QByteArray val(8, 0);
-					quint8 *p = (quint8 *)val.data();
-					const quint8 *magic = response.magic();
-					p[0] = 0;
-					p[1] = 0x01;
-					p[2] = (port16 >> 8) & 0xff;
-					p[2] ^= magic[0];
-					p[3] = port16 & 0xff;
-					p[3] ^= magic[1];
-					p[4] = (addr4 >> 24) & 0xff;
-					p[4] ^= magic[0];
-					p[5] = (addr4 >> 16) & 0xff;
-					p[5] ^= magic[1];
-					p[6] = (addr4 >> 8) & 0xff;
-					p[6] ^= magic[2];
-					p[7] = addr4 & 0xff;
-					p[7] ^= magic[3];
+		components[at].localFinished = true;
 
-					QList<StunMessage::Attribute> list;
-					StunMessage::Attribute attr;
-					attr.type = 0x0020;
-					attr.value = val;
-					list += attr;
+		bool allFinished = true;
+		foreach(const Component &c, components)
+		{
+			if(!c.localFinished)
+			{
+				allFinished = false;
+				break;
+			}
+		}
 
-					response.setAttributes(list);
+		if(allFinished)
+		{
+			state = Started;
 
-					QByteArray packet = response.toBinary(StunMessage::MessageIntegrity | StunMessage::Fingerprint, reqkey);
-					lt->sock->writeDatagram(path, packet, fromAddr, fromPort);
+			emit q->started();
+
+			if(!useTrickle)
+			{
+				// FIXME: there should be a way to not wait if
+				//   we know for sure there is nothing else
+				//   possibly coming
+				collectTimer = new QTimer(this);
+				connect(collectTimer, SIGNAL(timeout()), SLOT(collect_timeout()));
+				collectTimer->setSingleShot(true);
+				collectTimer->start(4000);
+				return;
+			}
+
+			// FIXME: DOR-SS
+			QList<Ice176::Candidate> list;
+			foreach(const IceComponent::Candidate &cc, localCandidates)
+			{
+				Ice176::Candidate c;
+				c.component = cc.info.componentId;
+				c.foundation = cc.info.foundation;
+				c.generation = 0; // TODO
+				c.id = cc.info.id;
+				c.ip = cc.info.addr.addr;
+				c.ip.setScopeId(QString());
+				c.network = cc.info.network;
+				c.port = cc.info.addr.port;
+				c.priority = cc.info.priority;
+				c.protocol = "udp";
+				if(cc.info.type != IceComponent::HostType)
+				{
+					c.rel_addr = cc.info.base.addr;
+					c.rel_addr.setScopeId(QString());
+					c.rel_port = cc.info.base.port;
 				}
 				else
 				{
-					QByteArray reskey = peerPass.toUtf8();
-					StunMessage msg = StunMessage::fromBinary(buf, &result, StunMessage::MessageIntegrity | StunMessage::Fingerprint, reskey);
-					if(!msg.isNull() && (msg.mclass() == StunMessage::SuccessResponse || msg.mclass() == StunMessage::ErrorResponse))
-					{
-						printf("received validated response\n");
-
-						// FIXME: this is so gross and completely defeats the point of having pools
-						for(int n = 0; n < checkList.pairs.count(); ++n)
-						{
-							CandidatePair &pair = checkList.pairs[n];
-							if(pair.local.addr.addr == lt->sock->localAddress() && pair.local.addr.port == lt->sock->localPort())
-								pair.pool->writeIncomingMessage(msg);
-						}
-					}
-					else
-					{
-						//printf("received some non-stun or invalid stun packet\n");
-
-						// FIXME: i don't know if this is good enough
-						if(StunMessage::isProbablyStun(buf))
-						{
-							printf("unexpected stun packet (loopback?), skipping.\n");
-							continue;
-						}
-
-						int at = -1;
-						for(int n = 0; n < checkList.pairs.count(); ++n)
-						{
-							CandidatePair &pair = checkList.pairs[n];
-							if(pair.local.addr.addr == lt->sock->localAddress() && pair.local.addr.port == lt->sock->localPort())
-							{
-								at = n;
-								break;
-							}
-						}
-						if(at == -1)
-						{
-							printf("the local transport does not seem to be associated with a candidate?!\n");
-							continue;
-						}
-
-						int componentIndex = checkList.pairs[at].local.componentId - 1;
-						//printf("packet is considered to be application data for component index %d\n", componentIndex);
-
-						in[componentIndex] += buf;
-						emit q->readyRead(componentIndex);
-					}
+					c.rel_addr = QHostAddress();
+					c.rel_port = -1;
 				}
+				c.rem_addr = QHostAddress();
+				c.rem_port = -1;
+				c.type = candidateType_to_string(cc.info.type);
+				list += c;
 			}
-		}
-		else // Relayed
-		{
-			// TODO
+			if(!list.isEmpty())
+				emit q->localCandidatesReady(list);
 		}
 	}
 
-	void lt_datagramsWritten(XMPP::IceLocalTransport::TransmitPath path, int count)
+	void ic_stopped()
+	{
+		IceComponent *ic = (IceComponent *)sender();
+		int at = findComponent(ic);
+		Q_ASSERT(at != -1);
+
+		components[at].stopped = true;
+
+		bool allStopped = true;
+		foreach(const Component &c, components)
+		{
+			if(!c.stopped)
+			{
+				allStopped = false;
+				break;
+			}
+		}
+
+		if(allStopped)
+			postStop();
+	}
+
+	void ic_debugLine(const QString &line)
+	{
+		IceComponent *ic = (IceComponent *)sender();
+		int at = findComponent(ic);
+		Q_ASSERT(at != -1);
+
+		// FIXME: components are always sorted?
+		printf("C%d: %s\n", at + 1, qPrintable(line));
+	}
+
+	void collect_timeout()
+	{
+		collectTimer->disconnect(this);
+		collectTimer->deleteLater();
+		collectTimer = 0;
+
+		QList<Ice176::Candidate> list;
+		foreach(const IceComponent::Candidate &cc, localCandidates)
+		{
+			Ice176::Candidate c;
+			c.component = cc.info.componentId;
+			c.foundation = cc.info.foundation;
+			c.generation = 0; // TODO
+			c.id = cc.info.id;
+			c.ip = cc.info.addr.addr;
+			c.ip.setScopeId(QString());
+			c.network = cc.info.network;
+			c.port = cc.info.addr.port;
+			c.priority = cc.info.priority;
+			c.protocol = "udp";
+			if(cc.info.type != IceComponent::HostType)
+			{
+				c.rel_addr = cc.info.base.addr;
+				c.rel_addr.setScopeId(QString());
+				c.rel_port = cc.info.base.port;
+			}
+			else
+			{
+				c.rel_addr = QHostAddress();
+				c.rel_port = -1;
+			}
+			c.rem_addr = QHostAddress();
+			c.rem_port = -1;
+			c.type = candidateType_to_string(cc.info.type);
+			list += c;
+		}
+		if(!list.isEmpty())
+			emit q->localCandidatesReady(list);
+	}
+
+	void it_readyRead(int path)
+	{
+		IceTransport *it = (IceTransport *)sender();
+		int at = findLocalCandidate(it, path);
+		Q_ASSERT(at != -1);
+
+		IceComponent::Candidate &cc = localCandidates[at];
+
+		IceTransport *sock = it;
+
+		while(sock->hasPendingDatagrams(path))
+		{
+			QHostAddress fromAddr;
+			int fromPort;
+			QByteArray buf = sock->readDatagram(path, &fromAddr, &fromPort);
+
+			//printf("port %d: received packet (%d bytes)\n", lt->sock->localPort(), buf.size());
+
+			QString requser = localUser + ':' + peerUser;
+			QByteArray reqkey = localPass.toUtf8();
+
+			StunMessage::ConvertResult result;
+			StunMessage msg = StunMessage::fromBinary(buf, &result, StunMessage::MessageIntegrity | StunMessage::Fingerprint, reqkey);
+			if(!msg.isNull() && (msg.mclass() == StunMessage::Request || msg.mclass() == StunMessage::Indication))
+			{
+				printf("received validated request or indication from %s:%d\n", qPrintable(fromAddr.toString()), fromPort);
+				QString user = QString::fromUtf8(msg.attribute(0x0006)); // USERNAME
+				if(requser != user)
+				{
+					printf("user [%s] is wrong.  it should be [%s].  skipping\n", qPrintable(user), qPrintable(requser));
+					continue;
+				}
+
+				if(msg.method() != 0x001)
+				{
+					printf("not a binding request.  skipping\n");
+					continue;
+				}
+
+				StunMessage response;
+				response.setClass(StunMessage::SuccessResponse);
+				response.setMethod(0x001);
+				response.setId(msg.id());
+
+				quint16 port16 = fromPort;
+				quint32 addr4 = fromAddr.toIPv4Address();
+				QByteArray val(8, 0);
+				quint8 *p = (quint8 *)val.data();
+				const quint8 *magic = response.magic();
+				p[0] = 0;
+				p[1] = 0x01;
+				p[2] = (port16 >> 8) & 0xff;
+				p[2] ^= magic[0];
+				p[3] = port16 & 0xff;
+				p[3] ^= magic[1];
+				p[4] = (addr4 >> 24) & 0xff;
+				p[4] ^= magic[0];
+				p[5] = (addr4 >> 16) & 0xff;
+				p[5] ^= magic[1];
+				p[6] = (addr4 >> 8) & 0xff;
+				p[6] ^= magic[2];
+				p[7] = addr4 & 0xff;
+				p[7] ^= magic[3];
+
+				QList<StunMessage::Attribute> list;
+				StunMessage::Attribute attr;
+				attr.type = 0x0020;
+				attr.value = val;
+				list += attr;
+
+				response.setAttributes(list);
+
+				QByteArray packet = response.toBinary(StunMessage::MessageIntegrity | StunMessage::Fingerprint, reqkey);
+				sock->writeDatagram(path, packet, fromAddr, fromPort);
+			}
+			else
+			{
+				QByteArray reskey = peerPass.toUtf8();
+				StunMessage msg = StunMessage::fromBinary(buf, &result, StunMessage::MessageIntegrity | StunMessage::Fingerprint, reskey);
+				if(!msg.isNull() && (msg.mclass() == StunMessage::SuccessResponse || msg.mclass() == StunMessage::ErrorResponse))
+				{
+					printf("received validated response\n");
+
+					// FIXME: this is so gross and completely defeats the point of having pools
+					for(int n = 0; n < checkList.pairs.count(); ++n)
+					{
+						CandidatePair &pair = checkList.pairs[n];
+						if(pair.local.addr.addr == cc.info.addr.addr && pair.local.addr.port == cc.info.addr.port)
+							pair.pool->writeIncomingMessage(msg);
+					}
+				}
+				else
+				{
+					//printf("received some non-stun or invalid stun packet\n");
+
+					// FIXME: i don't know if this is good enough
+					if(StunMessage::isProbablyStun(buf))
+					{
+						printf("unexpected stun packet (loopback?), skipping.\n");
+						continue;
+					}
+
+					int at = -1;
+					for(int n = 0; n < checkList.pairs.count(); ++n)
+					{
+						CandidatePair &pair = checkList.pairs[n];
+						if(pair.local.addr.addr == cc.info.addr.addr && pair.local.addr.port == cc.info.addr.port)
+						{
+							at = n;
+							break;
+						}
+					}
+					if(at == -1)
+					{
+						printf("the local transport does not seem to be associated with a candidate?!\n");
+						continue;
+					}
+
+					int componentIndex = checkList.pairs[at].local.componentId - 1;
+					//printf("packet is considered to be application data for component index %d\n", componentIndex);
+
+					// FIXME: this assumes components are ordered by id in our local arrays
+					in[componentIndex] += buf;
+					emit q->readyRead(componentIndex);
+				}
+			}
+		}
+	}
+
+	void it_datagramsWritten(int path, int count, const QHostAddress &addr, int port)
 	{
 		// TODO
 		Q_UNUSED(path);
 		Q_UNUSED(count);
-	}
-
-	void lt_timeout()
-	{
-		QTimer *t = (QTimer *)sender();
-		int at = -1;
-		for(int n = 0; n < localTransports.count(); ++n)
-		{
-			if(localTransports[n]->t == t)
-			{
-				at = n;
-				break;
-			}
-		}
-		if(at == -1)
-			return;
-
-		LocalTransport *lt = localTransports[at];
-		lt->stun_finished = true;
-
-		// TODO: delete lt->t ?
-
-		tryFinishGather();
+		Q_UNUSED(addr);
+		Q_UNUSED(port);
 	}
 
 	void pool_outgoingMessage(const QByteArray &packet, const QHostAddress &addr, int port)
@@ -919,27 +1097,22 @@ public slots:
 				break;
 			}
 		}
-		if(at == -1)
+		if(at == -1) // FIXME: assert?
 			return;
 
 		CandidatePair &pair = checkList.pairs[at];
 
-		at = -1;
-		for(int n = 0; n < localTransports.count(); ++n)
-		{
-			if(pair.local.addr.addr == localTransports[n]->sock->localAddress() && pair.local.addr.port == localTransports[n]->sock->localPort())
-			{
-				at = n;
-				break;
-			}
-		}
-		if(at == -1)
+		at = findLocalCandidate(pair.local.addr.addr, pair.local.addr.port);
+		if(at == -1) // FIXME: assert?
 			return;
 
-		LocalTransport *lt = localTransports[at];
+		IceComponent::Candidate &lc = localCandidates[at];
+
+		IceTransport *sock = lc.iceTransport;
+		int path = lc.path;
 
 		printf("connectivity check from %s:%d to %s:%d\n", qPrintable(pair.local.addr.addr.toString()), pair.local.addr.port, qPrintable(pair.remote.addr.addr.toString()), pair.remote.addr.port);
-		lt->sock->writeDatagram(IceLocalTransport::Direct, packet, pair.remote.addr.addr, pair.remote.addr.port);
+		sock->writeDatagram(path, packet, pair.remote.addr.addr, pair.remote.addr.port);
 	}
 
 	void binding_success()
@@ -983,6 +1156,17 @@ public slots:
 
 		if(at == -1)
 		{
+			int at = findComponent(pair.local.componentId);
+			Component &c = components[at];
+			if(c.lowOverhead)
+			{
+				printf("component is flagged for low overhead.  setting up for %s;%d -> %s;%d\n",
+					qPrintable(pair.local.addr.addr.toString()), pair.local.addr.port, qPrintable(pair.remote.addr.addr.toString()), pair.remote.addr.port);
+				at = findLocalCandidate(pair.local.addr.addr, pair.local.addr.port);
+				IceComponent::Candidate &cc = localCandidates[at];
+				c.ic->flagPathAsLowOverhead(cc.id, pair.remote.addr.addr, pair.remote.addr.port);
+			}
+
 			emit q->componentReady(pair.local.componentId - 1);
 		}
 		else
@@ -1005,47 +1189,94 @@ Ice176::~Ice176()
 
 void Ice176::reset()
 {
-	// TODO
+	d->reset();
 }
 
-void Ice176::setBasePort(int port)
+void Ice176::setProxy(const TurnClient::Proxy &proxy)
 {
-	d->basePort = port;
+	d->proxy = proxy;
+}
+
+void Ice176::setPortReserver(UdpPortReserver *portReserver)
+{
+	Q_ASSERT(d->state == Private::Stopped);
+
+	d->portReserver = portReserver;
 }
 
 void Ice176::setLocalAddresses(const QList<LocalAddress> &addrs)
 {
-	// TODO: dedup
-	d->localAddrs = addrs;
+	d->updateLocalAddresses(addrs);
 }
 
 void Ice176::setExternalAddresses(const QList<ExternalAddress> &addrs)
 {
-	// TODO: dedup
-	d->extAddrs.clear();
-	foreach(const ExternalAddress &addr, addrs)
-	{
-		if(d->localAddrs.contains(addr.base))
-			d->extAddrs += addrs;
-	}
+	d->updateExternalAddresses(addrs);
 }
 
-void Ice176::setStunService(StunServiceType type, const QHostAddress &addr, int port)
+void Ice176::setStunBindService(const QHostAddress &addr, int port)
 {
-	d->stunType = type;
-	d->stunAddr = addr;
-	d->stunPort = port;
+	d->stunBindAddr = addr;
+	d->stunBindPort = port;
+}
+
+void Ice176::setStunRelayUdpService(const QHostAddress &addr, int port, const QString &user, const QCA::SecureArray &pass)
+{
+	d->stunRelayUdpAddr = addr;
+	d->stunRelayUdpPort = port;
+	d->stunRelayUdpUser = user;
+	d->stunRelayUdpPass = pass;
+}
+
+void Ice176::setStunRelayTcpService(const QHostAddress &addr, int port, const QString &user, const QCA::SecureArray &pass)
+{
+	d->stunRelayTcpAddr = addr;
+	d->stunRelayTcpPort = port;
+	d->stunRelayTcpUser = user;
+	d->stunRelayTcpPass = pass;
+}
+
+void Ice176::setUseLocal(bool enabled)
+{
+	d->useLocal = enabled;
+}
+
+void Ice176::setUseStunBind(bool enabled)
+{
+	d->useStunBind = enabled;
+}
+
+void Ice176::setUseStunRelayUdp(bool enabled)
+{
+	d->useStunRelayUdp = enabled;
+}
+
+void Ice176::setUseStunRelayTcp(bool enabled)
+{
+	d->useStunRelayTcp = enabled;
 }
 
 void Ice176::setComponentCount(int count)
 {
+	Q_ASSERT(d->state == Private::Stopped);
+
 	d->componentCount = count;
+}
+
+void Ice176::setLocalCandidateTrickle(bool enabled)
+{
+	d->useTrickle = enabled;
 }
 
 void Ice176::start(Mode mode)
 {
 	d->mode = mode;
 	d->start();
+}
+
+void Ice176::stop()
+{
+	d->stop();
 }
 
 QString Ice176::localUfrag() const
@@ -1068,16 +1299,6 @@ void Ice176::setPeerPassword(const QString &pass)
 	d->peerPass = pass;
 }
 
-void Ice176::setStunUsername(const QString &user)
-{
-	d->stunUser = user;
-}
-
-void Ice176::setStunPassword(const QCA::SecureArray &pass)
-{
-	d->stunPass = pass;
-}
-
 void Ice176::addRemoteCandidates(const QList<Candidate> &list)
 {
 	d->addRemoteCandidates(list);
@@ -1095,38 +1316,25 @@ QByteArray Ice176::readDatagram(int componentIndex)
 
 void Ice176::writeDatagram(int componentIndex, const QByteArray &datagram)
 {
-	int at = -1;
-	for(int n = 0; n < d->checkList.pairs.count(); ++n)
-	{
-		if(d->checkList.pairs[n].local.componentId - 1 == componentIndex && d->checkList.pairs[n].isValid)
-		{
-			at = n;
-			break;
-		}
-	}
-	if(at == -1)
-		return;
+	d->write(componentIndex, datagram);
+}
 
-	Private::CandidatePair &pair = d->checkList.pairs[at];
+void Ice176::flagComponentAsLowOverhead(int componentIndex)
+{
+	d->flagComponentAsLowOverhead(componentIndex);
+}
 
-	at = -1;
-	for(int n = 0; n < d->localTransports.count(); ++n)
-	{
-		if(d->localTransports[n]->sock->localAddress() == pair.local.addr.addr && d->localTransports[n]->sock->localPort() == pair.local.addr.port)
-		{
-			at = n;
-			break;
-		}
-	}
-	if(at == -1)
-		return;
-
-	Private::LocalTransport *lt = d->localTransports[at];
-
-	lt->sock->writeDatagram(IceLocalTransport::Direct, datagram, pair.remote.addr.addr, pair.remote.addr.port);
-
-	// DOR-SR?
-	QMetaObject::invokeMethod(this, "datagramsWritten", Qt::QueuedConnection, Q_ARG(int, componentIndex), Q_ARG(int, 1));
+bool Ice176::isIPv6LinkLocalAddress(const QHostAddress &addr)
+{
+	Q_ASSERT(addr.protocol() == QAbstractSocket::IPv6Protocol);
+	Q_IPV6ADDR addr6 = addr.toIPv6Address();
+	quint16 hi = addr6[0];
+	hi <<= 8;
+	hi += addr6[1];
+	if((hi & 0xffc0) == 0xfe80)
+		return true;
+	else
+		return false;
 }
 
 }
