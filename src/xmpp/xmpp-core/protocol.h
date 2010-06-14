@@ -40,6 +40,7 @@
 #define NS_COMPRESS_FEATURE "http://jabber.org/features/compress"
 #define NS_COMPRESS_PROTOCOL "http://jabber.org/protocol/compress"
 #define NS_HOSTS    "http://barracuda.com/xmppextensions/hosts"
+#define NS_STREAM_MANAGEMENT  "urn:xmpp:sm:2"
 
 namespace XMPP
 {
@@ -58,6 +59,7 @@ namespace XMPP
 
 		bool tls_supported, sasl_supported, bind_supported, compress_supported;
 		bool tls_required;
+		bool sm_supported;
 		QStringList sasl_mechs;
 		QStringList compression_mechs;
 		QStringList hosts;
@@ -317,7 +319,8 @@ namespace XMPP
 			HandleAuthGet,      // send old-protocol auth-get
 			GetAuthGetResponse, // read auth-get response
 			HandleAuthSet,      // send old-protocol auth-set
-			GetAuthSetResponse  // read auth-set response
+			GetAuthSetResponse, // read auth-set response
+			GetSMResponse
 		};
 
 		QList<DBItem> dbrequests, dbpending, dbvalidated;
@@ -326,7 +329,7 @@ namespace XMPP
 		int step;
 
 		bool digest;
-		bool tls_started, sasl_started, compress_started;
+		bool tls_started, sasl_started, compress_started, sm_started;
 
 		Jid jid_;
 		bool oldOnly;
