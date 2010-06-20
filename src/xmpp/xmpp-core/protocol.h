@@ -24,6 +24,7 @@
 #include <qpair.h>
 //Added by qt3to4:
 #include <QList>
+#include <QPair>
 #include "xmlprotocol.h"
 #include "xmpp.h"
 
@@ -277,6 +278,9 @@ namespace XMPP
 		void setFrom(const QString &s);
 		void setDialbackKey(const QString &s);
 
+		long getNewSMId();
+		void markStanzaHandled(long id);
+
 		// input
 		QString user, host;
 
@@ -325,6 +329,8 @@ namespace XMPP
 
 		QList<DBItem> dbrequests, dbpending, dbvalidated;
 
+		QList<QPair<long, bool> > sm_receive_queue;
+		long sm_receive_count;
 		bool server, dialback, dialback_verify;
 		int step;
 
@@ -345,9 +351,12 @@ namespace XMPP
 		bool loginComplete();
 
 		bool isValidStanza(const QDomElement &e) const;
+		bool streamManagementHandleStanza(const QDomElement &e);
 		bool grabPendingItem(const Jid &to, const Jid &from, int type, DBItem *item);
 		bool normalStep(const QDomElement &e);
 		bool dialbackStep(const QDomElement &e);
+
+		long getSMLastHandledId();
 
 		// reimplemented
 		bool stepAdvancesParser() const;

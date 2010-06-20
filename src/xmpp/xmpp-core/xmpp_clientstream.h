@@ -146,6 +146,10 @@ namespace XMPP
 		QString errorText() const;
 		QDomElement errorAppSpec() const;
 
+		// SM stuff
+		long getSMStanzaId();
+		void markStanzaHandled(long id);
+
 		// extra
 		void writeDirect(const QString &s);
 		void setNoopTime(int mills);
