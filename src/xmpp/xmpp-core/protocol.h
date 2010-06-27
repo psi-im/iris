@@ -278,8 +278,9 @@ namespace XMPP
 		void setFrom(const QString &s);
 		void setDialbackKey(const QString &s);
 
-		long getNewSMId();
-		void markStanzaHandled(long id);
+		unsigned long getNewSMId();
+		void markStanzaHandled(unsigned long id);
+		void markLastMessageStanzaAcked();
 
 		// input
 		QString user, host;
@@ -329,8 +330,8 @@ namespace XMPP
 
 		QList<DBItem> dbrequests, dbpending, dbvalidated;
 
-		QList<QPair<long, bool> > sm_receive_queue;
-		long sm_receive_count;
+		QList<QPair<unsigned long, bool> > sm_receive_queue;
+		unsigned long sm_receive_count;
 		bool server, dialback, dialback_verify;
 		int step;
 
@@ -356,7 +357,7 @@ namespace XMPP
 		bool normalStep(const QDomElement &e);
 		bool dialbackStep(const QDomElement &e);
 
-		long getSMLastHandledId();
+		unsigned long getSMLastHandledId();
 
 		// reimplemented
 		bool stepAdvancesParser() const;

@@ -901,11 +901,11 @@ bool CoreProtocol::isValidStanza(const QDomElement &e) const
 bool CoreProtocol::streamManagementHandleStanza(const QDomElement &e)
 {
 	QString s = e.tagName();
-	qWarning() << "sending acknowledged stanza" << " tag name: " << s;
 	if(s == "r") {
-		long long last_handled_id = getSMLastHandledId();
+		qulonglong last_handled_id = getSMLastHandledId();
 		QDomElement e = doc.createElementNS(NS_STREAM_MANAGEMENT, "a");
 		e.setAttribute("h", last_handled_id);
+		qWarning() << "Stream Management: Sending acknowledgment with h=" << last_handled_id;
 		send(e);
 		event = ESend;
 		return true;
@@ -916,20 +916,21 @@ bool CoreProtocol::streamManagementHandleStanza(const QDomElement &e)
 	}
 }
 
-long CoreProtocol::getNewSMId() {
-	long sm_id = sm_receive_count;
+unsigned long CoreProtocol::getNewSMId() {
+	unsigned long sm_id = sm_receive_count;
 	sm_receive_queue.push_back(qMakePair(sm_id, false));
 	sm_receive_count++;
+	if (sm_receive_count == 4294967295) sm_receive_count = 0;
 	qWarning() << "Current SM id: " << sm_id;
 	return sm_id;
 }
 
-long CoreProtocol::getSMLastHandledId() {
+unsigned long CoreProtocol::getSMLastHandledId() {
 	if (sm_receive_queue.isEmpty()) {
 		return sm_receive_count - 1;
 	} else {
-		QPair<long, bool> queue_item;
-		long last_handled_id = sm_receive_count - 1;;
+		QPair<unsigned long, bool> queue_item;
+		unsigned long last_handled_id = sm_receive_count - 1;;
 		do {
 			queue_item = sm_receive_queue.front();
 			if (queue_item.second == true) {
@@ -941,14 +942,28 @@ long CoreProtocol::getSMLastHandledId() {
 	}
 }
 
-void CoreProtocol::markStanzaHandled(long id) {
-	for(QList<QPair<long, bool> >::Iterator it = sm_receive_queue.begin(); it != sm_receive_queue.end(); ++it ) {
+void CoreProtocol::markStanzaHandled(unsigned long id) {
+	for(QList<QPair<unsigned long, bool> >::Iterator it = sm_receive_queue.begin(); it != sm_receive_queue.end(); ++it ) {
 		if (it->first == id) {
 			it->second = true;
 			return;
 		}
 	}
 	qWarning() << "Stream Management: Higher level client marked unknown stanza handled!";
+}
+
+void CoreProtocol::markLastMessageStanzaAcked() {
+	if (sm_receive_queue.isEmpty()) {
+		qWarning() << "Stream Management: Higher level client marked unexistant stanza as acked.";
+		return;
+	}
+	qWarning() << "Previous list: " << sm_receive_queue;
+	for(QList<QPair<unsigned long, bool> >::Iterator it = sm_receive_queue.begin(); it != sm_receive_queue.end(); ++it ) {
+		if (it->second == false) {
+			it->second = true;
+			return;
+		}
+	}
 }
 
 bool CoreProtocol::grabPendingItem(const Jid &to, const Jid &from, int type, DBItem *item)

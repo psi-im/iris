@@ -122,7 +122,7 @@ namespace XMPP
 		void clearError();
 
 		void markHandled();
-		void setSMId(long id);
+		void setSMId(unsigned long id);
 
 	private:
 		friend class Stream;

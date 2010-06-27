@@ -1059,11 +1059,10 @@ void ClientStream::processNext()
 				// store the stanza for now, announce after processing all events
 				// TODO: add a method to the stanza to mark them handled.
 				Stanza s = createStanza(d->client.recvStanza());
+				unsigned long sm_id = d->client.getNewSMId();
 				if(s.isNull())
 					break;
-				s.setSMId(getSMStanzaId());
-				s.markHandled();
-				//if (s.kind() == Stanza::Presence) s.markHandled();
+				if (s.kind() == Stanza::Presence || s.kind() == Stanza::IQ) d->client.markStanzaHandled(sm_id);
 				d->in.append(new Stanza(s));
 				break;
 			}
@@ -1237,12 +1236,9 @@ void ClientStream::doNoop()
 }
 
 // SM stuff
-long ClientStream::getSMStanzaId() {
-	return d->client.getNewSMId();
-}
-
-void ClientStream::markStanzaHandled(long id) {
-	d->client.markStanzaHandled(id);
+void ClientStream::ackLastMessageStanza() {
+	 d->client.markLastMessageStanzaAcked();
+	 qWarning() << "StreamManagement: markLastMessageStanzaAcked";
 }
 
 void ClientStream::writeDirect(const QString &s)
