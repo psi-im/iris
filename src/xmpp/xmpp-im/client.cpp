@@ -407,6 +407,11 @@ QString Client::groupChatNick(const QString &host, const QString &room) const
 	return QString();
 }
 
+bool Client::isStreamManagementActive() const {
+	return qobject_cast<ClientStream*>(d->stream);
+}
+
+
 /*void Client::start()
 {
 	if(d->stream->old()) {
