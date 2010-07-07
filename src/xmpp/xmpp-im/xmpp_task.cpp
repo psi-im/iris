@@ -169,9 +169,9 @@ void Task::onDisconnect()
 	}
 }
 
-void Task::send(const QDomElement &x)
+void Task::send(const QDomElement &x, bool want_notify)
 {
-	client()->send(x);
+	client()->send(x, want_notify);
 }
 
 void Task::setSuccess(int code, const QString &str)

@@ -65,7 +65,7 @@
 #include "td.h"
 #endif
 
-//#define XMPP_DEBUG
+#define XMPP_DEBUG
 
 using namespace XMPP;
 
@@ -233,6 +233,7 @@ public:
 
 	QList<Stanza*> in;
 
+	QTimer timeout_timer;
 	QTimer noopTimer;
 	int noop_time;
 };
@@ -281,6 +282,8 @@ ClientStream::ClientStream(const QString &host, const QString &defRealm, ByteStr
 	//d->state = Connecting;
 	//d->jid = Jid();
 	//d->server = QString();
+
+	connect(&(d->timeout_timer), SIGNAL(timeout()), SLOT(sm_timeout()));
 }
 
 ClientStream::~ClientStream()
@@ -579,10 +582,10 @@ Stanza ClientStream::read()
 	}
 }
 
-void ClientStream::write(const Stanza &s)
+void ClientStream::write(const Stanza &s, bool notify)
 {
 	if(d->state == Active) {
-		d->client.sendStanza(s.element());
+		d->client.sendStanza(s.element(), notify);
 		processNext();
 	}
 }
@@ -974,6 +977,13 @@ void ClientStream::processNext()
 				continue;
 			return;
 		}
+		if (d->client.notify & CoreProtocol::NTimeout ) {
+			qDebug() << "Time = " + d->client.timeout_sec;
+			d->timeout_timer.start(d->client.timeout_sec * 1000);
+			d->timeout_timer.setSingleShot(true);
+			d->client.notify &= ~ CoreProtocol::NTimeout;
+			qDebug() << "\tNTimeout received";
+		}
 
 		int event = d->client.event;
 		d->notify = 0;
@@ -1082,6 +1092,9 @@ void ClientStream::processNext()
 				reset();
 				delayedCloseFinished();
 				return;
+			}
+			case CoreProtocol::EAck: {
+				qDebug() << "Received ack response: " << d->client.getNotableStanzasAcked();
 			}
 		}
 	}
@@ -1224,6 +1237,14 @@ int ClientStream::convertedSASLCond() const
 	return 0;
 }
 
+void ClientStream::sm_timeout() {
+#ifdef XMPP_DEBUG
+	printf("ClientStream::sm_timeout()\n");
+#endif
+	d->client.timeout_sec = 0;
+	processNext();
+}
+
 void ClientStream::doNoop()
 {
 	if(d->state == Active) {
@@ -1237,7 +1258,7 @@ void ClientStream::doNoop()
 
 // SM stuff
 bool ClientStream::isStreamManagementActive() {
-	return true; //TODO: do actual detection here
+	return d->client.isStreamManagementActive();
 }
 
 void ClientStream::ackLastMessageStanza() {

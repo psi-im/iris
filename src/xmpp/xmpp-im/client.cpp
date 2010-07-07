@@ -408,7 +408,8 @@ QString Client::groupChatNick(const QString &host, const QString &room) const
 }
 
 bool Client::isStreamManagementActive() const {
-	return qobject_cast<ClientStream*>(d->stream);
+	ClientStream *cs = qobject_cast<ClientStream*>(d->stream);
+	return cs->isStreamManagementActive();
 }
 
 
@@ -603,7 +604,7 @@ void Client::distribute(const QDomElement &x)
 	}
 }
 
-void Client::send(const QDomElement &x)
+void Client::send(const QDomElement &x, bool want_notify)
 {
 	if(!d->stream)
 		return;
@@ -622,13 +623,13 @@ void Client::send(const QDomElement &x)
 		//printf("bad stanza??\n");
 		return;
 	}
-
 	QString out = s.toString();
+	qWarning() << "Out: " << out;
 	debug(QString("Client: outgoing: [\n%1]\n").arg(out));
 	emit xmlOutgoing(out);
 
 	//printf("x[%s] x2[%s] s[%s]\n", Stream::xmlToString(x).toLatin1(), Stream::xmlToString(e).toLatin1(), s.toString().toLatin1());
-	d->stream->write(s);
+	d->stream->write(s, want_notify);
 }
 
 void Client::send(const QString &str)
@@ -988,9 +989,9 @@ void Client::importRosterItem(const RosterItem &item)
 	debug(dstr + str);
 }
 
-void Client::sendMessage(const Message &m)
+void Client::sendMessage(const Message &m, bool want_notify)
 {
-	JT_Message *j = new JT_Message(rootTask(), m);
+	JT_Message *j = new JT_Message(rootTask(), m, want_notify);
 	j->go(true);
 }
 
@@ -1167,6 +1168,10 @@ void Client::handleIncoming(BSConnection *c)
 		return;
 	}
 	d->ftman->stream_incomingReady(c);
+}
+
+void Client::handleSMAckResponse(int h) {
+	qDebug() << "handleSMAckResponse: h = " << h;
 }
 
 //---------------------------------------------------------------------------

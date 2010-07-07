@@ -70,7 +70,7 @@ namespace XMPP
 		const LiveRoster & roster() const;
 		const ResourceList & resourceList() const;
 
-		void send(const QDomElement &);
+		void send(const QDomElement &, bool want_notify = false);
 		void send(const QString &);
 
 		QString host() const;
@@ -80,7 +80,7 @@ namespace XMPP
 		Jid jid() const;
 
 		void rosterRequest();
-		void sendMessage(const Message &);
+		void sendMessage(const Message &, bool want_notify = false);
 		void sendSubscription(const Jid &, const QString &, const QString& nick = QString());
 		void setPresence(const Status &);
 
@@ -182,6 +182,8 @@ namespace XMPP
 		void s5b_incomingReady();
 		void ibb_incomingReady();
 
+		void handleSMAckResponse(int);
+
 	public:
 		class GroupChat;
 	private:
@@ -192,6 +194,9 @@ namespace XMPP
 		void updateSelfPresence(const Jid &, const Status &);
 		void updatePresence(LiveRosterItem *, const Jid &, const Status &);
 		void handleIncoming(BSConnection *);
+
+		void sendAckRequest();
+		void smQueueStanza(const QDomElement &e, bool notify = false);
 
 		class ClientPrivate;
 		ClientPrivate *d;

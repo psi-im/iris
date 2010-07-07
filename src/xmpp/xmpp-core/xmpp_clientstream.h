@@ -140,7 +140,7 @@ namespace XMPP
 		void close();
 		bool stanzaAvailable() const;
 		Stanza read();
-		void write(const Stanza &s);
+		void write(const Stanza &s, bool notify = false);
 
 		int errorCondition() const;
 		QString errorText() const;
@@ -189,6 +189,8 @@ namespace XMPP
 		void sasl_authCheck(const QString &user, const QString &authzid);
 		void sasl_authenticated();
 		void sasl_error();
+
+		void sm_timeout();
 
 		void doNoop();
 		void doReadyRead();

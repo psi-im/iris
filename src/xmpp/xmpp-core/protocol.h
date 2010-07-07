@@ -21,10 +21,12 @@
 #ifndef PROTOCOL_H
 #define PROTOCOL_H
 
-#include <qpair.h>
+#include <QObject>
 //Added by qt3to4:
 #include <QList>
 #include <QPair>
+#include <QTimer>
+
 #include "xmlprotocol.h"
 #include "xmpp.h"
 
@@ -126,6 +128,7 @@ namespace XMPP
 			EStanzaReady, // a stanza was received
 			EStanzaSent,  // a stanza was sent
 			EReady,       // stream is ready for stanza use
+			EAck,		  // received SM ack response from server
 			ECustom = XmlProtocol::ECustom+10
 		};
 		enum Error {
@@ -261,6 +264,9 @@ namespace XMPP
 
 		void reset();
 
+		// reimplemented to do SM
+		void sendStanza(const QDomElement &e, bool notify = false);
+
 		void startClientOut(const Jid &jid, bool oldOnly, bool tlsActive, bool doAuth, bool doCompression);
 		void startServerOut(const QString &to);
 		void startDialbackOut(const QString &to, const QString &from);
@@ -282,6 +288,9 @@ namespace XMPP
 		void markStanzaHandled(unsigned long id);
 		void markLastMessageStanzaAcked();
 
+		bool isStreamManagementActive() const;
+		int getNotableStanzasAcked();
+
 		// input
 		QString user, host;
 
@@ -302,7 +311,6 @@ namespace XMPP
 			QString key, id;
 			bool ok;
 		};
-
 	private:
 		enum Step {
 			Start,
@@ -331,7 +339,12 @@ namespace XMPP
 		QList<DBItem> dbrequests, dbpending, dbvalidated;
 
 		QList<QPair<unsigned long, bool> > sm_receive_queue;
+		QList<QPair<QDomElement, bool> > sm_send_queue;
 		unsigned long sm_receive_count;
+		QTime sm_ack_last_requested;
+		unsigned long sm_server_last_handled;
+		int sm_stanzas_notify;
+
 		bool server, dialback, dialback_verify;
 		int step;
 
@@ -358,6 +371,8 @@ namespace XMPP
 		bool dialbackStep(const QDomElement &e);
 
 		unsigned long getSMLastHandledId();
+		void requestSMAcknowlegement();
+		void processSMAcknowlegement(unsigned long last_handled);
 
 		// reimplemented
 		bool stepAdvancesParser() const;

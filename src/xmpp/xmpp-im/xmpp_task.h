@@ -59,7 +59,7 @@ namespace XMPP {
 	protected:
 		virtual void onGo();
 		virtual void onDisconnect();
-		void send(const QDomElement &);
+		void send(const QDomElement &, bool want_notify = false);
 		void setSuccess(int code=0, const QString &str="");
 		void setError(const QDomElement &);
 		void setError(int code=0, const QString &str="");

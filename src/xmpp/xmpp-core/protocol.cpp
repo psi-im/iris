@@ -633,12 +633,31 @@ void CoreProtocol::init()
 	compress_started = false;
 	sm_started = false;
 	sm_receive_count = 0;
+	sm_server_last_handled = 0;
 }
 
 void CoreProtocol::reset()
 {
 	BasicProtocol::reset();
 	init();
+}
+
+void CoreProtocol::sendStanza(const QDomElement &e, bool notify) {
+	if (isStreamManagementActive()) {
+#ifdef XMPP_TEST
+		if (notify) qDebug() << "Want notification for stanza";
+#endif
+		sm_send_queue.push_back(qMakePair(e, notify));
+		qDebug() << "sm_send_queue: ";
+		for (QList<QPair<QDomElement, bool> >::iterator i = sm_send_queue.begin(); i != sm_send_queue.end(); ++i) {
+			QPair<QDomElement, bool> entry = *i;
+			qDebug() << "\t" << entry.first.tagName() << " : " << entry.second;
+		}
+		if (sm_send_queue.length() > 9 && sm_send_queue.length() % 5 == 0) requestSMAcknowlegement();
+		sm_ack_last_requested.start();
+	}
+	qDebug() << "CoreProtocol::sendStanza";
+	BasicProtocol::sendStanza(e);
 }
 
 void CoreProtocol::startClientOut(const Jid &_jid, bool _oldOnly, bool tlsActive, bool _doAuth, bool _doCompress)
@@ -909,6 +928,11 @@ bool CoreProtocol::streamManagementHandleStanza(const QDomElement &e)
 		send(e);
 		event = ESend;
 		return true;
+	} else if (s == "a") {
+		qWarning() << "Received ack response from server";
+		processSMAcknowlegement(e.attribute("h").toULong());
+		event = EAck;
+		return true;
 	} else {
 		need = NNotify;
 		notify |= NRecv;
@@ -964,6 +988,38 @@ void CoreProtocol::markLastMessageStanzaAcked() {
 			return;
 		}
 	}
+}
+
+bool CoreProtocol::isStreamManagementActive() const {
+	return sm_started;
+}
+
+void CoreProtocol::requestSMAcknowlegement() {
+	qDebug() << "Now I'd request acknowledgement from the server.";
+	sm_ack_last_requested.start();
+	sendDirect(QString("<r xmlns='urn:xmpp:sm:2'/>"));
+	notify |= NTimeout;
+	need = NNotify;
+	timeout_sec = 30;
+}
+
+int CoreProtocol::getNotableStanzasAcked() {
+	return sm_stanzas_notify;
+}
+
+void CoreProtocol::processSMAcknowlegement(unsigned long last_handled) {
+	int handled_stanzas = 0;
+	int notifies = 0;
+	if (sm_server_last_handled == 0) handled_stanzas = last_handled + 1;
+	else handled_stanzas = last_handled - sm_server_last_handled;
+	sm_server_last_handled = last_handled;
+
+	for (int n = 0; n < handled_stanzas && !sm_send_queue.isEmpty() ; ++n) {
+		QPair<QDomElement, bool> entry = sm_send_queue.first();
+		sm_send_queue.pop_front();
+		if (entry.second) notifies++;
+	}
+	sm_stanzas_notify = notifies;
 }
 
 bool CoreProtocol::grabPendingItem(const Jid &to, const Jid &from, int type, DBItem *item)
@@ -1767,9 +1823,19 @@ bool CoreProtocol::normalStep(const QDomElement &e)
 		if(e.namespaceURI() == NS_STREAM_MANAGEMENT && e.localName() == "enabled") {
 			qWarning() << "Stream Management enabled";
 			sm_started = true;
+			sm_ack_last_requested.start();
+			notify |= NTimeout;
+			need = NNotify;
+			timeout_sec = 30;
 			event = EReady;
 			step = Done;
 			return true;
+		}
+	}
+
+	if (isStreamManagementActive()) {
+		if (sm_ack_last_requested.elapsed() >= 30000) {
+			requestSMAcknowlegement();
 		}
 	}
 
