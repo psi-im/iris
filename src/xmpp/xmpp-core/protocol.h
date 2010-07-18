@@ -263,6 +263,7 @@ namespace XMPP
 		~CoreProtocol();
 
 		void reset();
+		void startTimer(int seconds);
 
 		// reimplemented to do SM
 		void sendStanza(const QDomElement &e, bool notify = false);
