@@ -1016,6 +1016,32 @@ int CoreProtocol::getNotableStanzasAcked() {
 	return sm_stanzas_notify;
 }
 
+CoreProtocol::SMState CoreProtocol::getSMState() const {
+	CoreProtocol::SMState state;
+	state.sm_receive_queue = sm_receive_queue;
+	state.sm_send_queue = sm_send_queue;
+	state.sm_receive_count = sm_receive_count;
+
+	state.sm_server_last_handled = sm_server_last_handled;
+	state.sm_stanzas_notify = sm_stanzas_notify;
+
+	state.sm_resumtion_supported = sm_resumtion_supported;
+	state.sm_resumption_id = sm_resumption_id;
+	return state;
+}
+
+void CoreProtocol::setSMState(CoreProtocol::SMState &state) {
+	sm_receive_queue = state.sm_receive_queue;
+	sm_send_queue = state.sm_send_queue;
+	sm_receive_count = state.sm_receive_count;
+
+	sm_server_last_handled = state.sm_server_last_handled;
+	sm_stanzas_notify = state.sm_stanzas_notify;
+
+	sm_resumtion_supported = state.sm_resumtion_supported;
+	sm_resumption_id = state.sm_resumption_id;
+}
+
 void CoreProtocol::processSMAcknowlegement(unsigned long last_handled) {
 	int handled_stanzas = 0;
 	int notifies = 0;

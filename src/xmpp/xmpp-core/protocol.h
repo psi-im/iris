@@ -259,6 +259,17 @@ namespace XMPP
 			ErrPlain = ErrCustom  // server only supports plain, but allowPlain is false locally
 		};
 
+		struct SMState {
+			QList<QPair<unsigned long, bool> > sm_receive_queue;
+			QList<QPair<QDomElement, bool> > sm_send_queue;
+			unsigned long sm_receive_count;
+			unsigned long sm_server_last_handled;
+			int sm_stanzas_notify;
+
+			bool sm_resumtion_supported;
+			QString sm_resumption_id;
+		};
+
 		CoreProtocol();
 		~CoreProtocol();
 
@@ -291,6 +302,9 @@ namespace XMPP
 
 		bool isStreamManagementActive() const;
 		int getNotableStanzasAcked();
+
+		SMState getSMState() const;
+		void setSMState(SMState &state);
 
 		// input
 		QString user, host;
