@@ -346,6 +346,9 @@ namespace XMPP
 		unsigned long sm_server_last_handled;
 		int sm_stanzas_notify;
 
+		bool sm_resumtion_supported;
+		QString sm_resumption_id;
+
 		bool server, dialback, dialback_verify;
 		int step;
 
