@@ -185,6 +185,7 @@ Client::~Client()
 	delete d->s5bman;
 	delete d->root;
 	delete d;
+	fprintf(stderr, "\tClient::~Client\n");
 }
 
 void Client::connectToServer(ClientStream *s, const Jid &j, bool auth)

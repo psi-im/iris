@@ -23,6 +23,7 @@
 #include <QtCrypto>
 
 #include "xmpp_stream.h"
+#include "protocol.h"
 
 class QByteArray;
 class QString;
@@ -150,8 +151,12 @@ namespace XMPP
 		void writeDirect(const QString &s);
 		void setNoopTime(int mills);
 
+		// session management stuff
 		bool isStreamManagementActive();
 		void ackLastMessageStanza();
+
+		CoreProtocol::SMState getSMState() const;
+		void setSMState(CoreProtocol::SMState state);
 
 		// barracuda extension
 		QStringList hosts() const;

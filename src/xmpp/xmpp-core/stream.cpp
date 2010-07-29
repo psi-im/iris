@@ -290,6 +290,7 @@ ClientStream::~ClientStream()
 {
 	reset();
 	delete d;
+	fprintf(stderr, "\tClientStream::~ClientStream\n");
 }
 
 void ClientStream::reset(bool all)
