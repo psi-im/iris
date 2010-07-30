@@ -596,6 +596,8 @@ CoreProtocol::CoreProtocol()
 :BasicProtocol()
 {
 	init();
+	sm_resumtion_supported = false;
+	sm_resumption_id = "";
 }
 
 CoreProtocol::~CoreProtocol()
@@ -636,8 +638,6 @@ void CoreProtocol::init()
 	sm_started = false;
 	sm_receive_count = 0;
 	sm_server_last_handled = 0;
-	sm_resumtion_supported = false;
-	sm_resumption_id = "";
 }
 
 void CoreProtocol::reset()
@@ -772,9 +772,18 @@ bool CoreProtocol::loginComplete()
 
 	// deal with stream management
 	if(!sm_started && features.sm_supported) {
-		QDomElement e = doc.createElementNS(NS_STREAM_MANAGEMENT, "enable");
-		e.setAttribute("resume", "true");
-		send(e);
+		if (sm_resumtion_supported && sm_resumption_id != "") {
+			QDomElement e = doc.createElementNS(NS_STREAM_MANAGEMENT, "resume");
+			e.setAttribute("previd", sm_resumption_id);
+			QString last_hold_str;
+			last_hold_str.sprintf("%lx", sm_server_last_handled);
+			e.setAttribute("h", last_hold_str);
+			send(e);
+		} else {
+			QDomElement e = doc.createElementNS(NS_STREAM_MANAGEMENT, "enable");
+			e.setAttribute("resume", "true");
+			send(e);
+		}
 		event = ESend;
 		step = GetSMResponse;
 	} else {
@@ -1016,8 +1025,9 @@ int CoreProtocol::getNotableStanzasAcked() {
 	return sm_stanzas_notify;
 }
 
-CoreProtocol::SMState CoreProtocol::getSMState() const {
-	CoreProtocol::SMState state;
+ClientStream::SMState CoreProtocol::getSMState() const {
+	fprintf(stderr, "\tCoreProtocol::getSMState()\n");
+	ClientStream::SMState state;
 	state.sm_receive_queue = sm_receive_queue;
 	state.sm_send_queue = sm_send_queue;
 	state.sm_receive_count = sm_receive_count;
@@ -1030,7 +1040,8 @@ CoreProtocol::SMState CoreProtocol::getSMState() const {
 	return state;
 }
 
-void CoreProtocol::setSMState(CoreProtocol::SMState &state) {
+void CoreProtocol::setSMState(ClientStream::SMState &state) {
+	fprintf(stderr, "\tCoreProtocol::setSMState()\n");
 	sm_receive_queue = state.sm_receive_queue;
 	sm_send_queue = state.sm_send_queue;
 	sm_receive_count = state.sm_receive_count;
@@ -1283,25 +1294,31 @@ bool CoreProtocol::normalStep(const QDomElement &e)
 			return true;
 		}
 
-		QDomElement e = doc.createElement("iq");
-		e.setAttribute("type", "set");
-		e.setAttribute("id", "bind_1");
-		QDomElement b = doc.createElementNS(NS_BIND, "bind");
+		if (sm_resumtion_supported && sm_resumption_id != "") {
+			// try to resume;
+			fprintf(stderr, "\tResume session\n");
+			return loginComplete();
+		} else {
+			QDomElement e = doc.createElement("iq");
+			e.setAttribute("type", "set");
+			e.setAttribute("id", "bind_1");
+			QDomElement b = doc.createElementNS(NS_BIND, "bind");
 
-		// request specific resource?
-		QString resource = jid_.resource();
-		if(!resource.isEmpty()) {
-			QDomElement r = doc.createElement("resource");
-			r.appendChild(doc.createTextNode(jid_.resource()));
-			b.appendChild(r);
+			// request specific resource?
+			QString resource = jid_.resource();
+			if(!resource.isEmpty()) {
+				QDomElement r = doc.createElement("resource");
+				r.appendChild(doc.createTextNode(jid_.resource()));
+				b.appendChild(r);
+			}
+
+			e.appendChild(b);
+
+			send(e);
+			event = ESend;
+			step = GetBindResponse;
+			return true;
 		}
-
-		e.appendChild(b);
-
-		send(e);
-		event = ESend;
-		step = GetBindResponse;
-		return true;
 	}
 	else if(step == GetSASLFirst) {
 		QDomElement e = doc.createElementNS(NS_SASL, "auth");
@@ -1858,7 +1875,8 @@ bool CoreProtocol::normalStep(const QDomElement &e)
 		if(e.namespaceURI() == NS_STREAM_MANAGEMENT && e.localName() == "enabled") {
 			qWarning() << "Stream Management enabled";
 			sm_started = true;
-			if (e.attribute("enabled", "false") == "true" || e.attribute("enabled", "false") == "1") {
+			if (e.attribute("resume", "false") == "true" || e.attribute("resume", "false") == "1") {
+				fprintf(stderr,"\tResumption Supported\n");
 				sm_resumtion_supported = true;
 				sm_resumption_id = e.attribute("id", "");
 			}

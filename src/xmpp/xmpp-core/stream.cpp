@@ -1403,6 +1403,15 @@ void ClientStream::handleError()
 	}
 }
 
+ClientStream::SMState ClientStream::getSMState() const {
+	return d->client.getSMState();
+}
+
+void ClientStream::setSMState(ClientStream::SMState state) {
+	d->client.setSMState(state);
+}
+
+
 QStringList ClientStream::hosts() const
 {
 	return d->client.hosts;

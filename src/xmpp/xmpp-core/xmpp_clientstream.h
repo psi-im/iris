@@ -23,7 +23,6 @@
 #include <QtCrypto>
 
 #include "xmpp_stream.h"
-#include "protocol.h"
 
 class QByteArray;
 class QString;
@@ -92,6 +91,17 @@ namespace XMPP
 			AllowPlainOverTLS
 		};
 
+		struct SMState {
+			QList<QPair<unsigned long, bool> > sm_receive_queue;
+			QList<QPair<QDomElement, bool> > sm_send_queue;
+			unsigned long sm_receive_count;
+			unsigned long sm_server_last_handled;
+			int sm_stanzas_notify;
+
+			bool sm_resumtion_supported;
+			QString sm_resumption_id;
+		};
+
 		ClientStream(Connector *conn, TLSHandler *tlsHandler=0, QObject *parent=0);
 		ClientStream(const QString &host, const QString &defRealm, ByteStream *bs, QCA::TLS *tls=0, QObject *parent=0); // server
 		~ClientStream();
@@ -155,8 +165,8 @@ namespace XMPP
 		bool isStreamManagementActive();
 		void ackLastMessageStanza();
 
-		CoreProtocol::SMState getSMState() const;
-		void setSMState(CoreProtocol::SMState state);
+		SMState getSMState() const;
+		void setSMState(SMState state);
 
 		// barracuda extension
 		QStringList hosts() const;
