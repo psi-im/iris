@@ -598,6 +598,8 @@ CoreProtocol::CoreProtocol()
 	init();
 	sm_resumtion_supported = false;
 	sm_resumption_id = "";
+	sm_receive_count = 0;
+	sm_server_last_handled = 0;
 }
 
 CoreProtocol::~CoreProtocol()
@@ -636,8 +638,6 @@ void CoreProtocol::init()
 	compress_started = false;
 
 	sm_started = false;
-	sm_receive_count = 0;
-	sm_server_last_handled = 0;
 }
 
 void CoreProtocol::reset()
@@ -775,9 +775,8 @@ bool CoreProtocol::loginComplete()
 		if (sm_resumtion_supported && sm_resumption_id != "") {
 			QDomElement e = doc.createElementNS(NS_STREAM_MANAGEMENT, "resume");
 			e.setAttribute("previd", sm_resumption_id);
-			QString last_hold_str;
-			last_hold_str.sprintf("%lx", sm_server_last_handled);
-			e.setAttribute("h", last_hold_str);
+			qulonglong lasthandledid = getSMLastHandledId();
+			e.setAttribute("h", lasthandledid);
 			send(e);
 		} else {
 			QDomElement e = doc.createElementNS(NS_STREAM_MANAGEMENT, "enable");
@@ -1879,7 +1878,13 @@ bool CoreProtocol::normalStep(const QDomElement &e)
 				fprintf(stderr,"\tResumption Supported\n");
 				sm_resumtion_supported = true;
 				sm_resumption_id = e.attribute("id", "");
+				startTimer(20);
+				event = EReady;
+				step = Done;
+				return true;
 			}
+		} else if (e.namespaceURI() == NS_STREAM_MANAGEMENT && e.localName() == "resumed") {
+			processSMAcknowlegement(e.attribute("h").toULong());
 			startTimer(20);
 			event = EReady;
 			step = Done;
