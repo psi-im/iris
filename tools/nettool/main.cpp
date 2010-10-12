@@ -38,10 +38,12 @@ static QString prompt(const QString &s)
 	printf("* %s ", qPrintable(s));
 	fflush(stdout);
 	char line[256];
-	fgets(line, 255, stdin);
-	QString result = line;
-	if(result[result.length()-1] == '\n')
-		result.truncate(result.length()-1);
+	char *ret = fgets(line, 255, stdin);
+	QString result;
+	if(ret)
+		result = QString::fromLocal8Bit(line);
+	if(result[result.length() - 1] == '\n')
+		result.truncate(result.length() - 1);
 	return result;
 }
 
