@@ -169,6 +169,7 @@ private:
 
 	~StringPrepCache()
 	{
+		instance = 0;
 		foreach(Result* r, nameprep_table) {
 			delete r;
 		}
