@@ -282,6 +282,7 @@ void irisNetSetPluginPaths(const QStringList &paths)
 void irisNetCleanup()
 {
 	deinit();
+	qRemovePostRoutine(deinit);
 }
 
 void irisNetAddPostRoutine(IrisNetCleanUpFunction func)
