@@ -383,6 +383,7 @@ public:
 	{
 		inStream += in;
 
+		ObjectSessionWatcher watch(&sess);
 		while(1)
 		{
 			QByteArray packet;
@@ -398,19 +399,24 @@ public:
 			}
 
 			inStream = inStream.mid(packet.size());
+
+			// processDatagram may cause the session to be reset
+			//   or the object to be deleted
 			processDatagram(packet);
+			if(!watch.isValid())
+				break;
 		}
 	}
 
 	void processDatagram(const QByteArray &buf)
 	{
-		QByteArray data;
-		QHostAddress fromAddr;
-		int fromPort;
-
 		bool notStun;
 		if(!pool->writeIncomingMessage(buf, &notStun))
 		{
+			QByteArray data;
+			QHostAddress fromAddr;
+			int fromPort;
+
 			data = processNonPoolPacket(buf, notStun, &fromAddr, &fromPort);
 			if(!data.isNull())
 				processDataPacket(data, fromAddr, fromPort);
