@@ -1643,7 +1643,7 @@ jdns_response_t *_cache_get_response(jdns_session_t *s, const unsigned char *qna
 				r = jdns_response_new();
 
 			if(i->record)
-				jdns_response_append_answer(r, jdns_rr_copy(i->record));
+				jdns_response_append_answer(r, i->record);
 
 			passed = now - i->time_start;
 			timeleft = (i->ttl * 1000) - passed;
@@ -1940,6 +1940,8 @@ int _unicast_do_writes(jdns_session_t *s, int now)
 					list_remove(s->queries, q);
 					--n; // adjust position
 				}
+
+				jdns_response_delete(r);
 				continue;
 			}
 		}
@@ -2264,6 +2266,7 @@ int _unicast_do_reads(jdns_session_t *s, int now)
 			_debug_line(s, "we have no queries");
 
 			jdns_address_delete(addr);
+			jdns_packet_delete(packet);
 			continue;
 		}
 

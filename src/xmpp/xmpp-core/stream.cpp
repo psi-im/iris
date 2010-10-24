@@ -57,6 +57,10 @@
 #include "securestream.h"
 #include "protocol.h"
 
+#ifndef NO_IRISNET
+#include "irisnetglobal_p.h"
+#endif
+
 #ifdef XMPP_TEST
 #include "td.h"
 #endif
@@ -115,8 +119,19 @@ Stanza Stream::createStanza(const QDomElement &e)
 QString Stream::xmlToString(const QDomElement &e, bool clip)
 {
 	if(!foo)
+	{
 		foo = new CoreProtocol;
+#ifndef NO_IRISNET
+		irisNetAddPostRoutine(cleanup);
+#endif
+	}
 	return foo->elementToString(e, clip);
+}
+
+void Stream::cleanup()
+{
+	delete foo;
+	foo = 0;
 }
 
 //----------------------------------------------------------------------------

@@ -69,6 +69,8 @@ namespace XMPP
 
 		static QString xmlToString(const QDomElement &e, bool clip=false);
 
+		static void cleanup();
+
 	signals:
 		void connectionClosed();
 		void delayedCloseFinished();

@@ -26,6 +26,10 @@
 #include <QHash>
 #include <libidn/stringprep.h>
 
+#ifndef NO_IRISNET
+#include "irisnetglobal_p.h"
+#endif
+
 using namespace XMPP;
 
 
@@ -129,6 +133,12 @@ public:
 		return true;
 	}
 
+	static void cleanup()
+	{
+		delete instance;
+		instance = 0;
+	}
+
 private:
 	class Result
 	{
@@ -158,12 +168,16 @@ private:
 	static StringPrepCache *get_instance()
 	{
 		if(!instance)
+		{
 			instance = new StringPrepCache;
+#ifndef NO_IRISNET
+			irisNetAddPostRoutine(cleanup);
+#endif
+		}
 		return instance;
 	}
 
 	StringPrepCache()
-		: QObject(QCoreApplication::instance())
 	{
 	}
 
