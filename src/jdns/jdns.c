@@ -1656,36 +1656,35 @@ jdns_response_t *_cache_get_response(jdns_session_t *s, const unsigned char *qna
 	return r;
 }
 
-query_t *_get_query(jdns_session_t *s, const unsigned char *qname, int qtype, int unique)
+query_t *_find_first_active_query(jdns_session_t *s, const unsigned char *qname, int qtype)
 {
 	int n;
+	query_t *q;
+
+	for(n = 0; n < s->queries->count; ++n)
+	{
+		q = (query_t *)s->queries->item[n];
+		if(jdns_domain_cmp(q->qname, qname) && q->qtype == qtype && q->step != -1)
+			return q;
+	}
+
+	return 0;
+}
+
+query_t *_get_query(jdns_session_t *s, const unsigned char *qname, int qtype, int unique)
+{
 	query_t *q;
 	jdns_string_t *str;
 
 	if(!unique)
 	{
-		// check for existing queries
-		for(n = 0; n < s->queries->count; ++n)
+		q = _find_first_active_query(s, qname, qtype);
+		if(q)
 		{
-			q = (query_t *)s->queries->item[n];
-			if(jdns_domain_cmp(q->qname, qname) && q->qtype == qtype)
-			{
-				// if it is inactive, just nuke it
-				if(q->step == -1)
-				{
-					_remove_query_datagrams(s, q);
-					list_remove(s->queries, q);
-					--n; // adjust position
-				}
-				// otherwise, latch onto the first one we find
-				else
-				{
-					str = _make_printable_cstr((const char *)q->qname);
-					_debug_line(s, "[%d] reusing query for: [%s] [%s]", q->id, _qtype2str(qtype), str->data);
-					jdns_string_delete(str);
-					return q;
-				}
-			}
+			str = _make_printable_cstr((const char *)q->qname);
+			_debug_line(s, "[%d] reusing query for: [%s] [%s]", q->id, _qtype2str(qtype), str->data);
+			jdns_string_delete(str);
+			return q;
 		}
 	}
 
@@ -1921,8 +1920,9 @@ int _unicast_do_writes(jdns_session_t *s, int now)
 
 				// are any of the records about to expire in 3 minutes?
 				//  assume the client is interested in this record and
-				//  query it again "in the background"
-				if(lowest_timeleft < (3 * 60 * 1000))
+				//  query it again "in the background" (but only
+				//  if we are not already doing so)
+				if(lowest_timeleft < (3 * 60 * 1000) && !_find_first_active_query(s, q->qname, q->qtype))
 				{
 					query_t *new_q;
 
@@ -2190,7 +2190,7 @@ void _cache_remove_all_of_record(jdns_session_t *s, const jdns_rr_t *record)
 	for(n = 0; n < s->cache->count; ++n)
 	{
 		cache_item_t *i = (cache_item_t *)s->cache->item[n];
-		if(_cmp_rr(i->record, record))
+		if(i->record && _cmp_rr(i->record, record))
 		{
 			jdns_string_t *str = _make_printable_cstr((const char *)i->qname);
 			_debug_line(s, "cache del [%s]", str->data);

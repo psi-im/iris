@@ -556,24 +556,36 @@ static jdns_dnsparams_t *dnsparams_get_winsys()
 	return params;
 }
 
-static void apply_win_hosts_file(jdns_dnsparams_t *a)
+static void apply_hosts_var_filepath(jdns_dnsparams_t *a, const char *envvar, const char *path)
 {
-	jdns_string_t *p;
+	jdns_string_t *e;
 	char *str;
-	int len;
+	int elen, plen;
 
-	p = jdns_getenv("WINDIR");
-	if(!p)
+	e = jdns_getenv(envvar);
+	if(!e)
 		return;
-	len = strlen((char *)p->data);
-	str = (char *)jdns_alloc(len + 100); // should be enough
-	memcpy(str, p->data, len);
-	jdns_string_delete(p);
-	jdns_strcpy(str + len, "\\system32\\drivers\\etc\\hosts"); // winnt+
-	apply_hosts_file(a, str);
-	jdns_strcpy(str + len, "\\hosts"); // win9x
+	elen = strlen((char *)e->data);
+	plen = strlen(path);
+	str = (char *)jdns_alloc(elen + plen + 1);
+	memcpy(str, e->data, elen);
+	jdns_string_delete(e);
+
+	jdns_strcpy(str + elen, path);
 	apply_hosts_file(a, str);
 	jdns_free(str);
+}
+
+static void apply_win_hosts_file(jdns_dnsparams_t *a)
+{
+	// windows 64-bit
+	apply_hosts_var_filepath(a, "SystemRoot", "\\SysWOW64\\drivers\\etc\\hosts");
+
+	// winnt+
+	apply_hosts_var_filepath(a, "SystemRoot", "\\system32\\drivers\\etc\\hosts");
+
+	// win9x
+	apply_hosts_var_filepath(a, "WINDIR", "\\hosts");
 }
 
 static jdns_dnsparams_t *dnsparams_get_win()
