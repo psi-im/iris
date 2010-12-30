@@ -252,8 +252,17 @@ static jdns_string_t *file_nextline(FILE *f)
 		unsigned char c = fgetc(f);
 		if(feof(f))
 		{
-			jdns_free(buf);
-			return 0;
+			if(at > 0)
+			{
+				// if we read at least one char, take it as a
+				//   line
+				break;
+			}
+			else
+			{
+				jdns_free(buf);
+				return 0;
+			}
 		}
 		if(c == '\n')
 			break;

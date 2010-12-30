@@ -322,7 +322,7 @@ g_unichar_to_utf8 (gunichar c, gchar * outbuf)
  *               This value must be freed with g_free().
  **/
 static gunichar *
-g_utf8_to_ucs4_fast (const gchar * str, glong len, glong * items_written)
+g_utf8_to_ucs4_fast (const gchar * str, ssize_t len, size_t * items_written)
 {
   gint j, charlen;
   gunichar *result;
@@ -432,7 +432,7 @@ g_utf8_to_ucs4_fast (const gchar * str, glong len, glong * items_written)
 static gchar *
 g_ucs4_to_utf8 (const gunichar * str,
 		glong len,
-		glong * items_read, glong * items_written, GError ** error)
+		size_t * items_read, size_t * items_written, GError ** error)
 {
   gint result_length;
   gchar *result = NULL;
@@ -965,7 +965,7 @@ stringprep_unichar_to_utf8 (my_uint32_t c, char *outbuf)
 my_uint32_t *
 stringprep_utf8_to_ucs4 (const char *str, ssize_t len, size_t * items_written)
 {
-  return g_utf8_to_ucs4_fast (str, (glong) len, (glong *) items_written);
+  return g_utf8_to_ucs4_fast (str, len, items_written);
 }
 
 /**
@@ -990,8 +990,8 @@ char *
 stringprep_ucs4_to_utf8 (const my_uint32_t * str, ssize_t len,
 			 size_t * items_read, size_t * items_written)
 {
-  return g_ucs4_to_utf8 (str, len, (glong *) items_read,
-			 (glong *) items_written, NULL);
+  return g_ucs4_to_utf8 (str, len, items_read,
+			 items_written, NULL);
 }
 
 /**
