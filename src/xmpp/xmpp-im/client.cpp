@@ -80,6 +80,7 @@
 #include "xmpp_xmlcommon.h"
 #include "s5b.h"
 #include "xmpp_ibb.h"
+#include "xmpp_bitsofbinary.h"
 #include "filetransfer.h"
 
 /*#include <stdio.h>
@@ -140,6 +141,7 @@ public:
 	ResourceList resourceList;
 	S5BManager *s5bman;
 	IBBManager *ibbman;
+	BoBManager *bobman;
 	FileTransferManager *ftman;
 	bool ftEnabled;
 	QList<GroupChat> groupChatList;
@@ -170,6 +172,8 @@ Client::Client(QObject *par)
 
 	d->ibbman = new IBBManager(this);
 	connect(d->ibbman, SIGNAL(incomingReady()), SLOT(ibb_incomingReady()));
+
+	d->bobman = new BoBManager(this);
 
 	d->ftman = 0;
 }
@@ -255,6 +259,11 @@ S5BManager *Client::s5bManager() const
 IBBManager *Client::ibbManager() const
 {
 	return d->ibbman;
+}
+
+BoBManager *Client::bobManager() const
+{
+	return d->bobman;
 }
 
 bool Client::isActive() const
@@ -829,6 +838,11 @@ void Client::updatePresence(LiveRosterItem *i, const Jid &j, const Status &s)
 void Client::pmMessage(const Message &m)
 {
 	debug(QString("Client: Message from %1\n").arg(m.from().full()));
+
+	// bits of binary. we can't do this in Message, since it knows nothing about Client
+	foreach (const BoBData &b, m.bobDataList()) {
+		d->bobman->append(b);
+	}
 
 	if(m.type() == "groupchat") {
 		for(QList<GroupChat>::Iterator it = d->groupChatList.begin(); it != d->groupChatList.end(); it++) {

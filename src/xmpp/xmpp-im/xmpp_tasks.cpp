@@ -26,9 +26,11 @@
 //#include "xmpp_stream.h"
 //#include "xmpp_types.h"
 #include "xmpp_vcard.h"
+#include "xmpp_bitsofbinary.h"
 
 #include <qregexp.h>
 #include <QList>
+#include <QTimer>
 
 using namespace XMPP;
 
@@ -274,6 +276,9 @@ bool JT_Register::take(const QDomElement &x)
 				else if(i.tagName() == "x" && i.attribute("xmlns") == "jabber:x:data") {
 					d->xdata.fromXml(i);
 					d->hasXData = true;
+				}
+				else if(i.tagName() == "data" && i.attribute("xmlns") == "urn:xmpp:bob") {
+					client()->bobManager()->append(BoBData(i)); // xep-0231
 				}
 				else {
 					FormField f;
@@ -612,6 +617,11 @@ void JT_Presence::pres(const Status &s)
 			m.appendChild(textTag(doc(), "photo", s.photoHash()));
 			tag.appendChild(m);
 		}
+
+		// bits of binary
+		foreach(const BoBData &bd, s.bobDataList()) {
+			tag.appendChild(bd.toXml(doc()));
+		}
 	}
 }
 
@@ -772,6 +782,11 @@ bool JT_PushPresence::take(const QDomElement &e)
 				else if (muc_e.tagName() == "destroy")
 					p.setMUCDestroy(MUCDestroy(muc_e));
 			}
+		}
+		else if (i.tagName() == "data" && i.attribute("xmlns") == "urn:xmpp:bob") {
+			BoBData bd(i);
+			client()->bobManager()->append(bd);
+			p.addBoBData(bd);
 		}
 	}
 
@@ -1475,6 +1490,10 @@ bool JT_ServInfo::take(const QDomElement &e)
 			feature.setAttribute("var", "http://jabber.org/protocol/disco#info");
 			query.appendChild(feature);
 
+			feature = doc()->createElement("feature");
+			feature.setAttribute("var", "urn:xmpp:bob");
+			query.appendChild(feature);
+
 			// Client-specific features
 			QStringList clientFeatures = client()->features().list();
 			for (QStringList::ConstIterator i = clientFeatures.begin(); i != clientFeatures.end(); ++i) {
@@ -1928,3 +1947,117 @@ bool JT_DiscoPublish::take(const QDomElement &x)
 	return true;
 }
 
+
+// ---------------------------------------------------------
+// JT_BoBServer
+// ---------------------------------------------------------
+JT_BoBServer::JT_BoBServer(Task *parent)
+	: Task(parent)
+{
+
+}
+
+bool JT_BoBServer::take(const QDomElement &e)
+{
+	if (e.tagName() != "iq" || e.attribute("type") != "get")
+		return false;
+
+	QDomElement data = e.firstChildElement("data");
+	if (data.attribute("xmlns") == "urn:xmpp:bob") {
+		QDomElement iq;
+		BoBData bd = client()->bobManager()->bobData(data.attribute("cid"));
+		if (bd.isNull()) {
+			iq = createIQ(client()->doc(), "error",
+						  e.attribute("from"), e.attribute("id"));
+			Stanza::Error error(Stanza::Error::Cancel,
+								Stanza::Error::ItemNotFound);
+			iq.appendChild(error.toXml(*doc(), client()->stream().baseNS()));
+		}
+		else {
+			iq = createIQ(doc(), "result", e.attribute("from"), e.attribute("id"));
+			iq.appendChild(bd.toXml(doc()));
+		}
+		send(iq);
+		return true;
+	}
+	return false;
+}
+
+
+//----------------------------------------------------------------------------
+// JT_BitsOfBinary
+//----------------------------------------------------------------------------
+class JT_BitsOfBinary::Private
+{
+public:
+	Private() { }
+
+	QDomElement iq;
+	Jid jid;
+	QString cid;
+	BoBData data;
+};
+
+JT_BitsOfBinary::JT_BitsOfBinary(Task *parent)
+: Task(parent)
+{
+	d = new Private;
+}
+
+JT_BitsOfBinary::~JT_BitsOfBinary()
+{
+	delete d;
+}
+
+void JT_BitsOfBinary::get(const Jid &j, const QString &cid)
+{
+	d->jid = j;
+	d->cid = cid;
+
+	d->data = client()->bobManager()->bobData(cid);
+	if (d->data.isNull()) {
+		d->iq = createIQ(doc(), "get", d->jid.full(), id());
+		QDomElement data = doc()->createElement("data");
+		data.setAttribute("xmlns", "urn:xmpp:bob");
+		data.setAttribute("cid", cid);
+		d->iq.appendChild(data);
+	}
+}
+
+void JT_BitsOfBinary::onGo()
+{
+	if (d->data.isNull()) {
+		send(d->iq);
+	}
+	else {
+		setSuccess();
+	}
+}
+
+bool JT_BitsOfBinary::take(const QDomElement &x)
+{
+	if (!iqVerify(x, d->jid, id())) {
+		return false;
+	}
+
+	if (x.attribute("type") == "result") {
+		QDomElement data = x.firstChildElement("data");
+
+		if (!data.isNull() && data.attribute("cid") == d->cid) { // check xmlns?
+			d->data.fromXml(data);
+			client()->bobManager()->append(d->data);
+		}
+
+		setSuccess();
+	}
+	else {
+		setError(x);
+	}
+
+	return true;
+}
+
+BoBData JT_BitsOfBinary::data()
+{
+	return d->data;
+}

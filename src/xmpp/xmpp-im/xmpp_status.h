@@ -26,6 +26,7 @@
 #include <QDateTime>
 
 #include "xmpp_muc.h"
+#include "xmpp_bitsofbinary.h"
 
 namespace XMPP 
 {
@@ -99,6 +100,10 @@ namespace XMPP
 		void setPhotoHash(const QString&);
 		bool hasPhotoHash() const;
 
+		// XEP-0231 bits of binary
+		void addBoBData(const BoBData &);
+		QList<BoBData> bobDataList() const;
+
 	private:
 		int v_priority;
 		QString v_show, v_status, v_key;
@@ -112,6 +117,7 @@ namespace XMPP
 		// gabber song extension
 		QString v_songTitle;
 		QString v_capsNode, v_capsVersion, v_capsExt;
+		QList<BoBData> v_bobDataList;
 
 		// MUC
 		bool v_isMUC, v_hasMUCItem, v_hasMUCDestroy;

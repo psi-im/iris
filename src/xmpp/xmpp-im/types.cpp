@@ -27,6 +27,7 @@
 #include <QList>
 
 #include "xmpp_xmlcommon.h"
+#include "xmpp_bitsofbinary.h"
 #define NS_XML     "http://www.w3.org/XML/1998/namespace"
 
 namespace XMPP
@@ -914,6 +915,7 @@ public:
 	XData xdata;
 	QMap<QString,HTMLElement> htmlElements;
  	QDomElement sxe;
+	QList<BoBData> bobDataList;
 	
 	QList<int> mucStatuses;
 	QList<MUCInvite> mucInvites;
@@ -1380,6 +1382,16 @@ void Message::setSxe(const QDomElement& e)
 	d->sxe = e;
 }
 
+void Message::addBoBData(const BoBData &bob)
+{
+	d->bobDataList.append(bob);
+}
+
+QList<BoBData> Message::bobDataList() const
+{
+	return d->bobDataList;
+}
+
 bool Message::spooled() const
 {
 	return d->spooled;
@@ -1606,6 +1618,11 @@ Stanza Message::toStanza(Stream *stream) const
 		s.appendChild(d->xdata.toXml(&s.doc(), submit));
 	}
 
+	// bits of binary
+	foreach(const BoBData &bd, d->bobDataList) {
+		s.appendChild(bd.toXml(&s.doc()));
+	}
+
 	return s;
 }
 
@@ -1699,6 +1716,12 @@ bool Message::fromStanza(const Stanza &s, bool useTimeZoneOffset, int timeZoneOf
 
 	if(s.type() == "error")
 		d->error = s.error();
+
+	// Bits of Binary XEP-0231
+	nl = childElementsByTagNameNS(root, "urn:xmpp:bob", "data");
+	for(n = 0; n < nl.count(); ++n) {
+		addBoBData(BoBData(nl.item(n).toElement()));
+	}
 
 	// xhtml-im
 	nl = childElementsByTagNameNS(root, "http://jabber.org/protocol/xhtml-im", "html");
@@ -2262,6 +2285,16 @@ void Status::setPhotoHash(const QString& h)
 bool Status::hasPhotoHash() const
 {
 	return v_hasPhotoHash;
+}
+
+void Status::addBoBData(const BoBData &bob)
+{
+	v_bobDataList.append(bob);
+}
+
+QList<BoBData> Status::bobDataList() const
+{
+	return v_bobDataList;
 }
 
 bool Status::isAvailable() const

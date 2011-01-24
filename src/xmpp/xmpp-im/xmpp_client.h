@@ -117,6 +117,7 @@ namespace XMPP
 		
 		S5BManager *s5bManager() const;
 		IBBManager *ibbManager() const;
+		BoBManager *bobManager() const;
 		JidLinkManager *jidLinkManager() const;
 
 		void setFileTransferEnabled(bool b);

@@ -34,6 +34,7 @@ namespace XMPP
 {
 	class Roster;
 	class Status;
+	class BoBData;
 
 	class JT_Register : public Task
 	{
@@ -415,6 +416,33 @@ namespace XMPP
 		void onGo();
 		bool take(const QDomElement &);
 	
+	private:
+		class Private;
+		Private *d;
+	};
+
+	class JT_BoBServer : public Task
+	{
+		Q_OBJECT
+
+	public:
+		JT_BoBServer(Task *parent);
+		bool take(const QDomElement &);
+	};
+
+	class JT_BitsOfBinary : public Task
+	{
+		Q_OBJECT
+	public:
+		JT_BitsOfBinary(Task *);
+		~JT_BitsOfBinary();
+
+		void get(const Jid &, const QString &);
+
+		void onGo();
+		bool take(const QDomElement &);
+		BoBData data();
+
 	private:
 		class Private;
 		Private *d;
