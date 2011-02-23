@@ -22,19 +22,39 @@
 #define JABBER_IBB_H
 
 #include <QList>
-#include <qobject.h>
-#include <qdom.h>
-#include <qstring.h>
+#include <QObject>
+#include <QDomElement>
+
 #include "bytestream.h"
+#include "xmpp_bytestream.h"
 #include "im.h"
+#include "xmpp_task.h"
 
 namespace XMPP
 {
 	class Client;
 	class IBBManager;
 
+	class IBBData
+	{
+	public:
+		IBBData() : seq(0) {}
+		IBBData(const QString &sid, quint16 seq, const QByteArray &data)
+			: sid(sid)
+			, seq(seq)
+			, data(data)
+		{}
+
+		IBBData& fromXml(const QDomElement &e);
+		QDomElement toXml(QDomDocument *) const;
+
+		QString sid;
+		quint16 seq;
+		QByteArray data;
+	};
+
 	// this is an IBB connection.  use it much like a qsocket
-	class IBBConnection : public ByteStream
+	class IBBConnection : public BSConnection
 	{
 		Q_OBJECT
 	public:
@@ -43,14 +63,14 @@ namespace XMPP
 		IBBConnection(IBBManager *);
 		~IBBConnection();
 
-		void connectToJid(const Jid &peer, const QDomElement &comment);
+		void connectToJid(const Jid &peer, const QString &sid);
 		void accept();
 		void close();
 
 		int state() const;
 		Jid peer() const;
-		QString streamid() const;
-		QDomElement comment() const;
+		QString sid() const;
+		BytestreamManager* manager() const;
 
 		bool isOpen() const;
 		void write(const QByteArray &);
@@ -72,42 +92,53 @@ namespace XMPP
 		void reset(bool clear=false);
 
 		friend class IBBManager;
-		void waitForAccept(const Jid &peer, const QString &sid, const QDomElement &comment, const QString &iq_id);
-		void takeIncomingData(const QByteArray &, bool close);
+		void waitForAccept(const Jid &peer, const QString &iq_id,
+						   const QString &sid, int blockSize,
+						   const QString &stanza);
+		void takeIncomingData(const IBBData &ibbData);
+		void setRemoteClosed();
 	};
 
 	typedef QList<IBBConnection*> IBBConnectionList;
-	class IBBManager : public QObject
+	class IBBManager : public BytestreamManager
 	{
 		Q_OBJECT
 	public:
 		IBBManager(Client *);
 		~IBBManager();
 
+		static const char* ns();
 		Client *client() const;
 
+		bool isAcceptableSID(const Jid &peer, const QString &sid) const;
+		IBBConnection *createConnection();
 		IBBConnection *takeIncoming();
 
-	signals:
-		void incomingReady();
+	public slots:
+		void takeIncomingData(const Jid &from, const QString &id,
+							  const IBBData &data, Stanza::Kind);
+
+	protected:
+		const char* sidPrefix() const;
 
 	private slots:
-		void ibb_incomingRequest(const Jid &from, const QString &id, const QDomElement &);
-		void ibb_incomingData(const Jid &from, const QString &streamid, const QString &id, const QByteArray &data, bool close);
+		void ibb_incomingRequest(const Jid &from, const QString &id,
+								 const QString &sid, int blockSize,
+								 const QString &stanza);
+		void ibb_closeRequest(const Jid &from, const QString &id,
+							  const QString &sid);
 
 	private:
 		class Private;
 		Private *d;
 
-		QString genKey() const;
-
 		friend class IBBConnection;
 		IBBConnection *findConnection(const QString &sid, const Jid &peer="") const;
-		QString genUniqueKey() const;
 		void link(IBBConnection *);
 		void unlink(IBBConnection *);
 		void doAccept(IBBConnection *c, const QString &id);
-		void doReject(IBBConnection *c, const QString &id, int, const QString &);
+		void doReject(IBBConnection *c, const QString &id,
+					  Stanza::Error::ErrorCond cond, const QString &);
 	};
 
 	class JT_IBB : public Task
@@ -118,22 +149,27 @@ namespace XMPP
 		JT_IBB(Task *, bool serve=false);
 		~JT_IBB();
 
-		void request(const Jid &, const QDomElement &comment);
-		void sendData(const Jid &, const QString &streamid, const QByteArray &data, bool close);
-		void respondSuccess(const Jid &, const QString &id, const QString &streamid);
-		void respondError(const Jid &, const QString &id, int code, const QString &str);
+		void request(const Jid &, const QString &sid);
+		void sendData(const Jid &, const IBBData &ibbData);
+		void close(const Jid &, const QString &sid);
+		void respondError(const Jid &, const QString &id,
+						  Stanza::Error::ErrorCond cond, const QString &text = "");
 		void respondAck(const Jid &to, const QString &id);
 
 		void onGo();
 		bool take(const QDomElement &);
 
-		QString streamid() const;
 		Jid jid() const;
 		int mode() const;
+		int bytesWritten() const;
 
 	signals:
-		void incomingRequest(const Jid &from, const QString &id, const QDomElement &);
-		void incomingData(const Jid &from, const QString &streamid, const QString &id, const QByteArray &data, bool close);
+		void incomingRequest(const Jid &from, const QString &id,
+							 const QString &sid, int blockSize,
+							 const QString &stanza);
+		void incomingData(const Jid &from, const QString &id,
+						  const IBBData &data, Stanza::Kind);
+		void closeRequest(const Jid &from, const QString &id, const QString &sid);
 
 	private:
 		class Private;

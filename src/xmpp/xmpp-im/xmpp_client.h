@@ -30,6 +30,7 @@
 class QString;
 class QDomElement;
 class QDomDocument;
+class ByteStream;
 namespace XMPP {
 	class ClientStream;
 	class Features;
@@ -44,6 +45,7 @@ namespace XMPP {
 	class Roster;
 	class RosterItem;
 	class S5BManager;
+	class BSConnection;
 	class Stream;
 	class Task;
 }
@@ -128,6 +130,7 @@ namespace XMPP
 		void groupChatSetStatus(const QString &host, const QString &room, const Status &);
 		void groupChatChangeNick(const QString &host, const QString &room, const QString &nick, const Status &);
 		void groupChatLeave(const QString &host, const QString &room);
+		QString groupChatNick(const QString &host, const QString &room) const;
 
 	signals:
 		void activated();
@@ -186,6 +189,7 @@ namespace XMPP
 		void importRosterItem(const RosterItem &);
 		void updateSelfPresence(const Jid &, const Status &);
 		void updatePresence(LiveRosterItem *, const Jid &, const Status &);
+		void handleIncoming(BSConnection *);
 
 		class ClientPrivate;
 		ClientPrivate *d;

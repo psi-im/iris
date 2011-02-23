@@ -37,6 +37,7 @@ HEADERS += \
 	$$PWD/xmpp-im/xmpp_discoinfotask.h \
 	$$PWD/xmpp-im/xmpp_xmlcommon.h \
 	$$PWD/xmpp-im/xmpp_vcard.h \
+	$$PWD/xmpp-im/xmpp_bytestream.h \
 	$$PWD/xmpp-im/s5b.h \
 	$$PWD/xmpp-im/xmpp_ibb.h \
 	$$PWD/xmpp-im/filetransfer.h \
@@ -91,6 +92,7 @@ SOURCES += \
 	$$PWD/xmpp-im/xmpp_tasks.cpp \
 	$$PWD/xmpp-im/xmpp_xmlcommon.cpp \
 	$$PWD/xmpp-im/xmpp_vcard.cpp \
+	$$PWD/xmpp-im/xmpp_bytestream.cpp \
 	$$PWD/xmpp-im/s5b.cpp \
 	$$PWD/xmpp-im/xmpp_ibb.cpp \
 	$$PWD/xmpp-im/filetransfer.cpp \

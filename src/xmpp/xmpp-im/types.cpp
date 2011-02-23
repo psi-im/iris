@@ -18,16 +18,15 @@
  *
  */
 
-#include "im.h"
-#include "xmpp_features.h"
-
-#include <qmap.h>
-#include <qapplication.h>
-//Added by qt3to4:
+#include <QMap>
+#include <QApplication>
 #include <QList>
 
+#include "im.h"
+#include "xmpp_features.h"
 #include "xmpp_xmlcommon.h"
 #include "xmpp_bitsofbinary.h"
+#include "xmpp_ibb.h"
 #define NS_XML     "http://www.w3.org/XML/1998/namespace"
 
 namespace XMPP
@@ -913,6 +912,7 @@ public:
 	QString nick;
 	HttpAuthRequest httpAuthRequest;
 	XData xdata;
+	IBBData ibbData;
 	QMap<QString,HTMLElement> htmlElements;
  	QDomElement sxe;
 	QList<BoBData> bobDataList;
@@ -1390,6 +1390,11 @@ void Message::addBoBData(const BoBData &bob)
 QList<BoBData> Message::bobDataList() const
 {
 	return d->bobDataList;
+}
+
+const IBBData& Message::ibbData() const
+{
+	return d->ibbData;
 }
 
 bool Message::spooled() const
@@ -1906,8 +1911,13 @@ bool Message::fromStanza(const Stanza &s, bool useTimeZoneOffset, int timeZoneOf
 
 	// data form
 	t = childElementsByTagNameNS(root, "jabber:x:data", "x").item(0).toElement();
-	if(!t.isNull()){
+	if (!t.isNull()) {
 		d->xdata.fromXml(t);
+	}
+
+	t = childElementsByTagNameNS(root, IBBManager::ns(), "data").item(0).toElement();
+	if (!t.isNull()) {
+		d->ibbData.fromXml(t);
 	}
 
 	return true;

@@ -21,13 +21,15 @@
 #ifndef XMPP_S5B_H
 #define XMPP_S5B_H
 
-#include <qobject.h>
+#include <QObject>
 #include <QList>
 #include <QHostAddress>
 
 #include "bytestream.h"
+#include "xmpp_bytestream.h"
 #include "xmpp/jid/jid.h"
 #include "xmpp_task.h"
+#include "xmpp_stanza.h"
 
 class SocksClient;
 class SocksUDP;
@@ -58,24 +60,28 @@ namespace XMPP
 		QByteArray _buf;
 	};
 
-	class S5BConnection : public ByteStream
+	class S5BConnection : public BSConnection
 	{
 		Q_OBJECT
 	public:
 		enum Mode { Stream, Datagram };
-		enum Error { ErrRefused, ErrConnect, ErrProxy, ErrSocket };
-		enum State { Idle, Requesting, Connecting, WaitingForAccept, Active };
+
 		~S5BConnection();
 
 		Jid proxy() const;
 		void setProxy(const Jid &proxy);
 
 		void connectToJid(const Jid &peer, const QString &sid, Mode m = Stream);
+		void connectToJid(const Jid &peer, const QString &sid) {
+			connectToJid(peer, sid, Stream);
+		}
+
 		void accept();
 		void close();
 
 		Jid peer() const;
 		QString sid() const;
+		BytestreamManager* manager() const;
 		bool isRemote() const;
 		Mode mode() const;
 		int state() const;
@@ -128,19 +134,20 @@ namespace XMPP
 		S5BConnection(S5BManager *, QObject *parent=0);
 	};
 
-	class S5BManager : public QObject
+	class S5BManager : public BytestreamManager
 	{
 		Q_OBJECT
 	public:
 		S5BManager(Client *);
 		~S5BManager();
 
+		static const char* ns();
 		Client *client() const;
 		S5BServer *server() const;
 		void setServer(S5BServer *s);
 
+		Jid localPeer(const Jid &peer) const;
 		bool isAcceptableSID(const Jid &peer, const QString &sid) const;
-		QString genUniqueSID(const Jid &peer) const;
 
 		S5BConnection *createConnection();
 		S5BConnection *takeIncoming();
@@ -148,8 +155,8 @@ namespace XMPP
 		class Item;
 		class Entry;
 
-	signals:
-		void incomingReady();
+	protected:
+		const char* sidPrefix() const;
 
 	private slots:
 		void ps_incoming(const S5BRequest &req);
@@ -193,7 +200,7 @@ namespace XMPP
 
 		friend class Item;
 		void doSuccess(const Jid &peer, const QString &id, const Jid &streamHost);
-		void doError(const Jid &peer, const QString &id, int, const QString &);
+		void doError(const Jid &peer, const QString &id, Stanza::Error::ErrorCond, const QString &);
 		void doActivate(const Jid &peer, const QString &sid, const Jid &streamHost);
 	};
 
@@ -305,7 +312,8 @@ namespace XMPP
 		int priority() const;
 
 		void respondSuccess(const Jid &to, const QString &id, const Jid &streamHost);
-		void respondError(const Jid &to, const QString &id, int code, const QString &str);
+		void respondError(const Jid &to, const QString &id,
+						  Stanza::Error::ErrorCond cond, const QString &str);
 		void sendUDPSuccess(const Jid &to, const QString &dstaddr);
 		void sendActivate(const Jid &to, const QString &sid, const Jid &streamHost);
 

@@ -897,7 +897,7 @@ bool JT_PushMessage::take(const QDomElement &e)
 		return false;
 	}
 
-	message(m);
+	emit message(m);
 	return true;
 }
 
@@ -1476,6 +1476,10 @@ bool JT_ServInfo::take(const QDomElement &e)
 			// Standard features
 			feature = doc()->createElement("feature");
 			feature.setAttribute("var", "http://jabber.org/protocol/bytestreams");
+			query.appendChild(feature);
+
+			feature = doc()->createElement("feature");
+			feature.setAttribute("var", "http://jabber.org/protocol/ibb");
 			query.appendChild(feature);
 
 			feature = doc()->createElement("feature");

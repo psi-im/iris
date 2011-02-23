@@ -21,11 +21,12 @@
 #include "filetransfer.h"
 
 #include <QList>
-#include <qtimer.h>
-#include <qpointer.h>
-#include <qfileinfo.h>
+#include <QTimer>
+#include <QPointer>
+#include <QFileInfo>
 #include "xmpp_xmlcommon.h"
 #include "s5b.h"
+#include "xmpp_ibb.h"
 
 #define SENDBUFSIZE 65536
 
@@ -61,7 +62,7 @@ public:
 	QString streamType;
 	bool needStream;
 	QString id, iq_id;
-	S5BConnection *c;
+	BSConnection *c;
 	Jid proxy;
 	int state;
 	bool sender;
@@ -109,8 +110,12 @@ void FileTransfer::reset()
 	delete d->ft;
 	d->ft = 0;
 
-	delete d->c;
-	d->c = 0;
+	if (d->c) {
+		d->c->disconnect(this);
+		d->c->manager()->deleteConnection(d->c, d->state == Active && !d->sender ?
+											  3000 : 0);
+		d->c = 0;
+	}
 
 	d->state = Idle;
 	d->needStream = false;
@@ -135,9 +140,8 @@ void FileTransfer::sendFile(const Jid &to, const QString &fname, qlonglong size,
 
 	d->ft = new JT_FT(d->m->client()->rootTask());
 	connect(d->ft, SIGNAL(finished()), SLOT(ft_finished()));
-	QStringList list;
-	list += "http://jabber.org/protocol/bytestreams";
-	d->ft->request(to, d->id, fname, size, desc, list);
+	d->ft->request(to, d->id, fname, size, desc,
+				   QStringList() << S5BManager::ns() << IBBManager::ns() );
 	d->ft->go(true);
 }
 
@@ -214,7 +218,6 @@ void FileTransfer::accept(qlonglong offset, qlonglong length)
 		d->length = length;
 	else
 		d->length = d->size;
-	d->streamType = "http://jabber.org/protocol/bytestreams";
 	d->m->con_accept(this);
 }
 
@@ -229,11 +232,12 @@ void FileTransfer::close()
 	reset();
 }
 
-S5BConnection *FileTransfer::s5bConnection() const
+BSConnection *FileTransfer::bsConnection() const
 {
 	return d->c;
 }
 
+// file transfer request accepted or error happened
 void FileTransfer::ft_finished()
 {
 	JT_FT *ft = d->ft;
@@ -246,54 +250,61 @@ void FileTransfer::ft_finished()
 		if(d->length == 0)
 			d->length = d->size - d->rangeOffset;
 		d->streamType = ft->streamType();
-		d->c = d->m->client()->s5bManager()->createConnection();
-		connect(d->c, SIGNAL(connected()), SLOT(s5b_connected()));
-		connect(d->c, SIGNAL(connectionClosed()), SLOT(s5b_connectionClosed()));
-		connect(d->c, SIGNAL(bytesWritten(int)), SLOT(s5b_bytesWritten(int)));
-		connect(d->c, SIGNAL(error(int)), SLOT(s5b_error(int)));
+		if (d->streamType == S5BManager::ns()) {
+			d->c = d->m->client()->s5bManager()->createConnection();
+			if(d->proxy.isValid())
+				((S5BConnection*)(d->c))->setProxy(d->proxy);
+		}
+		else if (d->streamType == IBBManager::ns()) {
+			d->c = d->m->client()->ibbManager()->createConnection();
+		}
+		connect(d->c, SIGNAL(connected()), SLOT(stream_connected()));
+		connect(d->c, SIGNAL(connectionClosed()), SLOT(stream_connectionClosed()));
+		connect(d->c, SIGNAL(bytesWritten(int)), SLOT(stream_bytesWritten(int)));
+		connect(d->c, SIGNAL(error(int)), SLOT(stream_error(int)));
 
-		if(d->proxy.isValid())
-			d->c->setProxy(d->proxy);
 		d->c->connectToJid(d->peer, d->id);
 		accepted();
 	}
 	else {
-		reset();
 		if(ft->statusCode() == 403)
-			error(ErrReject);
+			emit error(ErrReject);
 		else if(ft->statusCode() == 400)
-			error(Err400);
+			emit error(Err400);
 		else
-			error(ErrNeg);
+			emit error(ErrNeg);
+		reset();
 	}
 }
 
-void FileTransfer::takeConnection(S5BConnection *c)
+void FileTransfer::takeConnection(BSConnection *c)
 {
 	d->c = c;
-	connect(d->c, SIGNAL(connected()), SLOT(s5b_connected()));
-	connect(d->c, SIGNAL(connectionClosed()), SLOT(s5b_connectionClosed()));
-	connect(d->c, SIGNAL(readyRead()), SLOT(s5b_readyRead()));
-	connect(d->c, SIGNAL(error(int)), SLOT(s5b_error(int)));
-	if(d->proxy.isValid())
-		d->c->setProxy(d->proxy);
+	connect(d->c, SIGNAL(connected()), SLOT(stream_connected()));
+	connect(d->c, SIGNAL(connectionClosed()), SLOT(stream_connectionClosed()));
+	connect(d->c, SIGNAL(readyRead()), SLOT(stream_readyRead()));
+	connect(d->c, SIGNAL(error(int)), SLOT(stream_error(int)));
+
+	S5BConnection *s5b = dynamic_cast<S5BConnection*>(c);
+	if(s5b && d->proxy.isValid())
+		s5b->setProxy(d->proxy);
 	accepted();
 	QTimer::singleShot(0, this, SLOT(doAccept()));
 }
 
-void FileTransfer::s5b_connected()
+void FileTransfer::stream_connected()
 {
 	d->state = Active;
-	connected();
+	emit connected();
 }
 
-void FileTransfer::s5b_connectionClosed()
+void FileTransfer::stream_connectionClosed()
 {
 	reset();
-	error(ErrStream);
+	emit error(ErrStream);
 }
 
-void FileTransfer::s5b_readyRead()
+void FileTransfer::stream_readyRead()
 {
 	QByteArray a = d->c->read();
 	qlonglong need = d->length - d->sent;
@@ -301,30 +312,30 @@ void FileTransfer::s5b_readyRead()
 		a.resize((uint)need);
 	d->sent += a.size();
 	if(d->sent == d->length)
-		reset();
+		QTimer::singleShot(3000, this, SLOT(reset())); // wait 3 sec for close from other side
 	readyRead(a);
 }
 
-void FileTransfer::s5b_bytesWritten(int x)
+void FileTransfer::stream_bytesWritten(int x)
 {
 	d->sent += x;
 	if(d->sent == d->length)
 		reset();
-	bytesWritten(x);
+	emit bytesWritten(x);
 }
 
-void FileTransfer::s5b_error(int x)
+void FileTransfer::stream_error(int x)
 {
 	reset();
-	if(x == S5BConnection::ErrRefused || x == S5BConnection::ErrConnect)
+	if(x == BSConnection::ErrRefused || x == BSConnection::ErrConnect)
 		error(ErrConnect);
-	else if(x == S5BConnection::ErrProxy)
+	else if(x == BSConnection::ErrProxy)
 		error(ErrProxy);
 	else
 		error(ErrStream);
 }
 
-void FileTransfer::man_waitForAccept(const FTRequest &req)
+void FileTransfer::man_waitForAccept(const FTRequest &req, const QString &streamType)
 {
 	d->state = WaitingForAccept;
 	d->peer = req.from;
@@ -334,6 +345,7 @@ void FileTransfer::man_waitForAccept(const FTRequest &req)
 	d->size = req.size;
 	d->desc = req.desc;
 	d->rangeSupported = req.rangeSupported;
+	d->streamType = streamType;
 }
 
 void FileTransfer::doAccept()
@@ -401,49 +413,60 @@ bool FileTransferManager::isActive(const FileTransfer *ft) const
 
 void FileTransferManager::pft_incoming(const FTRequest &req)
 {
-	bool found = false;
-	for(QStringList::ConstIterator it = req.streamTypes.begin(); it != req.streamTypes.end(); ++it) {
-		if((*it) == "http://jabber.org/protocol/bytestreams") {
-			found = true;
+	QString streamType;
+	foreach (const QString &ns, req.streamTypes) {
+		if (ns == S5BManager::ns() &&
+				d->client->s5bManager()->isAcceptableSID(req.from, req.id)) {
+			streamType = ns;
+			break;
+		}
+		if (ns == IBBManager::ns() &&
+				d->client->ibbManager()->isAcceptableSID(req.from, req.id)) {
+			streamType = ns;
 			break;
 		}
 	}
-	if(!found) {
-		d->pft->respondError(req.from, req.iq_id, 400, "No valid stream types");
-		return;
-	}
-	if(!d->client->s5bManager()->isAcceptableSID(req.from, req.id)) {
-		d->pft->respondError(req.from, req.iq_id, 400, "SID in use");
+
+	if(streamType.isEmpty()) {
+		d->pft->respondError(req.from, req.iq_id, Stanza::Error::NotAcceptable,
+							 "No valid stream types");
 		return;
 	}
 
 	FileTransfer *ft = new FileTransfer(this);
-	ft->man_waitForAccept(req);
+	ft->man_waitForAccept(req, streamType);
 	d->incoming.append(ft);
 	incomingReady();
 }
 
-void FileTransferManager::s5b_incomingReady(S5BConnection *c)
+void FileTransferManager::stream_incomingReady(BSConnection *c)
 {
-	FileTransfer *ft = 0;
-	foreach(FileTransfer* i, d->list) {
-		if(i->d->needStream && i->d->peer.compare(c->peer()) && i->d->id == c->sid()) {
-			ft = i;
-			break;
+	foreach(FileTransfer* ft, d->list) {
+		if(ft->d->needStream && ft->d->peer.compare(c->peer()) && ft->d->id == c->sid()) {
+			ft->takeConnection(c);
+			return;
 		}
 	}
-	if(!ft) {
-		c->close();
-		delete c;
-		return;
-	}
-	ft->takeConnection(c);
+	c->close();
+	delete c;
 }
 
 QString FileTransferManager::link(FileTransfer *ft)
 {
+	QString id;
+	bool found;
+	do {
+		found = false;
+		id = QString("ft_%1").arg(qrand() & 0xffff, 4, 16, QChar('0'));
+		foreach (FileTransfer* ft, d->list) {
+			if (ft->d->peer.compare(ft->d->peer) && ft->d->id == id) {
+				found = true;
+				break;
+			}
+		}
+	} while(found);
 	d->list.append(ft);
-	return d->client->s5bManager()->genUniqueSID(ft->d->peer);
+	return id;
 }
 
 void FileTransferManager::con_accept(FileTransfer *ft)
@@ -454,7 +477,7 @@ void FileTransferManager::con_accept(FileTransfer *ft)
 
 void FileTransferManager::con_reject(FileTransfer *ft)
 {
-	d->pft->respondError(ft->d->peer, ft->d->iq_id, 403, "Declined");
+	d->pft->respondError(ft->d->peer, ft->d->iq_id, Stanza::Error::Forbidden, "Declined");
 }
 
 void FileTransferManager::unlink(FileTransfer *ft)
@@ -486,7 +509,8 @@ JT_FT::~JT_FT()
 	delete d;
 }
 
-void JT_FT::request(const Jid &to, const QString &_id, const QString &fname, qlonglong size, const QString &desc, const QStringList &streamTypes)
+void JT_FT::request(const Jid &to, const QString &_id, const QString &fname,
+					qlonglong size, const QString &desc, const QStringList &streamTypes)
 {
 	QDomElement iq;
 	d->to = to;
@@ -619,15 +643,9 @@ bool JT_FT::take(const QDomElement &x)
 		}
 
 		// must be one of the offered streamtypes
-		bool found = false;
-		for(QStringList::ConstIterator it = d->streamTypes.begin(); it != d->streamTypes.end(); ++it) {
-			if((*it) == streamtype) {
-				found = true;
-				break;
-			}
-		}
-		if(!found)
+		if (!d->streamTypes.contains(streamtype)) {
 			return true;
+		}
 
 		d->rangeOffset = range_offset;
 		d->rangeLength = range_length;
@@ -691,12 +709,12 @@ void JT_PushFT::respondSuccess(const Jid &to, const QString &id, qlonglong range
 	send(iq);
 }
 
-void JT_PushFT::respondError(const Jid &to, const QString &id, int code, const QString &str)
+void JT_PushFT::respondError(const Jid &to, const QString &id,
+							 Stanza::Error::ErrorCond cond, const QString &str)
 {
 	QDomElement iq = createIQ(doc(), "error", to.full(), id);
-	QDomElement err = textTag(doc(), "error", str);
-	err.setAttribute("code", QString::number(code));
-	iq.appendChild(err);
+	Stanza::Error error(Stanza::Error::Cancel, cond, str);
+	iq.appendChild(error.toXml(*client()->doc(), client()->stream().baseNS()));
 	send(iq);
 }
 
@@ -723,7 +741,7 @@ bool JT_PushFT::take(const QDomElement &e)
 
 	QString fname = file.attribute("name");
 	if(fname.isEmpty()) {
-		respondError(from, id, 400, "Bad file name");
+		respondError(from, id, Stanza::Error::BadRequest, "Bad file name");
 		return true;
 	}
 
@@ -736,7 +754,7 @@ bool JT_PushFT::take(const QDomElement &e)
 	bool ok;
 	qlonglong size = file.attribute("size").toLongLong(&ok);
 	if(!ok || size < 0) {
-		respondError(from, id, 400, "Bad file size");
+		respondError(from, id, Stanza::Error::BadRequest, "Bad file size");
 		return true;
 	}
 
@@ -778,6 +796,6 @@ bool JT_PushFT::take(const QDomElement &e)
 	r.rangeSupported = rangeSupported;
 	r.streamTypes = streamTypes;
 
-	incoming(r);
+	emit incoming(r);
 	return true;
 }

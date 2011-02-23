@@ -20,8 +20,8 @@
 
 #include "s5b.h"
 
-#include <qtimer.h>
-#include <qpointer.h>
+#include <QTimer>
+#include <QPointer>
 #include <QByteArray>
 #include <stdlib.h>
 #include <qca.h>
@@ -38,12 +38,18 @@
 
 #define MAXSTREAMHOSTS 5
 
+static const char *S5B_NS = "http://jabber.org/protocol/bytestreams";
+
 //#define S5B_DEBUG
 
 namespace XMPP {
 
 static QString makeKey(const QString &sid, const Jid &initiator, const Jid &target)
 {
+#ifdef S5B_DEBUG
+	qDebug("makeKey: sid=%s initiator=%s target=%s", qPrintable(sid),
+		   qPrintable(initiator.full()), qPrintable(target.full()));
+#endif
 	QString str = sid + initiator.full() + target.full();
 	return QCA::Hash("sha1").hashToString(str.toUtf8());
 }
@@ -181,7 +187,7 @@ static int id_conn = 0;
 static int num_conn = 0;
 
 S5BConnection::S5BConnection(S5BManager *m, QObject *parent)
-:ByteStream(parent)
+	: BSConnection(parent)
 {
 	d = new Private;
 	d->m = m;
@@ -191,7 +197,7 @@ S5BConnection::S5BConnection(S5BManager *m, QObject *parent)
 	++num_conn;
 	d->id = id_conn++;
 #ifdef S5B_DEBUG
-	printf("S5BConnection[%d]: constructing, count=%d, %p\n", d->id, num_conn, this);
+	qDebug("S5BConnection[%d]: constructing, count=%d, %p\n", d->id, num_conn, this);
 #endif
 
 	reset();
@@ -203,7 +209,7 @@ S5BConnection::~S5BConnection()
 
 	--num_conn;
 #ifdef S5B_DEBUG
-	printf("S5BConnection[%d]: destructing, count=%d\n", d->id, num_conn);
+	qDebug("S5BConnection[%d]: destructing, count=%d\n", d->id, num_conn);
 #endif
 
 	delete d;
@@ -253,7 +259,7 @@ void S5BConnection::connectToJid(const Jid &peer, const QString &sid, Mode m)
 	d->state = Requesting;
 	d->mode = m;
 #ifdef S5B_DEBUG
-	printf("S5BConnection[%d]: connecting %s [%s]\n", d->id, qPrintable(d->peer.full()), qPrintable(d->sid));
+	qDebug("S5BConnection[%d]: connecting %s [%s]\n", d->id, qPrintable(d->peer.full()), qPrintable(d->sid));
 #endif
 	d->m->con_connect(this);
 }
@@ -265,7 +271,7 @@ void S5BConnection::accept()
 
 	d->state = Connecting;
 #ifdef S5B_DEBUG
-	printf("S5BConnection[%d]: accepting %s [%s]\n", d->id, qPrintable(d->peer.full()), qPrintable(d->sid));
+	qDebug("S5BConnection[%d]: accepting %s [%s]\n", d->id, qPrintable(d->peer.full()), qPrintable(d->sid));
 #endif
 	d->m->con_accept(this);
 }
@@ -280,7 +286,7 @@ void S5BConnection::close()
 	else if(d->state == Active)
 		d->sc->close();
 #ifdef S5B_DEBUG
-	printf("S5BConnection[%d]: closing %s [%s]\n", d->id, qPrintable(d->peer.full()), qPrintable(d->sid));
+	qDebug("S5BConnection[%d]: closing %s [%s]\n", d->id, qPrintable(d->peer.full()), qPrintable(d->sid));
 #endif
 	reset();
 }
@@ -293,6 +299,11 @@ Jid S5BConnection::peer() const
 QString S5BConnection::sid() const
 {
 	return d->sid;
+}
+
+BytestreamManager* S5BConnection::manager() const
+{
+	return d->m;
 }
 
 bool S5BConnection::isRemote() const
@@ -402,20 +413,20 @@ void S5BConnection::man_clientReady(SocksClient *sc, SocksUDP *sc_udp)
 
 	d->state = Active;
 #ifdef S5B_DEBUG
-	printf("S5BConnection[%d]: %s [%s] <<< success >>>\n", d->id, qPrintable(d->peer.full()), qPrintable(d->sid));
+	qDebug("S5BConnection[%d]: %s [%s] <<< success >>>\n", d->id, qPrintable(d->peer.full()), qPrintable(d->sid));
 #endif
 
 	// bytes already in the stream?
 	if(d->sc->bytesAvailable()) {
 #ifdef S5B_DEBUG
-		printf("Stream has %d bytes in it.\n", d->sc->bytesAvailable());
+		qDebug("Stream has %d bytes in it.\n", d->sc->bytesAvailable());
 #endif
 		d->notifyRead = true;
 	}
 	// closed before it got here?
 	if(!d->sc->isOpen()) {
 #ifdef S5B_DEBUG
-		printf("Stream was closed before S5B request finished?\n");
+		qDebug("Stream was closed before S5B request finished?\n");
 #endif
 		d->notifyClose = true;
 	}
@@ -458,7 +469,7 @@ void S5BConnection::sc_connectionClosed()
 	// if we have a pending read notification, postpone close
 	if(d->notifyRead) {
 #ifdef S5B_DEBUG
-		printf("closed while pending read\n");
+		qDebug("closed while pending read\n");
 #endif
 		d->notifyClose = true;
 		return;
@@ -572,7 +583,7 @@ public:
 };
 
 S5BManager::S5BManager(Client *parent)
-:QObject(parent)
+	: BytestreamManager(parent)
 {
 	// S5B needs SHA1
 	//if(!QCA::isSupported(QCA::CAP_SHA1))
@@ -596,6 +607,11 @@ S5BManager::~S5BManager()
 	}
 	delete d->ps;
 	delete d;
+}
+
+const char* S5BManager::ns()
+{
+	return S5B_NS;
 }
 
 Client *S5BManager::client() const
@@ -623,8 +639,7 @@ void S5BManager::setServer(S5BServer *serv)
 
 S5BConnection *S5BManager::createConnection()
 {
-	S5BConnection *c = new S5BConnection(this);
-	return c;
+	return new S5BConnection(this);
 }
 
 S5BConnection *S5BManager::takeIncoming()
@@ -646,7 +661,7 @@ S5BConnection *S5BManager::takeIncoming()
 void S5BManager::ps_incoming(const S5BRequest &req)
 {
 #ifdef S5B_DEBUG
-	printf("S5BManager: incoming from %s\n", qPrintable(req.from.full()));
+	qDebug("S5BManager: incoming from %s\n", qPrintable(req.from.full()));
 #endif
 
 	bool ok = false;
@@ -658,16 +673,16 @@ void S5BManager::ps_incoming(const S5BRequest &req)
 		if(e) {
 			if(e->i) {
 				// loopback
-				if(req.from.compare(d->client->jid()) && (req.id == e->i->out_id)) {
+				if(req.from.compare(localPeer(req.from)) && (req.id == e->i->out_id)) {
 #ifdef S5B_DEBUG
-					printf("ALLOWED: loopback\n");
+					qDebug("ALLOWED: loopback\n");
 #endif
 					ok = true;
 				}
 				// allowed by 'fast mode'
 				else if(e->i->state == Item::Initiator && e->i->targetMode == Item::Unknown) {
 #ifdef S5B_DEBUG
-					printf("ALLOWED: fast-mode\n");
+					qDebug("ALLOWED: fast-mode\n");
 #endif
 					e->i->handleFast(req.hosts, req.id);
 					return;
@@ -676,13 +691,13 @@ void S5BManager::ps_incoming(const S5BRequest &req)
 		}
 		else {
 #ifdef S5B_DEBUG
-			printf("ALLOWED: we don't have it\n");
+			qDebug("ALLOWED: we don't have it\n");
 #endif
 			ok = true;
 		}
 	}
 	if(!ok) {
-		d->ps->respondError(req.from, req.id, 406, "SID in use");
+		d->ps->respondError(req.from, req.id, Stanza::Error::NotAcceptable, "SID in use");
 		return;
 	}
 
@@ -716,9 +731,10 @@ void S5BManager::doSuccess(const Jid &peer, const QString &id, const Jid &stream
 	d->ps->respondSuccess(peer, id, streamHost);
 }
 
-void S5BManager::doError(const Jid &peer, const QString &id, int code, const QString &str)
+void S5BManager::doError(const Jid &peer, const QString &id,
+						 Stanza::Error::ErrorCond cond, const QString &str)
 {
-	d->ps->respondError(peer, id, code, str);
+	d->ps->respondError(peer, id, cond, str);
 }
 
 void S5BManager::doActivate(const Jid &peer, const QString &sid, const Jid &streamHost)
@@ -726,28 +742,17 @@ void S5BManager::doActivate(const Jid &peer, const QString &sid, const Jid &stre
 	d->ps->sendActivate(peer, sid, streamHost);
 }
 
-QString S5BManager::genUniqueSID(const Jid &peer) const
+Jid S5BManager::localPeer(const Jid &peer) const
 {
-	// get unused key
-	QString sid;
-	do {
-		sid = "s5b_";
-		for(int i = 0; i < 4; ++i) {
-			int word = rand() & 0xffff;
-			for(int n = 0; n < 4; ++n) {
-				QString s;
-				s.sprintf("%x", (word >> (n * 4)) & 0xf);
-				sid.append(s);
-			}
-		}
-	} while(!isAcceptableSID(peer, sid));
-	return sid;
+	QString gcNick = d->client->groupChatNick(peer.domain(), peer.node());
+	return gcNick.isEmpty() ? d->client->jid() : peer.withResource(gcNick);
 }
 
 bool S5BManager::isAcceptableSID(const Jid &peer, const QString &sid) const
 {
-	QString key = makeKey(sid, d->client->jid(), peer);
-	QString key_out = makeKey(sid, peer, d->client->jid());
+	Jid lp = localPeer(peer);
+	QString key = makeKey(sid, lp, peer);
+	QString key_out = makeKey(sid, peer, lp);
 
 	// if we have a server, then check through it
 	if(d->serv) {
@@ -759,6 +764,11 @@ bool S5BManager::isAcceptableSID(const Jid &peer, const QString &sid) const
 			return false;
 	}
 	return true;
+}
+
+const char* S5BManager::sidPrefix() const
+{
+	return "s5b_";
 }
 
 S5BConnection *S5BManager::findIncoming(const Jid &from, const QString &sid) const
@@ -909,7 +919,8 @@ void S5BManager::con_accept(S5BConnection *c)
 
 void S5BManager::con_reject(S5BConnection *c)
 {
-	d->ps->respondError(c->d->peer, c->d->req.id, 406, "Not acceptable");
+	d->ps->respondError(c->d->peer, c->d->req.id, Stanza::Error::NotAcceptable,
+						"Not acceptable");
 }
 
 void S5BManager::con_unlink(S5BConnection *c)
@@ -920,7 +931,8 @@ void S5BManager::con_unlink(S5BConnection *c)
 
 	// active incoming request?  cancel it
 	if(e->i && e->i->conn)
-		d->ps->respondError(e->i->peer, e->i->out_id, 406, "Not acceptable");
+		d->ps->respondError(e->i->peer, e->i->out_id,
+							Stanza::Error::NotAcceptable, "Not acceptable");
 	delete e->i;
 	d->activeList.removeAll(e);
 	delete e;
@@ -943,7 +955,7 @@ void S5BManager::item_accepted()
 	Item *i = (Item *)sender();
 	Entry *e = findEntry(i);
 
-	e->c->accepted(); // signal
+	emit e->c->accepted(); // signal
 }
 
 void S5BManager::item_tryingHosts(const StreamHostList &list)
@@ -1007,10 +1019,10 @@ void S5BManager::entryContinue(Entry *e)
 
 	if(e->c->isRemote()) {
 		const S5BRequest &req = e->c->d->req;
-		e->i->startTarget(e->sid, d->client->jid(), e->c->d->peer, req.hosts, req.id, req.fast, req.udp);
+		e->i->startTarget(e->sid, localPeer(e->c->d->peer), e->c->d->peer, req.hosts, req.id, req.fast, req.udp);
 	}
 	else {
-		e->i->startInitiator(e->sid, d->client->jid(), e->c->d->peer, true, e->c->d->mode == S5BConnection::Datagram ? true: false);
+		e->i->startInitiator(e->sid, localPeer(e->c->d->peer), e->c->d->peer, true, e->c->d->mode == S5BConnection::Datagram ? true: false);
 		e->c->requesting(); // signal
 	}
 }
@@ -1023,7 +1035,7 @@ void S5BManager::queryProxy(Entry *e)
 		return;
 
 #ifdef S5B_DEBUG
-	printf("querying proxy: [%s]\n", qPrintable(e->c->d->proxy.full()));
+	qDebug("querying proxy: [%s]\n", qPrintable(e->c->d->proxy.full()));
 #endif
 	e->query = new JT_S5B(d->client->rootTask());
 	connect(e->query, SIGNAL(finished()), SLOT(query_finished()));
@@ -1046,17 +1058,17 @@ void S5BManager::query_finished()
 	e->query = 0;
 
 #ifdef S5B_DEBUG
-	printf("query finished: ");
+	qDebug("query finished: ");
 #endif
 	if(query->success()) {
 		e->proxyInfo = query->proxyInfo();
 #ifdef S5B_DEBUG
-		printf("host/ip=[%s] port=[%d]\n", qPrintable(e->proxyInfo.host()), e->proxyInfo.port());
+		qDebug("host/ip=[%s] port=[%d]\n", qPrintable(e->proxyInfo.host()), e->proxyInfo.port());
 #endif
 	}
 	else {
 #ifdef S5B_DEBUG
-		printf("fail\n");
+		qDebug("fail\n");
 #endif
 	}
 
@@ -1159,7 +1171,7 @@ void S5BManager::Item::startInitiator(const QString &_sid, const Jid &_self, con
 	udp = _udp;
 
 #ifdef S5B_DEBUG
-	printf("S5BManager::Item initiating request %s [%s] (inhash=%s)\n", qPrintable(peer.full()), qPrintable(sid), qPrintable(key));
+	qDebug("S5BManager::Item initiating request %s [%s] (inhash=%s)\n", qPrintable(peer.full()), qPrintable(sid), qPrintable(key));
 #endif
 	state = Initiator;
 	doOutgoing();
@@ -1178,7 +1190,7 @@ void S5BManager::Item::startTarget(const QString &_sid, const Jid &_self, const 
 	udp = _udp;
 
 #ifdef S5B_DEBUG
-	printf("S5BManager::Item incoming request %s [%s] (inhash=%s)\n", qPrintable(peer.full()), qPrintable(sid), qPrintable(key));
+	qDebug("S5BManager::Item incoming request %s [%s] (inhash=%s)\n", qPrintable(peer.full()), qPrintable(sid), qPrintable(key));
 #endif
 	state = Target;
 	if(fast)
@@ -1191,13 +1203,13 @@ void S5BManager::Item::handleFast(const StreamHostList &hosts, const QString &iq
 	targetMode = Fast;
 
 	QPointer<QObject> self = this;
-	accepted();
+	emit accepted();
 	if(!self)
 		return;
 
 	// if we already have a stream, then bounce this request
 	if(client) {
-		m->doError(peer, iq_id, 406, "Not acceptable");
+		m->doError(peer, iq_id, Stanza::Error::NotAcceptable, "Not acceptable");
 	}
 	else {
 		in_hosts = hosts;
@@ -1210,11 +1222,11 @@ void S5BManager::Item::doOutgoing()
 {
 	StreamHostList hosts;
 	S5BServer *serv = m->server();
-	if(serv && serv->isActive() && !haveHost(in_hosts, m->client()->jid())) {
+	if(serv && serv->isActive() && !haveHost(in_hosts, self)) {
 		QStringList hostList = serv->hostList();
 		for(QStringList::ConstIterator it = hostList.begin(); it != hostList.end(); ++it) {
 			StreamHost h;
-			h.setJid(m->client()->jid());
+			h.setJid(self);
 			h.setHost(*it);
 			h.setPort(serv->port());
 			hosts += h;
@@ -1287,13 +1299,13 @@ void S5BManager::Item::doIncoming()
 	if(!self)
 		return;
 
-	conn->start(m->client()->jid(), list, out_key, udp, lateProxy ? 10 : 30);
+	conn->start(this->self, list, out_key, udp, lateProxy ? 10 : 30);
 }
 
 void S5BManager::Item::setIncomingClient(SocksClient *sc)
 {
 #ifdef S5B_DEBUG
-	printf("S5BManager::Item: %s [%s] successful incoming connection\n", qPrintable(peer.full()), qPrintable(sid));
+	qDebug("S5BManager::Item: %s [%s] successful incoming connection\n", qPrintable(peer.full()), qPrintable(sid));
 #endif
 
 	connect(sc, SIGNAL(readyRead()), SLOT(sc_readyRead()));
@@ -1318,14 +1330,14 @@ void S5BManager::Item::jt_finished()
 	task = 0;
 
 #ifdef S5B_DEBUG
-	printf("jt_finished: state=%s, %s\n", state == Initiator ? "initiator" : "target", j->success() ? "ok" : "fail");
+	qDebug("jt_finished: state=%s, %s\n", state == Initiator ? "initiator" : "target", j->success() ? "ok" : "fail");
 #endif
 
 	if(state == Initiator) {
 		if(targetMode == Unknown) {
 			targetMode = NotFast;
 			QPointer<QObject> self = this;
-			accepted();
+			emit accepted();
 			if(!self)
 				return;
 		}
@@ -1359,7 +1371,7 @@ void S5BManager::Item::jt_finished()
 			}
 			else {
 #ifdef S5B_DEBUG
-				printf("S5BManager::Item %s claims to have connected to us, but we don't see this\n", qPrintable(peer.full()));
+				qDebug("S5BManager::Item %s claims to have connected to us, but we don't see this\n", qPrintable(peer.full()));
 #endif
 				reset();
 				error(ErrWrongHost);
@@ -1372,7 +1384,7 @@ void S5BManager::Item::jt_finished()
 			allowIncoming = false;
 
 #ifdef S5B_DEBUG
-			printf("attempting to connect to proxy\n");
+			qDebug("attempting to connect to proxy\n");
 #endif
 			// connect to the proxy
 			proxy_conn = new S5BConnector;
@@ -1385,11 +1397,11 @@ void S5BManager::Item::jt_finished()
 			if(!self)
 				return;
 
-			proxy_conn->start(m->client()->jid(), list, key, udp, 30);
+			proxy_conn->start(this->self, list, key, udp, 30);
 		}
 		else {
 #ifdef S5B_DEBUG
-			printf("S5BManager::Item %s claims to have connected to a streamhost we never offered\n", qPrintable(peer.full()));
+			qDebug("S5BManager::Item %s claims to have connected to a streamhost we never offered\n", qPrintable(peer.full()));
 #endif
 			reset();
 			error(ErrWrongHost);
@@ -1397,7 +1409,7 @@ void S5BManager::Item::jt_finished()
 	}
 	else {
 #ifdef S5B_DEBUG
-		printf("S5BManager::Item %s [%s] error\n", qPrintable(peer.full()), qPrintable(sid));
+		qDebug("S5BManager::Item %s [%s] error\n", qPrintable(peer.full()), qPrintable(sid));
 #endif
 		remoteFailed = true;
 		statusCode = j->statusCode();
@@ -1427,7 +1439,8 @@ void S5BManager::Item::conn_result(bool b)
 		connSuccess = true;
 
 #ifdef S5B_DEBUG
-		printf("S5BManager::Item: %s [%s] successful outgoing connection\n", qPrintable(peer.full()), qPrintable(sid));
+		qDebug("S5BManager::Item: %s [%s] successful outgoing connection\n",
+			   qPrintable(peer.full()), qPrintable(sid));
 #endif
 
 		connect(sc, SIGNAL(readyRead()), SLOT(sc_readyRead()));
@@ -1473,7 +1486,7 @@ void S5BManager::Item::conn_result(bool b)
 void S5BManager::Item::proxy_result(bool b)
 {
 #ifdef S5B_DEBUG
-	printf("proxy_result: %s\n", b ? "ok" : "fail");
+	qDebug("proxy_result: %s\n", b ? "ok" : "fail");
 #endif
 	if(b) {
 		SocksClient *sc = proxy_conn->takeClient();
@@ -1490,7 +1503,7 @@ void S5BManager::Item::proxy_result(bool b)
 
 		// activate
 #ifdef S5B_DEBUG
-		printf("activating proxy stream\n");
+		qDebug("activating proxy stream\n");
 #endif
 		proxy_task = new JT_S5B(m->client()->rootTask());
 		connect(proxy_task, SIGNAL(finished()), SLOT(proxy_finished()));
@@ -1512,7 +1525,7 @@ void S5BManager::Item::proxy_finished()
 
 	if(j->success()) {
 #ifdef S5B_DEBUG
-		printf("proxy stream activated\n");
+		qDebug("proxy stream activated\n");
 #endif
 		if(state == Initiator) {
 			activatedStream = proxy.jid();
@@ -1530,7 +1543,7 @@ void S5BManager::Item::proxy_finished()
 void S5BManager::Item::sc_readyRead()
 {
 #ifdef S5B_DEBUG
-	printf("sc_readyRead\n");
+	qDebug("sc_readyRead\n");
 #endif
 	// only targets check for activation, and only should do it if there is no pending outgoing iq-set
 	if(state == Target && !task && !proxy_task)
@@ -1540,7 +1553,7 @@ void S5BManager::Item::sc_readyRead()
 void S5BManager::Item::sc_bytesWritten(int)
 {
 #ifdef S5B_DEBUG
-	printf("sc_bytesWritten\n");
+	qDebug("sc_bytesWritten\n");
 #endif
 	// this should only happen to the initiator, and should always be 1 byte (the '\r' sent earlier)
 	finished();
@@ -1549,7 +1562,7 @@ void S5BManager::Item::sc_bytesWritten(int)
 void S5BManager::Item::sc_error(int)
 {
 #ifdef S5B_DEBUG
-	printf("sc_error\n");
+	qDebug("sc_error\n");
 #endif
 	reset();
 	error(ErrConnect);
@@ -1558,25 +1571,26 @@ void S5BManager::Item::sc_error(int)
 void S5BManager::Item::doConnectError()
 {
 	localFailed = true;
-	m->doError(peer, in_id, 404, "Could not connect to given hosts");
+	m->doError(peer, in_id, Stanza::Error::RemoteServerNotFound,
+			   "Could not connect to given hosts");
 	checkFailure();
 }
 
 void S5BManager::Item::tryActivation()
 {
 #ifdef S5B_DEBUG
-	printf("tryActivation\n");
+	qDebug("tryActivation\n");
 #endif
 	if(activated) {
 #ifdef S5B_DEBUG
-		printf("already activated !?\n");
+		qDebug("already activated !?\n");
 #endif
 		return;
 	}
 
 	if(targetMode == NotFast) {
 #ifdef S5B_DEBUG
-		printf("tryActivation: NotFast\n");
+		qDebug("tryActivation: NotFast\n");
 #endif
 		// nothing to activate, we're done
 		finished();
@@ -1594,7 +1608,7 @@ void S5BManager::Item::tryActivation()
 		}
 		else {
 #ifdef S5B_DEBUG
-			printf("sending extra CR\n");
+			qDebug("sending extra CR\n");
 #endif
 			// must send [CR] to activate target streamhost
 			QByteArray a;
@@ -1614,7 +1628,7 @@ void S5BManager::Item::checkForActivation()
 		clientList.append(client_out);
 	foreach(SocksClient *sc, clientList) {
 #ifdef S5B_DEBUG
-		printf("checking for activation\n");
+		qDebug("checking for activation\n");
 #endif
 		if(fast) {
 			bool ok = false;
@@ -1626,7 +1640,7 @@ void S5BManager::Item::checkForActivation()
 			}
 			else {
 #ifdef S5B_DEBUG
-				printf("need CR\n");
+				qDebug("need CR\n");
 #endif
 				if(sc->bytesAvailable() >= 1) {
 					clientList.removeAll(sc);
@@ -1661,14 +1675,14 @@ void S5BManager::Item::checkForActivation()
 				client_udp = sc_udp;
 				activated = true;
 #ifdef S5B_DEBUG
-				printf("activation success\n");
+				qDebug("activation success\n");
 #endif
 				break;
 			}
 		}
 		else {
 #ifdef S5B_DEBUG
-			printf("not fast mode, no need to wait for anything\n");
+			qDebug("not fast mode, no need to wait for anything\n");
 #endif
 			clientList.removeAll(sc);
 			sc->disconnect(this);
@@ -1728,7 +1742,7 @@ void S5BManager::Item::finished()
 	client->disconnect(this);
 	state = Active;
 #ifdef S5B_DEBUG
-	printf("S5BManager::Item %s [%s] linked successfully\n", qPrintable(peer.full()), qPrintable(sid));
+	qDebug("S5BManager::Item %s [%s] linked successfully\n", qPrintable(peer.full()), qPrintable(sid));
 #endif
 	connected();
 }
@@ -1801,7 +1815,7 @@ private slots:
 	void sc_error(int)
 	{
 #ifdef S5B_DEBUG
-		printf("S5BConnector[%s]: error\n", qPrintable(host.host()));
+		qDebug("S5BConnector[%s]: error\n", qPrintable(host.host()));
 #endif
 		cleanup();
 		result(false);
@@ -1834,7 +1848,7 @@ private:
 	void success()
 	{
 #ifdef S5B_DEBUG
-		printf("S5BConnector[%s]: success\n", qPrintable(host.host()));
+		qDebug("S5BConnector[%s]: success\n", qPrintable(host.host()));
 #endif
 		client->disconnect(this);
 		result(true);
@@ -1884,7 +1898,7 @@ void S5BConnector::start(const Jid &self, const StreamHostList &hosts, const QSt
 	reset();
 
 #ifdef S5B_DEBUG
-	printf("S5BConnector: starting [%p]!\n", this);
+	qDebug("S5BConnector: starting [%p]!\n", this);
 #endif
 	for(StreamHostList::ConstIterator it = hosts.begin(); it != hosts.end(); ++it) {
 		Item *i = new Item(self, *it, key, udp);
@@ -1928,7 +1942,7 @@ void S5BConnector::item_result(bool b)
 		}
 		d->t.stop();
 #ifdef S5B_DEBUG
-		printf("S5BConnector: complete! [%p]\n", this);
+		qDebug("S5BConnector: complete! [%p]\n", this);
 #endif
 		result(true);
 	}
@@ -1938,7 +1952,7 @@ void S5BConnector::item_result(bool b)
 		if(d->itemList.isEmpty()) {
 			d->t.stop();
 #ifdef S5B_DEBUG
-			printf("S5BConnector: failed! [%p]\n", this);
+			qDebug("S5BConnector: failed! [%p]\n", this);
 #endif
 			result(false);
 		}
@@ -1949,7 +1963,7 @@ void S5BConnector::t_timeout()
 {
 	reset();
 #ifdef S5B_DEBUG
-	printf("S5BConnector: failed! (timeout)\n");
+	qDebug("S5BConnector: failed! (timeout)\n");
 #endif
 	result(false);
 }
@@ -2093,7 +2107,7 @@ void S5BServer::ss_incomingReady()
 {
 	Item *i = new Item(d->serv.takeIncoming());
 #ifdef S5B_DEBUG
-	printf("S5BServer: incoming connection from %s:%d\n", qPrintable(i->client->peerAddress().toString()), i->client->peerPort());
+	qDebug("S5BServer: incoming connection from %s:%d\n", qPrintable(i->client->peerAddress().toString()), i->client->peerPort());
 #endif
 	connect(i, SIGNAL(result(bool)), SLOT(item_result(bool)));
 	d->itemList.append(i);
@@ -2116,7 +2130,7 @@ void S5BServer::item_result(bool b)
 {
 	Item *i = (Item *)sender();
 #ifdef S5B_DEBUG
-	printf("S5BServer item result: %d\n", b);
+	qDebug("S5BServer item result: %d\n", b);
 #endif
 	if(!b) {
 		d->itemList.removeAll(i);
@@ -2139,7 +2153,7 @@ void S5BServer::item_result(bool b)
 	}
 
 #ifdef S5B_DEBUG
-	printf("S5BServer item result: unknown hash [%s]\n", qPrintable(key));
+	qDebug("S5BServer item result: unknown hash [%s]\n", qPrintable(key));
 #endif
 
 	// throw it away
@@ -2209,7 +2223,7 @@ void JT_S5B::request(const Jid &to, const QString &sid, const StreamHostList &ho
 	d->to = to;
 	iq = createIQ(doc(), "set", to.full(), id());
 	QDomElement query = doc()->createElement("query");
-	query.setAttribute("xmlns", "http://jabber.org/protocol/bytestreams");
+	query.setAttribute("xmlns", S5B_NS);
 	query.setAttribute("sid", sid);
 	query.setAttribute("mode", udp ? "udp" : "tcp" );
 	iq.appendChild(query);
@@ -2241,7 +2255,7 @@ void JT_S5B::requestProxyInfo(const Jid &to)
 	d->to = to;
 	iq = createIQ(doc(), "get", to.full(), id());
 	QDomElement query = doc()->createElement("query");
-	query.setAttribute("xmlns", "http://jabber.org/protocol/bytestreams");
+	query.setAttribute("xmlns", S5B_NS);
 	iq.appendChild(query);
 	d->iq = iq;
 }
@@ -2254,7 +2268,7 @@ void JT_S5B::requestActivation(const Jid &to, const QString &sid, const Jid &tar
 	d->to = to;
 	iq = createIQ(doc(), "set", to.full(), id());
 	QDomElement query = doc()->createElement("query");
-	query.setAttribute("xmlns", "http://jabber.org/protocol/bytestreams");
+	query.setAttribute("xmlns", S5B_NS);
 	query.setAttribute("sid", sid);
 	iq.appendChild(query);
 	QDomElement act = doc()->createElement("activate");
@@ -2370,7 +2384,7 @@ bool JT_PushS5B::take(const QDomElement &e)
 	// look for udpsuccess
 	if(e.tagName() == "message") {
 		QDomElement x = e.elementsByTagName("udpsuccess").item(0).toElement();
-		if(!x.isNull() && x.attribute("xmlns") == "http://jabber.org/protocol/bytestreams") {
+		if(!x.isNull() && x.attribute("xmlns") == S5B_NS) {
 			incomingUDPSuccess(Jid(x.attribute("from")), x.attribute("dstaddr"));
 			return true;
 		}
@@ -2387,7 +2401,7 @@ bool JT_PushS5B::take(const QDomElement &e)
 		return false;
 	if(e.attribute("type") != "set")
 		return false;
-	if(queryNS(e) != "http://jabber.org/protocol/bytestreams")
+	if(queryNS(e) != S5B_NS)
 		return false;
 
 	Jid from(e.attribute("from"));
@@ -2442,7 +2456,7 @@ void JT_PushS5B::respondSuccess(const Jid &to, const QString &id, const Jid &str
 {
 	QDomElement iq = createIQ(doc(), "result", to.full(), id);
 	QDomElement query = doc()->createElement("query");
-	query.setAttribute("xmlns", "http://jabber.org/protocol/bytestreams");
+	query.setAttribute("xmlns", S5B_NS);
 	iq.appendChild(query);
 	QDomElement shost = doc()->createElement("streamhost-used");
 	shost.setAttribute("jid", streamHost.full());
@@ -2450,12 +2464,12 @@ void JT_PushS5B::respondSuccess(const Jid &to, const QString &id, const Jid &str
 	send(iq);
 }
 
-void JT_PushS5B::respondError(const Jid &to, const QString &id, int code, const QString &str)
+void JT_PushS5B::respondError(const Jid &to, const QString &id,
+							  Stanza::Error::ErrorCond cond, const QString &str)
 {
 	QDomElement iq = createIQ(doc(), "error", to.full(), id);
-	QDomElement err = textTag(doc(), "error", str);
-	err.setAttribute("code", QString::number(code));
-	iq.appendChild(err);
+	Stanza::Error error(Stanza::Error::Cancel, cond, str);
+	iq.appendChild(error.toXml(*client()->doc(), client()->stream().baseNS()));
 	send(iq);
 }
 
@@ -2464,7 +2478,7 @@ void JT_PushS5B::sendUDPSuccess(const Jid &to, const QString &dstaddr)
 	QDomElement m = doc()->createElement("message");
 	m.setAttribute("to", to.full());
 	QDomElement u = doc()->createElement("udpsuccess");
-	u.setAttribute("xmlns", "http://jabber.org/protocol/bytestreams");
+	u.setAttribute("xmlns", S5B_NS);
 	u.setAttribute("dstaddr", dstaddr);
 	m.appendChild(u);
 	send(m);
