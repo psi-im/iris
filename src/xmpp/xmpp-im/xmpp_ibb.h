@@ -111,7 +111,7 @@ namespace XMPP
 		Client *client() const;
 
 		bool isAcceptableSID(const Jid &peer, const QString &sid) const;
-		IBBConnection *createConnection();
+		BSConnection *createConnection();
 		IBBConnection *takeIncoming();
 
 	public slots:

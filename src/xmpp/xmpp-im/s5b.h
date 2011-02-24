@@ -149,7 +149,7 @@ namespace XMPP
 		Jid localPeer(const Jid &peer) const;
 		bool isAcceptableSID(const Jid &peer, const QString &sid) const;
 
-		S5BConnection *createConnection();
+		BSConnection *createConnection();
 		S5BConnection *takeIncoming();
 
 		class Item;

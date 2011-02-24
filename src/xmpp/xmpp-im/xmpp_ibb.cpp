@@ -416,7 +416,7 @@ Client *IBBManager::client() const
 	return d->client;
 }
 
-IBBConnection *IBBManager::createConnection()
+BSConnection *IBBManager::createConnection()
 {
 	return new IBBConnection(this);
 }

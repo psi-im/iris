@@ -637,7 +637,7 @@ void S5BManager::setServer(S5BServer *serv)
 	}
 }
 
-S5BConnection *S5BManager::createConnection()
+BSConnection *S5BManager::createConnection()
 {
 	return new S5BConnection(this);
 }

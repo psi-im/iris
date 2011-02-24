@@ -27,6 +27,7 @@ namespace XMPP
 {
 	//class BSConnection;
 	class BSConnection;
+	class BytestreamManager;
 	struct FTRequest;
 
 	/*class AbstractFileTransfer 
@@ -108,6 +109,7 @@ namespace XMPP
 		~FileTransferManager();
 
 		bool isActive(const FileTransfer *ft) const;
+		void setDisabled(const QString &ns, bool state = true);
 
 		Client *client() const;
 		FileTransfer *createTransfer();
@@ -127,6 +129,8 @@ namespace XMPP
 		void stream_incomingReady(BSConnection *);
 
 		friend class FileTransfer;
+		BytestreamManager* streamManager(const QString &ns) const;
+		QStringList streamPriority() const;
 		QString link(FileTransfer *);
 		void con_accept(FileTransfer *);
 		void con_reject(FileTransfer *);

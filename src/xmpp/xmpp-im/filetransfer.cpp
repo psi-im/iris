@@ -24,6 +24,7 @@
 #include <QTimer>
 #include <QPointer>
 #include <QFileInfo>
+#include <QSet>
 #include "xmpp_xmlcommon.h"
 #include "s5b.h"
 #include "xmpp_ibb.h"
@@ -140,8 +141,7 @@ void FileTransfer::sendFile(const Jid &to, const QString &fname, qlonglong size,
 
 	d->ft = new JT_FT(d->m->client()->rootTask());
 	connect(d->ft, SIGNAL(finished()), SLOT(ft_finished()));
-	d->ft->request(to, d->id, fname, size, desc,
-				   QStringList() << S5BManager::ns() << IBBManager::ns() );
+	d->ft->request(to, d->id, fname, size, desc, d->m->streamPriority() );
 	d->ft->go(true);
 }
 
@@ -250,21 +250,24 @@ void FileTransfer::ft_finished()
 		if(d->length == 0)
 			d->length = d->size - d->rangeOffset;
 		d->streamType = ft->streamType();
-		if (d->streamType == S5BManager::ns()) {
-			d->c = d->m->client()->s5bManager()->createConnection();
-			if(d->proxy.isValid())
+		BytestreamManager *streamManager = d->m->streamManager(d->streamType);
+		if (streamManager) {
+			d->c = streamManager->createConnection();
+			if (dynamic_cast<S5BManager*>(streamManager) && d->proxy.isValid()) {
 				((S5BConnection*)(d->c))->setProxy(d->proxy);
-		}
-		else if (d->streamType == IBBManager::ns()) {
-			d->c = d->m->client()->ibbManager()->createConnection();
-		}
-		connect(d->c, SIGNAL(connected()), SLOT(stream_connected()));
-		connect(d->c, SIGNAL(connectionClosed()), SLOT(stream_connectionClosed()));
-		connect(d->c, SIGNAL(bytesWritten(int)), SLOT(stream_bytesWritten(int)));
-		connect(d->c, SIGNAL(error(int)), SLOT(stream_error(int)));
+			}
+			connect(d->c, SIGNAL(connected()), SLOT(stream_connected()));
+			connect(d->c, SIGNAL(connectionClosed()), SLOT(stream_connectionClosed()));
+			connect(d->c, SIGNAL(bytesWritten(int)), SLOT(stream_bytesWritten(int)));
+			connect(d->c, SIGNAL(error(int)), SLOT(stream_error(int)));
 
-		d->c->connectToJid(d->peer, d->id);
-		accepted();
+			d->c->connectToJid(d->peer, d->id);
+			accepted();
+		}
+		else {
+			emit error(Err400);
+			reset();
+		}
 	}
 	else {
 		if(ft->statusCode() == 403)
@@ -312,7 +315,7 @@ void FileTransfer::stream_readyRead()
 		a.resize((uint)need);
 	d->sent += a.size();
 	if(d->sent == d->length)
-		QTimer::singleShot(3000, this, SLOT(reset())); // wait 3 sec for close from other side
+		reset();
 	readyRead(a);
 }
 
@@ -361,6 +364,9 @@ class FileTransferManager::Private
 public:
 	Client *client;
 	QList<FileTransfer*> list, incoming;
+	QStringList streamPriority;
+	QHash<QString, BytestreamManager*> streamMap;
+	QSet<QString> disabledStreamTypes;
 	JT_PushFT *pft;
 };
 
@@ -369,6 +375,14 @@ FileTransferManager::FileTransferManager(Client *client)
 {
 	d = new Private;
 	d->client = client;
+	if (client->s5bManager()) {
+		d->streamPriority.append(S5BManager::ns());
+		d->streamMap[S5BManager::ns()] = client->s5bManager();
+	}
+	if (client->ibbManager()) {
+		d->streamPriority.append(IBBManager::ns());
+		d->streamMap[IBBManager::ns()] = client->ibbManager();
+	}
 
 	d->pft = new JT_PushFT(d->client->rootTask());
 	connect(d->pft, SIGNAL(incoming(const FTRequest &)), SLOT(pft_incoming(const FTRequest &)));
@@ -411,17 +425,22 @@ bool FileTransferManager::isActive(const FileTransfer *ft) const
 	return d->list.contains(const_cast<FileTransfer*>(ft)) > 0;
 }
 
+void FileTransferManager::setDisabled(const QString &ns, bool state)
+{
+	if (state) {
+		d->disabledStreamTypes.insert(ns);
+	}
+	else {
+		d->disabledStreamTypes.remove(ns);
+	}
+}
+
 void FileTransferManager::pft_incoming(const FTRequest &req)
 {
 	QString streamType;
 	foreach (const QString &ns, req.streamTypes) {
-		if (ns == S5BManager::ns() &&
-				d->client->s5bManager()->isAcceptableSID(req.from, req.id)) {
-			streamType = ns;
-			break;
-		}
-		if (ns == IBBManager::ns() &&
-				d->client->ibbManager()->isAcceptableSID(req.from, req.id)) {
+		BytestreamManager *manager = streamManager(ns);
+		if (manager && manager->isAcceptableSID(req.from, req.id)) {
 			streamType = ns;
 			break;
 		}
@@ -437,6 +456,25 @@ void FileTransferManager::pft_incoming(const FTRequest &req)
 	ft->man_waitForAccept(req, streamType);
 	d->incoming.append(ft);
 	incomingReady();
+}
+
+BytestreamManager* FileTransferManager::streamManager(const QString &ns) const
+{
+	if (d->disabledStreamTypes.contains(ns)) {
+		return 0;
+	}
+	return d->streamMap.value(ns);
+}
+
+QStringList FileTransferManager::streamPriority() const
+{
+	QStringList ret;
+	foreach (const QString &ns, d->streamPriority) {
+		if (!d->disabledStreamTypes.contains(ns)) {
+			ret.append(ns);
+		}
+	}
+	return ret;
 }
 
 void FileTransferManager::stream_incomingReady(BSConnection *c)

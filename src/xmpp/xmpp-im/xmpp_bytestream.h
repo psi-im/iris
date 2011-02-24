@@ -56,6 +56,7 @@ namespace XMPP
 
 		virtual bool isAcceptableSID(const Jid &peer, const QString &sid) const = 0;
 		QString genUniqueSID(const Jid &peer) const;
+		virtual BSConnection* createConnection() = 0;
 		virtual void deleteConnection(BSConnection *c, int msec = 0);
 
 	protected:
