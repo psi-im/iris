@@ -36,8 +36,11 @@ namespace XMPP
 		const QDomElement& body() const;
 		QString toString(const QString &rootTagName = "body") const;
 		QString text() const;
+		void filterOutUnwanted(bool strict = false);
 
 	private:
+		void filterOutUnwantedRecursive(QDomElement &el, bool strict);
+
 		QDomDocument doc_;
 		QDomElement body_;
 	};

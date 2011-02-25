@@ -880,6 +880,45 @@ QString HTMLElement::text() const
 	return body_.text();
 }
 
+void HTMLElement::filterOutUnwanted(bool strict)
+{
+	Q_UNUSED(strict) //TODO filter out not xhtml-im elements
+	filterOutUnwantedRecursive(body_, strict);
+}
+
+void HTMLElement::filterOutUnwantedRecursive(QDomElement &el, bool strict)
+{
+	Q_UNUSED(strict) //TODO filter out not xhtml-im elements
+
+	static QSet<QString> unwanted = QSet<QString>()<<"script"<<"iframe";
+	QDomNode child = el.firstChild();
+	while (!child.isNull()) {
+		QDomNode sibling = child.nextSibling();
+		if (child.isElement()) {
+			QDomElement childEl = child.toElement();
+			if (unwanted.contains(childEl.tagName())) {
+				child.parentNode().removeChild(child);
+			}
+			else {
+				QDomNamedNodeMap domAttrs = childEl.attributes();
+				int acnt = domAttrs.count();
+				QStringList attrs; //attributes for removing
+				for (int i=0; i<acnt; i++) {
+					QString name = domAttrs.item(i).toAttr().name();
+					if (name.startsWith("on")) {
+						attrs.append(name);
+					}
+				}
+				foreach(const QString &name, attrs) {
+					domAttrs.removeNamedItem(name);
+				}
+				filterOutUnwantedRecursive(childEl, strict);
+			}
+		}
+		child = sibling;
+	}
+}
+
 
 //----------------------------------------------------------------------------
 // Message
@@ -1000,7 +1039,7 @@ QString Message::lang() const
 //! \brief Return subject information.
 QString Message::subject(const QString &lang) const
 {
-	return d->subject[lang];
+	return d->subject.value(lang);
 }
 
 //! \brief Return body information.
@@ -1430,7 +1469,7 @@ Stanza Message::toStanza(Stream *stream) const
 	StringMap::ConstIterator it;
 	for(it = d->subject.begin(); it != d->subject.end(); ++it) {
 		const QString &str = (*it);
-		if(!str.isEmpty()) {
+		if(!str.isNull()) {
 			QDomElement e = s.createTextElement(s.baseNS(), "subject", str);
 			if(!it.key().isEmpty())
 				e.setAttributeNS(NS_XML, "xml:lang", it.key());
@@ -1737,6 +1776,7 @@ bool Message::fromStanza(const Stanza &s, bool useTimeZoneOffset, int timeZoneOf
 			if (e.tagName() == "body" && e.namespaceURI() == "http://www.w3.org/1999/xhtml") {
 				QString lang = e.attributeNS(NS_XML, "lang", "");
 				d->htmlElements[lang] = e;
+				d->htmlElements[lang].filterOutUnwanted(false); // just clear iframes and javascript event handlers
 			}
 		}
 	}
