@@ -99,8 +99,8 @@ namespace XMPP
 	signals:
 		void proxyQuery();                             // querying proxy for streamhost information
 		void proxyResult(bool b);                      // query success / fail
-		void requesting();                             // sent actual S5B request (initiator only)
-		void accepted();                               // target accepted (initiator only
+		void requesting();                             // sent actual S5B request (requester only)
+		void accepted();                               // target accepted (requester only
 		void tryingHosts(const StreamHostList &hosts); // currently connecting to these hosts
 		void proxyConnect();                           // connecting to proxy
 		void waitingForActivation();                   // waiting for activation (target only)
@@ -146,7 +146,6 @@ namespace XMPP
 		S5BServer *server() const;
 		void setServer(S5BServer *s);
 
-		Jid localPeer(const Jid &peer) const;
 		bool isAcceptableSID(const Jid &peer, const QString &sid) const;
 
 		BSConnection *createConnection();
@@ -275,7 +274,8 @@ namespace XMPP
 		JT_S5B(Task *);
 		~JT_S5B();
 
-		void request(const Jid &to, const QString &sid, const StreamHostList &hosts, bool fast, bool udp=false);
+		void request(const Jid &to, const QString &sid, const QString &dstaddr,
+					 const StreamHostList &hosts, bool fast, bool udp=false);
 		void requestProxyInfo(const Jid &to);
 		void requestActivation(const Jid &to, const QString &sid, const Jid &target);
 
@@ -297,7 +297,7 @@ namespace XMPP
 	struct S5BRequest
 	{
 		Jid from;
-		QString id, sid;
+		QString id, sid, dstaddr;
 		StreamHostList hosts;
 		bool fast;
 		bool udp;

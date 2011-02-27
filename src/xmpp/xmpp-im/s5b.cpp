@@ -44,13 +44,14 @@ static const char *S5B_NS = "http://jabber.org/protocol/bytestreams";
 
 namespace XMPP {
 
-static QString makeKey(const QString &sid, const Jid &initiator, const Jid &target)
+static QString makeKey(const QString &sid, const Jid &requester, const Jid &target)
 {
 #ifdef S5B_DEBUG
-	qDebug("makeKey: sid=%s initiator=%s target=%s", qPrintable(sid),
-		   qPrintable(initiator.full()), qPrintable(target.full()));
+	qDebug("makeKey: sid=%s requester=%s target=%s %s", qPrintable(sid),
+		   qPrintable(requester.full()), qPrintable(target.full()),
+		   qPrintable(QCA::Hash("sha1").hashToString((sid + requester.full() + target.full()).toUtf8())));
 #endif
-	QString str = sid + initiator.full() + target.full();
+	QString str = sid + requester.full() + target.full();
 	return QCA::Hash("sha1").hashToString(str.toUtf8());
 }
 
@@ -67,7 +68,7 @@ class S5BManager::Item : public QObject
 {
 	Q_OBJECT
 public:
-	enum { Idle, Initiator, Target, Active };
+	enum { Idle, Requester, Target, Active };
 	enum { ErrRefused, ErrConnect, ErrWrongHost, ErrProxy };
 	enum { Unknown, Fast, NotFast };
 	S5BManager *m;
@@ -81,7 +82,7 @@ public:
 	S5BConnector *conn, *proxy_conn;
 	bool wantFast;
 	StreamHost proxy;
-	int targetMode; // initiator sets this once it figures it out
+	int targetMode; // requester sets this once it figures it out
 	bool fast; // target sets this
 	bool activated;
 	bool lateProxy;
@@ -96,8 +97,10 @@ public:
 	~Item();
 
 	void reset();
-	void startInitiator(const QString &_sid, const Jid &_self, const Jid &_peer, bool fast, bool udp);
-	void startTarget(const QString &_sid, const Jid &_self, const Jid &_peer, const StreamHostList &hosts, const QString &iq_id, bool fast, bool udp);
+	void startRequester(const QString &_sid, const Jid &_self, const Jid &_peer, bool fast, bool udp);
+	void startTarget(const QString &_sid, const Jid &_self, const Jid &_peer,
+					 const QString &_dstaddr, const StreamHostList &hosts,
+					 const QString &iq_id, bool fast, bool udp);
 	void handleFast(const StreamHostList &hosts, const QString &iq_id);
 
 	void doOutgoing();
@@ -673,14 +676,14 @@ void S5BManager::ps_incoming(const S5BRequest &req)
 		if(e) {
 			if(e->i) {
 				// loopback
-				if(req.from.compare(localPeer(req.from)) && (req.id == e->i->out_id)) {
+				if(req.from.compare(d->client->jid()) && (req.id == e->i->out_id)) {
 #ifdef S5B_DEBUG
 					qDebug("ALLOWED: loopback\n");
 #endif
 					ok = true;
 				}
 				// allowed by 'fast mode'
-				else if(e->i->state == Item::Initiator && e->i->targetMode == Item::Unknown) {
+				else if(e->i->state == Item::Requester && e->i->targetMode == Item::Unknown) {
 #ifdef S5B_DEBUG
 					qDebug("ALLOWED: fast-mode\n");
 #endif
@@ -705,7 +708,7 @@ void S5BManager::ps_incoming(const S5BRequest &req)
 	c = new S5BConnection(this);
 	c->man_waitForAccept(req);
 	d->incomingConns.append(c);
-	incomingReady();
+	emit incomingReady();
 }
 
 void S5BManager::ps_incomingUDPSuccess(const Jid &from, const QString &key)
@@ -742,17 +745,10 @@ void S5BManager::doActivate(const Jid &peer, const QString &sid, const Jid &stre
 	d->ps->sendActivate(peer, sid, streamHost);
 }
 
-Jid S5BManager::localPeer(const Jid &peer) const
-{
-	QString gcNick = d->client->groupChatNick(peer.domain(), peer.node());
-	return gcNick.isEmpty() ? d->client->jid() : peer.withResource(gcNick);
-}
-
 bool S5BManager::isAcceptableSID(const Jid &peer, const QString &sid) const
 {
-	Jid lp = localPeer(peer);
-	QString key = makeKey(sid, lp, peer);
-	QString key_out = makeKey(sid, peer, lp);
+	QString key = makeKey(sid, d->client->jid(), peer);
+	QString key_out = makeKey(sid, peer, d->client->jid()); //not valid in muc via proxy
 
 	// if we have a server, then check through it
 	if(d->serv) {
@@ -1019,10 +1015,10 @@ void S5BManager::entryContinue(Entry *e)
 
 	if(e->c->isRemote()) {
 		const S5BRequest &req = e->c->d->req;
-		e->i->startTarget(e->sid, localPeer(e->c->d->peer), e->c->d->peer, req.hosts, req.id, req.fast, req.udp);
+		e->i->startTarget(e->sid, d->client->jid(), e->c->d->peer, req.dstaddr, req.hosts, req.id, req.fast, req.udp);
 	}
 	else {
-		e->i->startInitiator(e->sid, localPeer(e->c->d->peer), e->c->d->peer, true, e->c->d->mode == S5BConnection::Datagram ? true: false);
+		e->i->startRequester(e->sid, d->client->jid(), e->c->d->peer, true, e->c->d->mode == S5BConnection::Datagram ? true: false);
 		e->c->requesting(); // signal
 	}
 }
@@ -1085,14 +1081,14 @@ bool S5BManager::targetShouldOfferProxy(Entry *e)
 	if(!e->c->d->proxy.isValid())
 		return false;
 
-	// if target, don't offer any proxy if the initiator already did
+	// if target, don't offer any proxy if the requester already did
 	const StreamHostList &hosts = e->c->d->req.hosts;
 	for(StreamHostList::ConstIterator it = hosts.begin(); it != hosts.end(); ++it) {
 		if((*it).isProxy())
 			return false;
 	}
 
-	// ensure we don't offer the same proxy as the initiator
+	// ensure we don't offer the same proxy as the requester
 	if(haveHost(hosts, e->c->d->proxy))
 		return false;
 
@@ -1160,7 +1156,7 @@ void S5BManager::Item::reset()
 	udp = false;
 }
 
-void S5BManager::Item::startInitiator(const QString &_sid, const Jid &_self, const Jid &_peer, bool fast, bool _udp)
+void S5BManager::Item::startRequester(const QString &_sid, const Jid &_self, const Jid &_peer, bool fast, bool _udp)
 {
 	sid = _sid;
 	self = _self;
@@ -1173,11 +1169,14 @@ void S5BManager::Item::startInitiator(const QString &_sid, const Jid &_self, con
 #ifdef S5B_DEBUG
 	qDebug("S5BManager::Item initiating request %s [%s] (inhash=%s)\n", qPrintable(peer.full()), qPrintable(sid), qPrintable(key));
 #endif
-	state = Initiator;
+	state = Requester;
 	doOutgoing();
 }
 
-void S5BManager::Item::startTarget(const QString &_sid, const Jid &_self, const Jid &_peer, const StreamHostList &hosts, const QString &iq_id, bool _fast, bool _udp)
+void S5BManager::Item::startTarget(const QString &_sid, const Jid &_self,
+								   const Jid &_peer, const QString &_dstaddr,
+								   const StreamHostList &hosts, const QString &iq_id,
+								   bool _fast, bool _udp)
 {
 	sid = _sid;
 	peer = _peer;
@@ -1186,7 +1185,7 @@ void S5BManager::Item::startTarget(const QString &_sid, const Jid &_self, const 
 	in_id = iq_id;
 	fast = _fast;
 	key = makeKey(sid, self, peer);
-	out_key = makeKey(sid, peer, self);
+	out_key = _dstaddr.isEmpty() ? makeKey(sid, peer, self) : _dstaddr;
 	udp = _udp;
 
 #ifdef S5B_DEBUG
@@ -1247,7 +1246,7 @@ void S5BManager::Item::doOutgoing()
 
 	task = new JT_S5B(m->client()->rootTask());
 	connect(task, SIGNAL(finished()), SLOT(jt_finished()));
-	task->request(peer, sid, hosts, state == Initiator ? wantFast : false, udp);
+	task->request(peer, sid, key, hosts, state == Requester ? wantFast : false, udp);
 	out_id = task->id();
 	task->go(true);
 }
@@ -1270,7 +1269,7 @@ void S5BManager::Item::doIncoming()
 	}
 	else {
 		// only try doing the late proxy trick if using fast mode AND we did not offer a proxy
-		if((state == Initiator || (state == Target && fast)) && !proxy.jid().isValid()) {
+		if((state == Requester || (state == Target && fast)) && !proxy.jid().isValid()) {
 			// take just the non-proxy streamhosts
 			bool hasProxies = false;
 			for(StreamHostList::ConstIterator it = in_hosts.begin(); it != in_hosts.end(); ++it) {
@@ -1330,10 +1329,10 @@ void S5BManager::Item::jt_finished()
 	task = 0;
 
 #ifdef S5B_DEBUG
-	qDebug("jt_finished: state=%s, %s\n", state == Initiator ? "initiator" : "target", j->success() ? "ok" : "fail");
+	qDebug("jt_finished: state=%s, %s\n", state == Requester ? "requester" : "target", j->success() ? "ok" : "fail");
 #endif
 
-	if(state == Initiator) {
+	if(state == Requester) {
 		if(targetMode == Unknown) {
 			targetMode = NotFast;
 			QPointer<QObject> self = this;
@@ -1344,7 +1343,7 @@ void S5BManager::Item::jt_finished()
 	}
 
 	// if we've already reported successfully connecting to them, then this response doesn't matter
-	if(state == Initiator && connSuccess) {
+	if(state == Requester && connSuccess) {
 		tryActivation();
 		return;
 	}
@@ -1362,7 +1361,7 @@ void S5BManager::Item::jt_finished()
 		// they connected to us?
 		if(streamHost.compare(self)) {
 			if(client) {
-				if(state == Initiator) {
+				if(state == Requester) {
 					activatedStream = streamHost;
 					tryActivation();
 				}
@@ -1452,8 +1451,8 @@ void S5BManager::Item::conn_result(bool b)
 		// if the first batch works, don't try proxy
 		lateProxy = false;
 
-		// if initiator, run with this one
-		if(state == Initiator) {
+		// if requester, run with this one
+		if(state == Requester) {
 			// if we had an incoming one, toss it
 			delete client_udp;
 			client_udp = sc_udp;
@@ -1527,7 +1526,7 @@ void S5BManager::Item::proxy_finished()
 #ifdef S5B_DEBUG
 		qDebug("proxy stream activated\n");
 #endif
-		if(state == Initiator) {
+		if(state == Requester) {
 			activatedStream = proxy.jid();
 			tryActivation();
 		}
@@ -1555,7 +1554,7 @@ void S5BManager::Item::sc_bytesWritten(int)
 #ifdef S5B_DEBUG
 	qDebug("sc_bytesWritten\n");
 #endif
-	// this should only happen to the initiator, and should always be 1 byte (the '\r' sent earlier)
+	// this should only happen to the requester, and should always be 1 byte (the '\r' sent earlier)
 	finished();
 }
 
@@ -1709,7 +1708,7 @@ void S5BManager::Item::checkForActivation()
 void S5BManager::Item::checkFailure()
 {
 	bool failed = false;
-	if(state == Initiator) {
+	if(state == Requester) {
 		if(remoteFailed) {
 			if((localFailed && targetMode == Fast) || targetMode == NotFast)
 				failed = true;
@@ -1723,7 +1722,7 @@ void S5BManager::Item::checkFailure()
 	}
 
 	if(failed) {
-		if(state == Initiator) {
+		if(state == Requester) {
 			reset();
 			if(statusCode == 404)
 				error(ErrConnect);
@@ -2036,7 +2035,7 @@ private slots:
 		if(port == 0) {
 			host = _host;
 			client->disconnect(this);
-			result(true);
+			emit result(true);
 		}
 		else
 			doError();
@@ -2215,7 +2214,8 @@ JT_S5B::~JT_S5B()
 	delete d;
 }
 
-void JT_S5B::request(const Jid &to, const QString &sid, const StreamHostList &hosts, bool fast, bool udp)
+void JT_S5B::request(const Jid &to, const QString &sid, const QString &dstaddr,
+					 const StreamHostList &hosts, bool fast, bool udp)
 {
 	d->mode = 0;
 
@@ -2225,6 +2225,9 @@ void JT_S5B::request(const Jid &to, const QString &sid, const StreamHostList &ho
 	QDomElement query = doc()->createElement("query");
 	query.setAttribute("xmlns", S5B_NS);
 	query.setAttribute("sid", sid);
+	if (!client()->groupChatNick(to.domain(), to.node()).isEmpty()) {
+		query.setAttribute("dstaddr", dstaddr); // special case for muc as in xep-0065rc3
+	}
 	query.setAttribute("mode", udp ? "udp" : "tcp" );
 	iq.appendChild(query);
 	for(StreamHostList::ConstIterator it = hosts.begin(); it != hosts.end(); ++it) {
@@ -2444,11 +2447,12 @@ bool JT_PushS5B::take(const QDomElement &e)
 	r.from = from;
 	r.id = e.attribute("id");
 	r.sid = sid;
+	r.dstaddr = q.attribute("dstaddr"); // special case for muc as in xep-0065rc3
 	r.hosts = hosts;
 	r.fast = fast;
 	r.udp = q.attribute("mode") == "udp" ? true: false;
 
-	incoming(r);
+	emit incoming(r);
 	return true;
 }
 
