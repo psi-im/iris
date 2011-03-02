@@ -384,6 +384,13 @@ Jid Jid::withNode(const QString &s) const
 	return j;
 }
 
+Jid Jid::withDomain(const QString &s) const
+{
+	Jid j = *this;
+	j.setDomain(s);
+	return j;
+}
+
 Jid Jid::withResource(const QString &s) const
 {
 	Jid j = *this;
