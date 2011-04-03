@@ -759,6 +759,10 @@ static jdns_dnsparams_t *dnsparams_get_unixsys()
 		struct sockaddr_in6 *sa6;
 
 #ifdef USE_EXTEXT
+		// seems _ext.ext can be null in some cases...
+		if(RESVAR._u._ext.ext == NULL)
+			break;
+
 		sa6 = ((struct sockaddr_in6 *)RESVAR._u._ext.ext) + n;
 #else
 		sa6 = RESVAR._u._ext.nsaddrs[n];
