@@ -361,7 +361,7 @@ void Client::groupChatSetStatus(const QString &host, const QString &room, const 
 	j->go(true);
 }
 
-void Client::groupChatLeave(const QString &host, const QString &room)
+void Client::groupChatLeave(const QString &host, const QString &room, const QString &statusStr)
 {
 	Jid jid(room + "@" + host);
 	for(QList<GroupChat>::Iterator it = d->groupChatList.begin(); it != d->groupChatList.end(); it++) {
@@ -376,8 +376,26 @@ void Client::groupChatLeave(const QString &host, const QString &room)
 		JT_Presence *j = new JT_Presence(rootTask());
 		Status s;
 		s.setIsAvailable(false);
+		s.setStatus(statusStr);
 		j->pres(i.j, s);
 		j->go(true);
+	}
+}
+
+void Client::groupChatLeaveAll(const QString &statusStr)
+{
+	if (d->stream && d->active) {
+		for(QList<GroupChat>::Iterator it = d->groupChatList.begin(); it != d->groupChatList.end(); it++) {
+			GroupChat &i = *it;
+			i.status = GroupChat::Closing;
+
+			JT_Presence *j = new JT_Presence(rootTask());
+			Status s;
+			s.setIsAvailable(false);
+			s.setStatus(statusStr);
+			j->pres(i.j, s);
+			j->go(true);
+		}
 	}
 }
 
@@ -408,19 +426,6 @@ QString Client::groupChatNick(const QString &host, const QString &room) const
 void Client::close(bool)
 {
 	if(d->stream) {
-		if(d->active) {
-			for(QList<GroupChat>::Iterator it = d->groupChatList.begin(); it != d->groupChatList.end(); it++) {
-				GroupChat &i = *it;
-				i.status = GroupChat::Closing;
-
-				JT_Presence *j = new JT_Presence(rootTask());
-				Status s;
-				s.setIsAvailable(false);
-				j->pres(i.j, s);
-				j->go(true);
-			}
-		}
-
 		d->stream->disconnect(this);
 		d->stream->close();
 		d->stream = 0;

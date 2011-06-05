@@ -129,7 +129,8 @@ namespace XMPP
 		bool groupChatJoin(const QString &host, const QString &room, const QString &nick, const QString& password = QString(), int maxchars = -1, int maxstanzas = -1, int seconds = -1, const Status& = Status());
 		void groupChatSetStatus(const QString &host, const QString &room, const Status &);
 		void groupChatChangeNick(const QString &host, const QString &room, const QString &nick, const Status &);
-		void groupChatLeave(const QString &host, const QString &room);
+		void groupChatLeave(const QString &host, const QString &room, const QString &statusStr = QString());
+		void groupChatLeaveAll(const QString &statusStr = QString());
 		QString groupChatNick(const QString &host, const QString &room) const;
 
 	signals:
