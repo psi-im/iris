@@ -38,6 +38,8 @@ namespace XMPP {
 	class HTMLElement;
 	class HttpAuthRequest;
 	class XData;
+	class BoBData;
+	class IBBData;
 
 	typedef enum { OfflineEvent, DeliveredEvent, DisplayedEvent,
 			ComposingEvent, CancelEvent } MsgEvent;
@@ -135,6 +137,13 @@ namespace XMPP {
 		// JEP-xxxx SXE
 		void setSxe(const QDomElement&);
 		const QDomElement& sxe() const;
+
+		// XEP-0231 bits of binary
+		void addBoBData(const BoBData &);
+		QList<BoBData> bobDataList() const;
+
+		// XEP-0047 ibb
+		const IBBData& ibbData() const;
 
 		// MUC
 		void addMUCStatus(int);

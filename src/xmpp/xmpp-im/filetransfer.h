@@ -25,7 +25,9 @@
 
 namespace XMPP
 {
-	class S5BConnection;
+	//class BSConnection;
+	class BSConnection;
+	class BytestreamManager;
 	struct FTRequest;
 
 	/*class AbstractFileTransfer 
@@ -69,10 +71,10 @@ namespace XMPP
 
 		// both
 		void close(); // reject, or stop sending/receiving
-		S5BConnection *s5bConnection() const; // active link
+		BSConnection *bsConnection() const; // active link
 
 	signals:
-		void accepted(); // indicates S5BConnection has started
+		void accepted(); // indicates BSConnection has started
 		void connected();
 		void readyRead(const QByteArray &a);
 		void bytesWritten(int);
@@ -80,24 +82,23 @@ namespace XMPP
 
 	private slots:
 		void ft_finished();
-		void s5b_connected();
-		void s5b_connectionClosed();
-		void s5b_readyRead();
-		void s5b_bytesWritten(int);
-		void s5b_error(int);
+		void stream_connected();
+		void stream_connectionClosed();
+		void stream_readyRead();
+		void stream_bytesWritten(int);
+		void stream_error(int);
 		void doAccept();
+		void reset();
 
 	private:
 		class Private;
 		Private *d;
 
-		void reset();
-
 		friend class FileTransferManager;
 		FileTransfer(FileTransferManager *, QObject *parent=0);
 		FileTransfer(const FileTransfer& other);
-		void man_waitForAccept(const FTRequest &req);
-		void takeConnection(S5BConnection *c);
+		void man_waitForAccept(const FTRequest &req, const QString &streamType);
+		void takeConnection(BSConnection *c);
 	};
 
 	class FileTransferManager : public QObject
@@ -108,6 +109,7 @@ namespace XMPP
 		~FileTransferManager();
 
 		bool isActive(const FileTransfer *ft) const;
+		void setDisabled(const QString &ns, bool state = true);
 
 		Client *client() const;
 		FileTransfer *createTransfer();
@@ -124,9 +126,11 @@ namespace XMPP
 		Private *d;
 
 		friend class Client;
-		void s5b_incomingReady(S5BConnection *);
+		void stream_incomingReady(BSConnection *);
 
 		friend class FileTransfer;
+		BytestreamManager* streamManager(const QString &ns) const;
+		QStringList streamPriority() const;
 		QString link(FileTransfer *);
 		void con_accept(FileTransfer *);
 		void con_reject(FileTransfer *);
@@ -171,7 +175,8 @@ namespace XMPP
 		~JT_PushFT();
 
 		void respondSuccess(const Jid &to, const QString &id, qlonglong rangeOffset, qlonglong rangeLength, const QString &streamType);
-		void respondError(const Jid &to, const QString &id, int code, const QString &str);
+		void respondError(const Jid &to, const QString &id,
+						  Stanza::Error::ErrorCond cond, const QString &str);
 
 		bool take(const QDomElement &);
 

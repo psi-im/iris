@@ -18,15 +18,15 @@
  *
  */
 
-#include "im.h"
-#include "xmpp_features.h"
-
-#include <qmap.h>
-#include <qapplication.h>
-//Added by qt3to4:
+#include <QMap>
+#include <QApplication>
 #include <QList>
 
+#include "im.h"
+#include "xmpp_features.h"
 #include "xmpp_xmlcommon.h"
+#include "xmpp_bitsofbinary.h"
+#include "xmpp_ibb.h"
 #define NS_XML     "http://www.w3.org/XML/1998/namespace"
 
 namespace XMPP
@@ -880,6 +880,45 @@ QString HTMLElement::text() const
 	return body_.text();
 }
 
+void HTMLElement::filterOutUnwanted(bool strict)
+{
+	Q_UNUSED(strict) //TODO filter out not xhtml-im elements
+	filterOutUnwantedRecursive(body_, strict);
+}
+
+void HTMLElement::filterOutUnwantedRecursive(QDomElement &el, bool strict)
+{
+	Q_UNUSED(strict) //TODO filter out not xhtml-im elements
+
+	static QSet<QString> unwanted = QSet<QString>()<<"script"<<"iframe";
+	QDomNode child = el.firstChild();
+	while (!child.isNull()) {
+		QDomNode sibling = child.nextSibling();
+		if (child.isElement()) {
+			QDomElement childEl = child.toElement();
+			if (unwanted.contains(childEl.tagName())) {
+				child.parentNode().removeChild(child);
+			}
+			else {
+				QDomNamedNodeMap domAttrs = childEl.attributes();
+				int acnt = domAttrs.count();
+				QStringList attrs; //attributes for removing
+				for (int i=0; i<acnt; i++) {
+					QString name = domAttrs.item(i).toAttr().name();
+					if (name.startsWith("on")) {
+						attrs.append(name);
+					}
+				}
+				foreach(const QString &name, attrs) {
+					domAttrs.removeNamedItem(name);
+				}
+				filterOutUnwantedRecursive(childEl, strict);
+			}
+		}
+		child = sibling;
+	}
+}
+
 
 //----------------------------------------------------------------------------
 // Message
@@ -912,8 +951,10 @@ public:
 	QString nick;
 	HttpAuthRequest httpAuthRequest;
 	XData xdata;
+	IBBData ibbData;
 	QMap<QString,HTMLElement> htmlElements;
  	QDomElement sxe;
+	QList<BoBData> bobDataList;
 	
 	QList<int> mucStatuses;
 	QList<MUCInvite> mucInvites;
@@ -998,7 +1039,7 @@ QString Message::lang() const
 //! \brief Return subject information.
 QString Message::subject(const QString &lang) const
 {
-	return d->subject[lang];
+	return d->subject.value(lang);
 }
 
 //! \brief Return body information.
@@ -1380,6 +1421,21 @@ void Message::setSxe(const QDomElement& e)
 	d->sxe = e;
 }
 
+void Message::addBoBData(const BoBData &bob)
+{
+	d->bobDataList.append(bob);
+}
+
+QList<BoBData> Message::bobDataList() const
+{
+	return d->bobDataList;
+}
+
+const IBBData& Message::ibbData() const
+{
+	return d->ibbData;
+}
+
 bool Message::spooled() const
 {
 	return d->spooled;
@@ -1413,7 +1469,7 @@ Stanza Message::toStanza(Stream *stream) const
 	StringMap::ConstIterator it;
 	for(it = d->subject.begin(); it != d->subject.end(); ++it) {
 		const QString &str = (*it);
-		if(!str.isEmpty()) {
+		if(!str.isNull()) {
 			QDomElement e = s.createTextElement(s.baseNS(), "subject", str);
 			if(!it.key().isEmpty())
 				e.setAttributeNS(NS_XML, "xml:lang", it.key());
@@ -1606,6 +1662,11 @@ Stanza Message::toStanza(Stream *stream) const
 		s.appendChild(d->xdata.toXml(&s.doc(), submit));
 	}
 
+	// bits of binary
+	foreach(const BoBData &bd, d->bobDataList) {
+		s.appendChild(bd.toXml(&s.doc()));
+	}
+
 	return s;
 }
 
@@ -1700,6 +1761,12 @@ bool Message::fromStanza(const Stanza &s, bool useTimeZoneOffset, int timeZoneOf
 	if(s.type() == "error")
 		d->error = s.error();
 
+	// Bits of Binary XEP-0231
+	nl = childElementsByTagNameNS(root, "urn:xmpp:bob", "data");
+	for(n = 0; n < nl.count(); ++n) {
+		addBoBData(BoBData(nl.item(n).toElement()));
+	}
+
 	// xhtml-im
 	nl = childElementsByTagNameNS(root, "http://jabber.org/protocol/xhtml-im", "html");
 	if (nl.count()) {
@@ -1709,6 +1776,7 @@ bool Message::fromStanza(const Stanza &s, bool useTimeZoneOffset, int timeZoneOf
 			if (e.tagName() == "body" && e.namespaceURI() == "http://www.w3.org/1999/xhtml") {
 				QString lang = e.attributeNS(NS_XML, "lang", "");
 				d->htmlElements[lang] = e;
+				d->htmlElements[lang].filterOutUnwanted(false); // just clear iframes and javascript event handlers
 			}
 		}
 	}
@@ -1883,8 +1951,13 @@ bool Message::fromStanza(const Stanza &s, bool useTimeZoneOffset, int timeZoneOf
 
 	// data form
 	t = childElementsByTagNameNS(root, "jabber:x:data", "x").item(0).toElement();
-	if(!t.isNull()){
+	if (!t.isNull()) {
 		d->xdata.fromXml(t);
+	}
+
+	t = childElementsByTagNameNS(root, IBBManager::ns(), "data").item(0).toElement();
+	if (!t.isNull()) {
+		d->ibbData.fromXml(t);
 	}
 
 	return true;
@@ -2262,6 +2335,16 @@ void Status::setPhotoHash(const QString& h)
 bool Status::hasPhotoHash() const
 {
 	return v_hasPhotoHash;
+}
+
+void Status::addBoBData(const BoBData &bob)
+{
+	v_bobDataList.append(bob);
+}
+
+QList<BoBData> Status::bobDataList() const
+{
+	return v_bobDataList;
 }
 
 bool Status::isAvailable() const

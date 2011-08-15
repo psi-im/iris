@@ -33,6 +33,7 @@ using namespace XMPP;
 
 static int num_conn = 0;
 static int id_conn = 0;
+static const char *IBB_NS = "http://jabber.org/protocol/ibb";
 
 //----------------------------------------------------------------------------
 // IBBConnection
@@ -43,32 +44,35 @@ public:
 	Private() {}
 
 	int state;
+	quint16 seq;
 	Jid peer;
 	QString sid;
 	IBBManager *m;
 	JT_IBB *j;
-	QDomElement comment;
 	QString iq_id;
+	QString stanza;
 
 	int blockSize;
-	QByteArray recvbuf, sendbuf;
+	QByteArray recvBuf, sendBuf;
 	bool closePending, closing;
 
-	int id;
+	int id; // connection id
 };
 
 IBBConnection::IBBConnection(IBBManager *m)
-:ByteStream(m)
+	: BSConnection(m)
 {
 	d = new Private;
 	d->m = m;
 	d->j = 0;
+	d->blockSize = IBB_PACKET_SIZE;
 	reset();
 
 	++num_conn;
 	d->id = id_conn++;
-	QString dstr; dstr.sprintf("IBBConnection[%d]: constructing, count=%d\n", d->id, num_conn);
-	d->m->client()->debug(dstr);
+#ifdef IBB_DEBUG
+	qDebug("IBBConnection[%d]: constructing, count=%d", d->id, num_conn);
+#endif
 }
 
 void IBBConnection::reset(bool clear)
@@ -77,41 +81,45 @@ void IBBConnection::reset(bool clear)
 	d->state = Idle;
 	d->closePending = false;
 	d->closing = false;
+	d->seq = 0;
 
 	delete d->j;
 	d->j = 0;
 
-	d->sendbuf.resize(0);
+	d->sendBuf.clear();
 	if(clear)
-		d->recvbuf.resize(0);
+		d->recvBuf.clear();
 }
 
 IBBConnection::~IBBConnection()
 {
-	reset(true);
+	d->sendBuf.clear(); // drop buffer to make closing procedure fast
+	close();
 
 	--num_conn;
-	QString dstr; dstr.sprintf("IBBConnection[%d]: destructing, count=%d\n", d->id, num_conn);
-	d->m->client()->debug(dstr);
+#ifdef IBB_DEBUG
+	qDebug("IBBConnection[%d]: destructing, count=%d", d->id, num_conn);
+#endif
 
 	delete d;
 }
 
-void IBBConnection::connectToJid(const Jid &peer, const QDomElement &comment)
+void IBBConnection::connectToJid(const Jid &peer, const QString &sid)
 {
 	close();
 	reset(true);
 
 	d->state = Requesting;
 	d->peer = peer;
-	d->comment = comment;
+	d->sid = sid;
 
-	QString dstr; dstr.sprintf("IBBConnection[%d]: initiating request to %s\n", d->id, peer.full().toLatin1().data());
-	d->m->client()->debug(dstr);
+#ifdef IBB_DEBUG
+	qDebug("IBBConnection[%d]: initiating request to %s", d->id, qPrintable(peer.full()));
+#endif
 
 	d->j = new JT_IBB(d->m->client()->rootTask());
 	connect(d->j, SIGNAL(finished()), SLOT(ibb_finished()));
-	d->j->request(d->peer, comment);
+	d->j->request(d->peer, d->sid);
 	d->j->go(true);
 }
 
@@ -120,12 +128,16 @@ void IBBConnection::accept()
 	if(d->state != WaitingForAccept)
 		return;
 
-	QString dstr; dstr.sprintf("IBBConnection[%d]: accepting %s [%s]\n", d->id, d->peer.full().toLatin1().data(), d->sid.toLatin1().data());
-	d->m->client()->debug(dstr);
+#ifdef IBB_DEBUG
+	qDebug("IBBConnection[%d]: accepting %s [%s]", d->id,
+		   qPrintable(d->peer.full()), qPrintable(d->sid));
+#endif
 
 	d->m->doAccept(this, d->iq_id);
 	d->state = Active;
 	d->m->link(this);
+
+	emit connected(); // to be compatible with S5B
 }
 
 void IBBConnection::close()
@@ -134,26 +146,23 @@ void IBBConnection::close()
 		return;
 
 	if(d->state == WaitingForAccept) {
-		d->m->doReject(this, d->iq_id, 403, "Rejected");
+		d->m->doReject(this, d->iq_id, Stanza::Error::Forbidden, "Rejected");
 		reset();
 		return;
 	}
 
-	QString dstr; dstr.sprintf("IBBConnection[%d]: closing\n", d->id);
-	d->m->client()->debug(dstr);
+#ifdef IBB_DEBUG
+	qDebug("IBBConnection[%d]: closing", d->id);
+#endif
 
 	if(d->state == Active) {
+		d->closePending = true;
+		trySend();
+
 		// if there is data pending to be written, then pend the closing
 		if(bytesToWrite() > 0) {
-			d->closePending = true;
-			trySend();
 			return;
 		}
-
-		// send a close packet
-		JT_IBB *j = new JT_IBB(d->m->client()->rootTask());
-		j->sendData(d->peer, d->sid, QByteArray(), true);
-		j->go(true);
 	}
 
 	reset();
@@ -169,14 +178,14 @@ Jid IBBConnection::peer() const
 	return d->peer;
 }
 
-QString IBBConnection::streamid() const
+QString IBBConnection::sid() const
 {
 	return d->sid;
 }
 
-QDomElement IBBConnection::comment() const
+BytestreamManager* IBBConnection::manager() const
 {
-	return d->comment;
+	return d->m;
 }
 
 bool IBBConnection::isOpen() const
@@ -192,57 +201,64 @@ void IBBConnection::write(const QByteArray &a)
 	if(d->state != Active || d->closePending || d->closing)
 		return;
 
-	// append to the end of our send buffer
-	int oldsize = d->sendbuf.size();
-	d->sendbuf.resize(oldsize + a.size());
-	memcpy(d->sendbuf.data() + oldsize, a.data(), a.size());
-
+	d->sendBuf += a;
 	trySend();
 }
 
 QByteArray IBBConnection::read(int)
 {
 	// TODO: obey argument
-	QByteArray a = d->recvbuf;
-	d->recvbuf.resize(0);
+	QByteArray a = d->recvBuf;
+	d->recvBuf.resize(0);
 	return a;
 }
 
 int IBBConnection::bytesAvailable() const
 {
-	return d->recvbuf.size();
+	return d->recvBuf.size();
 }
 
 int IBBConnection::bytesToWrite() const
 {
-	return d->sendbuf.size();
+	return d->sendBuf.size();
 }
 
-void IBBConnection::waitForAccept(const Jid &peer, const QString &sid, const QDomElement &comment, const QString &iq_id)
+void IBBConnection::waitForAccept(const Jid &peer, const QString &iq_id,
+								  const QString &sid, int blockSize,
+								  const QString &stanza)
 {
 	close();
 	reset(true);
 
 	d->state = WaitingForAccept;
 	d->peer = peer;
-	d->sid = sid;
-	d->comment = comment;
 	d->iq_id = iq_id;
+	d->sid = sid;
+	d->blockSize = blockSize;
+	d->stanza = stanza;
+
 }
 
-void IBBConnection::takeIncomingData(const QByteArray &a, bool close)
+void IBBConnection::takeIncomingData(const IBBData &ibbData)
 {
-	// append to the end of our recv buffer
-	int oldsize = d->recvbuf.size();
-	d->recvbuf.resize(oldsize + a.size());
-	memcpy(d->recvbuf.data() + oldsize, a.data(), a.size());
+	if (ibbData.seq != d->seq) {
+		d->m->doReject(this, d->iq_id, Stanza::Error::UnexpectedRequest, "Invalid sequence");
+		return;
+	}
+	if (ibbData.data.size() > d->blockSize) {
+		d->m->doReject(this, d->iq_id, Stanza::Error::BadRequest, "Too much data");
+		return;
+	}
+	d->seq++;
+	d->recvBuf += ibbData.data;
 
 	readyRead();
+}
 
-	if(close) {
-		reset();
-		connectionClosed();
-	}
+void IBBConnection::setRemoteClosed()
+{
+	reset();
+	emit connectionClosed();
 }
 
 void IBBConnection::ibb_finished()
@@ -252,32 +268,32 @@ void IBBConnection::ibb_finished()
 
 	if(j->success()) {
 		if(j->mode() == JT_IBB::ModeRequest) {
-			d->sid = j->streamid();
 
-			QString dstr; dstr.sprintf("IBBConnection[%d]: %s [%s] accepted.\n", d->id, d->peer.full().toLatin1().data(), d->sid.toLatin1().data());
-			d->m->client()->debug(dstr);
-
+#ifdef IBB_DEBUG
+			qDebug("IBBConnection[%d]: %s [%s] accepted.", d->id,
+				   qPrintable(d->peer.full()), qPrintable(d->sid));
+#endif
 			d->state = Active;
 			d->m->link(this);
-			connected();
+			emit connected();
 		}
 		else {
-			bytesWritten(d->blockSize);
-
 			if(d->closing) {
 				reset();
-				delayedCloseFinished();
+				emit delayedCloseFinished();
 			}
 
-			if(!d->sendbuf.isEmpty() || d->closePending)
+			if(!d->sendBuf.isEmpty() || d->closePending)
 				QTimer::singleShot(IBB_PACKET_DELAY, this, SLOT(trySend()));
+
+			bytesWritten(j->bytesWritten()); // will delete this connection if no bytes left.
 		}
 	}
 	else {
 		if(j->mode() == JT_IBB::ModeRequest) {
-			QString dstr; dstr.sprintf("IBBConnection[%d]: %s refused.\n", d->id, d->peer.full().toLatin1().data());
-			d->m->client()->debug(dstr);
-
+#ifdef IBB_DEBUG
+			qDebug("IBBConnection[%d]: %s refused.", d->id, qPrintable(d->peer.full()));
+#endif
 			reset(true);
 			error(ErrRequest);
 		}
@@ -294,43 +310,58 @@ void IBBConnection::trySend()
 	if(d->j)
 		return;
 
-	QByteArray a;
-	if(!d->sendbuf.isEmpty()) {
-		// take a chunk
-		if(d->sendbuf.size() < IBB_PACKET_SIZE)
-			a.resize(d->sendbuf.size());
-		else
-			a.resize(IBB_PACKET_SIZE);
-		memcpy(a.data(), d->sendbuf.data(), a.size());
-		d->sendbuf.resize(d->sendbuf.size() - a.size());
-	}
+	QByteArray a = d->sendBuf.left(d->blockSize); // IBB_PACKET_SIZE
+	d->sendBuf.remove(0, a.size());
 
-	bool doClose = false;
-	if(d->sendbuf.isEmpty() && d->closePending)
-		doClose = true;
-
-	// null operation?
-	if(a.isEmpty() && !doClose)
-		return;
-
-	printf("IBBConnection[%d]: sending [%d] bytes ", d->id, a.size());
-	if(doClose)
-		printf("and closing.\n");
-	else
-		printf("(%d bytes left)\n", d->sendbuf.size());
-
-	if(doClose) {
+	if(a.isEmpty()) {
+		if (!d->closePending)
+			return; // null operation?
 		d->closePending = false;
 		d->closing = true;
+#ifdef IBB_DEBUG
+		qDebug("IBBConnection[%d]: closing", d->id);
+#endif
+	}
+	else {
+#ifdef IBB_DEBUG
+		qDebug("IBBConnection[%d]: sending [%d] bytes (%d bytes left)",
+			   d->id, a.size(), d->sendBuf.size());
+#endif
 	}
 
-	d->blockSize = a.size();
 	d->j = new JT_IBB(d->m->client()->rootTask());
 	connect(d->j, SIGNAL(finished()), SLOT(ibb_finished()));
-	d->j->sendData(d->peer, d->sid, a, doClose);
+	if (d->closing) {
+		d->j->close(d->peer, d->sid);
+	}
+	else {
+		d->j->sendData(d->peer, IBBData(d->sid, d->seq++, a));
+	}
 	d->j->go(true);
 }
 
+
+
+//----------------------------------------------------------------------------
+// IBBData
+//----------------------------------------------------------------------------
+IBBData& IBBData::fromXml(const QDomElement &e)
+{
+	sid = e.attribute("sid"),
+	seq = e.attribute("seq").toInt(),
+	data = QCA::Base64().stringToArray(e.text()).toByteArray();
+	return *this;
+}
+
+QDomElement IBBData::toXml(QDomDocument *doc) const
+{
+	QDomElement query = textTag(doc, "data",
+						QCA::Base64().arrayToString(data)).toElement();
+	query.setAttribute("xmlns", IBB_NS);
+	query.setAttribute("seq", QString::number(seq));
+	query.setAttribute("sid", sid);
+	return query;
+}
 
 //----------------------------------------------------------------------------
 // IBBManager
@@ -347,23 +378,37 @@ public:
 };
 
 IBBManager::IBBManager(Client *parent)
-:QObject(parent)
+	: BytestreamManager(parent)
 {
 	d = new Private;
 	d->client = parent;
 	
 	d->ibb = new JT_IBB(d->client->rootTask(), true);
-	connect(d->ibb, SIGNAL(incomingRequest(const Jid &, const QString &, const QDomElement &)), SLOT(ibb_incomingRequest(const Jid &, const QString &, const QDomElement &)));
-	connect(d->ibb, SIGNAL(incomingData(const Jid &, const QString &, const QString &, const QByteArray &, bool)), SLOT(ibb_incomingData(const Jid &, const QString &, const QString &, const QByteArray &, bool)));
+	connect(d->ibb,
+			SIGNAL(incomingRequest(const Jid &, const QString &,
+								   const QString &, int, const QString &)),
+			SLOT(ibb_incomingRequest(const Jid &, const QString &,
+									 const QString &, int,
+									 const QString &)));
+	connect(d->ibb,
+			SIGNAL(incomingData(const Jid &, const QString &, const IBBData &, Stanza::Kind)),
+			SLOT(takeIncomingData(const Jid &, const QString &, const IBBData &, Stanza::Kind)));
+	connect(d->ibb,
+			SIGNAL(closeRequest(const Jid &, const QString &, const QString &)),
+			SLOT(ibb_closeRequest(const Jid &, const QString &, const QString &)));
 }
 
 IBBManager::~IBBManager()
 {
-	while (!d->incomingConns.isEmpty()) {
-		delete d->incomingConns.takeFirst();
-	}
+	qDeleteAll(d->incomingConns);
+	d->incomingConns.clear();
 	delete d->ibb;
 	delete d;
+}
+
+const char* IBBManager::ns()
+{
+	return IBB_NS;
 }
 
 Client *IBBManager::client() const
@@ -371,66 +416,66 @@ Client *IBBManager::client() const
 	return d->client;
 }
 
+BSConnection *IBBManager::createConnection()
+{
+	return new IBBConnection(this);
+}
+
 IBBConnection *IBBManager::takeIncoming()
 {
-	if(d->incomingConns.isEmpty())
-		return 0;
-
-	IBBConnection *c = d->incomingConns.takeFirst();
-	return c;
+	return d->incomingConns.isEmpty()? 0 : d->incomingConns.takeFirst();
 }
 
-void IBBManager::ibb_incomingRequest(const Jid &from, const QString &id, const QDomElement &comment)
+void IBBManager::ibb_incomingRequest(const Jid &from, const QString &id,
+									 const QString &sid, int blockSize,
+									 const QString &stanza)
 {
-	QString sid = genUniqueKey();
-
 	// create a "waiting" connection
 	IBBConnection *c = new IBBConnection(this);
-	c->waitForAccept(from, sid, comment, id);
+	c->waitForAccept(from, id, sid, blockSize, stanza);
 	d->incomingConns.append(c);
-	incomingReady();
+	emit incomingReady();
 }
 
-void IBBManager::ibb_incomingData(const Jid &from, const QString &streamid, const QString &id, const QByteArray &data, bool close)
+void IBBManager::takeIncomingData(const Jid &from, const QString &id,
+								  const IBBData &data, Stanza::Kind sKind)
 {
-	IBBConnection *c = findConnection(streamid, from);
+	IBBConnection *c = findConnection(data.sid, from);
 	if(!c) {
-		d->ibb->respondError(from, id, 404, "No such stream");
+		if (sKind == Stanza::IQ) {
+			d->ibb->respondError(from, id, Stanza::Error::ItemNotFound, "No such stream");
+		}
+		// TODO imeplement xep-0079 error processing in case of Stanza::Message
+	}
+	else {
+		if (sKind == Stanza::IQ) {
+			d->ibb->respondAck(from, id);
+		}
+		c->takeIncomingData(data);
+	}
+}
+
+void IBBManager::ibb_closeRequest(const Jid &from, const QString &id,
+								  const QString &sid)
+{
+	IBBConnection *c = findConnection(sid, from);
+	if(!c) {
+		d->ibb->respondError(from, id, Stanza::Error::ItemNotFound, "No such stream");
 	}
 	else {
 		d->ibb->respondAck(from, id);
-		c->takeIncomingData(data, close);
+		c->setRemoteClosed();
 	}
 }
 
-QString IBBManager::genKey() const
+bool IBBManager::isAcceptableSID(const XMPP::Jid &jid, const QString&sid) const
 {
-	QString key = "ibb_";
-
-	for(int i = 0; i < 4; ++i) {
-		int word = rand() & 0xffff;
-		for(int n = 0; n < 4; ++n) {
-			QString s;
-			s.sprintf("%x", (word >> (n * 4)) & 0xf);
-			key.append(s);
-		}
-	}
-
-	return key;
+	return findConnection(sid, jid) == NULL;
 }
 
-QString IBBManager::genUniqueKey() const
+const char* IBBManager::sidPrefix() const
 {
-	// get unused key
-	QString key;
-	while(1) {
-		key = genKey();
-
-		if(!findConnection(key))
-			break;
-	}
-
-	return key;
+	return "ibb_";
 }
 
 void IBBManager::link(IBBConnection *c)
@@ -446,7 +491,7 @@ void IBBManager::unlink(IBBConnection *c)
 IBBConnection *IBBManager::findConnection(const QString &sid, const Jid &peer) const
 {
 	foreach(IBBConnection* c, d->activeConns) {
-		if(c->streamid() == sid && (peer.isEmpty() || c->peer().compare(peer)) )
+		if(c->sid() == sid && (peer.isEmpty() || c->peer().compare(peer)) )
 			return c;
 	}
 	return 0;
@@ -454,12 +499,13 @@ IBBConnection *IBBManager::findConnection(const QString &sid, const Jid &peer) c
 
 void IBBManager::doAccept(IBBConnection *c, const QString &id)
 {
-	d->ibb->respondSuccess(c->peer(), id, c->streamid());
+	d->ibb->respondAck(c->peer(), id);
 }
 
-void IBBManager::doReject(IBBConnection *c, const QString &id, int code, const QString &str)
+void IBBManager::doReject(IBBConnection *c, const QString &id,
+						  Stanza::Error::ErrorCond cond, const QString &str)
 {
-	d->ibb->respondError(c->peer(), id, code, str);
+	d->ibb->respondError(c->peer(), id, cond, str);
 }
 
 
@@ -475,7 +521,8 @@ public:
 	int mode;
 	bool serve;
 	Jid to;
-	QString streamid;
+	QString sid;
+	int bytesWritten;
 };
 
 JT_IBB::JT_IBB(Task *parent, bool serve)
@@ -490,61 +537,58 @@ JT_IBB::~JT_IBB()
 	delete d;
 }
 
-void JT_IBB::request(const Jid &to, const QDomElement &comment)
+void JT_IBB::request(const Jid &to, const QString &sid)
 {
 	d->mode = ModeRequest;
 	QDomElement iq;
 	d->to = to;
 	iq = createIQ(doc(), "set", to.full(), id());
-	QDomElement query = doc()->createElement("query");
-	query.setAttribute("xmlns", "http://jabber.org/protocol/ibb");
+	QDomElement query = doc()->createElement("open");
+	//genUniqueKey
+	query.setAttribute("xmlns", IBB_NS);
+	query.setAttribute("sid", sid);
+	query.setAttribute("block-size", IBB_PACKET_SIZE);
+	query.setAttribute("stanza", "iq");
 	iq.appendChild(query);
-	query.appendChild(comment);
 	d->iq = iq;
 }
 
-void JT_IBB::sendData(const Jid &to, const QString &streamid, const QByteArray &a, bool close)
+void JT_IBB::sendData(const Jid &to, const IBBData &ibbData)
+{
+	d->mode = ModeSendData;
+	QDomElement iq;
+	d->to = to;
+	d->bytesWritten = ibbData.data.size();
+	iq = createIQ(doc(), "set", to.full(), id());
+	iq.appendChild(ibbData.toXml(doc()));
+	d->iq = iq;
+}
+
+void JT_IBB::close(const Jid &to, const QString &sid)
 {
 	d->mode = ModeSendData;
 	QDomElement iq;
 	d->to = to;
 	iq = createIQ(doc(), "set", to.full(), id());
-	QDomElement query = doc()->createElement("query");
-	query.setAttribute("xmlns", "http://jabber.org/protocol/ibb");
-	iq.appendChild(query);
-	query.appendChild(textTag(doc(), "streamid", streamid));
-	if(!a.isEmpty())
-		query.appendChild(textTag(doc(), "data", QCA::Base64().arrayToString(a)));
-	if(close) {
-		QDomElement c = doc()->createElement("close");
-		query.appendChild(c);
-	}
+	QDomElement query = iq.appendChild(doc()->createElement("close")).toElement();
+	query.setAttribute("xmlns", IBB_NS);
+	query.setAttribute("sid", sid);
+
 	d->iq = iq;
 }
 
-void JT_IBB::respondSuccess(const Jid &to, const QString &id, const QString &streamid)
-{
-	QDomElement iq = createIQ(doc(), "result", to.full(), id);
-	QDomElement query = doc()->createElement("query");
-	query.setAttribute("xmlns", "http://jabber.org/protocol/ibb");
-	iq.appendChild(query);
-	query.appendChild(textTag(doc(), "streamid", streamid));
-	send(iq);
-}
-
-void JT_IBB::respondError(const Jid &to, const QString &id, int code, const QString &str)
+void JT_IBB::respondError(const Jid &to, const QString &id,
+						  Stanza::Error::ErrorCond cond, const QString &text)
 {
 	QDomElement iq = createIQ(doc(), "error", to.full(), id);
-	QDomElement err = textTag(doc(), "error", str);
-	err.setAttribute("code", QString::number(code));
-	iq.appendChild(err);
+	Stanza::Error error(Stanza::Error::Cancel, cond, text);
+	iq.appendChild(error.toXml(*client()->doc(), client()->stream().baseNS()));
 	send(iq);
 }
 
 void JT_IBB::respondAck(const Jid &to, const QString &id)
 {
-	QDomElement iq = createIQ(doc(), "result", to.full(), id);
-	send(iq);
+	send( createIQ(doc(), "result", to.full(), id) );
 }
 
 void JT_IBB::onGo()
@@ -559,34 +603,29 @@ bool JT_IBB::take(const QDomElement &e)
 		if(e.tagName() != "iq" || e.attribute("type") != "set")
 			return false;
 
-		if(queryNS(e) != "http://jabber.org/protocol/ibb")
-			return false;
-
-		Jid from(e.attribute("from"));
-		QString id = e.attribute("id");
-		QDomElement q = queryTag(e);
-
 		bool found;
-		QDomElement s = findSubTag(q, "streamid", &found);
-		if(!found) {
-			QDomElement comment = findSubTag(q, "comment", &found);
-			incomingRequest(from, id, comment);
+		QString id = e.attribute("id");
+		QString from = e.attribute("from");
+		QDomElement openEl = findSubTag(e, "open", &found);
+		if (found && openEl.attribute("xmlns") == IBB_NS) {
+			emit incomingRequest(Jid(from), id,
+							openEl.attribute("sid"),
+							openEl.attribute("block-size").toInt(),
+							openEl.attribute("stanza"));
+			return true;
 		}
-		else {
-			QString sid = tagContent(s);
-			QByteArray a;
-			bool close = false;
-			s = findSubTag(q, "data", &found);
-			if(found)
-				a = QCA::Base64().stringToArray(tagContent(s)).toByteArray();
-			s = findSubTag(q, "close", &found);
-			if(found)
-				close = true;
-
-			incomingData(from, sid, id, a, close);
+		QDomElement dataEl = findSubTag(e, "data", &found);
+		if (found && dataEl.attribute("xmlns") == IBB_NS) {
+			IBBData data;
+			emit incomingData(Jid(from), id, data.fromXml(dataEl), Stanza::IQ);
+			return true;
 		}
-
-		return true;
+		QDomElement closeEl = findSubTag(e, "close", &found);
+		if (found && closeEl.attribute("xmlns") == IBB_NS) {
+			emit closeRequest(Jid(from), id, closeEl.attribute("sid"));
+			return true;
+		}
+		return false;
 	}
 	else {
 		Jid from(e.attribute("from"));
@@ -594,23 +633,7 @@ bool JT_IBB::take(const QDomElement &e)
 			return false;
 
 		if(e.attribute("type") == "result") {
-			QDomElement q = queryTag(e);
-
-			// request
-			if(d->mode == ModeRequest) {
-				bool found;
-				QDomElement s = findSubTag(q, "streamid", &found);
-				if(found)
-					d->streamid = tagContent(s);
-				else
-					d->streamid = "";
-				setSuccess();
-			}
-			// sendData
-			else {
-				// thank you for the ack, kind sir
-				setSuccess();
-			}
+			setSuccess();
 		}
 		else {
 			setError(e);
@@ -618,11 +641,6 @@ bool JT_IBB::take(const QDomElement &e)
 
 		return true;
 	}
-}
-
-QString JT_IBB::streamid() const
-{
-	return d->streamid;
 }
 
 Jid JT_IBB::jid() const
@@ -633,5 +651,10 @@ Jid JT_IBB::jid() const
 int JT_IBB::mode() const
 {
 	return d->mode;
+}
+
+int JT_IBB::bytesWritten() const
+{
+	return d->bytesWritten;
 }
 

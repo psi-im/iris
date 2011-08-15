@@ -21,13 +21,15 @@
 #ifndef XMPP_S5B_H
 #define XMPP_S5B_H
 
-#include <qobject.h>
+#include <QObject>
 #include <QList>
 #include <QHostAddress>
 
 #include "bytestream.h"
+#include "xmpp_bytestream.h"
 #include "xmpp/jid/jid.h"
 #include "xmpp_task.h"
+#include "xmpp_stanza.h"
 
 class SocksClient;
 class SocksUDP;
@@ -58,24 +60,28 @@ namespace XMPP
 		QByteArray _buf;
 	};
 
-	class S5BConnection : public ByteStream
+	class S5BConnection : public BSConnection
 	{
 		Q_OBJECT
 	public:
 		enum Mode { Stream, Datagram };
-		enum Error { ErrRefused, ErrConnect, ErrProxy, ErrSocket };
-		enum State { Idle, Requesting, Connecting, WaitingForAccept, Active };
+
 		~S5BConnection();
 
 		Jid proxy() const;
 		void setProxy(const Jid &proxy);
 
 		void connectToJid(const Jid &peer, const QString &sid, Mode m = Stream);
+		void connectToJid(const Jid &peer, const QString &sid) {
+			connectToJid(peer, sid, Stream);
+		}
+
 		void accept();
 		void close();
 
 		Jid peer() const;
 		QString sid() const;
+		BytestreamManager* manager() const;
 		bool isRemote() const;
 		Mode mode() const;
 		int state() const;
@@ -93,8 +99,8 @@ namespace XMPP
 	signals:
 		void proxyQuery();                             // querying proxy for streamhost information
 		void proxyResult(bool b);                      // query success / fail
-		void requesting();                             // sent actual S5B request (initiator only)
-		void accepted();                               // target accepted (initiator only
+		void requesting();                             // sent actual S5B request (requester only)
+		void accepted();                               // target accepted (requester only
 		void tryingHosts(const StreamHostList &hosts); // currently connecting to these hosts
 		void proxyConnect();                           // connecting to proxy
 		void waitingForActivation();                   // waiting for activation (target only)
@@ -128,28 +134,28 @@ namespace XMPP
 		S5BConnection(S5BManager *, QObject *parent=0);
 	};
 
-	class S5BManager : public QObject
+	class S5BManager : public BytestreamManager
 	{
 		Q_OBJECT
 	public:
 		S5BManager(Client *);
 		~S5BManager();
 
+		static const char* ns();
 		Client *client() const;
 		S5BServer *server() const;
 		void setServer(S5BServer *s);
 
 		bool isAcceptableSID(const Jid &peer, const QString &sid) const;
-		QString genUniqueSID(const Jid &peer) const;
 
-		S5BConnection *createConnection();
+		BSConnection *createConnection();
 		S5BConnection *takeIncoming();
 
 		class Item;
 		class Entry;
 
-	signals:
-		void incomingReady();
+	protected:
+		const char* sidPrefix() const;
 
 	private slots:
 		void ps_incoming(const S5BRequest &req);
@@ -193,7 +199,7 @@ namespace XMPP
 
 		friend class Item;
 		void doSuccess(const Jid &peer, const QString &id, const Jid &streamHost);
-		void doError(const Jid &peer, const QString &id, int, const QString &);
+		void doError(const Jid &peer, const QString &id, Stanza::Error::ErrorCond, const QString &);
 		void doActivate(const Jid &peer, const QString &sid, const Jid &streamHost);
 	};
 
@@ -268,7 +274,8 @@ namespace XMPP
 		JT_S5B(Task *);
 		~JT_S5B();
 
-		void request(const Jid &to, const QString &sid, const StreamHostList &hosts, bool fast, bool udp=false);
+		void request(const Jid &to, const QString &sid, const QString &dstaddr,
+					 const StreamHostList &hosts, bool fast, bool udp=false);
 		void requestProxyInfo(const Jid &to);
 		void requestActivation(const Jid &to, const QString &sid, const Jid &target);
 
@@ -290,7 +297,7 @@ namespace XMPP
 	struct S5BRequest
 	{
 		Jid from;
-		QString id, sid;
+		QString id, sid, dstaddr;
 		StreamHostList hosts;
 		bool fast;
 		bool udp;
@@ -305,7 +312,8 @@ namespace XMPP
 		int priority() const;
 
 		void respondSuccess(const Jid &to, const QString &id, const Jid &streamHost);
-		void respondError(const Jid &to, const QString &id, int code, const QString &str);
+		void respondError(const Jid &to, const QString &id,
+						  Stanza::Error::ErrorCond cond, const QString &str);
 		void sendUDPSuccess(const Jid &to, const QString &dstaddr);
 		void sendActivate(const Jid &to, const QString &sid, const Jid &streamHost);
 

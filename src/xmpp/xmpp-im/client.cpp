@@ -80,6 +80,7 @@
 #include "xmpp_xmlcommon.h"
 #include "s5b.h"
 #include "xmpp_ibb.h"
+#include "xmpp_bitsofbinary.h"
 #include "filetransfer.h"
 
 /*#include <stdio.h>
@@ -140,6 +141,7 @@ public:
 	ResourceList resourceList;
 	S5BManager *s5bman;
 	IBBManager *ibbman;
+	BoBManager *bobman;
 	FileTransferManager *ftman;
 	bool ftEnabled;
 	QList<GroupChat> groupChatList;
@@ -170,6 +172,8 @@ Client::Client(QObject *par)
 
 	d->ibbman = new IBBManager(this);
 	connect(d->ibbman, SIGNAL(incomingReady()), SLOT(ibb_incomingReady()));
+
+	d->bobman = new BoBManager(this);
 
 	d->ftman = 0;
 }
@@ -255,6 +259,11 @@ S5BManager *Client::s5bManager() const
 IBBManager *Client::ibbManager() const
 {
 	return d->ibbman;
+}
+
+BoBManager *Client::bobManager() const
+{
+	return d->bobman;
 }
 
 bool Client::isActive() const
@@ -352,7 +361,7 @@ void Client::groupChatSetStatus(const QString &host, const QString &room, const 
 	j->go(true);
 }
 
-void Client::groupChatLeave(const QString &host, const QString &room)
+void Client::groupChatLeave(const QString &host, const QString &room, const QString &statusStr)
 {
 	Jid jid(room + "@" + host);
 	for(QList<GroupChat>::Iterator it = d->groupChatList.begin(); it != d->groupChatList.end(); it++) {
@@ -367,9 +376,38 @@ void Client::groupChatLeave(const QString &host, const QString &room)
 		JT_Presence *j = new JT_Presence(rootTask());
 		Status s;
 		s.setIsAvailable(false);
+		s.setStatus(statusStr);
 		j->pres(i.j, s);
 		j->go(true);
 	}
+}
+
+void Client::groupChatLeaveAll(const QString &statusStr)
+{
+	if (d->stream && d->active) {
+		for(QList<GroupChat>::Iterator it = d->groupChatList.begin(); it != d->groupChatList.end(); it++) {
+			GroupChat &i = *it;
+			i.status = GroupChat::Closing;
+
+			JT_Presence *j = new JT_Presence(rootTask());
+			Status s;
+			s.setIsAvailable(false);
+			s.setStatus(statusStr);
+			j->pres(i.j, s);
+			j->go(true);
+		}
+	}
+}
+
+QString Client::groupChatNick(const QString &host, const QString &room) const
+{
+	Jid jid(room + "@" + host);
+	foreach (const GroupChat &gc, d->groupChatList) {
+		if (gc.j.compare(jid, false)) {
+			return gc.j.resource();
+		}
+	}
+	return QString();
 }
 
 /*void Client::start()
@@ -388,19 +426,6 @@ void Client::groupChatLeave(const QString &host, const QString &room)
 void Client::close(bool)
 {
 	if(d->stream) {
-		if(d->active) {
-			for(QList<GroupChat>::Iterator it = d->groupChatList.begin(); it != d->groupChatList.end(); it++) {
-				GroupChat &i = *it;
-				i.status = GroupChat::Closing;
-
-				JT_Presence *j = new JT_Presence(rootTask());
-				Status s;
-				s.setIsAvailable(false);
-				j->pres(i.j, s);
-				j->go(true);
-			}
-		}
-
 		d->stream->disconnect(this);
 		d->stream->close();
 		d->stream = 0;
@@ -499,7 +524,7 @@ void Client::streamReadyRead()
 
 		QString out = s.toString();
 		debug(QString("Client: incoming: [\n%1]\n").arg(out));
-		xmlIncoming(out);
+		emit xmlIncoming(out);
 
 		QDomElement x = oldStyleNS(s.element());
 		distribute(x);
@@ -511,7 +536,7 @@ void Client::streamIncomingXml(const QString &s)
 	QString str = s;
 	if(str.at(str.length()-1) != '\n')
 		str += '\n';
-	xmlIncoming(str);
+	emit xmlIncoming(str);
 }
 
 void Client::streamOutgoingXml(const QString &s)
@@ -519,12 +544,12 @@ void Client::streamOutgoingXml(const QString &s)
 	QString str = s;
 	if(str.at(str.length()-1) != '\n')
 		str += '\n';
-	xmlOutgoing(str);
+	emit xmlOutgoing(str);
 }
 
 void Client::debug(const QString &str)
 {
-	debugText(str);
+	emit debugText(str);
 }
 
 QString Client::genUniqueId()
@@ -601,7 +626,7 @@ void Client::send(const QDomElement &x)
 
 	QString out = s.toString();
 	debug(QString("Client: outgoing: [\n%1]\n").arg(out));
-	xmlOutgoing(out);
+	emit xmlOutgoing(out);
 
 	//printf("x[%s] x2[%s] s[%s]\n", Stream::xmlToString(x).toLatin1(), Stream::xmlToString(e).toLatin1(), s.toString().toLatin1());
 	d->stream->write(s);
@@ -613,7 +638,7 @@ void Client::send(const QString &str)
 		return;
 
 	debug(QString("Client: outgoing: [\n%1]\n").arg(str));
-	xmlOutgoing(str);
+	emit xmlOutgoing(str);
 	static_cast<ClientStream*>(d->stream)->writeDirect(str);
 }
 
@@ -673,7 +698,7 @@ Jid Client::jid() const
 
 void Client::ppSubscription(const Jid &j, const QString &s, const QString& n)
 {
-	subscription(j, s, n);
+	emit subscription(j, s, n);
 }
 
 void Client::ppPresence(const Jid &j, const Status &s)
@@ -695,25 +720,25 @@ void Client::ppPresence(const Jid &j, const Status &s)
 					if(us && s.hasError()) {
 						Jid j = i.j;
 						d->groupChatList.erase(it);
-						groupChatError(j, s.errorCode(), s.errorString());
+						emit groupChatError(j, s.errorCode(), s.errorString());
 					}
 					else {
 						// don't signal success unless it is a non-error presence
 						if(!s.hasError()) {
 							i.status = GroupChat::Connected;
-							groupChatJoined(i.j);
+							emit groupChatJoined(i.j);
 						}
-						groupChatPresence(j, s);
+						emit groupChatPresence(j, s);
 					}
 					break;
 				case GroupChat::Connected:
-					groupChatPresence(j, s);
+					emit groupChatPresence(j, s);
 					break;
 				case GroupChat::Closing:
 					if(us && !s.isAvailable()) {
 						Jid j = i.j;
 						d->groupChatList.erase(it);
-						groupChatLeft(j);
+						emit groupChatLeft(j);
 					}
 					break;
 				default:
@@ -725,7 +750,7 @@ void Client::ppPresence(const Jid &j, const Status &s)
 	}
 
 	if(s.hasError()) {
-		presenceError(j, s.errorCode(), s.errorString());
+		emit presenceError(j, s.errorCode(), s.errorString());
 		return;
 	}
 
@@ -762,7 +787,7 @@ void Client::updateSelfPresence(const Jid &j, const Status &s)
 		if(found) {
 			debug(QString("Client: Removing self resource: name=[%1]\n").arg(j.resource()));
 			(*rit).setStatus(s);
-			resourceUnavailable(j, *rit);
+			emit resourceUnavailable(j, *rit);
 			d->resourceList.erase(rit);
 		}
 	}
@@ -794,7 +819,7 @@ void Client::updatePresence(LiveRosterItem *i, const Jid &j, const Status &s)
 		if(found) {
 			(*rit).setStatus(s);
 			debug(QString("Client: Removing resource from [%1]: name=[%2]\n").arg(i->jid().full()).arg(j.resource()));
-			resourceUnavailable(j, *rit);
+			emit resourceUnavailable(j, *rit);
 			i->resourceList().erase(rit);
 			i->setLastUnavailableStatus(s);
 		}
@@ -803,7 +828,7 @@ void Client::updatePresence(LiveRosterItem *i, const Jid &j, const Status &s)
 			Resource r = Resource(j.resource(), s);
 			i->resourceList() += r;
 			rit = i->resourceList().find(j.resource());
-			resourceUnavailable(j, *rit);
+			emit resourceUnavailable(j, *rit);
 			i->resourceList().erase(rit);
 			i->setLastUnavailableStatus(s);
 		}
@@ -829,6 +854,15 @@ void Client::updatePresence(LiveRosterItem *i, const Jid &j, const Status &s)
 void Client::pmMessage(const Message &m)
 {
 	debug(QString("Client: Message from %1\n").arg(m.from().full()));
+
+	// bits of binary. we can't do this in Message, since it knows nothing about Client
+	foreach (const BoBData &b, m.bobDataList()) {
+		d->bobman->append(b);
+	}
+
+	if (!m.ibbData().data.isEmpty()) {
+		d->ibbman->takeIncomingData(m.from(), m.id(), m.ibbData(), Stanza::Message);
+	}
 
 	if(m.type() == "groupchat") {
 		for(QList<GroupChat>::Iterator it = d->groupChatList.begin(); it != d->groupChatList.end(); it++) {
@@ -874,7 +908,7 @@ void Client::slotRosterRequestFinished()
 		for(LiveRoster::Iterator it = d->roster.begin(); it != d->roster.end();) {
 			LiveRosterItem &i = *it;
 			if(i.flagForDelete()) {
-				rosterItemRemoved(i);
+				emit rosterItemRemoved(i);
 				it = d->roster.erase(it);
 			}
 			else
@@ -888,7 +922,7 @@ void Client::slotRosterRequestFinished()
 	}
 
 	// report success / fail
-	rosterRequestFinished(r->success(), r->statusCode(), r->statusString());
+	emit rosterRequestFinished(r->success(), r->statusCode(), r->statusString());
 }
 
 void Client::importRoster(const Roster &r)
@@ -927,7 +961,7 @@ void Client::importRosterItem(const RosterItem &item)
 	if(item.subscription().type() == Subscription::Remove) {
 		LiveRoster::Iterator it = d->roster.find(item.jid());
 		if(it != d->roster.end()) {
-			rosterItemRemoved(*it);
+			emit rosterItemRemoved(*it);
 			d->roster.erase(it);
 		}
 		dstr = "Client: (Removed) ";
@@ -939,7 +973,7 @@ void Client::importRosterItem(const RosterItem &item)
 			LiveRosterItem &i = *it;
 			i.setFlagForDelete(false);
 			i.setRosterItem(item);
-			rosterItemUpdated(i);
+			emit rosterItemUpdated(i);
 			dstr = "Client: (Updated) ";
                 }
 		else {
@@ -947,7 +981,7 @@ void Client::importRosterItem(const RosterItem &item)
 			d->roster += i;
 
 			// signal it
-			rosterItemAdded(i);
+			emit rosterItemAdded(i);
 			dstr = "Client: (Added)   ";
 		}
 	}
@@ -1116,7 +1150,16 @@ const Features& Client::extension(const QString& ext) const
 
 void Client::s5b_incomingReady()
 {
-	S5BConnection *c = d->s5bman->takeIncoming();
+	handleIncoming(d->s5bman->takeIncoming());
+}
+
+void Client::ibb_incomingReady()
+{
+	handleIncoming(d->ibbman->takeIncoming());
+}
+
+void Client::handleIncoming(BSConnection *c)
+{
 	if(!c)
 		return;
 	if(!d->ftman) {
@@ -1124,15 +1167,7 @@ void Client::s5b_incomingReady()
 		c->deleteLater();
 		return;
 	}
-	d->ftman->s5b_incomingReady(c);
-}
-
-void Client::ibb_incomingReady()
-{
-	IBBConnection *c = d->ibbman->takeIncoming();
-	if(!c)
-		return;
-	c->deleteLater();
+	d->ftman->stream_incomingReady(c);
 }
 
 //---------------------------------------------------------------------------

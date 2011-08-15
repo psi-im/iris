@@ -33,6 +33,7 @@
 #include <net/route.h>
 #include <netinet/in.h>
 #include <errno.h>
+#include <unistd.h>
 
 // for solaris
 #ifndef SIOCGIFCONF

@@ -1,5 +1,6 @@
 /*
- * Copyright (C) 2006  Remko Troncon
+ * bytestream_manager.cpp - base class for bytestreams over xmpp
+ * Copyright (C) 2003  Justin Karneges, Rion
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -17,33 +18,47 @@
  *
  */
 
-#ifndef XMPP_HTMLELEMENT_H
-#define XMPP_HTMLELEMENT_H
+#include <QTimer>
 
-#include <QDomElement>
-
-class QString;
+#include "xmpp_bytestream.h"
+#include "xmpp_client.h"
 
 namespace XMPP
 {
-	class HTMLElement
-	{
-	public:
-		HTMLElement();
-		HTMLElement(const QDomElement &body);
 
-		void setBody(const QDomElement &body);
-		const QDomElement& body() const;
-		QString toString(const QString &rootTagName = "body") const;
-		QString text() const;
-		void filterOutUnwanted(bool strict = false);
+BytestreamManager::BytestreamManager(Client *parent)
+	: QObject(parent)
+{
 
-	private:
-		void filterOutUnwantedRecursive(QDomElement &el, bool strict);
-
-		QDomDocument doc_;
-		QDomElement body_;
-	};
 }
 
-#endif
+BytestreamManager::~BytestreamManager()
+{
+
+}
+
+QString BytestreamManager::genUniqueSID(const Jid &peer) const
+{
+	// get unused key
+	QString sid;
+	do {
+		sid = QString("%1%2").arg(sidPrefix())
+							 .arg(qrand() & 0xffff, 4, 16, QChar('0'));
+	} while(!isAcceptableSID(peer, sid));
+	return sid;
+}
+
+/**
+ * Deletes conection in specified interval
+ */
+void BytestreamManager::deleteConnection(BSConnection *c, int msec)
+{
+	if (msec) {
+		QTimer::singleShot(msec, c, SLOT(deleteLater()));
+	}
+	else {
+		delete c;
+	}
+}
+
+}
