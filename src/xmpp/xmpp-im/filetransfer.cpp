@@ -438,11 +438,13 @@ void FileTransferManager::setDisabled(const QString &ns, bool state)
 void FileTransferManager::pft_incoming(const FTRequest &req)
 {
 	QString streamType;
-	foreach (const QString &ns, req.streamTypes) {
-		BytestreamManager *manager = streamManager(ns);
-		if (manager && manager->isAcceptableSID(req.from, req.id)) {
-			streamType = ns;
-			break;
+	foreach(const QString& ns, d->streamPriority) {
+		if(req.streamTypes.contains(ns)) {
+			BytestreamManager *manager = streamManager(ns);
+			if (manager && manager->isAcceptableSID(req.from, req.id)) {
+				streamType = ns;
+				break;
+			}
 		}
 	}
 
