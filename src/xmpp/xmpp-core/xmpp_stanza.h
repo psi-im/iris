@@ -71,7 +71,7 @@ namespace XMPP
 				UnexpectedRequest
 			};
 
-			Error(int type=Cancel, int condition=UndefinedCondition, const QString &text="", const QDomElement &appSpec=QDomElement());
+			Error(int type=Cancel, int condition=UndefinedCondition, const QString &text=QString(), const QDomElement &appSpec=QDomElement());
 
 			int type;
 			int condition;

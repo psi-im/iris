@@ -31,7 +31,7 @@ namespace XMPP
 	{
 	public:
 		HttpAuthRequest(const QString &m, const QString &u, const QString &i);
-		HttpAuthRequest(const QString &m = "", const QString &u = "");
+		HttpAuthRequest(const QString &m = QString(), const QString &u = QString());
 		HttpAuthRequest(const QDomElement &);
 
 		bool isEmpty() const;
