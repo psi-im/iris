@@ -642,7 +642,7 @@ bool JT_FT::take(const QDomElement &x)
 		if(!file.isNull()) {
 			QDomElement range = file.elementsByTagName("range").item(0).toElement();
 			if(!range.isNull()) {
-				int x;
+				qlonglong x;
 				bool ok;
 				if(range.hasAttribute("offset")) {
 					x = range.attribute("offset").toLongLong(&ok);
