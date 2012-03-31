@@ -124,7 +124,7 @@ class Client::ClientPrivate
 public:
 	ClientPrivate() {}
 
-	ClientStream *stream;
+	QPointer<ClientStream> stream;
 	QDomDocument doc;
 	int id_seed;
 	Task *root;
@@ -165,8 +165,6 @@ Client::Client(QObject *par)
 	d->id_seed = 0xaaaa;
 	d->root = new Task(this, true);
 
-	d->stream = 0;
-
 	d->s5bman = new S5BManager(this);
 	connect(d->s5bman, SIGNAL(incomingReady()), SLOT(s5b_incomingReady()));
 
@@ -186,7 +184,6 @@ Client::~Client()
 	delete d->ibbman;
 	delete d->s5bman;
 	delete d->root;
-	//delete d->stream;
 	delete d;
 }
 
@@ -516,10 +513,7 @@ static QDomElement oldStyleNS(const QDomElement &e)
 
 void Client::streamReadyRead()
 {
-	// HACK HACK HACK
-	QPointer<ClientStream> pstream = d->stream;
-
-	while(pstream && d->stream->stanzaAvailable()) {
+	while(d->stream && d->stream->stanzaAvailable()) {
 		Stanza s = d->stream->read();
 
 		QString out = s.toString();
@@ -644,7 +638,7 @@ void Client::send(const QString &str)
 
 Stream & Client::stream()
 {
-	return *d->stream;
+	return *(d->stream.data());
 }
 
 QString Client::streamBaseNS() const
