@@ -319,8 +319,9 @@ QDebug operator<<(QDebug dbg, const XMPP::NameRecord &record)
 			dbg.nospace() << ", size=" << record.rawData().size();
 			break;
 		case XMPP::NameRecord::Any:
-			// can't happen
-			Q_ASSERT(0);
+			dbg.nospace() << ", <unknown>";
+			// should not happen
+			Q_ASSERT(false);
 			break;
 	}
 
