@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  *
  */
 
@@ -155,7 +155,7 @@ void BSocket::recreate_resolver() {
 void BSocket::reset(bool clear)
 {
 #ifdef BS_DEBUG
-	BSDEBUG;
+	BSDEBUG << clear;
 #endif
 	if(d->qsock) {
 		delete d->qsock_relay;
@@ -171,7 +171,7 @@ void BSocket::reset(bool clear)
 		//}
 
 		//d->sd.deleteLater(d->qsock);
-    d->qsock->deleteLater();
+		d->qsock->deleteLater();
 		d->qsock = 0;
 	}
 	else {

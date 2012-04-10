@@ -14,7 +14,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  *
  */
 
@@ -418,7 +418,6 @@ void AdvancedConnector::bs_connected()
 #ifdef XMPP_DEBUG
 	XDEBUG;
 #endif
-
 	if(d->proxy.type() == Proxy::None) {
 		QHostAddress h = (static_cast<BSocket*>(d->bs))->peerAddress();
 		int p = (static_cast<BSocket*>(d->bs))->peerPort();
@@ -450,7 +449,7 @@ void AdvancedConnector::bs_error(int x)
 	int t = d->proxy.type();
 
 #ifdef XMPP_DEBUG
-	printf("bse1\n");
+	qDebug("bse1");
 #endif
 
 	// figure out the error
@@ -520,7 +519,7 @@ void AdvancedConnector::bs_error(int x)
 	*/
 	if(d->opt_ssl == Probe && d->port == XMPP_LEGACY_PORT) {
 #ifdef XMPP_DEBUG
-		printf("bse1.2\n");
+		qDebug("bse1.2");
 #endif
 		BSocket *s = static_cast<BSocket*>(d->bs);
 		d->port = XMPP_DEFAULT_PORT;
@@ -529,7 +528,7 @@ void AdvancedConnector::bs_error(int x)
 	/* otherwise we have no fallbacks and must have failed to connect */
 	else {
 #ifdef XMPP_DEBUG
-		printf("bse1.3\n");
+		qDebug("bse1.3");
 #endif
 		cleanup();
 		d->errorCode = ErrConnectionRefused;

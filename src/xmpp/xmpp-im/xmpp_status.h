@@ -14,7 +14,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  *
  */
 
@@ -35,8 +35,8 @@ namespace XMPP
 	public:
 		enum Type { Offline, Online, Away, XA, DND, Invisible, FFC };
 
-		Status(const QString &show="", const QString &status="", int priority=0, bool available=true);
-		Status(Type type, const QString& status="", int priority=0);
+		Status(const QString &show=QString(), const QString &status=QString(), int priority=0, bool available=true);
+		Status(Type type, const QString& status=QString(), int priority=0);
 		~Status();
 
 		int priority() const;

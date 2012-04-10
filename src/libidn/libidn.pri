@@ -4,7 +4,7 @@ DEPENDPATH  += $$PWD/..
 unix:{
   QMAKE_CFLAGS_WARN_ON -= -W
 }
-win32:{
+win32-msvc*:{
   QMAKE_CFLAGS += -Zm400
 }
 
