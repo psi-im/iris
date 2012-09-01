@@ -439,6 +439,7 @@ public:
 	}
 
 	BSocket sock;
+	QHostAddress lastAddress;
 	QByteArray postdata, recvBuf, body;
 	QString url;
 	QString user, pass;
@@ -501,7 +502,11 @@ void HttpProxyPost::post(const QString &proxyHost, int proxyPort, const QString 
 	else
 		fprintf(stderr, ", auth {%s,%s}\n", d->user.latin1(), d->pass.latin1());
 #endif
-	d->sock.connectToHost(proxyHost, proxyPort);
+	if (d->lastAddress.isNull()) {
+		d->sock.connectToHost(proxyHost, proxyPort);
+	} else {
+		d->sock.connectToHost(d->lastAddress, proxyPort);
+	}
 }
 
 void HttpProxyPost::stop()
@@ -533,6 +538,7 @@ void HttpProxyPost::sock_connected()
 #ifdef PROX_DEBUG
 	fprintf(stderr, "HttpProxyPost: Connected\n");
 #endif
+	d->lastAddress = d->sock.peerAddress();
 	d->inHeader = true;
 	d->headerLines.clear();
 
