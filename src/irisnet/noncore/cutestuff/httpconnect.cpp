@@ -64,7 +64,7 @@ static QString extractLine(QByteArray *buf, bool *found)
 	}
 	else {
 		// Found newline
-		QString s = QString::fromAscii(buf->left(index));
+		QString s = QString::fromLatin1(buf->left(index));
 		buf->remove(0, index + 2);
 
 		if (found)

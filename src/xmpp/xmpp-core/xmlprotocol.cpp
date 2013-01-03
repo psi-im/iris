@@ -18,14 +18,12 @@
  *
  */
 
-#include "xmlprotocol.h"
-
-#include "bytestream.h"
-//Added by qt3to4:
 #include <QList>
 #include <QTextStream>
 #include <QByteArray>
-#include <QApplication>
+
+#include "xmlprotocol.h"
+#include "bytestream.h"
 
 using namespace XMPP;
 

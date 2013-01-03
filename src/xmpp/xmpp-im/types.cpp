@@ -19,7 +19,6 @@
  */
 
 #include <QMap>
-#include <QApplication>
 #include <QList>
 
 #include "im.h"
