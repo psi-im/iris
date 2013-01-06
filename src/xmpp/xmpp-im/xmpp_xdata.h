@@ -27,6 +27,8 @@
 #include <QList>
 #include <QSharedDataPointer>
 #include <QStringList>
+#include <QSize>
+#include <QHash>
 
 class QDomElement;
 class QDomDocument;
@@ -53,6 +55,7 @@ namespace XMPP {
 
 		Type type() const;
 		void setType(Type);
+		QString registrarType() const;
 
 		struct ReportField {
 			ReportField() { }
@@ -83,9 +86,30 @@ namespace XMPP {
 				QString value;
 			};
 
+			struct MediaUri {
+				QString type;
+				QString uri;
+				QHash<QString,QString> params;
+			};
+
+			class MediaElement : public QList<MediaUri>
+			{
+			public:
+				void append(const QString &type, const QString &uri, QHash<QString,QString> params);
+				void setMediaSize(const QSize &size);
+				QSize mediaSize() const;
+				bool checkSupport(const QStringList &wildcards);
+
+			private:
+				QSize _size;
+			};
+
 			typedef QList<Option> OptionList;
 			OptionList options() const;
 			void setOptions(OptionList);
+
+			MediaElement mediaElement() const;
+			void setMediaElement(const MediaElement &);
 
 			bool required() const;
 			void setRequired(bool);
@@ -128,6 +152,7 @@ namespace XMPP {
 		private:
 			QString _desc, _label, _var;
 			QList<Option> _options;
+			MediaElement _mediaElement;
 			bool _required;
 			Type _type;
 			QStringList _value;
@@ -143,6 +168,7 @@ namespace XMPP {
 		public:
 			QString title, instructions;
 			XData::Type type;
+			QString registrarType;
 			FieldList fields;
 			QList<ReportField> report;
 			QList<ReportItem>  reportItems;

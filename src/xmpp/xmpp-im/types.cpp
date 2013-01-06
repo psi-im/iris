@@ -1948,8 +1948,15 @@ bool Message::fromStanza(const Stanza &s, bool useTimeZoneOffset, int timeZoneOf
 		d->httpAuthRequest = HttpAuthRequest();
 	}
 
+	QDomElement captcha = childElementsByTagNameNS(root, "urn:xmpp:captcha",
+												 "captcha").item(0).toElement();
+	QDomElement xdataRoot = root;
+	if (!captcha.isNull()) {
+		//xdataRoot = captcha;
+	}
+
 	// data form
-	t = childElementsByTagNameNS(root, "jabber:x:data", "x").item(0).toElement();
+	t = childElementsByTagNameNS(xdataRoot, "jabber:x:data", "x").item(0).toElement();
 	if (!t.isNull()) {
 		d->xdata.fromXml(t);
 	}

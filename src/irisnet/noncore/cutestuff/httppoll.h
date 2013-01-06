@@ -23,6 +23,8 @@
 
 #include "bytestream.h"
 
+class QUrl;
+
 // CS_NAMESPACE_BEGIN
 
 class HttpPoll : public ByteStream

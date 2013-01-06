@@ -246,7 +246,7 @@ void HttpPoll::http_result()
 	int n = cookie.indexOf("ID=");
 	if(n == -1) {
 		reset();
-		error(ErrRead);
+		setError(ErrRead);
 		return;
 	}
 	n += 3;
@@ -266,7 +266,7 @@ void HttpPoll::http_result()
 		}
 		else {
 			reset();
-			error(ErrRead);
+			setError(ErrRead);
 			return;
 		}
 	}
@@ -323,17 +323,17 @@ void HttpPoll::http_error(int x)
 {
 	reset();
 	if(x == HttpProxyPost::ErrConnectionRefused)
-		error(ErrConnectionRefused);
+		setError(ErrConnectionRefused);
 	else if(x == HttpProxyPost::ErrHostNotFound)
-		error(ErrHostNotFound);
+		setError(ErrHostNotFound);
 	else if(x == HttpProxyPost::ErrSocket)
-		error(ErrRead);
+		setError(ErrRead);
 	else if(x == HttpProxyPost::ErrProxyConnect)
-		error(ErrProxyConnect);
+		setError(ErrProxyConnect);
 	else if(x == HttpProxyPost::ErrProxyNeg)
-		error(ErrProxyNeg);
+		setError(ErrProxyNeg);
 	else if(x == HttpProxyPost::ErrProxyAuth)
-		error(ErrProxyAuth);
+		setError(ErrProxyAuth);
 }
 
 int HttpPoll::tryWrite()
@@ -638,7 +638,7 @@ void HttpProxyPost::tls_error()
 
 void HttpProxyPost::sock_readyRead()
 {
-	QByteArray block = d->sock.read();
+	QByteArray block = d->sock.readAll();
 	if(d->useSsl)
 		d->tls->writeIncoming(block);
 	else
@@ -647,7 +647,7 @@ void HttpProxyPost::sock_readyRead()
 
 void HttpProxyPost::processData(const QByteArray &block)
 {
-	ByteStream::appendArray(&d->recvBuf, block);
+	d->recvBuf += block;
 
 	if(d->inHeader) {
 		// grab available lines
@@ -902,7 +902,7 @@ void HttpProxyGetStream::sock_connectionClosed()
 
 void HttpProxyGetStream::sock_readyRead()
 {
-	QByteArray block = d->sock.read();
+	QByteArray block = d->sock.readAll();
 
 	if(d->use_ssl)
 		d->tls->writeIncoming(block);
@@ -918,7 +918,7 @@ void HttpProxyGetStream::processData(const QByteArray &block)
 		return;
 	}
 
-	ByteStream::appendArray(&d->recvBuf, block);
+	d->recvBuf += block;
 
 	if(d->inHeader) {
 		// grab available lines

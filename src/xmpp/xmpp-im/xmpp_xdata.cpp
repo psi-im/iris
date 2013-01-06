@@ -62,6 +62,16 @@ void XData::Field::setOptions(XData::Field::OptionList o)
 	_options = o;
 }
 
+XData::Field::MediaElement XData::Field::mediaElement() const
+{
+	return _mediaElement;
+}
+
+void XData::Field::setMediaElement(const XData::Field::MediaElement &el)
+{
+	_mediaElement = el;
+}
+
 bool XData::Field::required() const
 {
 	return _required;
@@ -221,6 +231,33 @@ void XData::Field::fromXml(const QDomElement &e)
 		else if ( tag == "value" ) {
 			_value.append(i.text());
 		}
+		else if (tag == "media" && (i.namespaceURI() == "urn:xmpp:media-element"
+				 || i.attribute("xmlns") == "urn:xmpp:media-element")) { // allow only one media element
+			QSize s;
+			if (i.hasAttribute("width")) {
+				s.setWidth(i.attribute("width").toInt());
+			}
+			if (i.hasAttribute("height")) {
+				s.setHeight(i.attribute("height").toInt());
+			}
+			_mediaElement.setMediaSize(s);
+			for(QDomNode un = i.firstChild(); !un.isNull(); un = un.nextSibling()) {
+				QDomElement uel = un.toElement();
+				if(uel.isNull() || uel.tagName() != "uri") {
+					continue;
+				}
+				QStringList type = uel.attribute("type").split(';');
+				QHash<QString,QString> params;
+				for (int i = 1; i < type.size(); ++i) {
+					QStringList p = type.value(i).split('=');
+					QString key = p[0].trimmed();
+					if (!key.isEmpty()) {
+						params[key] = p.value(1).trimmed();
+					}
+				}
+				_mediaElement.append(type.value(0).trimmed(), uel.text(), params);
+			}
+		}
 	}
 }
 
@@ -281,8 +318,71 @@ QDomElement XData::Field::toXml(QDomDocument *doc, bool submitForm) const
 			f.appendChild( textTag(doc, "value", *it) );
 	}
 
+	if ( !_mediaElement.isEmpty() ) {
+		QDomElement media = doc->createElementNS("urn:xmpp:media-element", "media");
+		QSize s = _mediaElement.mediaSize();
+		if (!s.isEmpty()) {
+			media.setAttribute("width", s.width());
+			media.setAttribute("height", s.height());
+		}
+		foreach(const MediaUri &uri, _mediaElement) {
+			QDomElement uriEl = doc->createElement("uri");
+			QString type = uri.type;
+			foreach (const QString &k, uri.params.keys()) {
+				type += ";" + k + "=" + uri.params[k];
+			}
+			uriEl.setAttribute("type", type);
+			uriEl.appendChild(doc->createTextNode(uri.uri));
+			media.appendChild(uriEl);
+		}
+		f.appendChild(media);
+	}
+
 	return f;
 }
+
+
+
+
+//----------------------------------------------------------------------------
+// MediaElement
+//----------------------------------------------------------------------------
+
+void XData::Field::MediaElement::append(const QString &type, const QString &uri,
+										QHash<QString,QString> params)
+{
+	XData::Field::MediaUri u;
+	u.type = type;
+	u.uri = uri;
+	u.params = params;
+	QList<XData::Field::MediaUri>::append(u);
+}
+
+void XData::Field::MediaElement::setMediaSize(const QSize &size)
+{
+	_size = size;
+}
+
+QSize XData::Field::MediaElement::mediaSize() const
+{
+	return _size;
+}
+
+bool XData::Field::MediaElement::checkSupport(const QStringList &wildcards)
+{
+	foreach (const XData::Field::MediaUri &uri, *this) {
+		foreach (const QString &wildcard, wildcards) {
+			if (QRegExp(wildcard, Qt::CaseSensitive, QRegExp::Wildcard)
+					.exactMatch(uri.type)) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+
+
 
 //----------------------------------------------------------------------------
 // XData
@@ -322,6 +422,11 @@ XData::Type XData::type() const
 void XData::setType(Type t)
 {
 	d->type = t;
+}
+
+QString XData::registrarType() const
+{
+	return d->registrarType;
 }
 
 XData::FieldList XData::fields() const
@@ -364,6 +469,9 @@ void XData::fromXml(const QDomElement &e)
 			Field f;
 			f.fromXml(i);
 			d->fields.append(f);
+			if (f.type() == Field::Field_Hidden && f.var() == "FORM_TYPE") {
+				d->registrarType = f.value().value(0);
+			}
 		}
 		else if ( i.tagName() == "reported" ) {
 			d->report.clear();

@@ -543,7 +543,7 @@ int XmlProtocol::internalWriteData(const QByteArray &a, TrackItem::Type t, int i
 	i.size = a.size();
 	trackQueue += i;
 
-	ByteStream::appendArray(&outData, a);
+	outData += a;
 	return a.size();
 }
 
