@@ -1,3 +1,24 @@
+/*
+ * networkaccessmanager.h - NetworkAccessManager with some adv. features
+ * Copyright (C) 2013 Il'inykh Sergey (rion)
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+ *
+ */
+
+
 #ifndef NETWORKACCESSMANAGER_H
 #define NETWORKACCESSMANAGER_H
 
@@ -8,49 +29,14 @@ class QUrl;
 class NetworkAccessManagerPrivate;
 class ByteStream;
 
-class NetworkSocketFactoryResult : public QObject
-{
-	Q_OBJECT
 
-protected:
-	bool _isFinished;
-	ByteStream *_socket;
-
-public:
-	NetworkSocketFactoryResult(QObject *parent) :
-		QObject(parent),
-		_isFinished(false),
-		_socket(NULL)
-	{
-
-	}
-
-	inline bool isFinished() const { return _isFinished; }
-	inline ByteStream *socket() const { return _socket; }
-	inline void setSocket(ByteStream *socket = NULL)
-	{
-		// if socket is NULL, we were unable to retrieve one (kinda error)
-		// socket may be in failed state too
-		_socket = socket;
-		_isFinished = true;
-		emit socketConnected();
-	}
-
-signals:
-	void socketConnected();
-};
-
-
-
-
-class NetworkSocketFactory
+class NetworkSchemeHandler
 {
 public:
-	// by default creates internal result which works fine for http(s)://
-	virtual NetworkSocketFactoryResult* socket(const QUrl &url);
+	virtual QNetworkReply* createRequest(QNetworkAccessManager::Operation op,
+										 const QNetworkRequest & req,
+										 QIODevice * outgoingData = 0) = 0;
 };
-
-
 
 
 class NetworkAccessManager : public QNetworkAccessManager
@@ -61,14 +47,14 @@ public:
 	~NetworkAccessManager();
 
 	QNetworkDiskCache &cache() const;
-	void setSocketFactory(NetworkSocketFactory *factory);
+	void setSchemeHandler(const QString &scheme, NetworkSchemeHandler *);
 
 protected:
 	QNetworkReply* createRequest(Operation op, const QNetworkRequest &req,
 								 QIODevice *outgoingData = 0);
-	
+
 signals:
-	
+
 public slots:
 
 private:

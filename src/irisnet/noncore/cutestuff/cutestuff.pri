@@ -6,7 +6,8 @@ HEADERS += \
 	$$PWD/httpconnect.h \
 	$$PWD/httppoll.h \
 	$$PWD/socks.h \
-	$$PWD/networkaccessmanager.h
+	$$PWD/networkaccessmanager.h \
+	$$PWD/httpstream.h
 
 SOURCES += \
 	$$PWD/bytestream.cpp \
@@ -14,4 +15,6 @@ SOURCES += \
 	$$PWD/httpconnect.cpp \
 	$$PWD/httppoll.cpp \
 	$$PWD/socks.cpp \
-	$$PWD/networkaccessmanager.cpp
+	$$PWD/networkaccessmanager.cpp \
+	$$PWD/httpstream.cpp
+
