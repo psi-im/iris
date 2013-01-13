@@ -4,6 +4,8 @@ Makefile
 ui_*.h
 moc_*.cpp
 qrc_*.cpp
+*.orig
+*.rej
 /conf.log
 /conf.pri
 /configure
