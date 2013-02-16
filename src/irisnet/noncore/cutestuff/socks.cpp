@@ -841,7 +841,7 @@ void SocksClient::continueIncoming()
 					methods |= AuthUsername;
 			}
 			d->waiting = true;
-			incomingMethods(methods);
+			emit incomingMethods(methods);
 		}
 	}
 	else if(d->step == StepAuth) {

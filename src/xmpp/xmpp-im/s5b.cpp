@@ -40,7 +40,7 @@
 
 static const char *S5B_NS = "http://jabber.org/protocol/bytestreams";
 
-//#define S5B_DEBUG
+#define S5B_DEBUG
 
 namespace XMPP {
 
@@ -325,26 +325,19 @@ int S5BConnection::state() const
 	return d->state;
 }
 
-bool S5BConnection::isOpen() const
-{
-	if(d->state == Active)
-		return true;
-	else
-		return false;
-}
-
-void S5BConnection::write(const QByteArray &buf)
+qint64 S5BConnection::writeData(const char *data, qint64 maxSize)
 {
 	if(d->state == Active && d->mode == Stream)
-		d->sc->write(buf);
+		return d->sc->write(data, maxSize);
+	return 0;
 }
 
-QByteArray S5BConnection::read(int bytes)
+qint64 S5BConnection::readData(char *data, qint64 maxSize)
 {
 	if(d->sc)
-		return d->sc->read(bytes);
+		return d->sc->read(data, maxSize);
 	else
-		return QByteArray();
+		return 0;
 }
 
 qint64 S5BConnection::bytesAvailable() const
