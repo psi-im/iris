@@ -430,7 +430,7 @@ void S5BConnection::man_clientReady(SocksClient *sc, SocksUDP *sc_udp)
 	}
 	if(d->notifyRead || d->notifyClose)
 		QTimer::singleShot(0, this, SLOT(doPending()));
-	connected();
+	emit connected();
 }
 
 void S5BConnection::doPending()
@@ -493,7 +493,7 @@ void S5BConnection::sc_readyRead()
 
 	d->notifyRead = false;
 	// echo
-	readyRead();
+	emit readyRead();
 }
 
 void S5BConnection::sc_bytesWritten(qint64 x)
@@ -1605,10 +1605,7 @@ void S5BManager::Item::tryActivation()
 			qDebug("sending extra CR\n");
 #endif
 			// must send [CR] to activate target streamhost
-			QByteArray a;
-			a.resize(1);
-			a[0] = '\r';
-			client->write(a);
+			client->write("\r", 1);
 		}
 	}
 }
@@ -1638,9 +1635,9 @@ void S5BManager::Item::checkForActivation()
 #endif
 				if(sc->bytesAvailable() >= 1) {
 					clientList.removeAll(sc);
-					QByteArray a = sc->read(1);
-					if(a[0] != '\r') {
-						delete sc;
+					char c;
+					if(!sc->getChar(&c) || c != '\r') {
+						delete sc; // FIXME breaks S5BManager::Item destructor?
 						return;
 					}
 					ok = true;
@@ -1738,7 +1735,7 @@ void S5BManager::Item::finished()
 #ifdef S5B_DEBUG
 	qDebug("S5BManager::Item %s [%s] linked successfully\n", qPrintable(peer.full()), qPrintable(sid));
 #endif
-	connected();
+	emit connected();
 }
 
 //----------------------------------------------------------------------------
@@ -1938,7 +1935,7 @@ void S5BConnector::item_result(bool b)
 #ifdef S5B_DEBUG
 		qDebug("S5BConnector: complete! [%p]\n", this);
 #endif
-		result(true);
+		emit result(true);
 	}
 	else {
 		d->itemList.removeAll(i);
@@ -1948,7 +1945,7 @@ void S5BConnector::item_result(bool b)
 #ifdef S5B_DEBUG
 			qDebug("S5BConnector: failed! [%p]\n", this);
 #endif
-			result(false);
+			emit result(false);
 		}
 	}
 }
