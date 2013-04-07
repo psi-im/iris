@@ -5,6 +5,25 @@
 # standalone checker for the module.
 #
 
+CONFIG += qca-static
+DEFINES += HAVE_OPENSSL
+# use qca from psi if necessary
+qca-static {
+	DEFINES += QCA_STATIC
+	DEFINES += QT_STATICPLUGIN
+	INCLUDEPATH += $$PWD/../../../../third-party/qca/qca/include/QtCrypto
+
+	include($$PWD/../../../../third-party/qca/qca.pri)
+
+	# QCA-OpenSSL
+	contains(DEFINES, HAVE_OPENSSL) {
+		include($$PWD/../../../../third-party/qca/qca-ossl.pri)
+	}
+}
+else {
+	CONFIG += crypto
+}
+
 include($$PWD/qttestutil/qttestutil.pri)
 include($$PWD/../common.pri)
 
