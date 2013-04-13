@@ -15,10 +15,3 @@ int main(int argc, char* argv[])
 	QCoreApplication application(argc, argv);
 	return QtTestUtil::TestRegistry::getInstance()->runTests(argc, argv);
 }
-
-#ifdef QCA_STATIC
-#include <QtPlugin>
-#ifdef HAVE_OPENSSL
-Q_IMPORT_PLUGIN(qca_ossl)
-#endif
-#endif
