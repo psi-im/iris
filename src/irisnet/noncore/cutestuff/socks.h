@@ -118,7 +118,7 @@ private:
 	Private *d;
 
 	void init();
-	void reset(bool clear=false);
+	void resetConnection(bool clear=false);
 	void do_request();
 	void processOutgoing(const QByteArray &);
 	void processIncoming(const QByteArray &);

@@ -98,7 +98,7 @@ private:
 	class Private;
 	Private *d;
 
-	void reset(bool clear=false);
+	void resetConnection(bool clear=false);
 	void ensureSocket();
 	void recreate_resolver();
 	bool check_protocol_fallback();
