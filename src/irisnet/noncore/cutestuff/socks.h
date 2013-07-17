@@ -63,6 +63,8 @@ public:
 	SocksClient(int, QObject *parent=0);
 	~SocksClient();
 
+	virtual QAbstractSocket* abstractSocket() const;
+
 	bool isIncoming() const;
 
 	// outgoing

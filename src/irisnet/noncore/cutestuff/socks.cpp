@@ -471,6 +471,11 @@ SocksClient::~SocksClient()
 	delete d;
 }
 
+QAbstractSocket* SocksClient::abstractSocket() const
+{
+	return d->sock.abstractSocket();
+}
+
 void SocksClient::resetConnection(bool clear)
 {
 	if(d->sock.state() != BSocket::Idle)

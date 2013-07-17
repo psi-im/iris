@@ -307,6 +307,11 @@ void BSocket::handle_connect_error(QAbstractSocket::SocketError e) {
 	d->resolver->tryNext();
 }
 
+QAbstractSocket* BSocket::abstractSocket() const
+{
+	return d->qsock;
+}
+
 int BSocket::socket() const
 {
 	if(d->qsock)
