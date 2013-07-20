@@ -944,7 +944,7 @@ public:
 	QList<PubSubItem> pubsubItems;
 	QList<PubSubRetraction> pubsubRetractions;
 	QString eventId;
-	QString xencrypted, invite;
+	QString xsigned, xencrypted, invite;
 	ChatState chatState;
 	MessageReceipt messageReceipt;
 	QString messageReceiptId;
@@ -1331,6 +1331,16 @@ void Message::setMessageReceiptId(const QString &s)
 	d->messageReceiptId = s;
 }
 
+QString Message::xsigned() const
+{
+	return d->xsigned;
+}
+
+void Message::setXSigned(const QString &s)
+{
+	d->xsigned = s;
+}
+
 QString Message::xencrypted() const
 {
 	return d->xencrypted;
@@ -1611,6 +1621,10 @@ Stanza Message::toStanza(Stream *stream) const
 		}
 	}
 
+	// xsigned
+	if(!d->xsigned.isEmpty())
+		s.appendChild(s.createTextElement("jabber:x:signed", "x", d->xsigned));
+
 	// xencrypted
 	if(!d->xencrypted.isEmpty())
 		s.appendChild(s.createTextElement("jabber:x:encrypted", "x", d->xencrypted));
@@ -1884,6 +1898,13 @@ bool Message::fromStanza(const Stanza &s, bool useTimeZoneOffset, int timeZoneOf
 		d->messageReceipt = ReceiptReceived;
 		d->messageReceiptId = t.attribute("id");
 	}
+
+	// xsigned
+	t = childElementsByTagNameNS(root, "jabber:x:signed", "x").item(0).toElement();
+	if(!t.isNull())
+		d->xsigned = t.text();
+	else
+		d->xsigned = QString();
 
 	// xencrypted
 	t = childElementsByTagNameNS(root, "jabber:x:encrypted", "x").item(0).toElement();
