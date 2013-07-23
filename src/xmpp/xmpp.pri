@@ -9,7 +9,7 @@ iris_bundle:{
 	include(../irisnet/noncore/noncore.pri)
 }
 else {
-        LIBS = -L$$IRIS_BASE/lib -lirisnet $$LIBS
+	LIBS += -L$$IRIS_BASE/lib -lirisnet
 }
 
 include($$IRIS_XMPP_BASE_MODULE)
