@@ -211,8 +211,8 @@ XDomNodeList childElementsByTagNameNS(const QDomElement &e, const QString &nsURI
 
 /**
  * \brief create a new IQ stanza
- * \param doc 
- * \param type 
+ * \param doc
+ * \param type
  * \param to destination jid
  * \param id stanza id
  * \return the created stanza
