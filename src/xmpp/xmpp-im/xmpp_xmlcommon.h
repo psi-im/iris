@@ -64,7 +64,6 @@ bool stamp2TS(const QString &ts, QDateTime *d);
 QString TS2stamp(const QDateTime &d);
 QDomElement textTag(QDomDocument *doc, const QString &name, const QString &content);
 QString tagContent(const QDomElement &e);
-QDomElement findSubTag(const QDomElement &e, const QString &name, bool *found);
 XDomNodeList childElementsByTagNameNS(const QDomElement &e, const QString &nsURI, const QString &localName);
 QDomElement createIQ(QDomDocument *doc, const QString &type, const QString &to, const QString &id);
 QDomElement queryTag(const QDomElement &e);
