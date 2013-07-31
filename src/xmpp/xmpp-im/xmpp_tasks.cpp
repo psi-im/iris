@@ -1475,22 +1475,24 @@ bool JT_ServInfo::take(const QDomElement &e)
 
 		QDomElement feature;
 		if (node.isEmpty() || node == client()->capsNode() + "#" + client()->capsVersion()) {
-			// Standard features
-			feature = doc()->createElement("feature");
-			feature.setAttribute("var", "http://jabber.org/protocol/bytestreams");
-			query.appendChild(feature);
+			if (client()->fileTransferManager()) {
+				// Standard features
+				feature = doc()->createElement("feature");
+				feature.setAttribute("var", "http://jabber.org/protocol/bytestreams");
+				query.appendChild(feature);
 
-			feature = doc()->createElement("feature");
-			feature.setAttribute("var", "http://jabber.org/protocol/ibb");
-			query.appendChild(feature);
+				feature = doc()->createElement("feature");
+				feature.setAttribute("var", "http://jabber.org/protocol/ibb");
+				query.appendChild(feature);
 
-			feature = doc()->createElement("feature");
-			feature.setAttribute("var", "http://jabber.org/protocol/si");
-			query.appendChild(feature);
+				feature = doc()->createElement("feature");
+				feature.setAttribute("var", "http://jabber.org/protocol/si");
+				query.appendChild(feature);
 
-			feature = doc()->createElement("feature");
-			feature.setAttribute("var", "http://jabber.org/protocol/si/profile/file-transfer");
-			query.appendChild(feature);
+				feature = doc()->createElement("feature");
+				feature.setAttribute("var", "http://jabber.org/protocol/si/profile/file-transfer");
+				query.appendChild(feature);
+			}
 
 			feature = doc()->createElement("feature");
 			feature.setAttribute("var", "http://jabber.org/protocol/disco#info");
