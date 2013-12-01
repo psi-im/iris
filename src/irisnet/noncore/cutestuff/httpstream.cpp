@@ -313,7 +313,7 @@ bool HttpStream::parseHeaders(const QByteArray &buffer, int &pos)
 					*it += newValue;
 				} else {
 					headers.insert(newKey, newValue);
-					lastKey == newKey;
+					lastKey = newKey;
 				}
 			}
 		}
