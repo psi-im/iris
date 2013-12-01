@@ -321,3 +321,5 @@ bool HttpStream::parseHeaders(const QByteArray &buffer, int &pos)
 	}
 	return valid;
 }
+
+#include "httpstream.moc"
