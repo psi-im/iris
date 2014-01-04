@@ -1084,6 +1084,13 @@ void ClientStream::processNext()
 	}
 }
 
+static void cleanupSimpleSASLProvider()
+{
+#if QCA_VERSION >= 0x020100
+	QCA::unloadProvider("simplesasl");
+#endif
+}
+
 bool ClientStream::handleNeed()
 {
 	int need = d->client.need;
@@ -1130,8 +1137,9 @@ bool ClientStream::handleNeed()
 			}
 			if(!found) {
 				// install with low-priority
-				QCA::insertProvider(createProviderSimpleSASL());
-				QCA::setProviderPriority("simplesasl", 10);
+				if(!QCA::insertProvider(createProviderSimpleSASL(), 10))
+					break;
+				irisNetAddPostRoutine(cleanupSimpleSASLProvider);
 			}
 
 			d->sasl = new QCA::SASL();
