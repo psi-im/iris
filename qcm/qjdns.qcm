@@ -17,7 +17,7 @@ public:
 	QString shortname() const { return "qjdns"; }
 	bool exec()
 	{
-#if defined Q_OS_WIN || Q_OS_MAC
+#if defined Q_OS_WIN || defined Q_OS_MAC
 		// HACK: on Windows and Mac OS X, always use psi's bundled qjdns
 		conf->addExtra("CONFIG += iris-qjdns");
 		return true;
