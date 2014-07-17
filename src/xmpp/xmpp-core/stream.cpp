@@ -65,7 +65,7 @@
 #include "td.h"
 #endif
 
-#define XMPP_DEBUG
+//#define XMPP_DEBUG
 
 using namespace XMPP;
 
@@ -290,7 +290,7 @@ ClientStream::~ClientStream()
 {
 	reset();
 	delete d;
-	fprintf(stderr, "\tClientStream::~ClientStream\n");
+	//fprintf(stderr, "\tClientStream::~ClientStream\n");
 }
 
 void ClientStream::reset(bool all)
@@ -964,13 +964,19 @@ void ClientStream::processNext()
 				emit incomingXml(str);
 		}
 
-		printf("\tNOTIFY: %d\n", d->client.notify);
+#ifdef XMPP_DEBUG
+		qDebug("\tNOTIFY: %d\n", d->client.notify);
+#endif
 		if (d->client.notify & CoreProtocol::NTimeout ) {
+#ifdef XMPP_DEBUG
 			qDebug() << "Time = "<< d->client.timeout_sec;
+#endif
 			d->timeout_timer.setSingleShot(true);
 			d->timeout_timer.start(d->client.timeout_sec * 1000);
 			d->client.notify &= ~ CoreProtocol::NTimeout;
+#ifdef XMPP_DEBUG
 			qDebug() << "\tNTimeout received | Start timer";
+#endif
 		}
 
 		if(!ok) {
@@ -1097,7 +1103,9 @@ void ClientStream::processNext()
 				return;
 			}
 			case CoreProtocol::EAck: {
+#ifdef XMPP_DEBUG
 				qDebug() << "Received ack response: " << d->client.getNotableStanzasAcked();
+#endif
 				emit stanzasAcked(d->client.getNotableStanzasAcked());
 			}
 		}
@@ -1267,7 +1275,9 @@ bool ClientStream::isStreamManagementActive() {
 
 void ClientStream::ackLastMessageStanza() {
 	 d->client.markLastMessageStanzaAcked();
-	 qWarning() << "StreamManagement: markLastMessageStanzaAcked";
+#ifdef XMPP_DEBUG
+	 qDebug() << "StreamManagement: markLastMessageStanzaAcked";
+#endif
 }
 
 void ClientStream::writeDirect(const QString &s)

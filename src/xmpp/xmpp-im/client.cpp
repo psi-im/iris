@@ -185,7 +185,7 @@ Client::~Client()
 	delete d->s5bman;
 	delete d->root;
 	delete d;
-	fprintf(stderr, "\tClient::~Client\n");
+	//fprintf(stderr, "\tClient::~Client\n");
 }
 
 void Client::connectToServer(ClientStream *s, const Jid &j, bool auth)
@@ -625,7 +625,7 @@ void Client::send(const QDomElement &x, bool want_notify)
 		return;
 	}
 	QString out = s.toString();
-	qWarning() << "Out: " << out;
+	//qWarning() << "Out: " << out;
 	debug(QString("Client: outgoing: [\n%1]\n").arg(out));
 	emit xmlOutgoing(out);
 
