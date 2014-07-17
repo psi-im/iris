@@ -598,7 +598,7 @@ CoreProtocol::CoreProtocol()
 :BasicProtocol()
 {
 	init();
-	sm_resumtion_supported = false;
+	sm_resumption_supported = false;
 	sm_resumption_id = "";
 	sm_receive_count = 0;
 	sm_server_last_handled = 0;
@@ -778,7 +778,7 @@ bool CoreProtocol::loginComplete()
 
 	// deal with stream management
 	if(!sm_started && features.sm_supported) {
-		if (sm_resumtion_supported && sm_resumption_id != "") {
+		if (sm_resumption_supported && sm_resumption_id != "") {
 			QDomElement e = doc.createElementNS(NS_STREAM_MANAGEMENT, "resume");
 			e.setAttribute("previd", sm_resumption_id);
 			qulonglong lasthandledid = getSMLastHandledId();
@@ -1056,8 +1056,9 @@ ClientStream::SMState CoreProtocol::getSMState() const {
 	state.sm_server_last_handled = sm_server_last_handled;
 	state.sm_stanzas_notify = sm_stanzas_notify;
 
-	state.sm_resumtion_supported = sm_resumtion_supported;
+	state.sm_resumtion_supported = sm_resumption_supported;
 	state.sm_resumption_id = sm_resumption_id;
+	state.sm_resumption_location = sm_resumption_location;
 	return state;
 }
 
@@ -1070,7 +1071,7 @@ void CoreProtocol::setSMState(ClientStream::SMState &state) {
 	sm_server_last_handled = state.sm_server_last_handled;
 	sm_stanzas_notify = state.sm_stanzas_notify;
 
-	sm_resumtion_supported = state.sm_resumtion_supported;
+	sm_resumption_supported = state.sm_resumtion_supported;
 	sm_resumption_id = state.sm_resumption_id;
 }
 
@@ -1315,7 +1316,7 @@ bool CoreProtocol::normalStep(const QDomElement &e)
 			return true;
 		}
 
-		if (sm_resumtion_supported && sm_resumption_id != "") {
+		if (sm_resumption_supported && sm_resumption_id != "") {
 			// try to resume;
 			fprintf(stderr, "\tResume session\n");
 			return loginComplete();
@@ -1904,8 +1905,34 @@ bool CoreProtocol::normalStep(const QDomElement &e)
 #ifdef SM_DEBUG
 				qDebug("\tResumption Supported");
 #endif
-				sm_resumtion_supported = true;
+				sm_resumption_supported = true;
 				sm_resumption_id = e.attribute("id", "");
+
+				if (!e.attribute("location").isEmpty()) {
+					int port_off = 0;
+					QStringRef sm_host;
+					int sm_port = -1;
+					QString location = e.attribute("location");
+					if (location[0] == '[') { // ipv6
+						port_off = location.indexOf(']');
+						if (port_off != -1) { // looks valid
+							sm_host = location.midRef(1, port_off - 1);
+						}
+					}
+					if (port_off != -1) { // -1 means previous ipv6 parse failed
+						port_off = location.indexOf(':');
+						if (port_off != -1) {
+							sm_host = location.leftRef(port_off);
+							sm_port = location.mid(port_off + 1).toInt();
+						} else {
+							sm_host = location.midRef(0);
+						}
+					}
+					if (!sm_host.isEmpty() && sm_port) {
+						sm_resumption_location = QPair<QString,int>(sm_host.toString(), sm_port);
+					}
+				}
+
 				startTimer(20);
 				event = EReady;
 				step = Done;

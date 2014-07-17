@@ -100,6 +100,7 @@ namespace XMPP
 
 			bool sm_resumtion_supported;
 			QString sm_resumption_id;
+			QPair<QString,int> sm_resumption_location;
 		};
 
 		ClientStream(Connector *conn, TLSHandler *tlsHandler=0, QObject *parent=0);

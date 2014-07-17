@@ -43,7 +43,7 @@
 #define NS_COMPRESS_FEATURE "http://jabber.org/features/compress"
 #define NS_COMPRESS_PROTOCOL "http://jabber.org/protocol/compress"
 #define NS_HOSTS    "http://barracuda.com/xmppextensions/hosts"
-#define NS_STREAM_MANAGEMENT  "urn:xmpp:sm:2"
+#define NS_STREAM_MANAGEMENT  "urn:xmpp:sm:3"
 
 namespace XMPP
 {
@@ -349,8 +349,9 @@ namespace XMPP
 		unsigned long sm_server_last_handled;
 		int sm_stanzas_notify;
 
-		bool sm_resumtion_supported;
+		bool sm_resumption_supported;
 		QString sm_resumption_id;
+		QPair<QString,int> sm_resumption_location;
 
 		bool server, dialback, dialback_verify;
 		int step;
