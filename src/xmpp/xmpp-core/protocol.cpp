@@ -1036,7 +1036,7 @@ void CoreProtocol::requestSMAcknowlegement() {
 #ifdef SM_DEBUG
 	qDebug() << "Now I'd request acknowledgement from the server.";
 #endif
-	sendDirect(QString("<r xmlns='urn:xmpp:sm:2'/>"));
+	sendDirect(QString("<r xmlns='" NS_STREAM_MANAGEMENT "'/>"));
 	startTimer(20);
 }
 
