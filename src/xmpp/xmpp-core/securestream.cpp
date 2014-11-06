@@ -382,6 +382,12 @@ public:
 		}
 		return false;
 	}
+
+	void deleteLayers()
+	{
+		qDeleteAll(layers);
+		layers.clear();
+	}
 };
 
 SecureStream::SecureStream(ByteStream *s)
@@ -401,6 +407,7 @@ SecureStream::SecureStream(ByteStream *s)
 
 SecureStream::~SecureStream()
 {
+	d->deleteLayers();
 	delete d;
 }
 
@@ -573,9 +580,7 @@ void SecureStream::layer_tlsClosed(const QByteArray &)
 {
 	setOpenMode(QIODevice::NotOpen);
 	d->active = false;
-	while (!d->layers.isEmpty()) {
-		delete d->layers.takeFirst();
-	}
+	d->deleteLayers();
 	tlsClosed();
 }
 
@@ -628,9 +633,7 @@ void SecureStream::layer_error(int x)
 	d->errorCode = x;
 	setOpenMode(QIODevice::NotOpen);
 	d->active = false;
-	while (!d->layers.isEmpty()) {
-		delete d->layers.takeFirst();
-	}
+	d->deleteLayers();
 	if(type == SecureLayer::TLS)
 		setError(ErrTLS);
 	else if(type == SecureLayer::SASL)
