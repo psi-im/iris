@@ -1258,7 +1258,10 @@ void ServiceResolver::handle_srv_ready(const QList<XMPP::NameRecord> &r)
 
 	/* lookup srv pointers */
 	d->srvList << r;
-	try_next_srv();
+	emit srvReady();
+	if (d->requestedProtocol != HappyEyeballs) {
+		try_next_srv();
+	}
 }
 
 /* failed the srv lookup, but we might have a fallback host in the srvList */
@@ -1414,6 +1417,21 @@ void ServiceResolver::stop() {
 bool ServiceResolver::hasPendingSrv() const
 {
 	return !d->srvList.isEmpty();
+}
+
+ServiceResolver::ProtoSplit ServiceResolver::happySplit()
+{
+	Q_ASSERT(d->requestedProtocol == HappyEyeballs);
+	ProtoSplit s;
+	s.ipv4 = new ServiceResolver(this);
+	s.ipv4->setProtocol(IPv4);
+	s.ipv4->d->srvList = d->srvList;
+	s.ipv4->d->hostList = d->hostList;
+	s.ipv6 = new ServiceResolver(this);
+	s.ipv6->setProtocol(IPv6);
+	s.ipv6->d->srvList = d->srvList;
+	s.ipv6->d->hostList = d->hostList;
+	return s;
 }
 
 
