@@ -104,6 +104,7 @@ public:
 	enum State {
 		Failure,
 		Created,
+		Resolve,
 		Connecting,
 		Connected
 	};
@@ -158,6 +159,7 @@ public:
 		for (int i = 0; i < sockets.count(); i++) {
 			abortSocket(sockets[i]);
 		}
+		fallbackTimer.stop();
 	}
 
 
@@ -190,6 +192,7 @@ public:
 			addSocket();
 			fallbackTimer.start();
 		}
+		sd.state = Resolve;
 		sd.resolver->start(domain, port);
 	}
 
@@ -206,6 +209,7 @@ public:
 		sd.resolver = new XMPP::ServiceResolver(this);
 		sd.resolver->setProtocol(XMPP::ServiceResolver::HappyEyeballs);
 		connect(sd.resolver, SIGNAL(srvReady()), SLOT(splitSrvResolvers()));
+		sd.state = Resolve;
 		sd.resolver->start(service, transport, domain, port);
 	}
 
@@ -232,7 +236,6 @@ private:
 			sd.resolver->stop();
 			disconnect(sd.resolver);
 			sd.resolver->deleteLater(); // or just delete ?
-			sd.resolver = 0;
 		}
 		delete sd.relay;
 		delete sd.sock;
@@ -273,6 +276,9 @@ private slots:
 	*/
 	void qs_connected()
 	{
+#ifdef BS_DEBUG
+		BSDEBUG;
+#endif
 		setCurrentByRelay(static_cast<QTcpSocketSignalRelay*>(sender()));
 		for (int i = 0; i < sockets.count(); i++) {
 			if (i != lastIndex) {
@@ -290,8 +296,12 @@ private slots:
 		setCurrentByRelay(static_cast<QTcpSocketSignalRelay*>(sender()));
 		// TODO remember error code
 		lastError = sockets[lastIndex].sock->errorString();
-		abortSocket(sockets[lastIndex]);
+#ifdef BS_DEBUG
+		BSDEBUG << "error:" << lastError;
+#endif
 		if (sockets[lastIndex].resolver) {
+			sockets[lastIndex].sock->abort();
+			sockets[lastIndex].state = Resolve;
 			sockets[lastIndex].resolver->tryNext();
 		} else {
 			// it seems we connect by hostaddress. just one socket w/o resolver
@@ -301,19 +311,28 @@ private slots:
 
 	void splitSrvResolvers()
 	{
+#ifdef BS_DEBUG
+		BSDEBUG << "splitting resolvers";
+#endif
 		setCurrentByResolver(static_cast<XMPP::ServiceResolver*>(sender()));
 		SockData &sdv4 = sockets[lastIndex];
 		SockData &sdv6 = addSocket();
 		XMPP::ServiceResolver::ProtoSplit ps = sdv4.resolver->happySplit();
+		initResolver(ps.ipv4);
+		initResolver(ps.ipv6);
+
 		disconnect(sdv4.resolver);
 		sdv4.resolver->deleteLater();
+
 		sdv4.resolver = ps.ipv4;
+		sdv4.state = Created;
 		sdv6.resolver = ps.ipv6;
-		initResolver(sdv4.resolver);
-		initResolver(sdv6.resolver);
+
 		if (fallbackProtocol == QAbstractSocket::IPv4Protocol) {
+			sdv6.state = Resolve;
 			sdv6.resolver->tryNext();
 		} else {
+			sdv4.state = Resolve;
 			sdv4.resolver->tryNext();
 		}
 		fallbackTimer.start();
@@ -327,6 +346,7 @@ private slots:
 #endif
 		setCurrentByResolver(static_cast<XMPP::ServiceResolver*>(sender()));
 		//d->isSrv = d->resolver->hasPendingSrv(); // if has no then its fallback or SRV is not used at all
+		sockets[lastIndex].state = Connecting;
 		sockets[lastIndex].sock->connectToHost(address, port);
 	}
 
@@ -344,10 +364,13 @@ private slots:
 
 	void startFallback()
 	{
+#ifdef BS_DEBUG
+		BSDEBUG;
+#endif
 		for(int i = 0; i < sockets.count(); i++) {
 			SockData &sd = sockets[i];
 			if (sd.state == Created) {
-				sd.state = Connecting;
+				sd.state = Resolve;
 				if (sd.resolver) {
 					sd.resolver->tryNext();
 				} else {
@@ -456,10 +479,6 @@ void BSocket::ensureConnector()
 /* Connect to an already resolved host */
 void BSocket::connectToHost(const QHostAddress &address, quint16 port)
 {
-#ifdef BS_DEBUG
-	BSDEBUG << "a:" << address << "p:" << port;
-#endif
-
 	resetConnection(true);
 	d->address = address;
 	d->port = port;
@@ -472,10 +491,6 @@ void BSocket::connectToHost(const QHostAddress &address, quint16 port)
 /* Connect to a host via the specified protocol, or the default protocols if not specified */
 void BSocket::connectToHost(const QString &host, quint16 port, QAbstractSocket::NetworkLayerProtocol protocol)
 {
-#ifdef BS_DEBUG
-	BSDEBUG << "h:" << host << "p:" << port << "pr:" << protocol;
-#endif
-
 	resetConnection(true);
 	d->host = host;
 	d->port = port;
@@ -488,10 +503,6 @@ void BSocket::connectToHost(const QString &host, quint16 port, QAbstractSocket::
 /* Connect to the hosts for the specified service */
 void BSocket::connectToHost(const QString &service, const QString &transport, const QString &domain, quint16 port)
 {
-#ifdef BS_DEBUG
-	BSDEBUG << "s:" << service << "t:" << transport << "d:" << domain;
-#endif
-
 	resetConnection(true);
 	d->domain = domain;
 	d->state = Connecting;

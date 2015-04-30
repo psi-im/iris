@@ -482,6 +482,8 @@ class IRISNET_EXPORT WeightedNameRecordList
 public:
 	WeightedNameRecordList();
 	WeightedNameRecordList(const QList<NameRecord> &list);
+	WeightedNameRecordList(const WeightedNameRecordList &other);
+	WeightedNameRecordList& operator=(const WeightedNameRecordList &other);
 	~WeightedNameRecordList();
 	bool isEmpty() const; //!< Returns true if the list contains no items; otherwise returns false.
 	NameRecord takeNext(); //!< Removes the next host to try from the list and returns it.

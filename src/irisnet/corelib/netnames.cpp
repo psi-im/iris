@@ -513,6 +513,22 @@ WeightedNameRecordList::WeightedNameRecordList(const QList<XMPP::NameRecord> &li
 	append(list);
 }
 
+WeightedNameRecordList::WeightedNameRecordList(const WeightedNameRecordList &other)
+{
+	*this = other;
+}
+
+WeightedNameRecordList &WeightedNameRecordList::operator=(const WeightedNameRecordList &other)
+{
+	priorityGroups = other.priorityGroups;
+	if (other.currentPriorityGroup != other.priorityGroups.end()) {
+		currentPriorityGroup = priorityGroups.find(other.currentPriorityGroup.key());
+	} else {
+		currentPriorityGroup = priorityGroups.end();
+	}
+	return *this;
+}
+
 WeightedNameRecordList::~WeightedNameRecordList() {
 }
 
@@ -1427,10 +1443,12 @@ ServiceResolver::ProtoSplit ServiceResolver::happySplit()
 	s.ipv4->setProtocol(IPv4);
 	s.ipv4->d->srvList = d->srvList;
 	s.ipv4->d->hostList = d->hostList;
+	s.ipv4->d->domain = d->domain;
 	s.ipv6 = new ServiceResolver(this);
 	s.ipv6->setProtocol(IPv6);
 	s.ipv6->d->srvList = d->srvList;
 	s.ipv6->d->hostList = d->hostList;
+	s.ipv6->d->domain = d->domain;
 	return s;
 }
 
