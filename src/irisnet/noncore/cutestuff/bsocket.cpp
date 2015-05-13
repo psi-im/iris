@@ -97,7 +97,7 @@ public slots:
 };
 
 
-class BSocketConnector : public QObject
+class HappyEyeballsConnector : public QObject
 {
 	Q_OBJECT
 public:
@@ -130,13 +130,13 @@ public:
 	QList<SockData> sockets;
 	QTimer fallbackTimer;
 
-	BSocketConnector(QObject *parent) :
+	HappyEyeballsConnector(QObject *parent) :
 		QObject(parent),
 		port(0)
 	{
 		fallbackProtocol = QAbstractSocket::IPv4Protocol;
 		fallbackTimer.setSingleShot(true);
-		fallbackTimer.setInterval(1000); /* does spec say what to set? */
+		fallbackTimer.setInterval(250); /* rfc recommends 150-250ms */
 		connect(&fallbackTimer, SIGNAL(timeout()), SLOT(startFallback()));
 	}
 
@@ -345,7 +345,6 @@ private slots:
 		BSDEBUG << "a:" << address << "p:" << port;
 #endif
 		setCurrentByResolver(static_cast<XMPP::ServiceResolver*>(sender()));
-		//d->isSrv = d->resolver->hasPendingSrv(); // if has no then its fallback or SRV is not used at all
 		sockets[lastIndex].state = Connecting;
 		sockets[lastIndex].sock->connectToHost(address, port);
 	}
@@ -394,12 +393,10 @@ class BSocket::Private
 public:
 	Private()
 	{
-		isSrv = false;
 		qsock = 0;
 		qsock_relay = 0;
 	}
 
-	bool isSrv;
 	QTcpSocket *qsock;
 	QTcpSocketSignalRelay *qsock_relay;
 	int state;
@@ -411,7 +408,7 @@ public:
 
 	//SafeDelete sd;
 
-	QPointer<BSocketConnector> connector;
+	QPointer<HappyEyeballsConnector> connector;
 };
 
 BSocket::BSocket(QObject *parent)
@@ -470,7 +467,7 @@ void BSocket::resetConnection(bool clear)
 void BSocket::ensureConnector()
 {
 	if(!d->connector) {
-		d->connector = new BSocketConnector(this);
+		d->connector = new HappyEyeballsConnector(this);
 		connect(d->connector, SIGNAL(connected()), SLOT(qs_connected()));
 		connect(d->connector, SIGNAL(error(QAbstractSocket::SocketError)), SLOT(qs_error(QAbstractSocket::SocketError)));
 	}
@@ -536,11 +533,6 @@ void BSocket::setSocket(int s)
 int BSocket::state() const
 {
 	return d->state;
-}
-
-bool BSocket::isPeerFromSrv() const
-{
-	return d->isSrv;
 }
 
 bool BSocket::isOpen() const
@@ -648,7 +640,7 @@ quint16 BSocket::peerPort() const
 
 void BSocket::qs_connected()
 {
-	BSocketConnector::SockData sd = d->connector->takeCurrent(this);
+	HappyEyeballsConnector::SockData sd = d->connector->takeCurrent(this);
 	d->qsock = sd.sock;
 	d->qsock_relay = sd.relay;
 	d->connector->deleteLater();
