@@ -49,6 +49,7 @@ namespace XMPP
 		bool canChatState() const;
 		bool canCommand() const;
 		bool isGateway() const;
+		bool hasVersion() const;
 		bool haveVCard() const;
 
 		enum FeatureID {
@@ -61,6 +62,7 @@ namespace XMPP
 			FID_Gateway,
 			FID_VCard,
 			FID_AHCommand,
+			FID_QueryVersion,
 
 			// private Psi actions
 			FID_Add

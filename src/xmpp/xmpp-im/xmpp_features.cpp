@@ -138,6 +138,15 @@ bool Features::isGateway() const
 	return test(ns);
 }
 
+#define FID_QUERYVERSION "jabber:iq:version"
+bool Features::hasVersion() const
+{
+	QStringList ns;
+	ns << FID_QUERYVERSION;
+
+	return test(ns);
+}
+
 #define FID_DISCO "http://jabber.org/protocol/disco"
 bool Features::canDisco() const
 {
@@ -178,34 +187,36 @@ public:
 	FeatureName()
 	: QObject(QCoreApplication::instance())
 	{
-		id2s[FID_Invalid]	= tr("ERROR: Incorrect usage of Features class");
-		id2s[FID_None]		= tr("None");
-		id2s[FID_Register]	= tr("Register");
-		id2s[FID_Search]	= tr("Search");
-		id2s[FID_Groupchat]	= tr("Groupchat");
-		id2s[FID_Gateway]	= tr("Gateway");
-		id2s[FID_Disco]		= tr("Service Discovery");
-		id2s[FID_VCard]		= tr("VCard");
-		id2s[FID_AHCommand]	= tr("Execute command");
+		id2s[FID_Invalid]		= tr("ERROR: Incorrect usage of Features class");
+		id2s[FID_None]			= tr("None");
+		id2s[FID_Register]		= tr("Register");
+		id2s[FID_Search]		= tr("Search");
+		id2s[FID_Groupchat]		= tr("Groupchat");
+		id2s[FID_Gateway]		= tr("Gateway");
+		id2s[FID_Disco]			= tr("Service Discovery");
+		id2s[FID_VCard]			= tr("VCard");
+		id2s[FID_AHCommand]		= tr("Execute command");
+		id2s[FID_QueryVersion]	= tr("Query version");
 
 		// custom Psi actions
-		id2s[FID_Add]		= tr("Add to roster");
+		id2s[FID_Add]			= tr("Add to roster");
 
 		// compute reverse map
 		//QMap<QString, long>::Iterator it = id2s.begin();
 		//for ( ; it != id2s.end(); ++it)
 		//	s2id[it.data()] = it.key();
 
-		id2f[FID_Register]	= FID_REGISTER;
-		id2f[FID_Search]	= FID_SEARCH;
-		id2f[FID_Groupchat]	= FID_GROUPCHAT;
-		id2f[FID_Gateway]	= FID_GATEWAY;
-		id2f[FID_Disco]		= FID_DISCO;
-		id2f[FID_VCard]		= FID_VCARD;
-		id2f[FID_AHCommand]	= FID_AHCOMMAND;
+		id2f[FID_Register]		= FID_REGISTER;
+		id2f[FID_Search]		= FID_SEARCH;
+		id2f[FID_Groupchat]		= FID_GROUPCHAT;
+		id2f[FID_Gateway]		= FID_GATEWAY;
+		id2f[FID_Disco]			= FID_DISCO;
+		id2f[FID_VCard]			= FID_VCARD;
+		id2f[FID_AHCommand]		= FID_AHCOMMAND;
+		id2f[FID_QueryVersion]	= FID_QUERYVERSION;
 
 		// custom Psi actions
-		id2f[FID_Add]		= FID_ADD;
+		id2f[FID_Add]			= FID_ADD;
 	}
 
 	//QMap<QString, long> s2id;
@@ -235,6 +246,8 @@ long Features::id() const
 		return FID_AHCommand;
 	else if ( test(QStringList(FID_ADD)) )
 		return FID_Add;
+	else if ( hasVersion() )
+		return FID_QueryVersion;
 
 	return FID_None;
 }
