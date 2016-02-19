@@ -269,14 +269,18 @@ QDomElement addCorrectNS(const QDomElement &e)
 
 	// find closest xmlns
 	QDomNode n = e;
-	while(!n.isNull() && !n.toElement().hasAttribute("xmlns"))
+	while(!n.isNull() && !n.toElement().hasAttribute("xmlns") && n.toElement().namespaceURI() == "" )
 		n = n.parentNode();
 	QString ns;
-	if(n.isNull() || !n.toElement().hasAttribute("xmlns"))
-		ns = "jabber:client";
-	else
+	if(n.isNull() || !n.toElement().hasAttribute("xmlns")){
+		if (n.toElement().namespaceURI () == ""){
+			ns = "jabber:client";
+		} else {
+			ns = n.toElement().namespaceURI();
+		}
+	} else {
 		ns = n.toElement().attribute("xmlns");
-
+	}
 	// make a new node
 	QDomElement i = e.ownerDocument().createElementNS(ns, e.tagName());
 
