@@ -181,7 +181,8 @@ namespace XMPP
 		void s5b_incomingReady();
 		void ibb_incomingReady();
 
-		void handleSMAckResponse(int);
+		void handleSMAckResponse(int);	
+		void parseUnhandledStreamFeatures();
 
 	public:
 		class GroupChat;
