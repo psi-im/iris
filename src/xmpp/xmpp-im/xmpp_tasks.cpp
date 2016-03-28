@@ -1999,7 +1999,7 @@ bool JT_BitsOfBinary::take(const QDomElement &x)
 	return true;
 }
 
-BoBData JT_BitsOfBinary::data()
+BoBData &JT_BitsOfBinary::data()
 {
 	return d->data;
 }
