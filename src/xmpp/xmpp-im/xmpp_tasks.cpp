@@ -1481,7 +1481,7 @@ bool JT_ServInfo::take(const QDomElement &e)
 		}
 		return true;
 	}
-	if (ns.isEmpty()) {
+	if (!ns.isEmpty()) {
 		return false;
 	}
 
