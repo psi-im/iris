@@ -1435,6 +1435,9 @@ bool JT_ServInfo::take(const QDomElement &e)
 		return false;
 
 	QString ns = queryNS(e);
+	if (ns.isEmpty()) {
+		ns = e.firstChildElement("time").attribute("xmlns");
+	}
 	if(ns == "jabber:iq:version") {
 		QDomElement iq = createIQ(doc(), "result", e.attribute("from"), e.attribute("id"));
 		QDomElement query = doc()->createElement("query");
