@@ -546,7 +546,7 @@ void Client::parseUnhandledStreamFeatures()
 {
 	QList<QDomElement> nl = d->stream->unhandledFeatures();
 	foreach (const QDomElement &e, nl) {
-		if (e.hasAttributeNS(NS_CAPS, "c")) {
+		if (e.localName() == "c" && e.namespaceURI() == NS_CAPS) {
 			d->serverCaps = CapsSpec::fromXml(e);
 		}
 	}
