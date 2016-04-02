@@ -464,6 +464,8 @@ namespace XMPP
 	{
 		Q_OBJECT
 	public:
+		const static int CaptchaValidTimeout = 120;
+
 		JT_CaptchaChallenger(Task *);
 		~JT_CaptchaChallenger();
 

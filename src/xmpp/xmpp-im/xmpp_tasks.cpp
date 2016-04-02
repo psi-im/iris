@@ -2067,6 +2067,8 @@ void JT_CaptchaChallenger::set(const Jid &j, const CaptchaChallenge &c)
 
 void JT_CaptchaChallenger::onGo()
 {
+	setTimeout(CaptchaValidTimeout);
+
 	Message m;
 	m.setId(id());
 	m.setBody(d->challenge.explanation());
