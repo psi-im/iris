@@ -196,9 +196,9 @@ void Task::onTimeout()
 	}
 }
 
-void Task::send(const QDomElement &x, bool want_notify)
+void Task::send(const QDomElement &x)
 {
-	client()->send(x, want_notify);
+	client()->send(x);
 }
 
 void Task::setSuccess(int code, const QString &str)

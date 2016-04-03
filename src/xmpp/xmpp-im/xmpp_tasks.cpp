@@ -843,13 +843,12 @@ static QDomElement oldStyleNS(const QDomElement &e)
 	return i;
 }
 
-JT_Message::JT_Message(Task *parent, const Message &msg, bool want_notify)
+JT_Message::JT_Message(Task *parent, const Message &msg)
 :Task(parent)
 {
 	m = msg;
 	if (m.id().isEmpty())
 		m.setId(id());
-	w_notify = want_notify;
 }
 
 JT_Message::~JT_Message()
@@ -860,7 +859,7 @@ void JT_Message::onGo()
 {
 	Stanza s = m.toStanza(&(client()->stream()));
 	QDomElement e = oldStyleNS(s.element());
-	send(e, w_notify);
+	send(e);
 	setSuccess();
 }
 

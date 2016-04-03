@@ -65,6 +65,7 @@
 #include "td.h"
 #endif
 
+
 //#define XMPP_DEBUG
 
 using namespace XMPP;
@@ -175,6 +176,7 @@ public:
 		lang = "";
 
 		in_rrsig = false;
+		quiet_reconnection = false;
 
 		reset();
 	}
@@ -237,6 +239,7 @@ public:
 	QTimer timeout_timer;
 	QTimer noopTimer;
 	int noop_time;
+	bool quiet_reconnection;
 };
 
 ClientStream::ClientStream(Connector *conn, TLSHandler *tlsHandler, QObject *parent)
@@ -602,10 +605,10 @@ Stanza ClientStream::read()
 	}
 }
 
-void ClientStream::write(const Stanza &s, bool notify)
+void ClientStream::write(const Stanza &s)
 {
 	if(d->state == Active) {
-		d->client.sendStanza(s.element(), notify);
+		d->client.sendStanza(s.element());
 		processNext();
 	}
 }
@@ -644,7 +647,8 @@ void ClientStream::cr_connected()
 	d->client.doBinding = d->doBinding;*/
 
 	QPointer<QObject> self = this;
-	emit connected();
+	if (!d->quiet_reconnection)
+		emit connected();
 	if(!self)
 		return;
 
@@ -719,7 +723,8 @@ void ClientStream::ss_bytesWritten(qint64 bytes)
 void ClientStream::ss_tlsHandshaken()
 {
 	QPointer<QObject> self = this;
-	securityLayerActivated(LayerTLS);
+	if (!d->quiet_reconnection)
+		securityLayerActivated(LayerTLS);
 	if(!self)
 		return;
 	d->client.setAllowPlain(d->allowPlain == AllowPlain || d->allowPlain == AllowPlainOverTLS);
@@ -1081,7 +1086,8 @@ void ClientStream::processNext()
 				d->jid = d->client.jid();
 				d->state = Active;
 				setNoopTime(d->noop_time);
-				authenticated();
+				if (!d->quiet_reconnection)
+					authenticated();
 				if(!self)
 					return;
 				break;
@@ -1101,10 +1107,10 @@ void ClientStream::processNext()
 				// store the stanza for now, announce after processing all events
 				// TODO: add a method to the stanza to mark them handled.
 				Stanza s = createStanza(d->client.recvStanza());
-				unsigned long sm_id = d->client.getNewSMId();
 				if(s.isNull())
 					break;
-				if (s.kind() == Stanza::Presence || s.kind() == Stanza::IQ) d->client.markStanzaHandled(sm_id);
+				if (d->client.sm.isActive())
+					d->client.sm.markStanzaHandled();
 				d->in.append(new Stanza(s));
 				break;
 			}
@@ -1126,10 +1132,28 @@ void ClientStream::processNext()
 				return;
 			}
 			case CoreProtocol::EAck: {
+				int ack_cnt = d->client.sm.takeAckedCount();
 #ifdef XMPP_DEBUG
-				qDebug() << "Received ack response: " << d->client.getNotableStanzasAcked();
+				qDebug() << "Stream Management: [INF] Received ack amount: " << ack_cnt;
 #endif
-				emit stanzasAcked(d->client.getNotableStanzasAcked());
+				emit stanzasAcked(ack_cnt);
+				break;
+			}
+			case CoreProtocol::ESMConnTimeout: {
+#ifdef XMPP_DEBUG
+				qDebug() << "Stream Management: [INF] Connection timeout";
+#endif
+				reset();
+				if (d->client.sm.state().isResumption()) {
+					d->state = Connecting;
+					emit warning(WarnSMReconnection);
+					d->quiet_reconnection = true;
+					d->conn->connectToServer(d->server);
+				} else {
+					d->quiet_reconnection = false;
+					emit connectionClosed();
+				}
+				return;
 			}
 		}
 	}
@@ -1245,7 +1269,8 @@ bool ClientStream::handleNeed()
 			d->ss->setLayerSASL(d->sasl, d->client.spare);
 			if(d->sasl_ssf > 0) {
 				QPointer<QObject> self = this;
-				securityLayerActivated(LayerSASL);
+				if (!d->quiet_reconnection)
+					securityLayerActivated(LayerSASL);
 				if(!self)
 					return false;
 			}
@@ -1297,18 +1322,6 @@ void ClientStream::doNoop()
 		d->client.sendWhitespace();
 		processNext();
 	}
-}
-
-// SM stuff
-bool ClientStream::isStreamManagementActive() {
-	return d->client.isStreamManagementActive();
-}
-
-void ClientStream::ackLastMessageStanza() {
-	 d->client.markLastMessageStanzaAcked();
-#ifdef XMPP_DEBUG
-	 qDebug() << "StreamManagement: markLastMessageStanzaAcked";
-#endif
 }
 
 void ClientStream::writeDirect(const QString &s)
@@ -1444,12 +1457,14 @@ void ClientStream::handleError()
 	}
 }
 
-ClientStream::SMState ClientStream::getSMState() const {
-	return d->client.getSMState();
+bool ClientStream::isResumed() const
+{
+	return d->client.sm.isResumed();
 }
 
-void ClientStream::setSMState(ClientStream::SMState state) {
-	d->client.setSMState(state);
+void ClientStream::setSMEnabled(bool e)
+{
+	d->client.sm.state().setEnabled(e);
 }
 
 

@@ -400,14 +400,6 @@ QString Client::groupChatNick(const QString &host, const QString &room) const
 	return QString();
 }
 
-bool Client::isStreamManagementActive() const {
-	ClientStream *cs = qobject_cast<ClientStream*>(d->stream);
-	if(cs)
-		return cs->isStreamManagementActive();
-	return false;
-}
-
-
 /*void Client::start()
 {
 	if(d->stream->old()) {
@@ -609,7 +601,7 @@ void Client::distribute(const QDomElement &x)
 	}
 }
 
-void Client::send(const QDomElement &x, bool want_notify)
+void Client::send(const QDomElement &x)
 {
 	if(!d->stream)
 		return;
@@ -634,7 +626,7 @@ void Client::send(const QDomElement &x, bool want_notify)
 	emit xmlOutgoing(out);
 
 	//printf("x[%s] x2[%s] s[%s]\n", Stream::xmlToString(x).toLatin1(), Stream::xmlToString(e).toLatin1(), s.toString().toLatin1());
-	d->stream->write(s, want_notify);
+	d->stream->write(s);
 }
 
 void Client::send(const QString &str)
@@ -994,9 +986,9 @@ void Client::importRosterItem(const RosterItem &item)
 	debug(dstr + str);
 }
 
-void Client::sendMessage(const Message &m, bool want_notify)
+void Client::sendMessage(const Message &m)
 {
-	JT_Message *j = new JT_Message(rootTask(), m, want_notify);
+	JT_Message *j = new JT_Message(rootTask(), m);
 	j->go(true);
 }
 
