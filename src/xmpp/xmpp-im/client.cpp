@@ -540,6 +540,9 @@ void Client::parseUnhandledStreamFeatures()
 	foreach (const QDomElement &e, nl) {
 		if (e.localName() == "c" && e.namespaceURI() == NS_CAPS) {
 			d->serverCaps = CapsSpec::fromXml(e);
+			if (d->capsman->isEnabled()) {
+				d->capsman->updateCaps(Jid(d->stream->jid().domain()), d->serverCaps);
+			}
 		}
 	}
 }
