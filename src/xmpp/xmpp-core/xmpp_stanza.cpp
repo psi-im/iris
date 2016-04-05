@@ -661,7 +661,7 @@ void Stanza::clearError()
 QSharedPointer<QDomDocument> Stanza::unboundDocument(QSharedPointer<QDomDocument> sd)
 {
 	if (!sd) {
-		sd.reset(new QDomDocument);
+		sd = QSharedPointer<QDomDocument>(new QDomDocument);
 	}
 	sd->importNode(d->e, true);
 	d->sharedDoc = sd;
