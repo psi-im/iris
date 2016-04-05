@@ -44,15 +44,17 @@
 
 #include "xmpp.h"
 
-#include <qtextstream.h>
-#include <qpointer.h>
-#include <qtimer.h>
+#include <QTextStream>
+#include <QPointer>
+#include <QTimer>
 #include <QList>
 #include <QByteArray>
-#include <stdlib.h>
-#include "bytestream.h"
 #include <QtCrypto>
 #include <QUrl>
+//#include <stdio.h>
+#include <stdlib.h>
+
+#include "bytestream.h"
 #include "simplesasl.h"
 #include "securestream.h"
 #include "protocol.h"
@@ -292,13 +294,17 @@ ClientStream::ClientStream(const QString &host, const QString &defRealm, ByteStr
 
 ClientStream::~ClientStream()
 {
+	//fprintf(stderr, "\tClientStream::~ClientStream\n");
+	//fflush(stderr);
 	reset();
 	delete d;
-	//fprintf(stderr, "\tClientStream::~ClientStream\n");
 }
 
 void ClientStream::reset(bool all)
 {
+	//fprintf(stderr, "\tClientStream::reset\n");
+	//fflush(stderr);
+
 	d->reset();
 	d->noopTimer.stop();
 
@@ -309,6 +315,17 @@ void ClientStream::reset(bool all)
 	// reset sasl
 	delete d->sasl;
 	d->sasl = 0;
+
+	if(all) {
+		while (!d->in.isEmpty()) {
+			delete d->in.takeFirst();
+		}
+	} else {
+		QSharedPointer<QDomDocument> sd;
+		foreach (Stanza *s, d->in) {
+			sd = s->unboundDocument(sd);
+		}
+	}
 
 	// client
 	if(d->mode == Client) {
@@ -338,12 +355,6 @@ void ClientStream::reset(bool all)
 		}
 
 		d->srv.reset();
-	}
-
-	if(all) {
-		while (!d->in.isEmpty()) {
-			delete d->in.takeFirst();
-		}
 	}
 }
 
@@ -1011,6 +1022,9 @@ void ClientStream::processNext()
 			//if(!d->in_rrsig && !d->in.isEmpty()) {
 			if(!d->in.isEmpty()) {
 				//d->in_rrsig = true;
+				//fprintf(stderr, "\tClientStream::processNext() QTimer::singleShot\n");
+				//fflush(stderr);
+
 				QTimer::singleShot(0, this, SLOT(doReadyRead()));
 			}
 

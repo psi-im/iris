@@ -164,6 +164,9 @@ Client::Client(QObject *par)
 
 Client::~Client()
 {
+	//fprintf(stderr, "\tClient::~Client\n");
+	//fflush(stderr);
+
 	close(true);
 
 	delete d->ftman;
@@ -415,6 +418,9 @@ QString Client::groupChatNick(const QString &host, const QString &room) const
 // TODO: fast close
 void Client::close(bool)
 {
+	//fprintf(stderr, "\tClient::close\n");
+	//fflush(stderr);
+
 	if(d->stream) {
 		d->stream->disconnect(this);
 		d->stream->close();
@@ -506,6 +512,9 @@ static QDomElement oldStyleNS(const QDomElement &e)
 
 void Client::streamReadyRead()
 {
+	//fprintf(stderr, "\tClientStream::streamReadyRead\n");
+	//fflush(stderr);
+
 	while(d->stream && d->stream->stanzaAvailable()) {
 		Stanza s = d->stream->read();
 
