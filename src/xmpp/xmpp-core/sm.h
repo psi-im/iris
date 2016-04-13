@@ -27,7 +27,7 @@
 #include <QDateTime>
 
 #define NS_STREAM_MANAGEMENT   "urn:xmpp:sm:3"
-#define SM_TIMER_INTERVAL_SECS 20
+#define SM_TIMER_INTERVAL_SECS 40
 
 //#define IRIS_SM_DEBUG
 
