@@ -632,6 +632,7 @@ void Client::send(const QDomElement &x)
 		//printf("bad stanza??\n");
 		return;
 	}
+	emit stanzaElementOutgoing(e);
 	QString out = s.toString();
 	//qWarning() << "Out: " << out;
 	debug(QString("Client: outgoing: [\n%1]\n").arg(out));
