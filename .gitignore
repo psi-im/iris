@@ -1,5 +1,6 @@
 Makefile
 *.o
+*.obj
 *.moc
 ui_*.h
 moc_*.cpp
