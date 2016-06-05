@@ -92,7 +92,7 @@ static ProcessQuit *g_pq = 0;
 inline bool is_gui_app()
 {
 #ifdef QT_GUI_LIB
-	return (QApplication::type() != QApplication::Tty);
+	return qobject_cast<QGuiApplication *>(QCoreApplication::instance());
 #else
 	return false;
 #endif
