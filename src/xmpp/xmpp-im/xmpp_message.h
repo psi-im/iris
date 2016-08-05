@@ -149,6 +149,10 @@ namespace XMPP {
 		// XEP-0047 ibb
 		const IBBData& ibbData() const;
 
+		// XEP-0280 Message Carbons
+		void setDisabledCarbons(bool disabled);
+		bool isDisabledCarbons() const;
+
 		// MUC
 		void addMUCStatus(int);
 		const QList<int>& getMUCStatuses() const;

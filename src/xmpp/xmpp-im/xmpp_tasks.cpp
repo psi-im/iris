@@ -884,7 +884,29 @@ bool JT_PushMessage::take(const QDomElement &e)
 	if(e.tagName() != "message")
 		return false;
 
-	Stanza s = client()->stream().createStanza(addCorrectNS(e));
+	QDomElement e1 = e;
+
+	// Check for Carbon
+	QDomNodeList list = e1.childNodes();
+	for (int i = 0; i < list.size(); ++i) {
+		QDomElement el = list.at(i).toElement();
+
+		if (el.attribute("xmlns") == "urn:xmpp:carbons:2" && (el.tagName() == "received" || el.tagName() == "sent")) {
+			QDomElement el1 = el.firstChildElement();
+			if (el1.tagName() == "forwarded" && el1.attribute("xmlns") == "urn:xmpp:forward:0") {
+				QDomElement el2 = el1.firstChildElement("message");
+				if (!el2.isNull()) {
+					e1 = el2;
+					if (el.tagName() == "received")
+						e1.setAttribute("to", e.attribute("to"));
+					else
+						e1.setAttribute("from", e.attribute("to"));
+				}
+			}
+		}
+	}
+
+	Stanza s = client()->stream().createStanza(addCorrectNS(e1));
 	if(s.isNull()) {
 		//printf("take: bad stanza??\n");
 		return false;
@@ -2179,4 +2201,48 @@ bool JT_CaptchaSender::take(const QDomElement &x)
 	}
 
 	return true;
+}
+
+//----------------------------------------------------------------------------
+// JT_MessageCarbons
+//----------------------------------------------------------------------------
+JT_MessageCarbons::JT_MessageCarbons(Task *parent)
+	: Task(parent)
+{
+
+}
+
+void JT_MessageCarbons::enable()
+{
+	_iq = createIQ(doc(), "set", "", id());
+
+	QDomElement enable = doc()->createElement("enable");
+	enable.setAttribute("xmlns", "urn:xmpp:carbons:2");
+
+	_iq.appendChild(enable);
+}
+
+void JT_MessageCarbons::disable()
+{
+	_iq = createIQ(doc(), "set", "", id());
+
+	QDomElement disable = doc()->createElement("disable");
+	disable.setAttribute("xmlns", "urn:xmpp:carbons:2");
+
+	_iq.appendChild(disable);
+}
+
+void JT_MessageCarbons::onGo()
+{
+	send(_iq);
+	setSuccess();
+}
+
+bool JT_MessageCarbons::take(const QDomElement &e)
+{
+	if (e.tagName() != "iq" || e.attribute("type") != "result")
+		return false;
+
+	bool res = iqVerify(e, Jid(), id());
+	return res;
 }
