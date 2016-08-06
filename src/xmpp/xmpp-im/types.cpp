@@ -957,6 +957,7 @@ public:
 	QMap<QString,HTMLElement> htmlElements;
  	QDomElement sxe;
 	QList<BoBData> bobDataList;
+	Jid forwardedFrom;
 
 	QList<int> mucStatuses;
 	QList<MUCInvite> mucInvites;
@@ -966,6 +967,7 @@ public:
 	bool spooled, wasEncrypted;
 
 	//XEP-0280 Message Carbons
+	Message::CarbonDir carbonDir; // it's a forwarded message
 	bool isDisabledCarbons;
 };
 
@@ -987,6 +989,7 @@ Message::Message(const Jid &to)
 	d->errorCode = -1;*/
 	d->chatState = StateNone;
 	d->messageReceipt = ReceiptNone;
+	d->carbonDir = Message::NoCarbon;
 	d->isDisabledCarbons = false;
 }
 
@@ -1470,6 +1473,26 @@ void Message::setDisabledCarbons(bool disabled)
 bool Message::isDisabledCarbons() const
 {
 	return d->isDisabledCarbons;
+}
+
+void Message::setCarbonDirection(Message::CarbonDir cd)
+{
+	d->carbonDir = cd;
+}
+
+Message::CarbonDir Message::carbonDirection() const
+{
+	return d->carbonDir;
+}
+
+void Message::setForwardedFrom(const Jid &jid)
+{
+	d->forwardedFrom = jid;
+}
+
+const Jid &Message::forwardedFrom() const
+{
+	return d->forwardedFrom;
 }
 
 bool Message::spooled() const

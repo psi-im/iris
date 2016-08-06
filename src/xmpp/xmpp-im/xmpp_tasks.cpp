@@ -885,28 +885,36 @@ bool JT_PushMessage::take(const QDomElement &e)
 		return false;
 
 	QDomElement e1 = e;
+	QDomElement forward;
+	Message::CarbonDir cd = Message::NoCarbon;
 
 	// Check for Carbon
 	QDomNodeList list = e1.childNodes();
 	for (int i = 0; i < list.size(); ++i) {
 		QDomElement el = list.at(i).toElement();
 
-		if (el.attribute("xmlns") == "urn:xmpp:carbons:2" && (el.tagName() == "received" || el.tagName() == "sent")) {
+		if (el.attribute("xmlns") == QLatin1String("urn:xmpp:carbons:2") && (el.tagName() == QLatin1String("received") || el.tagName() == QLatin1String("sent"))) {
 			QDomElement el1 = el.firstChildElement();
-			if (el1.tagName() == "forwarded" && el1.attribute("xmlns") == "urn:xmpp:forward:0") {
-				QDomElement el2 = el1.firstChildElement("message");
+			if (el1.tagName() == QLatin1String("forwarded") && el1.attribute(QLatin1String("xmlns")) == QLatin1String("urn:xmpp:forward:0")) {
+				QDomElement el2 = el1.firstChildElement(QLatin1String("message"));
 				if (!el2.isNull()) {
-					e1 = el2;
-					if (el.tagName() == "received")
-						e1.setAttribute("to", e.attribute("to"));
-					else
-						e1.setAttribute("from", e.attribute("to"));
+					forward = el2;
+					cd = el.tagName() == QLatin1String("received")? Message::Received : Message::Sent;
+					break;
 				}
+			}
+		}
+		else if (el.tagName() == QLatin1String("forwarded") && el.attribute(QLatin1String("xmlns")) == QLatin1String("urn:xmpp:forward:0")) {
+			forward = el.firstChildElement(QLatin1String("message")); // currently only messages are supportted
+			// TODO <delay> element support
+			if (!forward.isNull()) {
+				break;
 			}
 		}
 	}
 
-	Stanza s = client()->stream().createStanza(addCorrectNS(e1));
+	QString from = e1.attribute(QLatin1String("from"));
+	Stanza s = client()->stream().createStanza(addCorrectNS(forward.isNull()? e1 : forward));
 	if(s.isNull()) {
 		//printf("take: bad stanza??\n");
 		return false;
@@ -916,6 +924,10 @@ bool JT_PushMessage::take(const QDomElement &e)
 	if(!m.fromStanza(s, client()->manualTimeZoneOffset(), client()->timeZoneOffset())) {
 		//printf("bad message\n");
 		return false;
+	}
+	if (!forward.isNull()) {
+		m.setForwardedFrom(Jid(from));
+		m.setCarbonDirection(cd);
 	}
 
 	emit message(m);
