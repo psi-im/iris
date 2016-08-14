@@ -164,6 +164,53 @@ static inline bool highSurrogate(const quint32 ch)
 	return  ch >= 0xD800 && ch <= 0xDBFF;
 }
 
+static quint32 xmlToCodepoint(const QString &str, int pos, int *len)
+{
+	if (pos >= str.size() || str.at(pos) != '&') {
+		*len = 0;
+		return 0;
+	}
+
+	++pos;
+	if (pos >= str.size() || str.at(pos) != '#') {
+		*len = 1;
+		return 0;
+	}
+
+	++pos;
+	if (pos >= str.size()) {
+		*len = 2;
+		return 0;
+	}
+
+	bool hex = (str.at(pos) == 'x');
+	if (hex) ++pos;
+
+	quint32 ch = 0;
+	int last = qMin(str.size(), pos+8);
+	for (int i=pos; i<last; ++i) {
+		if (str.at(i).unicode() >= '0' && str.at(i).unicode() <= '9') {
+			if (hex) {
+				ch <<= 4;
+				ch |= str.at(i).unicode()-'0';
+			} else {
+				ch *= 10;
+				ch += str.at(i).unicode()-'0';
+			}
+		} else if (hex && str.at(i).toUpper().unicode() >= 'A' && str.at(i).toUpper().unicode() <= 'F') {
+			ch <<= 4;
+			ch |= str.at(i).toUpper().unicode()-'A'+10;
+		} else if (str.at(i) == ';') {
+			*len = 2 + (hex ? 1 : 0) + i-pos + 1;
+			return ch;
+		}
+	}
+
+	// no valid XML sequence, drop leading &# chars
+	*len = 2;
+	return 0;
+}
+
 
 // force encoding of '>'.  this function is needed for XMPP-Core, which
 //  requires the '>' character to be encoded as "&gt;" even though this is
@@ -220,6 +267,15 @@ static QString sanitizeForStream(const QString &in)
 			// because that's something that should not happen.
 			if (intag && (!inquote)) {
 				out += c;
+			} else if (c == '&') {
+				int len = 0;
+				const quint32 ch = xmlToCodepoint(in, n, &len);
+				if (validChar(ch)) {
+					out += QStringRef(&in, n, len);
+				} else {
+					qDebug("Dropping invalid XML sequence %s", QStringRef(&in, n, len).toUtf8().data());
+				}
+				n += len-1;
 			} else if (validChar(c.unicode()))  {
 				out += c;
 			} else if (highSurrogate(c.unicode()) && (n+1 < inlength) && lowSurrogate(in[n+1].unicode())) {
