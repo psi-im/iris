@@ -97,7 +97,7 @@ static QString xmlToString(const QDomElement &e, const QString &fakeNS, const QS
 	QString out;
 	{
 		QTextStream ts(&out, QIODevice::WriteOnly);
-		// NOTE: Workaround for bug in QtXML:
+		// NOTE: Workaround for bug in QtXML https://bugreports.qt.io/browse/QTBUG-25291 (Qt4 only):
 		// Qt by default convert low surrogate to XML notation &#x....; and let high in binary!
 		//
 		// Qt is calling encode function per UTF-16 codepoint, which means that high and low
