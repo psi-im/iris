@@ -1168,6 +1168,7 @@ DiscoItem Client::makeDiscoResult(const QString &node) const
 	features.addFeature("urn:xmpp:bob");
 	features.addFeature("urn:xmpp:ping");
 	features.addFeature("urn:xmpp:time");
+	features.addFeature("urn:xmpp:message-correct:0");
 
 	// Client-specific features
 	foreach (const QString & i, d->features.list()) {
