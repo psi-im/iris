@@ -410,7 +410,7 @@ void JT_Roster::set(const Jid &jid, const QString &name, const QStringList &grou
 
 void JT_Roster::remove(const Jid &jid)
 {
-	type = 1;
+	type = 2;
 	//to = client()->host();
 	QDomElement item = doc()->createElement("item");
 	item.setAttribute("jid", jid.full());
