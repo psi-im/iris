@@ -54,6 +54,8 @@ QString image2type(const QByteArray &ba)
 		return QLatin1String("image/jpeg");
 	if ( format == QLatin1String("BMP") )
 		return QLatin1String("image/bmp");
+	if ( format == QLatin1String("WEBP") )
+		return QLatin1String("image/webp");
 	if ( format == QLatin1String("XPM") )
 		return QLatin1String("image/x-xpm");
 	if ( format == QLatin1String("SVG") )
