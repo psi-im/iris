@@ -513,7 +513,10 @@ void BSocket::connectToHost(const QString &service, const QString &transport, co
 
 QAbstractSocket* BSocket::abstractSocket() const
 {
-	return d->qsock;
+	if(d->qsock)
+		return d->qsock;
+	else
+		return 0;
 }
 
 int BSocket::socket() const
