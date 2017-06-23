@@ -652,6 +652,11 @@ void Client::send(const QString &str)
 	static_cast<ClientStream*>(d->stream)->writeDirect(str);
 }
 
+bool Client::hasStream() const
+{
+	return !!d->stream;
+}
+
 Stream & Client::stream()
 {
 	return *(d->stream.data());
