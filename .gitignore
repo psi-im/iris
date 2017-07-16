@@ -5,6 +5,7 @@ Makefile
 ui_*.h
 moc_*.cpp
 qrc_*.cpp
+moc_predefs.h
 *.orig
 *.rej
 *.autosave
