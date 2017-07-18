@@ -331,7 +331,12 @@ void BasicProtocol::extractStreamError(const QDomElement &e)
 
 void BasicProtocol::send(const QDomElement &e, bool clip)
 {
-	writeElement(e, TypeElement, false, clip);
+	writeElement(e, TypeElement, false, clip, false);
+}
+
+void BasicProtocol::sendUrgent(const QDomElement &e, bool clip)
+{
+	writeElement(e, TypeElement, false, clip, true);
 }
 
 void BasicProtocol::sendStreamError(int cond, const QString &text, const QDomElement &appSpec)
@@ -931,7 +936,7 @@ bool CoreProtocol::streamManagementHandleStanza(const QDomElement &e)
 #ifdef IRIS_SM_DEBUG
 		qDebug() << "Stream Management: [<-?] Received request from server";
 #endif
-		send(sm.makeResponseStanza(doc));
+		sendUrgent(sm.makeResponseStanza(doc));
 		event = ESend;
 		return true;
 	} else if (s == "a") {
