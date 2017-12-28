@@ -26,18 +26,18 @@
 
 namespace XMPP
 {
-	class Jid;
+    class Jid;
 
-	class LiveRoster : public QList<LiveRosterItem>
-	{
-	public:
-		LiveRoster();
-		~LiveRoster();
+    class LiveRoster : public QList<LiveRosterItem>
+    {
+    public:
+        LiveRoster();
+        ~LiveRoster();
 
-		void flagAllForDelete();
-		LiveRoster::Iterator find(const Jid &, bool compareRes=true);
-		LiveRoster::ConstIterator find(const Jid &, bool compareRes=true) const;
-	};
+        void flagAllForDelete();
+        LiveRoster::Iterator find(const Jid &, bool compareRes=true);
+        LiveRoster::ConstIterator find(const Jid &, bool compareRes=true) const;
+    };
 }
 
 #endif

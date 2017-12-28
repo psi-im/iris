@@ -29,19 +29,19 @@ class QDomElement;
 
 namespace XMPP
 {
-	class Jid;
-	class Roster : public QList<RosterItem>
-	{
-	public:
-		Roster();
-		~Roster();
+    class Jid;
+    class Roster : public QList<RosterItem>
+    {
+    public:
+        Roster();
+        ~Roster();
 
-		Roster::Iterator find(const Jid &);
-		Roster::ConstIterator find(const Jid &) const;
+        Roster::Iterator find(const Jid &);
+        Roster::ConstIterator find(const Jid &) const;
 
-	private:
-		class RosterPrivate *d;
-	};
+    private:
+        class RosterPrivate *d;
+    };
 }
 
 #endif
