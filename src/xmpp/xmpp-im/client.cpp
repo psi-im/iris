@@ -632,8 +632,8 @@ void Client::send(const QDomElement &x)
         //printf("bad stanza??\n");
         return;
     }
-    emit stanzaElementOutgoing(e);
-    if (e.isNull()) {
+    emit stanzaElementOutgoing(e); // signal handler may change the node (TODO weird design?)
+    if (e.isNull()) { // so it was changed by signal above
         return;
     }
     QString out = s.toString();
