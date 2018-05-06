@@ -50,6 +50,7 @@ namespace XMPP {
     class Stream;
     class Task;
     class CapsManager;
+    class EncryptionHandler;
 }
 
 namespace XMPP
@@ -64,7 +65,7 @@ namespace XMPP
 
         bool isActive() const;
         void connectToServer(ClientStream *s, const Jid &j, bool auth=true);
-        void start(const QString &host, const QString &user, const QString &pass, const QString &resource);
+        void start(const QString &host, const QString &user, const QString &pass, const QString &resource, EncryptionHandler* = nullptr);
         void close(bool fast=false);
 
         bool hasStream() const;
@@ -85,7 +86,7 @@ namespace XMPP
         Jid jid() const;
 
         void rosterRequest();
-        void sendMessage(const Message &);
+        void sendMessage(Message &, EncryptionHandler * = nullptr);
         void sendSubscription(const Jid &, const QString &, const QString& nick = QString());
         void setPresence(const Status &);
 

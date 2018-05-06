@@ -860,12 +860,13 @@ static QDomElement oldStyleNS(const QDomElement &e)
     return i;
 }
 
-JT_Message::JT_Message(Task *parent, const Message &msg)
+JT_Message::JT_Message(Task *parent, Message &msg, EncryptionHandler *encryptionHandler)
 :Task(parent)
 {
-    m = msg;
-    if (m.id().isEmpty())
-        m.setId(id());
+    m = &msg;
+    if (m->id().isEmpty())
+        m->setId(id());
+    m_encryptionHandler = encryptionHandler;
 }
 
 JT_Message::~JT_Message()
@@ -874,9 +875,14 @@ JT_Message::~JT_Message()
 
 void JT_Message::onGo()
 {
-    Stanza s = m.toStanza(&(client()->stream()));
+    Stanza s = m->toStanza(&(client()->stream()));
     QDomElement e = oldStyleNS(s.element());
-    send(e);
+    bool wasEncrypted = m_encryptionHandler && m_encryptionHandler->encryptMessageElement(e);
+    // if the element is null, then the encryption is happening asynchronously
+    if (!(wasEncrypted && e.isNull())) {
+        send(e);
+    }
+    m->setWasEncrypted(wasEncrypted);
     setSuccess();
 }
 
@@ -884,13 +890,21 @@ void JT_Message::onGo()
 //----------------------------------------------------------------------------
 // JT_PushMessage
 //----------------------------------------------------------------------------
-JT_PushMessage::JT_PushMessage(Task *parent)
+class JT_PushMessage::Private {
+public:
+    EncryptionHandler *m_encryptionHandler;
+};
+
+JT_PushMessage::JT_PushMessage(Task *parent, EncryptionHandler *encryptionHandler)
 :Task(parent)
 {
+    d = new Private;
+    d->m_encryptionHandler = encryptionHandler;
 }
 
 JT_PushMessage::~JT_PushMessage()
 {
+    delete d;
 }
 
 bool JT_PushMessage::take(const QDomElement &e)
@@ -899,6 +913,13 @@ bool JT_PushMessage::take(const QDomElement &e)
         return false;
 
     QDomElement e1 = e;
+
+    bool wasEncrypted = d->m_encryptionHandler != nullptr && d->m_encryptionHandler->decryptMessageElement(e1) && !e1.isNull();
+    if (wasEncrypted && e1.isNull()) {
+        // The message was processed, but has to be discarded for some reason
+        return true;
+    }
+
     QDomElement forward;
     Message::CarbonDir cd = Message::NoCarbon;
 
@@ -947,6 +968,7 @@ bool JT_PushMessage::take(const QDomElement &e)
         m.setForwardedFrom(fromJid);
         m.setCarbonDirection(cd);
     }
+    m.setWasEncrypted(wasEncrypted);
 
     emit message(m);
     return true;

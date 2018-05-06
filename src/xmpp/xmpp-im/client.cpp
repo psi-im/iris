@@ -193,7 +193,7 @@ void Client::connectToServer(ClientStream *s, const Jid &j, bool auth)
     d->stream->connectToServer(j, auth);
 }
 
-void Client::start(const QString &host, const QString &user, const QString &pass, const QString &_resource)
+void Client::start(const QString &host, const QString &user, const QString &pass, const QString &_resource, EncryptionHandler *encryptionHandler)
 {
     // TODO
     d->host = host;
@@ -209,7 +209,7 @@ void Client::start(const QString &host, const QString &user, const QString &pass
     connect(pp, SIGNAL(subscription(Jid,QString,QString)), SLOT(ppSubscription(Jid,QString,QString)));
     connect(pp, SIGNAL(presence(Jid,Status)), SLOT(ppPresence(Jid,Status)));
 
-    JT_PushMessage *pm = new JT_PushMessage(rootTask());
+    JT_PushMessage *pm = new JT_PushMessage(rootTask(), encryptionHandler);
     connect(pm, SIGNAL(message(Message)), SLOT(pmMessage(Message)));
 
     JT_PushRoster *pr = new JT_PushRoster(rootTask());
@@ -1018,9 +1018,9 @@ void Client::importRosterItem(const RosterItem &item)
     debug(dstr + str);
 }
 
-void Client::sendMessage(const Message &m)
+void Client::sendMessage(Message &m, EncryptionHandler *encryptionHandler)
 {
-    JT_Message *j = new JT_Message(rootTask(), m);
+    JT_Message *j = new JT_Message(rootTask(), m, encryptionHandler);
     j->go(true);
 }
 
