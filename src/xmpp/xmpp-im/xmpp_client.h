@@ -60,12 +60,12 @@ namespace XMPP
         Q_OBJECT
 
     public:
-        Client(QObject *parent=0);
+        Client(QObject *parent = nullptr, EncryptionHandler *encryptionHandler = nullptr);
         ~Client();
 
         bool isActive() const;
         void connectToServer(ClientStream *s, const Jid &j, bool auth=true);
-        void start(const QString &host, const QString &user, const QString &pass, const QString &resource, EncryptionHandler* = nullptr);
+        void start(const QString &host, const QString &user, const QString &pass, const QString &resource);
         void close(bool fast=false);
 
         bool hasStream() const;
@@ -86,7 +86,7 @@ namespace XMPP
         Jid jid() const;
 
         void rosterRequest();
-        void sendMessage(Message &, EncryptionHandler * = nullptr);
+        void sendMessage(Message &);
         void sendSubscription(const Jid &, const QString &, const QString& nick = QString());
         void setPresence(const Status &);
 
