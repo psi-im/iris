@@ -136,7 +136,7 @@ public:
 };
 
 
-Client::Client(QObject *par, EncryptionHandler *encryptionHandler)
+Client::Client(QObject *par)
 :QObject(par)
 {
     d = new ClientPrivate;
@@ -161,8 +161,6 @@ Client::Client(QObject *par, EncryptionHandler *encryptionHandler)
     d->ftman = 0;
 
     d->capsman = new CapsManager(this);
-
-    d->encryptionHandler = encryptionHandler;
 }
 
 Client::~Client()
@@ -1138,6 +1136,11 @@ void Client::setClientVersion(const QString &s)
 void Client::setCaps(const CapsSpec &s)
 {
     d->caps = s;
+}
+
+void Client::setEncryptionHandler(EncryptionHandler *encryptionHandler)
+{
+    d->encryptionHandler = encryptionHandler;
 }
 
 DiscoItem::Identity Client::identity() const

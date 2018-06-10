@@ -60,7 +60,7 @@ namespace XMPP
         Q_OBJECT
 
     public:
-        Client(QObject *parent = nullptr, EncryptionHandler *encryptionHandler = nullptr);
+        Client(QObject *parent=0);
         ~Client();
 
         bool isActive() const;
@@ -111,6 +111,7 @@ namespace XMPP
         void setClientName(const QString &);
         void setClientVersion(const QString &);
         void setCaps(const CapsSpec &);
+        void setEncryptionHandler(EncryptionHandler *);
 
         void setIdentity(const DiscoItem::Identity &);
         DiscoItem::Identity identity() const;
