@@ -863,10 +863,14 @@ static QDomElement oldStyleNS(const QDomElement &e)
 JT_Message::JT_Message(Task *parent, Message &msg, EncryptionHandler *encryptionHandler)
 :Task(parent)
 {
-    m = &msg;
-    if (m->id().isEmpty())
-        m->setId(id());
-    m_encryptionHandler = encryptionHandler;
+    if (msg.id().isEmpty())
+        msg.setId(id());
+
+    Stanza s = msg.toStanza(&(client()->stream()));
+    e = oldStyleNS(s.element());
+
+    bool wasEncrypted = encryptionHandler && encryptionHandler->encryptMessageElement(e);
+    msg.setWasEncrypted(wasEncrypted);
 }
 
 JT_Message::~JT_Message()
@@ -875,14 +879,10 @@ JT_Message::~JT_Message()
 
 void JT_Message::onGo()
 {
-    Stanza s = m->toStanza(&(client()->stream()));
-    QDomElement e = oldStyleNS(s.element());
-    bool wasEncrypted = m_encryptionHandler && m_encryptionHandler->encryptMessageElement(e);
     // if the element is null, then the encryption is happening asynchronously
-    if (!(wasEncrypted && e.isNull())) {
+    if (!e.isNull()) {
         send(e);
     }
-    m->setWasEncrypted(wasEncrypted);
     setSuccess();
 }
 

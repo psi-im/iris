@@ -193,8 +193,7 @@ namespace XMPP
         void onGo();
 
     private:
-        Message *m;
-        EncryptionHandler *m_encryptionHandler;
+        QDomElement e;
 
         class Private;
         Private *d;
