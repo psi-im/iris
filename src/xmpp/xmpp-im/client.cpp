@@ -1021,7 +1021,7 @@ void Client::importRosterItem(const RosterItem &item)
 
 void Client::sendMessage(Message &m)
 {
-    JT_Message *j = new JT_Message(rootTask(), m, d->encryptionHandler);
+    JT_Message *j = new JT_Message(rootTask(), m);
     j->go(true);
 }
 
@@ -1141,6 +1141,11 @@ void Client::setCaps(const CapsSpec &s)
 void Client::setEncryptionHandler(EncryptionHandler *encryptionHandler)
 {
     d->encryptionHandler = encryptionHandler;
+}
+
+EncryptionHandler *Client::encryptionHandler() const
+{
+    return d->encryptionHandler;
 }
 
 DiscoItem::Identity Client::identity() const
