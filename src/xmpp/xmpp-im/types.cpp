@@ -1005,6 +1005,12 @@ Message::~Message()
 {
 }
 
+//! \brief Check if it's exactly the same instance.
+bool Message::operator==(const Message &from) const
+{
+    return d == from.d;
+}
+
 //! \brief Return receiver's Jid information.
 Jid Message::to() const
 {
