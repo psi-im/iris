@@ -29,13 +29,15 @@ ServerInfoManager::ServerInfoManager(Client* client)
     , _canMessageCarbons(false)
 {
     deinitialize();
+    // NOTE we can use this class for any server, but for this we shouldn't use roster signal here
     connect(_client, SIGNAL(rosterRequestFinished(bool, int, const QString &)), SLOT(initialize()), Qt::QueuedConnection);
 }
 
 void ServerInfoManager::reset()
 {
     _hasPEP = false;
-    _multicastService = QString();
+    _multicastService.clear();
+    _extraServerInfo.clear();
     disconnect(CapsRegistry::instance());
     disconnect(_client, SIGNAL(disconnected()), this, SLOT(deinitialize()));
 }
@@ -86,6 +88,17 @@ void ServerInfoManager::disco_finished()
         foreach(DiscoItem::Identity i, is) {
             if (i.category == "pubsub" && i.type == "pep")
                 _hasPEP = true;
+        }
+
+        for (const auto &x: jt->item().extensions()) {
+            if (x.type() == XData::Data_Result && x.registrarType() == QLatin1String("http://jabber.org/network/serverinfo")) {
+                for (const auto &f: x.fields()) {
+                    if (f.type() == XData::Field::Field_ListMulti) {
+                        QStringList values;
+                        _extraServerInfo.insert(f.var(), f.value()); // covers XEP-0157
+                    }
+                }
+            }
         }
 
         emit featuresChanged();

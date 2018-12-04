@@ -44,6 +44,7 @@ public:
     bool hasPEP() const;
     inline const Features &features() const { return _features; }
     bool canMessageCarbons() const;
+    inline const QMap<QString,QStringList> &extraServerInfo() const { return _extraServerInfo; }
 
 signals:
     void featuresChanged();
@@ -59,6 +60,7 @@ private:
     CapsSpec _caps;
     Features _features;
     QString _multicastService;
+    QMap<QString,QStringList> _extraServerInfo; // XEP-0128, XEP-0157
     bool _featuresRequested;
     bool _hasPEP;
     bool _canMessageCarbons;
