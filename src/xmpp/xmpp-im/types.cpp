@@ -972,6 +972,8 @@ public:
     Message::CarbonDir carbonDir = Message::NoCarbon; // it's a forwarded message
     Message::ProcessingHints processingHints;
     QString replaceId;
+    QString originId; // XEP-0359
+    Message::StanzaId stanzaId; // XEP-0359
 };
 
 //! \brief Constructs Message with given Jid information.
@@ -1425,6 +1427,26 @@ bool Message::hasMUCUser() const
     return d->hasMUCUser;
 }
 
+Message::StanzaId Message::stanzaId() const
+{
+    return d->stanzaId;
+}
+
+void Message::setStanzaId(const Message::StanzaId &id)
+{
+    d->stanzaId = id;
+}
+
+QString Message::originId() const
+{
+    return d->originId;
+}
+
+void Message::setOriginId(const QString &id)
+{
+    d->originId = id;
+}
+
 QString Message::invite() const
 {
     return d->invite;
@@ -1810,6 +1832,20 @@ Stanza Message::toStanza(Stream *stream) const
             s.appendChild(s.createElement(ns, QStringLiteral("store")));
         }
     }
+
+    // XEP-0359: Unique and Stable Stanza IDs
+    if (!d->originId.isEmpty()) {
+        auto e = s.createElement(QStringLiteral("urn:xmpp:sid:0"), QStringLiteral("origin-id"));
+        e.setAttribute(QStringLiteral("id"), d->originId);
+        s.appendChild(e);
+    }
+    if (!d->stanzaId.id.isEmpty() && d->stanzaId.by.isValid()) { // only for servers using iris
+        auto e = s.createElement(QStringLiteral("urn:xmpp:sid:0"), QStringLiteral("stanza-id"));
+        e.setAttribute(QStringLiteral("id"), d->stanzaId.id);
+        e.setAttribute(QStringLiteral("by"), d->stanzaId.by.full());
+        s.appendChild(e);
+    }
+
     return s;
 }
 
@@ -1911,6 +1947,14 @@ bool Message::fromStanza(const Stanza &s, bool useTimeZoneOffset, int timeZoneOf
             else if (e.tagName() == QLatin1String("store") && e.namespaceURI() == QLatin1String("urn:xmpp:hints")) {
                 d->processingHints |= Store;
             }
+            else if (e.tagName() == QLatin1String("origin-id") && e.namespaceURI() == QLatin1String("urn:xmpp:sid:0")) {
+                d->originId = e.attribute(QStringLiteral("id"));
+            }
+            else if (e.tagName() == QLatin1String("stanza-id") && e.namespaceURI() == QLatin1String("urn:xmpp:sid:0")) {
+                d->stanzaId.id = e.attribute(QStringLiteral("id"));
+                d->stanzaId.by = Jid(e.attribute(QStringLiteral("by")));
+            }
+
             else {
                 //printf("extension element: [%s]\n", e.tagName().latin1());
             }

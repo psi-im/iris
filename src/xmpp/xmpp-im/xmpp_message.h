@@ -66,6 +66,11 @@ namespace XMPP {
         };
         Q_DECLARE_FLAGS(ProcessingHints, ProcessingHint)
 
+        struct StanzaId {
+            Jid by;
+            QString id;
+        };
+
         Message(const Jid &to="");
         Message(const Message &from);
         Message & operator=(const Message &from);
@@ -200,6 +205,12 @@ namespace XMPP {
         const QString& mucPassword() const;
         void setMUCPassword(const QString&);
         bool hasMUCUser() const;
+
+        // XEP-0359
+        StanzaId stanzaId() const;
+        void setStanzaId(const StanzaId &id);
+        QString originId() const;
+        void setOriginId(const QString &id);
 
         // Obsolete invitation
         QString invite() const;
