@@ -970,6 +970,7 @@ public:
     //XEP-0280 Message Carbons
     bool isDisabledCarbons = false;
     Message::CarbonDir carbonDir = Message::NoCarbon; // it's a forwarded message
+    Message::ProcessingHints processingHints;
     QString replaceId;
 };
 
@@ -1547,6 +1548,16 @@ void Message::setReplaceId(const QString& id) {
     d->replaceId = id;
 }
 
+void Message::setProcessingHints(const ProcessingHints &hints)
+{
+    d->processingHints = hints;
+}
+
+Message::ProcessingHints Message::processingHints() const
+{
+    return d->processingHints;
+}
+
 Stanza Message::toStanza(Stream *stream) const
 {
     Stanza s = stream->createStanza(Stanza::Message, d->to, d->type);
@@ -1782,6 +1793,23 @@ Stanza Message::toStanza(Stream *stream) const
         e.setAttribute("id", d->replaceId);
         s.appendChild(e);
     }
+
+    // Message processing hints. XEP-0334
+    if (d->processingHints) {
+        QString ns = QStringLiteral(u"urn:xmpp:hints");
+        if (d->processingHints & NoPermanentStore) {
+            s.appendChild(s.createElement(ns, QStringLiteral("no-permanent-store")));
+        }
+        if (d->processingHints & NoStore) {
+            s.appendChild(s.createElement(ns, QStringLiteral("no-store")));
+        }
+        if (d->processingHints & NoCopy) {
+            s.appendChild(s.createElement(ns, QStringLiteral("no-copy")));
+        }
+        if (d->processingHints & Store) {
+            s.appendChild(s.createElement(ns, QStringLiteral("store")));
+        }
+    }
     return s;
 }
 
@@ -1834,29 +1862,29 @@ bool Message::fromStanza(const Stanza &s, bool useTimeZoneOffset, int timeZoneOf
         if(i.isElement()) {
             QDomElement e = i.toElement();
             if(e.namespaceURI() == s.baseNS()) {
-                if(e.tagName() == "subject") {
+                if(e.tagName() == QLatin1String("subject")) {
                     QString lang = e.attributeNS(NS_XML, "lang", "");
                     if (lang.isEmpty() || !(lang = XMLHelper::sanitizedLang(lang)).isEmpty()) {
                         d->subject[lang] = e.text();
                     }
                 }
-                else if(e.tagName() == "body") {
+                else if(e.tagName() == QLatin1String("body")) {
                     QString lang = e.attributeNS(NS_XML, "lang", "");
                     if (lang.isEmpty() || !(lang = XMLHelper::sanitizedLang(lang)).isEmpty()) {
                         d->body[lang] = e.text();
                     }
                 }
-                else if(e.tagName() == "thread")
+                else if(e.tagName() == QLatin1String("thread"))
                     d->thread = e.text();
             }
-            else if(e.tagName() == "event" && e.namespaceURI() == "http://jabber.org/protocol/pubsub#event") {
+            else if(e.tagName() == QLatin1String("event") && e.namespaceURI() == QLatin1String("http://jabber.org/protocol/pubsub#event")) {
                 for(QDomNode enode = e.firstChild(); !enode.isNull(); enode = enode.nextSibling()) {
                     QDomElement eel = enode.toElement();
-                    if (eel.tagName() == "items") {
+                    if (eel.tagName() == QLatin1String("items")) {
                         d->pubsubNode = eel.attribute("node");
                         for(QDomNode inode = eel.firstChild(); !inode.isNull(); inode = inode.nextSibling()) {
                             QDomElement o = inode.toElement();
-                            if (o.tagName() == "item") {
+                            if (o.tagName() == QLatin1String("item")) {
                                 for(QDomNode j = o.firstChild(); !j.isNull(); j = j.nextSibling()) {
                                     QDomElement item = j.toElement();
                                     if (!item.isNull()) {
@@ -1870,6 +1898,18 @@ bool Message::fromStanza(const Stanza &s, bool useTimeZoneOffset, int timeZoneOf
                         }
                     }
                 }
+            }
+            else if (e.tagName() == QLatin1String("no-permanent-store") && e.namespaceURI() == QLatin1String("urn:xmpp:hints")) {
+                d->processingHints |= NoPermanentStore;
+            }
+            else if (e.tagName() == QLatin1String("no-store") && e.namespaceURI() == QLatin1String("urn:xmpp:hints")) {
+                d->processingHints |= NoStore;
+            }
+            else if (e.tagName() == QLatin1String("no-copy") && e.namespaceURI() == QLatin1String("urn:xmpp:hints")) {
+                d->processingHints |= NoCopy;
+            }
+            else if (e.tagName() == QLatin1String("store") && e.namespaceURI() == QLatin1String("urn:xmpp:hints")) {
+                d->processingHints |= Store;
             }
             else {
                 //printf("extension element: [%s]\n", e.tagName().latin1());
@@ -2863,10 +2903,6 @@ Resource::Resource(const QString &name, const Status &stat)
     v_status = stat;
 }
 
-Resource::~Resource()
-{
-}
-
 const QString & Resource::name() const
 {
     return v_name;
@@ -2957,6 +2993,16 @@ RosterItem::RosterItem(const Jid &_jid)
 {
     v_jid = _jid;
     v_push = false;
+}
+
+RosterItem::RosterItem(const RosterItem &item) :
+    v_jid(item.v_jid),
+    v_name(item.v_name),
+    v_groups(item.v_groups),
+    v_subscription(item.v_subscription),
+    v_ask(item.v_ask),
+    v_push(item.v_push)
+{
 }
 
 RosterItem::~RosterItem()

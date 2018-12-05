@@ -57,6 +57,15 @@ namespace XMPP {
             Sent      // own messages are sent from other clients
         };
 
+        // XEP-0334
+        enum ProcessingHint {
+            NoPermanentStore = 1,
+            NoStore          = 2,
+            NoCopy           = 4,
+            Store            = 8
+        };
+        Q_DECLARE_FLAGS(ProcessingHints, ProcessingHint)
+
         Message(const Jid &to="");
         Message(const Message &from);
         Message & operator=(const Message &from);
@@ -173,9 +182,13 @@ namespace XMPP {
         void setForwardedFrom(const Jid &jid);
         const Jid &forwardedFrom() const;
 
-        // XEP-308
+        // XEP-0308
         QString replaceId() const;
         void setReplaceId(const QString& id);
+
+        // XEP-0334
+        void setProcessingHints(const ProcessingHints &hints);
+        ProcessingHints processingHints() const;
 
         // MUC
         void addMUCStatus(int);
@@ -208,5 +221,8 @@ namespace XMPP {
         QExplicitlySharedDataPointer<Private> d;
     };
 }
+
+Q_DECLARE_OPERATORS_FOR_FLAGS(XMPP::Message::ProcessingHints)
+
 
 #endif
