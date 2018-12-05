@@ -40,6 +40,7 @@ set(PLAIN_HEADERS
     xmpp-im/xmpp_roster.h
     xmpp-im/xmpp_rosteritem.h
     xmpp-im/xmpp_rosterx.h
+    xmpp-im/xmpp_serverinfomanager.h
     xmpp-im/xmpp_status.h
     xmpp-im/xmpp_subsets.h
     xmpp-im/xmpp_url.h
@@ -107,6 +108,7 @@ set(PLAIN_SOURCES
     xmpp-im/xmpp_discoinfotask.cpp
     xmpp-im/xmpp_discoitem.cpp
     xmpp-im/xmpp_ibb.cpp
+    xmpp-im/xmpp_serverinfomanager.cpp
     xmpp-im/xmpp_subsets.cpp
     xmpp-im/xmpp_task.cpp
     xmpp-im/xmpp_tasks.cpp
