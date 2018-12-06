@@ -933,7 +933,7 @@ void Client::rosterRequest()
 
 void Client::slotRosterRequestFinished()
 {
-    JT_Roster *r = (JT_Roster *)sender();
+    JT_Roster *r = static_cast<JT_Roster *>(sender());
     // on success, let's take it
     if(r->success()) {
         //d->roster.flagAllForDelete(); // mod_groups patch
