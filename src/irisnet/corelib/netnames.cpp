@@ -539,7 +539,7 @@ bool WeightedNameRecordList::isEmpty() const {
 XMPP::NameRecord WeightedNameRecordList::takeNext() {
     /* Find the next useful priority group */
     while (currentPriorityGroup != priorityGroups.end() && currentPriorityGroup->empty()) {
-        currentPriorityGroup++;
+        ++currentPriorityGroup;
     }
     /* There are no priority groups left, return failure */
     if (currentPriorityGroup == priorityGroups.end()) {
