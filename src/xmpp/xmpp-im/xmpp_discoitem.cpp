@@ -43,13 +43,13 @@ public:
 };
 
 DiscoItem::DiscoItem()
+    : d(new DiscoItemPrivate)
 {
-    d = new DiscoItemPrivate;
 }
 
 DiscoItem::DiscoItem(const DiscoItem &from)
+    : d(new DiscoItemPrivate)
 {
-    d = new DiscoItemPrivate;
     *this = from;
 }
 

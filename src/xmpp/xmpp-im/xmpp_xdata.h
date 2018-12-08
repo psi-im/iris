@@ -59,7 +59,7 @@ namespace XMPP {
 
         struct ReportField {
             ReportField() { }
-            ReportField( QString _label, QString _name ) { label = _label; name = _name; }
+            ReportField( QString _label, QString _name ) : label(_label), name(_name) { }
             QString label;
             QString name;
         };
