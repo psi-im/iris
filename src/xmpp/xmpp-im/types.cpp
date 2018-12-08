@@ -2667,7 +2667,7 @@ Status::Type Status::txt2type(const QString& stat)
               return XMPP::Status::Away;
 }
 
-void Status::setType(QString stat)
+void Status::setType(const QString &stat)
 {
       setType(txt2type(stat));
 }
