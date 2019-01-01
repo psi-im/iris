@@ -273,7 +273,7 @@ bool Client::isActive() const
 QString Client::groupChatPassword(const QString& host, const QString& room) const
 {
     Jid jid(room + "@" + host);
-    foreach(GroupChat i, d->groupChatList) {
+    foreach(const GroupChat &i, d->groupChatList) {
         if(i.j.compare(jid, false)) {
             return i.password;
         }
