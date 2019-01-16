@@ -1700,7 +1700,7 @@ bool JT_DiscoItems::take(const QDomElement &x)
             }
         }
 
-        setSuccess(true);
+        setSuccess();
     }
     else {
         setError(x);
@@ -1774,7 +1774,7 @@ bool JT_DiscoPublish::take(const QDomElement &x)
         return false;
 
     if(x.attribute("type") == "result") {
-        setSuccess(true);
+        setSuccess();
     }
     else {
         setError(x);
