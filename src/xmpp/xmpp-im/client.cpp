@@ -82,6 +82,7 @@
 #include "xmpp_caps.h"
 #include "protocol.h"
 #include "xmpp_serverinfomanager.h"
+#include "httpfileupload.h"
 
 #ifdef Q_OS_WIN
 #define vsnprintf _vsnprintf
@@ -131,6 +132,7 @@ public:
     BoBManager *bobman = nullptr;
     FileTransferManager *ftman = nullptr;
     ServerInfoManager *serverInfoManager = nullptr;
+    HttpFileUploadManager *httpFileUploadManager = nullptr;
     QList<GroupChat> groupChatList;
     EncryptionHandler *encryptionHandler = nullptr;
 };
@@ -160,6 +162,7 @@ Client::Client(QObject *par)
     d->capsman = new CapsManager(this);
 
     d->serverInfoManager = new ServerInfoManager(this);
+    d->httpFileUploadManager = new HttpFileUploadManager(this);
 }
 
 Client::~Client()
@@ -263,6 +266,11 @@ CapsManager *Client::capsManager() const
 ServerInfoManager *Client::serverInfoManager() const
 {
     return d->serverInfoManager;
+}
+
+HttpFileUploadManager *Client::httpFileUploadManager() const
+{
+    return d->httpFileUploadManager;
 }
 
 bool Client::isActive() const
