@@ -1,7 +1,28 @@
+/*
+ * Copyright (C) 2019  Sergey Ilinykh
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+ *
+ */
+
 #include "jingle.h"
 #include "xmpp_xmlcommon.h"
 #include "xmpp/jid/jid.h"
+#include "xmpp-im/xmpp_hash.h"
 
+#include <QDateTime>
 #include <QDomElement>
 
 namespace XMPP {
@@ -380,7 +401,7 @@ QDomElement Content::element(QDomDocument *doc) const
 	content.setAttribute(QLatin1String("creator"), creatorStr);
 	content.setAttribute(QLatin1String("name"), d->name);
 	if (d->disposition != QLatin1String("session")) {
-		content.setAttribute(QLatin1String("disposition"), d->disposition);
+		content.setAttribute(QLatin1String("disposition"), d->disposition); // NOTE review how we can parse it some generic way
 	}
 	if (!sendersStr.isEmpty()) {
 		content.setAttribute(QLatin1String("senders"), sendersStr);
@@ -402,6 +423,31 @@ Content::Private *Content::ensureD()
         d = new Private;
     }
     return d.data();
+}
+
+//----------------------------------------------------------------------------
+// Reason
+//----------------------------------------------------------------------------
+class FileTransfer::Private : public QSharedData
+{
+public:
+    QDateTime date;
+    QString mediaType;
+    QString name;
+    QString desc;
+    QString size;
+    FileTransfer::Range range;
+    Hash hash;
+};
+
+FileTransfer::FileTransfer(const QDomElement &file)
+{
+    QDateTime date;
+    QString mediaType;
+    QString name;
+    QString desc;
+    QString size;
+    Range range;
 }
 
 

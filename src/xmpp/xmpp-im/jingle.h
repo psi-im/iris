@@ -1,3 +1,22 @@
+/*
+ * Copyright (C) 2019  Sergey Ilinykh
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+ *
+ */
+
 #ifndef JINGLE_H
 #define JINGLE_H
 
@@ -7,6 +26,7 @@ class QDomElement;
 class QDomDocument;
 
 #define JINGLE_NS "urn:xmpp:jingle:1"
+#define JINGLE_FT_NS "urn:xmpp:jingle:apps:file-transfer:5"
 
 namespace XMPP {
 namespace Jingle {
@@ -102,6 +122,37 @@ public:
     Content(const QDomElement &content);
     inline bool isValid() const { return d != nullptr; }
     QDomElement element(QDomDocument *doc) const;
+private:
+    class Private;
+    Private *ensureD();
+    QSharedDataPointer<Private> d;
+};
+
+class FileTransfer
+{
+public:
+    struct Range {
+        quint64 offset;
+        quint64 length;
+    };
+
+    inline FileTransfer(){}
+    FileTransfer(const QDomElement &file);
+    inline bool isValid() const { return d != nullptr; }
+    QDomElement element(QDomDocument *doc) const;
+private:
+    class Private;
+    Private *ensureD();
+    QSharedDataPointer<Private> d;
+};
+
+class Description
+{
+public:
+    enum class Type {
+        Unrecognized, // non-standard, just a default
+        FileTransfer, // urn:xmpp:jingle:apps:file-transfer:5
+    };
 private:
     class Private;
     Private *ensureD();

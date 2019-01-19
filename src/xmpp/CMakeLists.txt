@@ -21,6 +21,7 @@ set(PLAIN_HEADERS
     xmpp-core/xmpp_stanza.h
 
     xmpp-im/xmpp_address.h
+    xmpp-im/xmpp_hash.h
     xmpp-im/xmpp_agentitem.h
     xmpp-im/xmpp_captcha.h
     xmpp-im/xmpp_chatstate.h
@@ -85,6 +86,10 @@ set(HEADERS
 
     zlib/zlibcompressor.h
     zlib/zlibdecompressor.h
+
+    blake2/blake2qt.h
+    blake2/blake2.h
+    blake2/blake2-impl.h
     )
 
 set(PLAIN_SOURCES
@@ -121,6 +126,10 @@ set(PLAIN_SOURCES
 
     zlib/zlibcompressor.cpp
     zlib/zlibdecompressor.cpp
+
+    blake2/blake2qt.cpp
+    blake2/blake2b-ref.c
+    blake2/blake2s-ref.c
 
     jid/jid.cpp
 

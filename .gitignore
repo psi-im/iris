@@ -9,6 +9,7 @@ moc_predefs.h
 *.orig
 *.rej
 *.autosave
+*.swp
 object_script.*
 /conf.log
 /conf.pri
