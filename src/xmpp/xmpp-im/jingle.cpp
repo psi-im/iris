@@ -446,8 +446,77 @@ FileTransfer::FileTransfer(const QDomElement &file)
     QString mediaType;
     QString name;
     QString desc;
-    QString size;
-    Range range;
+    size_t size;
+    Range range{};
+    Hash hash;
+
+    bool ok;
+
+    for(QDomElement ce = file.firstChildElement();
+        !ce.isNull(); ce = ce.nextSiblingElement()) {
+
+        if (ce.tagName() == QLatin1String("date")) {
+            date = QDateTime::fromString(ce.text().left(19), Qt::ISODate);
+            if (!date.isValid()) {
+                return;
+            }
+
+        } else if (ce.tagName() == QLatin1String("media-type")) {
+            mediaType = ce.text();
+
+        } else if (ce.tagName() == QLatin1String("name")) {
+            name = ce.text();
+
+        } else if (ce.tagName() == QLatin1String("size")) {
+            size = ce.text().toULongLong(&ok);
+            if (!ok) {
+                return;
+            }
+
+        } else if (ce.tagName() == QLatin1String("range")) {
+            if (ce.hasAttribute(QLatin1String("offset"))) {
+                range.offset = ce.attribute(QLatin1String("offset")).toULongLong(&ok);
+                if (!ok) {
+                    return;
+                }
+            }
+            if (ce.hasAttribute(QLatin1String("length"))) {
+                range.offset = ce.attribute(QLatin1String("length")).toULongLong(&ok);
+                if (!ok) {
+                    return;
+                }
+            }
+            QDomElement hashEl = ce.firstChildElement(QLatin1String("hash"));
+            if (hashEl.namespaceURI() == QLatin1String("urn:xmpp:hashes:2")) {
+                range.hash = Hash(hashEl);
+                if (range.hash.type() == Hash::Type::Unknown) {
+                    return;
+                }
+            }
+
+        } else if (ce.tagName() == QLatin1String("desc")) {
+            desc = ce.text();
+
+        } else if (ce.tagName() == QLatin1String("hash")) {
+            if (ce.namespaceURI() == QLatin1String("urn:xmpp:hashes:2")) {
+                hash = Hash(ce);
+                if (hash.type() == Hash::Type::Unknown) {
+                    return;
+                }
+            }
+
+        } else if (ce.tagName() == QLatin1String("hash-used")) {
+            if (ce.namespaceURI() == QLatin1String("urn:xmpp:hashes:2")) {
+                hash = Hash(ce);
+                if (hash.type() == Hash::Type::Unknown) {
+                    return;
+                }
+            }
+
+        }
+    }
+
+    // TODO make private and fill it
 }
 
 

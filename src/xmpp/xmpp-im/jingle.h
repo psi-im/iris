@@ -20,6 +20,8 @@
 #ifndef JINGLE_H
 #define JINGLE_H
 
+#include "xmpp_hash.h"
+
 #include <QSharedDataPointer>
 
 class QDomElement;
@@ -134,6 +136,7 @@ public:
     struct Range {
         quint64 offset;
         quint64 length;
+        Hash hash;
     };
 
     inline FileTransfer(){}
