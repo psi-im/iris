@@ -1,4 +1,5 @@
 /*
+ * jignle.cpp - General purpose Jingle
  * Copyright (C) 2019  Sergey Ilinykh
  *
  * This library is free software; you can redistribute it and/or
@@ -21,9 +22,11 @@
 #include "xmpp_xmlcommon.h"
 #include "xmpp/jid/jid.h"
 #include "xmpp-im/xmpp_hash.h"
+#include "xmpp_client.h"
 
 #include <QDateTime>
 #include <QDomElement>
+#include <QMap>
 #include <QMap>
 #include <QStringLiteral>
 
@@ -64,6 +67,11 @@ public:
     QList<Content> content;
     Reason reason;
 };
+
+Jingle::Jingle()
+{
+
+}
 
 Jingle::Jingle(const QDomElement &e)
 {
@@ -129,6 +137,17 @@ Jingle::Jingle(const QDomElement &e)
     d->content = contentList;
     d->initiator = initiator;
     d->responder = responder;
+}
+
+Jingle::Jingle(const Jingle &other) :
+    d(other.d)
+{
+
+}
+
+Jingle::~Jingle()
+{
+
 }
 
 Jingle::Private* Jingle::ensureD()
@@ -205,6 +224,11 @@ public:
     QString text;
 };
 
+Reason::Reason()
+{
+
+}
+
 Reason::Reason(const QDomElement &e)
 {
     if(e.tagName() != QLatin1String("reason"))
@@ -230,6 +254,12 @@ Reason::Reason(const QDomElement &e)
         d->cond = condition;
         d->text = text;
     }
+}
+
+Reason::Reason(const Reason &other) :
+    d(other.d)
+{
+
 }
 
 Reason::Condition Reason::condition() const
@@ -280,12 +310,19 @@ Reason::Private* Reason::ensureD()
 }
 
 //----------------------------------------------------------------------------
-// Content
+// ContentBase
 //----------------------------------------------------------------------------
 ContentBase::ContentBase(const QDomElement &el)
 {
+    static QMap<QString,Senders> sendersMap({
+                                                {QStringLiteral("initiator"), Senders::Initiator},
+                                                {QStringLiteral("none"), Senders::Initiator},
+                                                {QStringLiteral("responder"), Senders::Initiator}
+                                            });
     creator = creatorAttr(el);
     name = el.attribute(QLatin1String("name"));
+    senders = sendersMap.value(el.attribute(QLatin1String("senders")));
+    disposition = el.attribute(QLatin1String("disposition")); // if empty, it's "session"
 }
 
 QDomElement ContentBase::toXml(QDomDocument *doc, const char *tagName) const
@@ -296,27 +333,54 @@ QDomElement ContentBase::toXml(QDomDocument *doc, const char *tagName) const
     auto el = doc->createElement(QLatin1String(tagName));
     setCreatorAttr(el, creator);
     el.setAttribute(QLatin1String("name"), name);
+
+    QString sendersStr;
+    switch (senders) {
+    case Senders::None:
+        sendersStr = QLatin1String("none");
+        break;
+
+    case Senders::Initiator:
+        sendersStr = QLatin1String("initiator");
+        break;
+
+    case Senders::Responder:
+        sendersStr = QLatin1String("responder");
+        break;
+
+    case Senders::Both:
+    default:
+        break;
+    }
+
+    if (!disposition.isEmpty() && disposition != QLatin1String("session")) {
+        el.setAttribute(QLatin1String("disposition"), disposition); // NOTE review how we can parse it some generic way
+    }
+    if (!sendersStr.isEmpty()) {
+        el.setAttribute(QLatin1String("senders"), sendersStr);
+    }
+
     return el;
 }
 
 
-Content::Creator ContentBase::creatorAttr(const QDomElement &el)
+ContentBase::Creator ContentBase::creatorAttr(const QDomElement &el)
 {
     auto creatorStr = el.attribute(QLatin1String("creator"));
     if (creatorStr == QLatin1String("initiator")) {
-        return Content::Creator::Initiator;
+        return Creator::Initiator;
     }
     if (creatorStr == QLatin1String("responder")) {
-        return Content::Creator::Responder;
+        return Creator::Responder;
     }
-    return Content::Creator::NoCreator;
+    return Creator::NoCreator;
 }
 
-bool ContentBase::setCreatorAttr(QDomElement &el, Content::Creator creator)
+bool ContentBase::setCreatorAttr(QDomElement &el, Creator creator)
 {
-    if (creator == Content::Creator::Initiator) {
+    if (creator == Creator::Initiator) {
         el.setAttribute(QLatin1String("creator"), QLatin1String("initiator"));
-    } else if (creator == Content::Creator::Responder) {
+    } else if (creator == Creator::Responder) {
         el.setAttribute(QLatin1String("creator"), QLatin1String("responder"));
     } else {
         return false;
@@ -324,59 +388,30 @@ bool ContentBase::setCreatorAttr(QDomElement &el, Content::Creator creator)
     return true;
 }
 
-class Content::Private : public QSharedData
-{
-public:
-    Content::Senders senders;
-    QString disposition; // default "session"
-};
-
+//----------------------------------------------------------------------------
+// Content
+//----------------------------------------------------------------------------
 Content::Content(const QDomElement &content) :
     ContentBase(content)
 {
-    if (!ContentBase::isValid()) {
+    QDomElement descriptionEl = content.firstChildElement(QLatin1String("description"));
+    QDomElement transportEl = content.firstChildElement(QLatin1String("transport"));
+    //QDomElement securityEl = content.firstChildElement(QLatin1String("security"));
+    if (descriptionEl.isNull() || transportEl.isNull()) {
         return;
     }
 
-    QString disposition = QLatin1String("session");
-	Senders senders = Senders::Both;
-    //Xmlable *description = 0, *transport = 0, *security = 0;
 
-	QDomElement descriptionEl = content.firstChildElement(QLatin1String("description"));
-	QDomElement transportEl = content.firstChildElement(QLatin1String("transport"));
-	//QDomElement securityEl = content.firstChildElement(QLatin1String("security"));
-	if (descriptionEl.isNull() || transportEl.isNull()) {
-		return;
-	}
-	QString sendersStr = content.attribute(QLatin1String("senders"));
-	if (sendersStr == QLatin1String("initiator")) {
-		senders = Senders::Initiator;
-	}
-	else if (sendersStr == QLatin1String("none")) {
-		senders = Senders::None;
-	}
-	else if (sendersStr == QLatin1String("responder")) {
-		senders = Senders::Responder;
-	}
-	else if (sendersStr == QLatin1String("both")) {
-		senders = Senders::Both;
-	}
-	else {
-		return;
-	}
-	disposition = content.attribute(QLatin1String("disposition"));
-	/*
+    /*
     description = client->jingleManager()->descriptionFromXml(descriptionEl);
-	transport = client->jingleManager()->transportFromXml(transportEl);
-	if (!securityEl.isNull()) {
-		security = client->jingleManager()->securityFromXml(securityEl);
-		// if security == 0 then then its unsupported? just ignore it atm
-		// according to xtls draft responder may omit security when unsupported.
-	}
+    transport = client->jingleManager()->transportFromXml(transportEl);
+    if (!securityEl.isNull()) {
+        security = client->jingleManager()->securityFromXml(securityEl);
+        // if security == 0 then then its unsupported? just ignore it atm
+        // according to xtls draft responder may omit security when unsupported.
+    }
     */
-    d = new Private;
-	d->senders = senders;
-	d->disposition = disposition;
+
     // TODO description
     // TODO transports
     // TODO security
@@ -384,204 +419,95 @@ Content::Content(const QDomElement &content) :
 
 QDomElement Content::toXml(QDomDocument *doc) const
 {
-    QString creatorStr;
-	QString sendersStr;
-
     auto el = ContentBase::toXml(doc, "content");
     if (el.isNull()) {  // TODO check/init other elements of content
         return el;
     }
 
-	switch (d->senders) {
-		case Senders::None:
-			sendersStr = QLatin1String("none");
-			break;
-
-		case Senders::Initiator:
-			sendersStr = QLatin1String("initiator");
-			break;
-
-		case Senders::Responder:
-			sendersStr = QLatin1String("responder");
-			break;
-
-		case Senders::Both:
-		default:
-			break;
-	}
-
-	QDomElement content = doc->createElement(QLatin1String("content"));
-	content.setAttribute(QLatin1String("creator"), creatorStr);
-	if (d->disposition != QLatin1String("session")) {
-		content.setAttribute(QLatin1String("disposition"), d->disposition); // NOTE review how we can parse it some generic way
-	}
-	if (!sendersStr.isEmpty()) {
-		content.setAttribute(QLatin1String("senders"), sendersStr);
-	}
-
     /*
-	content.appendChild(description->toXml(doc));
-	content.appendChild(transport->toXml(doc));
-	if (!security.isNull()) {
-		content.appendChild(security->toXml(doc));
-	}
+    content.appendChild(description->toXml(doc));
+    content.appendChild(transport->toXml(doc));
+    if (!security.isNull()) {
+        content.appendChild(security->toXml(doc));
+    }
     */
-	return content;
-}
-
-Content::Private *Content::ensureD()
-{
-    if (!d) {
-        d = new Private;
-    }
-    return d.data();
-}
-
-
-namespace FileTransfer {
-
-static const QString NS = QStringLiteral("urn:xmpp:jingle:apps:file-transfer:5");
-
-//----------------------------------------------------------------------------
-// File
-//----------------------------------------------------------------------------
-class File::Private : public QSharedData
-{
-public:
-    QDateTime date;
-    QString mediaType;
-    QString name;
-    QString desc;
-    QString size;
-    Range range;
-    Hash hash;
-};
-
-File::File(const QDomElement &file)
-{
-    QDateTime date;
-    QString mediaType;
-    QString name;
-    QString desc;
-    size_t size;
-    Range range{};
-    Hash hash;
-
-    bool ok;
-
-    for(QDomElement ce = file.firstChildElement();
-        !ce.isNull(); ce = ce.nextSiblingElement()) {
-
-        if (ce.tagName() == QLatin1String("date")) {
-            date = QDateTime::fromString(ce.text().left(19), Qt::ISODate);
-            if (!date.isValid()) {
-                return;
-            }
-
-        } else if (ce.tagName() == QLatin1String("media-type")) {
-            mediaType = ce.text();
-
-        } else if (ce.tagName() == QLatin1String("name")) {
-            name = ce.text();
-
-        } else if (ce.tagName() == QLatin1String("size")) {
-            size = ce.text().toULongLong(&ok);
-            if (!ok) {
-                return;
-            }
-
-        } else if (ce.tagName() == QLatin1String("range")) {
-            if (ce.hasAttribute(QLatin1String("offset"))) {
-                range.offset = ce.attribute(QLatin1String("offset")).toULongLong(&ok);
-                if (!ok) {
-                    return;
-                }
-            }
-            if (ce.hasAttribute(QLatin1String("length"))) {
-                range.offset = ce.attribute(QLatin1String("length")).toULongLong(&ok);
-                if (!ok) {
-                    return;
-                }
-            }
-            QDomElement hashEl = ce.firstChildElement(QLatin1String("hash"));
-            if (hashEl.namespaceURI() == QLatin1String("urn:xmpp:hashes:2")) {
-                range.hash = Hash(hashEl);
-                if (range.hash.type() == Hash::Type::Unknown) {
-                    return;
-                }
-            }
-
-        } else if (ce.tagName() == QLatin1String("desc")) {
-            desc = ce.text();
-
-        } else if (ce.tagName() == QLatin1String("hash")) {
-            if (ce.namespaceURI() == QLatin1String("urn:xmpp:hashes:2")) {
-                hash = Hash(ce);
-                if (hash.type() == Hash::Type::Unknown) {
-                    return;
-                }
-            }
-
-        } else if (ce.tagName() == QLatin1String("hash-used")) {
-            if (ce.namespaceURI() == QLatin1String("urn:xmpp:hashes:2")) {
-                hash = Hash(ce);
-                if (hash.type() == Hash::Type::Unknown) {
-                    return;
-                }
-            }
-
-        }
-    }
-
-    // TODO make private and fill it
-}
-
-QDomElement File::toXml(QDomDocument *doc) const
-{
-    return QDomElement(); // TODO
-}
-
-File::Private *File::ensureD()
-{
-    if (!d) {
-        d = new Private;
-    }
-    return d.data();
-}
-
-//----------------------------------------------------------------------------
-// Checksum
-//----------------------------------------------------------------------------
-Checksum::Checksum(const QDomElement &cs) :
-    ContentBase(cs)
-{
-    file = File(cs.firstChildElement(QLatin1String("file")));
-}
-
-bool Checksum::isValid() const
-{
-    return ContentBase::isValid() && file.isValid();
-}
-
-QDomElement Checksum::toXml(QDomDocument *doc) const
-{
-    auto el = ContentBase::toXml(doc, "checksum");
-    if (!el.isNull()) {
-        el.appendChild(file.toXml(doc));
-    }
     return el;
 }
 
 //----------------------------------------------------------------------------
-// Received
+// Manager
 //----------------------------------------------------------------------------
-QDomElement Received::toXml(QDomDocument *doc) const
+class Manager::Private
 {
-    return ContentBase::toXml(doc, "received");
+    XMPP::Client *client;
+};
+
+Manager::Manager(Client *client) :
+    d(new Private)
+{
+    client = client;
+}
+
+Manager::~Manager()
+{
+}
+
+Session *Manager::newSession(const Jid &j)
+{
+    auto s = new Session(this);
+    return s;
 }
 
 
-} // namespace FileTransfer
+//----------------------------------------------------------------------------
+// Session
+//----------------------------------------------------------------------------
+class Session::Private
+{
+public:
+    Manager *manager;
+};
+
+Session::Session(Manager *manager) :
+    d(new Private)
+{
+    d->manager = manager;
+}
+
+Session::~Session()
+{
+
+}
+
+void Session::initiate(const Content &content)
+{
+
+}
+
+//----------------------------------------------------------------------------
+// Session
+//----------------------------------------------------------------------------
+class Application::Private
+{
+public:
+    Client *client;
+};
+
+Application::Application(Client *client) :
+    d(new Private)
+{
+    d->client = client;
+}
+
+Application::~Application()
+{
+
+}
+
+Client *Application::client() const
+{
+    return d->client;
+}
 
 } // namespace Jingle
 } // namespace XMPP

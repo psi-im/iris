@@ -1,4 +1,5 @@
 /*
+ * jignle.h - General purpose Jingle
  * Copyright (C) 2019  Sergey Ilinykh
  *
  * This library is free software; you can redistribute it and/or
@@ -31,6 +32,8 @@ class QDomDocument;
 #define JINGLE_FT_NS "urn:xmpp:jingle:apps:file-transfer:5"
 
 namespace XMPP {
+class Client;
+
 namespace Jingle {
 
 class Jingle
@@ -55,8 +58,10 @@ public:
         TransportReplace
     };
 
-    inline Jingle(){}
+    Jingle();
     Jingle(const QDomElement &e);
+    Jingle(const Jingle &);
+    ~Jingle();
     QDomElement toXml(QDomDocument *doc) const;
 private:
     class Private;
@@ -89,8 +94,9 @@ public:
         UnsupportedTransports
     };
 
-    inline Reason(){}
+    Reason();
     Reason(const QDomElement &el);
+    Reason(const Reason &other);
     inline bool isValid() const { return d != nullptr; }
     Condition condition() const;
     void setCondition(Condition cond);
@@ -113,75 +119,92 @@ public:
         Responder
     };
 
-    inline bool isValid() const { return creator != Creator::NoCreator && !name.isEmpty(); }
-protected:
+    enum class Senders {
+        Both, // it's default
+        None,
+        Initiator,
+        Responder
+    };
+
     inline ContentBase(){}
     ContentBase(const QDomElement &el);
+
+    inline bool isValid() const { return creator != Creator::NoCreator && !name.isEmpty(); }
+protected:
     QDomElement toXml(QDomDocument *doc, const char *tagName) const;
     static Creator creatorAttr(const QDomElement &el);
     static bool setCreatorAttr(QDomElement &el, Creator creator);
 
     Creator creator = Creator::NoCreator;
     QString name;
+    Senders senders = Senders::Both;
+    QString disposition; // default "session"
 };
 
 class Content : public ContentBase // TODO that's somewhat wrong mixing pimpl with this base
 {
 public:
-    enum class Senders {
-        None,
-        Both,
-        Initiator,
-        Responder
-    };
 
     inline Content(){}
     Content(const QDomElement &content);
-    inline bool isValid() const { return d != nullptr; }
     QDomElement toXml(QDomDocument *doc) const;
-private:
-    class Private;
-    Private *ensureD();
-    QSharedDataPointer<Private> d;
 };
 
-
-namespace FileTransfer {
-
-struct Range {
-    quint64 offset = 0;
-    quint64 length = 0;
-    Hash hash;
-};
-
-class File
+class Manager;
+class Session : public QObject
 {
+    Q_OBJECT
 public:
-    inline File(){}
-    File(const QDomElement &file);
-    inline bool isValid() const { return d != nullptr; }
-    QDomElement toXml(QDomDocument *doc) const;
+    Session(Manager *manager);
+    ~Session();
+
+    void initiate(const Content &content);
 private:
     class Private;
-    Private *ensureD();
-    QSharedDataPointer<Private> d;
+    QScopedPointer<Private> d;
 };
 
-class Checksum : public ContentBase {
-    inline Checksum(){}
-    Checksum(const QDomElement &file);
-    bool isValid() const;
-    QDomElement toXml(QDomDocument *doc) const;
+class Application : public QObject
+{
+    Q_OBJECT
+public:
+    Application(Client *client);
+    virtual ~Application();
+
+    Client *client() const;
+    virtual void incomingSession(Session *session, const QDomElement &contentEl) = 0;
 private:
-    File file;
+    class Private;
+    QScopedPointer<Private> d;
 };
 
-class Received : public ContentBase {
-    using ContentBase::ContentBase;
-    QDomElement toXml(QDomDocument *doc) const;
+class Transport
+{
+
 };
 
-} // namespace FT
+class Manager : public QObject
+{
+    Q_OBJECT
+
+	static const int MaxSessions = 1000; //1000? just to have some limit
+
+public:
+	explicit Manager(XMPP::Client *client = 0);
+	~Manager();
+
+	XMPP::Client* client() const;
+	//Session* sessionInitiate(const Jid &to, const QDomElement &description, const QDomElement &transport);
+	// TODO void setRedirection(const Jid &to);
+
+	void registerApp(const QString &ns, Application *app);
+
+	Session* newSession(const Jid &j);
+
+private:
+    class Private;
+	QScopedPointer<Private> d;
+};
 
 class Description
 {
