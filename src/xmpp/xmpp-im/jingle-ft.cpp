@@ -26,7 +26,7 @@ namespace Jingle {
 
 namespace FileTransfer {
 
-static const QString NS = QStringLiteral("urn:xmpp:jingle:apps:file-transfer:5");
+const QString NS = QStringLiteral("urn:xmpp:jingle:apps:file-transfer:5");
 
 //----------------------------------------------------------------------------
 // File
@@ -140,6 +140,7 @@ File::File(const QDomElement &file)
 
 QDomElement File::toXml(QDomDocument *doc) const
 {
+    Q_UNUSED(doc) // TODO
     return QDomElement(); // TODO
 }
 
@@ -183,14 +184,6 @@ QDomElement Received::toXml(QDomDocument *doc) const
 }
 
 //----------------------------------------------------------------------------
-// FTContent
-//----------------------------------------------------------------------------
-FTContent::FTContent(const QDomElement &el)
-{
-
-}
-
-//----------------------------------------------------------------------------
 // FTApplication
 //----------------------------------------------------------------------------
 FTApplication::FTApplication(Client *client):
@@ -199,9 +192,15 @@ FTApplication::FTApplication(Client *client):
 
 }
 
-void FTApplication::incomingSession(Session *session, const QDomElement &contentEl)
+void FTApplication::incomingSession(Session *session)
 {
-    auto content = FTContent(contentEl);
+    Q_UNUSED(session) // TODO
+}
+
+QSharedPointer<Description> FTApplication::descriptionFromXml(const QDomElement &el)
+{
+    Q_UNUSED(el) // TODO
+    QSharedPointer<Description>();
 }
 
 } // namespace FileTransfer

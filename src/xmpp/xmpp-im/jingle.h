@@ -24,18 +24,19 @@
 #include "xmpp_hash.h"
 
 #include <QSharedDataPointer>
+#include <QSharedPointer>
 
 class QDomElement;
 class QDomDocument;
-
-#define JINGLE_NS "urn:xmpp:jingle:1"
-#define JINGLE_FT_NS "urn:xmpp:jingle:apps:file-transfer:5"
 
 namespace XMPP {
 class Client;
 
 namespace Jingle {
 
+extern const QString NS;
+
+class Manager;
 class Jingle
 {
 public:
@@ -59,10 +60,12 @@ public:
     };
 
     Jingle();
-    Jingle(const QDomElement &e);
+    Jingle(Manager *manager, const QDomElement &e);
     Jingle(const Jingle &);
     ~Jingle();
     QDomElement toXml(QDomDocument *doc) const;
+    inline bool isValid() const { return d != nullptr; }
+    Action action() const;
 private:
     class Private;
     QSharedDataPointer<Private> d;
@@ -95,6 +98,7 @@ public:
     };
 
     Reason();
+    ~Reason();
     Reason(const QDomElement &el);
     Reason(const Reason &other);
     inline bool isValid() const { return d != nullptr; }
@@ -141,13 +145,69 @@ protected:
     QString disposition; // default "session"
 };
 
+class Description
+{
+public:
+    enum class Type {
+        Unrecognized, // non-standard, just a default
+        FileTransfer, // urn:xmpp:jingle:apps:file-transfer:5
+    };
+private:
+    class Private;
+    Private *ensureD();
+    QSharedDataPointer<Private> d;
+};
+
+class Transport
+{
+public:
+    /*
+    Categorization by speed, reliability and connectivity
+    - speed: realtim, fast, slow
+    - reliability: reliable, not reliable
+    - connectivity: always connect, hard to connect
+
+    Some transports may change their qualities, so we have to consider worst case.
+
+    ICE-UDP: RealTime, Not Reliable, Hard To Connect
+    S5B:     Fast,     Reliable,     Hard To Connect
+    IBB:     Slow,     Reliable,     Always Connect
+    */
+    enum Feature {
+        // connection establishment
+        HardToConnect = 0x01,
+        AlwaysConnect = 0x02,
+
+        // reliability
+        NotReliable   = 0x10,
+        Reliable      = 0x20,
+
+        // speed
+        Slow          = 0x100,
+        Fast          = 0x200,
+        RealTime      = 0x400
+    };
+
+    Q_DECLARE_FLAGS(Features, Feature)
+};
+
+class Security
+{
+
+};
+
 class Content : public ContentBase // TODO that's somewhat wrong mixing pimpl with this base
 {
 public:
 
     inline Content(){}
-    Content(const QDomElement &content);
+    Content(Manager *manager, const QDomElement &content);
     QDomElement toXml(QDomDocument *doc) const;
+
+    QSharedPointer<Description> description;
+    QSharedPointer<Transport> transport;
+    QSharedPointer<Security> security;
+    Reason reason;
 };
 
 class Manager;
@@ -172,15 +232,13 @@ public:
     virtual ~Application();
 
     Client *client() const;
-    virtual void incomingSession(Session *session, const QDomElement &contentEl) = 0;
+    virtual void incomingSession(Session *session) = 0;
+
+    virtual QSharedPointer<Description> descriptionFromXml(const QDomElement &el) = 0;
+
 private:
     class Private;
     QScopedPointer<Private> d;
-};
-
-class Transport
-{
-
 };
 
 class Manager : public QObject
@@ -201,22 +259,15 @@ public:
 
 	Session* newSession(const Jid &j);
 
+    QSharedPointer<Description> descriptionFromXml(const QDomElement &el);
+    QSharedPointer<Transport> transportFromXml(const QDomElement &el);
+
 private:
+    friend class JTPush;
+    bool incomingIQ(const QDomElement &iq);
+
     class Private;
 	QScopedPointer<Private> d;
-};
-
-class Description
-{
-public:
-    enum class Type {
-        Unrecognized, // non-standard, just a default
-        FileTransfer, // urn:xmpp:jingle:apps:file-transfer:5
-    };
-private:
-    class Private;
-    Private *ensureD();
-    QSharedDataPointer<Private> d;
 };
 
 } // namespace Jingle

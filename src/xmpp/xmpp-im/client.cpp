@@ -84,6 +84,8 @@
 #include "protocol.h"
 #include "xmpp_serverinfomanager.h"
 #include "httpfileupload.h"
+#include "jingle.h"
+#include "jingle-ft.h"
 
 #ifdef Q_OS_WIN
 #define vsnprintf _vsnprintf
@@ -134,6 +136,7 @@ public:
     FileTransferManager *ftman = nullptr;
     ServerInfoManager *serverInfoManager = nullptr;
     HttpFileUploadManager *httpFileUploadManager = nullptr;
+    Jingle::Manager *jingleManager = nullptr;
     QList<GroupChat> groupChatList;
     EncryptionHandler *encryptionHandler = nullptr;
 };
@@ -164,6 +167,9 @@ Client::Client(QObject *par)
 
     d->serverInfoManager = new ServerInfoManager(this);
     d->httpFileUploadManager = new HttpFileUploadManager(this);
+    d->jingleManager = new Jingle::Manager(this);
+    auto ft = new Jingle::FileTransfer::FTApplication(this);
+    d->jingleManager->registerApp(Jingle::FileTransfer::NS, ft);
 }
 
 Client::~Client()
@@ -272,6 +278,11 @@ ServerInfoManager *Client::serverInfoManager() const
 HttpFileUploadManager *Client::httpFileUploadManager() const
 {
     return d->httpFileUploadManager;
+}
+
+Jingle::Manager *Client::jingleManager() const
+{
+    return d->jingleManager;
 }
 
 bool Client::isActive() const
@@ -595,8 +606,9 @@ QDomDocument *Client::doc() const
 
 void Client::distribute(const QDomElement &x)
 {
-    if(x.hasAttribute("from")) {
-        Jid j(x.attribute("from"));
+    static QString fromAttr(QStringLiteral("from"));
+    if(x.hasAttribute(fromAttr)) {
+        Jid j(x.attribute(fromAttr));
         if(!j.isValid()) {
             debug("Client: bad 'from' JID\n");
             return;

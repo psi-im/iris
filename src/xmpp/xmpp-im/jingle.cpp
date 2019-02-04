@@ -23,15 +23,107 @@
 #include "xmpp/jid/jid.h"
 #include "xmpp-im/xmpp_hash.h"
 #include "xmpp_client.h"
+#include "xmpp_task.h"
+#include "xmpp_stream.h"
 
 #include <QDateTime>
 #include <QDomElement>
 #include <QMap>
 #include <QMap>
-#include <QStringLiteral>
+#include <QPointer>
+#include <functional>
 
 namespace XMPP {
 namespace Jingle {
+
+const QString NS(QStringLiteral("urn:xmpp:jingle:1"));
+
+//----------------------------------------------------------------------------
+// Manager
+//----------------------------------------------------------------------------
+class Manager::Private
+{
+public:
+    friend class Content;
+
+    XMPP::Client *client;
+    // ns -> application
+    QMap<QString,QPointer<Application>> applications;
+    // ns -> parser function
+    QMap<QString,std::function<QSharedPointer<Transport>(const QDomElement &)>> transportParsers;
+};
+
+Manager::Manager(Client *client) :
+    d(new Private)
+{
+    client = client;
+}
+
+Manager::~Manager()
+{
+}
+
+void Manager::registerApp(const QString &ns, Application *app)
+{
+    d->applications.insert(ns, app);
+}
+
+Session *Manager::newSession(const Jid &j)
+{
+    Q_UNUSED(j); // TODO
+    auto s = new Session(this);
+    return s;
+}
+
+QSharedPointer<Description> Manager::descriptionFromXml(const QDomElement &el)
+{
+    auto app = d->applications.value(el.namespaceURI());
+    if (!app) {
+        return QSharedPointer<Description>();
+    }
+    return app->descriptionFromXml(el);
+}
+
+QSharedPointer<Transport> Manager::transportFromXml(const QDomElement &el)
+{
+    auto parser = d->transportParsers.value(el.namespaceURI());
+    if (!parser) {
+        return QSharedPointer<Transport>();
+    }
+    return parser(el);
+}
+
+bool Manager::incomingIQ(const QDomElement &iq)
+{
+    return false; // TODO remove this when we hae something to test
+    auto jingleEl = iq.firstChildElement(QStringLiteral("jingle"));
+    if (jingleEl.isNull() || jingleEl.namespaceURI() != ::XMPP::Jingle::NS) {
+        return false;
+    }
+    Jingle jingle(this, jingleEl);
+    if (!jingle.isValid()) {
+        auto resp = createIQ(client()->doc(), "error", iq.attribute(QStringLiteral("from")), iq.attribute(QStringLiteral("id")));
+        Stanza::Error error(Stanza::Error::Cancel, Stanza::Error::BadRequest);
+        resp.appendChild(error.toXml(*client()->doc(), client()->stream().baseNS()));
+        d->client->send(resp);
+        return true;
+    }
+    // TODO check if it comes from known contacts maybe?
+    //if (jingle.)
+
+//    auto ch = jingleEl.firstChildElement();
+//    if (ch.tagName() == "content") {
+
+//    }
+
+
+//    auto it = d->nsHandlers.find(iq.namespaceURI());
+//    if (it == d->nsHandlers.end()) {
+//        return false;
+//    }
+    return true;
+}
+
 
 //----------------------------------------------------------------------------
 // Jingle
@@ -73,7 +165,7 @@ Jingle::Jingle()
 
 }
 
-Jingle::Jingle(const QDomElement &e)
+Jingle::Jingle(Manager *manager, const QDomElement &e)
 {
     QString actionStr = e.attribute(QLatin1String("action"));
     Action action;
@@ -104,10 +196,11 @@ Jingle::Jingle(const QDomElement &e)
             return;
         }
     }
-    for(QDomElement ce = e.firstChildElement(QLatin1String("content"));
-        !ce.isNull(); ce = ce.nextSiblingElement(QLatin1String("content"))) {
+    QString contentTag(QStringLiteral("content"));
+    for(QDomElement ce = e.firstChildElement(contentTag);
+        !ce.isNull(); ce = ce.nextSiblingElement(contentTag)) {
 
-        auto c = Content(ce);
+        auto c = Content(manager, ce);
         if (!c.isValid()) {
             qDebug("invalid content");
             return;
@@ -164,7 +257,7 @@ QDomElement Jingle::toXml(QDomDocument *doc) const
         return QDomElement();
     }
 
-    QDomElement query = doc->createElementNS(QLatin1String(JINGLE_NS), QLatin1String("jingle"));
+    QDomElement query = doc->createElementNS(NS, QLatin1String("jingle"));
     //query.setAttribute("xmlns", JINGLE_NS);
     for (unsigned int i = 0; i < sizeof(jingleActions) / sizeof(jingleActions[0]); i++) {
         if (jingleActions[i].action == d->action) {
@@ -191,6 +284,11 @@ QDomElement Jingle::toXml(QDomDocument *doc) const
         query.appendChild(d->reason.toXml(doc));
     }
     return query;
+}
+
+Jingle::Action Jingle::action() const
+{
+    return d->action;
 }
 
 
@@ -225,6 +323,11 @@ public:
 };
 
 Reason::Reason()
+{
+
+}
+
+Reason::~Reason()
 {
 
 }
@@ -391,7 +494,7 @@ bool ContentBase::setCreatorAttr(QDomElement &el, Creator creator)
 //----------------------------------------------------------------------------
 // Content
 //----------------------------------------------------------------------------
-Content::Content(const QDomElement &content) :
+Content::Content(Manager *manager, const QDomElement &content) :
     ContentBase(content)
 {
     QDomElement descriptionEl = content.firstChildElement(QLatin1String("description"));
@@ -401,10 +504,9 @@ Content::Content(const QDomElement &content) :
         return;
     }
 
-
     /*
-    description = client->jingleManager()->descriptionFromXml(descriptionEl);
-    transport = client->jingleManager()->transportFromXml(transportEl);
+    auto description = manager->descriptionFromXml(descriptionEl);
+    auto transport = manager->transportFromXml(transportEl);
     if (!securityEl.isNull()) {
         security = client->jingleManager()->securityFromXml(securityEl);
         // if security == 0 then then its unsupported? just ignore it atm
@@ -435,28 +537,28 @@ QDomElement Content::toXml(QDomDocument *doc) const
 }
 
 //----------------------------------------------------------------------------
-// Manager
+// JT - Jingle Task
 //----------------------------------------------------------------------------
-class Manager::Private
+class JTPush : public Task
 {
-    XMPP::Client *client;
+    Q_OBJECT
+public:
+    JTPush(Task *parent) :
+        Task(parent)
+    {
+
+    }
+
+    ~JTPush(){}
+
+    bool take(const QDomElement &el)
+    {
+        if (el.tagName() != QLatin1String("iq") || el.attribute(QLatin1String("type")) != QLatin1String("set")) {
+            return false;
+        }
+        return client()->jingleManager()->incomingIQ(el);
+    }
 };
-
-Manager::Manager(Client *client) :
-    d(new Private)
-{
-    client = client;
-}
-
-Manager::~Manager()
-{
-}
-
-Session *Manager::newSession(const Jid &j)
-{
-    auto s = new Session(this);
-    return s;
-}
 
 
 //----------------------------------------------------------------------------
@@ -481,7 +583,7 @@ Session::~Session()
 
 void Session::initiate(const Content &content)
 {
-
+    Q_UNUSED(content) // TODO
 }
 
 //----------------------------------------------------------------------------

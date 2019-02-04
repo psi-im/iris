@@ -30,6 +30,8 @@ class Client;
 namespace Jingle {
 namespace FileTransfer {
 
+extern const QString NS;
+
 struct Range {
     quint64 offset = 0;
     quint64 length = 0;
@@ -67,20 +69,13 @@ class Received : public ContentBase
     QDomElement toXml(QDomDocument *doc) const;
 };
 
-class FTContent : public Content
-{
-public:
-    FTContent(const QDomElement &el);
-    QDomElement toXml(QDomDocument *doc) const;
-};
-
-
 class FTApplication : public Application
 {
     Q_OBJECT
 public:
     FTApplication(Client *client);
-    void incomingSession(Session *session, const QDomElement &contentEl);
+    void incomingSession(Session *session);
+    QSharedPointer<Description> descriptionFromXml(const QDomElement &el);
 
 private:
     Client *client;
