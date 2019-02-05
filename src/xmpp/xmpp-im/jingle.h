@@ -158,7 +158,7 @@ private:
     QSharedDataPointer<Private> d;
 };
 
-class Transport
+class TransportManager
 {
 public:
     /*
@@ -205,7 +205,7 @@ public:
     QDomElement toXml(QDomDocument *doc) const;
 
     QSharedPointer<Description> description;
-    QSharedPointer<Transport> transport;
+    QSharedPointer<TransportManager> transport;
     QSharedPointer<Security> security;
     Reason reason;
 };
@@ -260,7 +260,7 @@ public:
 	Session* newSession(const Jid &j);
 
     QSharedPointer<Description> descriptionFromXml(const QDomElement &el);
-    QSharedPointer<Transport> transportFromXml(const QDomElement &el);
+    QSharedPointer<TransportManager> transportFromXml(const QDomElement &el);
 
 private:
     friend class JTPush;

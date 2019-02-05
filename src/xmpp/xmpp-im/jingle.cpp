@@ -50,7 +50,7 @@ public:
     // ns -> application
     QMap<QString,QPointer<Application>> applications;
     // ns -> parser function
-    QMap<QString,std::function<QSharedPointer<Transport>(const QDomElement &)>> transportParsers;
+    QMap<QString,std::function<QSharedPointer<TransportManager>(const QDomElement &)>> transportParsers;
 };
 
 Manager::Manager(Client *client) :
@@ -84,11 +84,11 @@ QSharedPointer<Description> Manager::descriptionFromXml(const QDomElement &el)
     return app->descriptionFromXml(el);
 }
 
-QSharedPointer<Transport> Manager::transportFromXml(const QDomElement &el)
+QSharedPointer<TransportManager> Manager::transportFromXml(const QDomElement &el)
 {
     auto parser = d->transportParsers.value(el.namespaceURI());
     if (!parser) {
-        return QSharedPointer<Transport>();
+        return QSharedPointer<TransportManager>();
     }
     return parser(el);
 }

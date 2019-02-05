@@ -78,7 +78,8 @@ HEADERS += \
     $$PWD/xmpp-im/im.h \
     $$PWD/xmpp-im/xmpp_serverinfomanager.h \
     $$PWD/xmpp-im/jingle.h \
-    $$PWD/xmpp-im/jingle-ft.h
+    $$PWD/xmpp-im/jingle-ft.h \
+    $$PWD/xmpp-im/jingle-s5b.h
 
 SOURCES += \
     $$PWD/xmpp-core/connector.cpp \
@@ -112,5 +113,6 @@ SOURCES += \
     $$PWD/xmpp-im/xmpp_caps.cpp \
     $$PWD/xmpp-im/xmpp_serverinfomanager.cpp \
     $$PWD/xmpp-im/jingle.cpp \
-    $$PWD/xmpp-im/jingle-ft.cpp
+    $$PWD/xmpp-im/jingle-ft.cpp \
+    $$PWD/xmpp-im/jingle-s5b.cpp
 
