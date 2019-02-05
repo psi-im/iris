@@ -125,6 +125,7 @@ set(PLAIN_SOURCES
     xmpp-im/xmpp_xdata.cpp
     xmpp-im/xmpp_xmlcommon.cpp
     xmpp-im/jingle-s5b.cpp
+    xmpp-im/jingle-ft.cpp
 
     base/randomnumbergenerator.cpp
     base/timezone.cpp
@@ -153,7 +154,6 @@ set(SOURCES
     xmpp-im/s5b.cpp
     xmpp-im/xmpp_features.cpp
     xmpp-im/jingle.cpp
-    xmpp-im/jingle-ft.cpp
     )
 
 qt_wrap_cpp(MOC_SOURCES ${HEADERS} ${SOURCES})
