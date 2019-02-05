@@ -101,10 +101,10 @@ class Client::GroupChat
 {
 public:
     enum { Connecting, Connected, Closing };
-    GroupChat() {}
+    GroupChat()  = default;
 
     Jid j;
-    int status;
+    int status = 0;
     QString password;
 };
 

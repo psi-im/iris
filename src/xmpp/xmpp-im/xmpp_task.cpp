@@ -30,16 +30,18 @@ using namespace XMPP;
 class Task::TaskPrivate
 {
 public:
-    TaskPrivate() {}
+    TaskPrivate() = default;
 
     QString id;
-    bool success;
-    int statusCode;
+    bool success = false;
+    int statusCode = 0;
     QString statusString;
-    Client *client;
-    bool insig, deleteme, autoDelete;
-    bool done;
-    int timeout;
+    Client *client = nullptr;
+    bool insig = false;
+    bool deleteme = false;
+    bool autoDelete = false;
+    bool done = false;
+    int timeout = 0;
 };
 
 Task::Task(Task *parent)
@@ -53,7 +55,7 @@ Task::Task(Task *parent)
 }
 
 Task::Task(Client *parent, bool)
-:QObject(0)
+:QObject(nullptr)
 {
     init();
 

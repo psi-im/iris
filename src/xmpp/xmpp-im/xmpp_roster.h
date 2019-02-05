@@ -40,7 +40,8 @@ namespace XMPP
         Roster::ConstIterator find(const Jid &) const;
 
     private:
-        class RosterPrivate *d;
+        class RosterPrivate;
+        RosterPrivate *d = nullptr;
     };
 }
 

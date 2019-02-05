@@ -67,7 +67,7 @@ namespace XMPP
         Jid to;
 
         class Private;
-        Private *d;
+        Private *d = nullptr;
     };
 
     class JT_UnRegister : public Task
@@ -87,7 +87,7 @@ namespace XMPP
 
     private:
         class Private;
-        Private *d;
+        Private *d = nullptr;
     };
 
     class JT_Roster : public Task
@@ -115,7 +115,7 @@ namespace XMPP
         Jid to;
 
         class Private;
-        Private *d;
+        Private *d = nullptr;
     };
 
     class JT_PushRoster : public Task
@@ -132,7 +132,7 @@ namespace XMPP
 
     private:
         class Private;
-        Private *d;
+        Private *d = nullptr;
     };
 
     class JT_Presence : public Task
@@ -151,10 +151,10 @@ namespace XMPP
 
     private:
         QDomElement tag;
-        int type;
+        int type = -1;
 
         class Private;
-        Private *d;
+        Private *d = nullptr;
     };
 
     class JT_PushPresence : public Task
@@ -172,7 +172,7 @@ namespace XMPP
 
     private:
         class Private;
-        Private *d;
+        Private *d = nullptr;
     };
 
     class JT_Session : public Task
@@ -196,7 +196,7 @@ namespace XMPP
         Message m;
 
         class Private;
-        Private *d;
+        Private *d = nullptr;
     };
 
     class JT_PushMessage : public Task
@@ -213,7 +213,7 @@ namespace XMPP
 
     private:
         class Private;
-        Private *d;
+        Private *d = nullptr;
     };
 
     class JT_VCard : public Task
@@ -237,7 +237,7 @@ namespace XMPP
         int type;
 
         class Private;
-        Private *d;
+        Private *d = nullptr;
     };
 
     class JT_Search : public Task
@@ -265,7 +265,7 @@ namespace XMPP
         int type;
 
         class Private;
-        Private *d;
+        Private *d = nullptr;
     };
 
     class JT_ClientVersion : public Task
@@ -307,7 +307,7 @@ namespace XMPP
         QDomElement iq;
         XMPP::Jid j;
         QDateTime utc;
-        int tzo;
+        int tzo = 0;
     };
 
     class JT_ServInfo : public Task
@@ -366,7 +366,7 @@ namespace XMPP
 
     private:
         class Private;
-        Private *d;
+        Private *d = nullptr;
     };
 
     class JT_DiscoPublish : public Task
@@ -383,7 +383,7 @@ namespace XMPP
 
     private:
         class Private;
-        Private *d;
+        Private *d = nullptr;
     };
 
     class JT_BoBServer : public Task
@@ -410,7 +410,7 @@ namespace XMPP
 
     private:
         class Private;
-        Private *d;
+        Private *d = nullptr;
     };
 
     class JT_PongServer : public Task
@@ -453,7 +453,7 @@ namespace XMPP
 
     private:
         class Private;
-        Private *d;
+        Private *d = nullptr;
     };
 
     class JT_CaptchaSender : public Task
