@@ -158,6 +158,27 @@ private:
     QSharedDataPointer<Private> d;
 };
 
+class Transport : public QObject {
+    Q_OBJECT
+public:
+
+    enum Direction { // incoming or outgoing file/data transfer.
+        Outgoing,
+        Incoming
+    };
+
+    virtual void start() = 0; // for local transport start searching for candidates (including probing proxy,stun etc)
+                         // for remote transport try to connect to all proposed hosts in order their priority.
+                         // in-band transport may just emit updated() here
+    virtual bool update(const QDomElement &el) = 0; // accepts transport element on incoming transport-info
+    virtual QDomElement takeUpdate(QDomDocument *doc) = 0;
+    virtual bool isValid() const = 0;
+signals:
+    void updated(); // found some candidates and they have to be sent. takeUpdate has to be called from this signal handler.
+                    // if it's just always ready then signal has to be sent at least once otherwise session-initiate won't be sent.
+    void connected(); // this signal is for app logic. maybe to finally start drawing some progress bar
+};
+
 class TransportManager
 {
 public:
@@ -189,6 +210,9 @@ public:
     };
 
     Q_DECLARE_FLAGS(Features, Feature)
+
+    virtual QSharedPointer<Transport> sessionInitiate() = 0; // outgoing. one have to call Transport::start to collect candidates
+    virtual QSharedPointer<Transport> sessionInitiate(const QDomElement &transportEl) = 0; // incoming
 };
 
 class Security

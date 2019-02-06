@@ -71,30 +71,76 @@ Candidate::~Candidate()
 
 }
 
-class Negotiation::Private : public QSharedData {
+class S5BTransport::Private {
 public:
     QList<Candidate> candidates;
     QString dstaddr;
     QString sid;
-    Negotiation::Mode mode;
+    S5BTransport::Mode mode;
+    Transport::Direction direction;
 };
 
-Negotiation::Negotiation(const QDomElement &el) :
+S5BTransport::S5BTransport(const QDomElement &el) :
     d(new Private)
 {
     d->sid = el.attribute(QStringLiteral("sid"));
+    d->direction = Transport::Incoming;
     // TODO remaining
+    if (d->sid.isEmpty()) { // is invalid
+        d.reset(); //  make invalid
+    }
 }
 
-Negotiation::Negotiation(const Negotiation &other) :
-    d(other.d)
+S5BTransport::~S5BTransport()
 {
 
 }
 
-Negotiation::~Negotiation()
+void S5BTransport::start()
 {
 
+}
+
+bool S5BTransport::update(const QDomElement &el)
+{
+    Q_UNUSED(el)
+    return false; // TODO
+}
+
+QDomElement S5BTransport::takeUpdate(QDomDocument *doc)
+{
+    Q_UNUSED(doc)
+    return QDomElement(); // TODO
+}
+
+bool S5BTransport::isValid() const
+{
+    return d != nullptr;
+}
+
+QSharedPointer<Transport> S5BTransport::createOutgoing()
+{
+    auto d = new Private;
+    d->direction = Transport::Outgoing;
+    d->sid = QString("s5b_%1").arg(qrand() & 0xffff, 4, 16, QChar('0')); // FIXME check for collisions
+
+    auto t = new S5BTransport;
+    t->d.reset(d);
+    return QSharedPointer<Transport>(t);
+}
+
+QSharedPointer<Transport> Manager::sessionInitiate()
+{
+    return S5BTransport::createOutgoing();
+}
+
+QSharedPointer<Transport> Manager::sessionInitiate(const QDomElement &transportEl)
+{
+    QSharedPointer<Transport> t(new S5BTransport(transportEl));
+    if (!t->isValid()) {
+        t.reset();
+    }
+    return t;
 }
 
 

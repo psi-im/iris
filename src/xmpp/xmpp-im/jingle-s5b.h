@@ -50,24 +50,38 @@ private:
     QSharedDataPointer<Private> d;
 };
 
-class Negotiation {
+class Manager;
+class S5BTransport : public Transport
+{
+    Q_OBJECT
 public:
     enum Mode {
         Tcp,
         Udp
     };
 
-    Negotiation(const QDomElement &el);
-    Negotiation(const Negotiation &other);
-    ~Negotiation();
+    inline S5BTransport() {}
+    S5BTransport(const QDomElement &el);
+    ~S5BTransport();
 
+    void start();
+    bool update(const QDomElement &el);
+    QDomElement takeUpdate(QDomDocument *doc);
+    bool isValid() const;
 private:
+    friend class Manager;
+    static QSharedPointer<Transport> createOutgoing();
+
     class Private;
-    QSharedDataPointer<Private> d;
+    QScopedPointer<Private> d;
 };
 
 class Manager : public TransportManager {
+public:
+    Manager(Client *client);
 
+    QSharedPointer<Transport> sessionInitiate(); // outgoing. one have to call Transport::start to collect candidates
+    QSharedPointer<Transport> sessionInitiate(const QDomElement &transportEl); // incoming
 };
 
 } // namespace S5B
