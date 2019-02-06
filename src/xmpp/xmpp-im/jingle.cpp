@@ -611,5 +611,12 @@ Client *Application::client() const
     return d->client;
 }
 
+TransportManager::TransportManager(Manager *jingleManager) :
+    QObject(jingleManager)
+{
+
+}
+
+
 } // namespace Jingle
 } // namespace XMPP

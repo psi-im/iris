@@ -161,6 +161,7 @@ private:
 class Transport : public QObject {
     Q_OBJECT
 public:
+    using QObject::QObject;
 
     enum Direction { // incoming or outgoing file/data transfer.
         Outgoing,
@@ -179,8 +180,9 @@ signals:
     void connected(); // this signal is for app logic. maybe to finally start drawing some progress bar
 };
 
-class TransportManager
+class TransportManager : public QObject
 {
+    Q_OBJECT
 public:
     /*
     Categorization by speed, reliability and connectivity
@@ -209,6 +211,8 @@ public:
         RealTime      = 0x400
     };
 
+    TransportManager(Manager *jingleManager);
+
     Q_DECLARE_FLAGS(Features, Feature)
 
     virtual QSharedPointer<Transport> sessionInitiate() = 0; // outgoing. one have to call Transport::start to collect candidates
@@ -234,7 +238,7 @@ public:
     Reason reason;
 };
 
-class Manager;
+
 class Session : public QObject
 {
     Q_OBJECT

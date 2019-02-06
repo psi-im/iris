@@ -51,7 +51,7 @@ private:
 };
 
 class Manager;
-class S5BTransport : public Transport
+class Transport : public XMPP::Jingle::Transport
 {
     Q_OBJECT
 public:
@@ -60,28 +60,38 @@ public:
         Udp
     };
 
-    inline S5BTransport() {}
-    S5BTransport(const QDomElement &el);
-    ~S5BTransport();
+    inline Transport() {}
+    Transport(Manager *manager, const QDomElement &el);
+    ~Transport();
 
     void start();
     bool update(const QDomElement &el);
     QDomElement takeUpdate(QDomDocument *doc);
     bool isValid() const;
+
+    QString sid() const;
+
 private:
     friend class Manager;
-    static QSharedPointer<Transport> createOutgoing();
+    static QSharedPointer<XMPP::Jingle::Transport> createOutgoing(Manager *manager);
 
     class Private;
     QScopedPointer<Private> d;
 };
 
 class Manager : public TransportManager {
+    Q_OBJECT
 public:
-    Manager(Client *client);
+    Manager(XMPP::Jingle::Manager *manager);
 
-    QSharedPointer<Transport> sessionInitiate(); // outgoing. one have to call Transport::start to collect candidates
-    QSharedPointer<Transport> sessionInitiate(const QDomElement &transportEl); // incoming
+    QSharedPointer<XMPP::Jingle::Transport> sessionInitiate(); // outgoing. one have to call Transport::start to collect candidates
+    QSharedPointer<XMPP::Jingle::Transport> sessionInitiate(const QDomElement &transportEl); // incoming
+
+    bool hasTrasport(const QString &sid) const;
+
+private:
+    class Private;
+    QScopedPointer<Private> d;
 };
 
 } // namespace S5B

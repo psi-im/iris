@@ -71,18 +71,21 @@ Candidate::~Candidate()
 
 }
 
-class S5BTransport::Private {
+class Transport::Private {
 public:
+    Manager *manager = nullptr;
     QList<Candidate> candidates;
     QString dstaddr;
     QString sid;
-    S5BTransport::Mode mode;
-    Transport::Direction direction;
+    Transport::Mode mode = Transport::Tcp;
+    Transport::Direction direction = Transport::Outgoing;
 };
 
-S5BTransport::S5BTransport(const QDomElement &el) :
+Transport::Transport(Manager *manager, const QDomElement &el) :
+    XMPP::Jingle::Transport(manager),
     d(new Private)
 {
+    d->manager = manager;
     d->sid = el.attribute(QStringLiteral("sid"));
     d->direction = Transport::Incoming;
     // TODO remaining
@@ -91,57 +94,97 @@ S5BTransport::S5BTransport(const QDomElement &el) :
     }
 }
 
-S5BTransport::~S5BTransport()
+Transport::~Transport()
 {
 
 }
 
-void S5BTransport::start()
+void Transport::start()
 {
 
 }
 
-bool S5BTransport::update(const QDomElement &el)
+bool Transport::update(const QDomElement &el)
 {
     Q_UNUSED(el)
     return false; // TODO
 }
 
-QDomElement S5BTransport::takeUpdate(QDomDocument *doc)
+QDomElement Transport::takeUpdate(QDomDocument *doc)
 {
     Q_UNUSED(doc)
     return QDomElement(); // TODO
 }
 
-bool S5BTransport::isValid() const
+bool Transport::isValid() const
 {
     return d != nullptr;
 }
 
-QSharedPointer<Transport> S5BTransport::createOutgoing()
+QString Transport::sid() const
+{
+    return d->sid;
+}
+
+QSharedPointer<XMPP::Jingle::Transport> Transport::createOutgoing(Manager *manager)
 {
     auto d = new Private;
+    d->manager = manager;
     d->direction = Transport::Outgoing;
-    d->sid = QString("s5b_%1").arg(qrand() & 0xffff, 4, 16, QChar('0')); // FIXME check for collisions
+    d->mode = Transport::Tcp;
+    do {
+        d->sid = QString("s5b_%1").arg(qrand() & 0xffff, 4, 16, QChar('0')); // FIXME check for collisions
+    } while (d->manager->hasTrasport(d->sid));
 
-    auto t = new S5BTransport;
+    auto t = new Transport;
     t->d.reset(d);
-    return QSharedPointer<Transport>(t);
+    return QSharedPointer<XMPP::Jingle::Transport>(t);
 }
 
-QSharedPointer<Transport> Manager::sessionInitiate()
+//----------------------------------------------------------------
+// Manager
+//----------------------------------------------------------------
+
+class Manager::Private
 {
-    return S5BTransport::createOutgoing();
+public:
+    XMPP::Jingle::Manager *jingleManager;
+
+    // sid -> transport mapping
+    QHash<QString,QSharedPointer<XMPP::Jingle::Transport>> transports;
+};
+
+Manager::Manager(XMPP::Jingle::Manager *manager) :
+    TransportManager(manager),
+    d(new Private)
+{
+    d->jingleManager = manager;
 }
 
-QSharedPointer<Transport> Manager::sessionInitiate(const QDomElement &transportEl)
+QSharedPointer<XMPP::Jingle::Transport> Manager::sessionInitiate()
 {
-    QSharedPointer<Transport> t(new S5BTransport(transportEl));
-    if (!t->isValid()) {
-        t.reset();
-    }
+    auto t = Transport::createOutgoing(this);
+    d->transports.insert(t.staticCast<Transport>()->sid(), t);
     return t;
 }
+
+QSharedPointer<XMPP::Jingle::Transport> Manager::sessionInitiate(const QDomElement &transportEl)
+{
+    auto t = new Transport(this, transportEl);
+    QSharedPointer<XMPP::Jingle::Transport> ret(t);
+    if (t->isValid()) {
+        d->transports.insert(t->sid(), ret);
+    } else {
+        ret.reset();
+    }
+    return ret;
+}
+
+bool Manager::hasTrasport(const QString &sid) const
+{
+    return d->transports.contains(sid);
+}
+
 
 
 } // namespace S5B
