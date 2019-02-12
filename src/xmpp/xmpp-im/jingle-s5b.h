@@ -35,6 +35,7 @@ extern const QString NS;
 class Candidate {
 public:
     enum Type {
+        None, // non standard, just a default
         Assisted,
         Direct,
         Proxy,
@@ -44,6 +45,7 @@ public:
     Candidate(const QDomElement &el);
     Candidate(const Candidate &other);
     ~Candidate();
+    inline bool isValid() const { return d != nullptr; }
 
 private:
     class Private;
@@ -61,11 +63,10 @@ public:
     };
 
     inline Transport() {}
-    Transport(Manager *manager, const QDomElement &el);
     ~Transport();
 
     void start();
-    bool update(const QDomElement &el);
+    bool update(const QDomElement &transportEl);
     QDomElement takeUpdate(QDomDocument *doc);
     bool isValid() const;
 
@@ -73,7 +74,8 @@ public:
 
 private:
     friend class Manager;
-    static QSharedPointer<XMPP::Jingle::Transport> createOutgoing(Manager *manager);
+    static QSharedPointer<XMPP::Jingle::Transport> createOutgoing(Manager *manager, const Jid &to, const QString &transportSid);
+    static QSharedPointer<XMPP::Jingle::Transport> createIncoming(Manager *manager, const Jid &from, const QDomElement &transportEl);
 
     class Private;
     QScopedPointer<Private> d;
@@ -83,11 +85,12 @@ class Manager : public TransportManager {
     Q_OBJECT
 public:
     Manager(XMPP::Jingle::Manager *manager);
+    ~Manager();
 
-    QSharedPointer<XMPP::Jingle::Transport> sessionInitiate(); // outgoing. one have to call Transport::start to collect candidates
-    QSharedPointer<XMPP::Jingle::Transport> sessionInitiate(const QDomElement &transportEl); // incoming
+    QSharedPointer<XMPP::Jingle::Transport> sessionInitiate(const Jid &to); // outgoing. one have to call Transport::start to collect candidates
+    QSharedPointer<XMPP::Jingle::Transport> sessionInitiate(const Jid &from, const QDomElement &transportEl); // incoming
 
-    bool hasTrasport(const QString &sid) const;
+    bool hasTrasport(const Jid &jid, const QString &sid) const;
 
 private:
     class Private;

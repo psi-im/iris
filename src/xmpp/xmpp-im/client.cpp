@@ -168,7 +168,7 @@ Client::Client(QObject *par)
     d->serverInfoManager = new ServerInfoManager(this);
     d->httpFileUploadManager = new HttpFileUploadManager(this);
     d->jingleManager = new Jingle::Manager(this);
-    auto ft = new Jingle::FileTransfer::FTApplication(this);
+    auto ft = new Jingle::FileTransfer::ApplicationManager(this);
     d->jingleManager->registerApp(Jingle::FileTransfer::NS, ft);
 }
 

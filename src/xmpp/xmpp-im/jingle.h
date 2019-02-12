@@ -25,6 +25,7 @@
 
 #include <QSharedDataPointer>
 #include <QSharedPointer>
+#include <functional>
 
 class QDomElement;
 class QDomDocument;
@@ -60,12 +61,15 @@ public:
     };
 
     Jingle();
-    Jingle(Manager *manager, const QDomElement &e);
+    Jingle(const QDomElement &e);
     Jingle(const Jingle &);
     ~Jingle();
     QDomElement toXml(QDomDocument *doc) const;
     inline bool isValid() const { return d != nullptr; }
     Action action() const;
+    const QString &sid() const;
+    const Jid &initiator() const;
+    const Jid &responder() const;
 private:
     class Private;
     QSharedDataPointer<Private> d;
@@ -180,6 +184,59 @@ signals:
     void connected(); // this signal is for app logic. maybe to finally start drawing some progress bar
 };
 
+
+
+class Security
+{
+
+};
+
+class Session : public QObject
+{
+    Q_OBJECT
+public:
+    Session(Manager *manager);
+    ~Session();
+
+    XMPP::Stanza::Error lastError() const;
+
+private:
+    friend class Manager;
+    friend class JTPush;
+    bool incomingInitiate(const Jid &from, const Jingle &jingle, const QDomElement &jingleEl);
+    bool updateFromXml(Jingle::Action action, const QDomElement &jingleEl);
+
+    class Private;
+    QScopedPointer<Private> d;
+};
+
+class Application : public QObject
+{
+    Q_OBJECT
+public:
+    using QObject::QObject;
+};
+
+class ApplicationManager : public QObject
+{
+    Q_OBJECT
+public:
+    ApplicationManager(Client *client);
+    virtual ~ApplicationManager();
+
+    Client *client() const;
+    virtual void incomingSession(Session *session) = 0;
+
+    virtual Application* startApplication(const QDomElement &el) = 0;
+
+    // this method is supposed to gracefully close all related sessions as a preparation for plugin unload for example
+    virtual void closeAll() = 0;
+
+private:
+    class Private;
+    QScopedPointer<Private> d;
+};
+
 class TransportManager : public QObject
 {
     Q_OBJECT
@@ -215,87 +272,56 @@ public:
 
     Q_DECLARE_FLAGS(Features, Feature)
 
-    virtual QSharedPointer<Transport> sessionInitiate() = 0; // outgoing. one have to call Transport::start to collect candidates
-    virtual QSharedPointer<Transport> sessionInitiate(const QDomElement &transportEl) = 0; // incoming
-};
+    virtual QSharedPointer<Transport> sessionInitiate(const Jid &to) = 0; // outgoing. one have to call Transport::start to collect candidates
+    virtual QSharedPointer<Transport> sessionInitiate(const Jid &from, const QDomElement &transportEl) = 0; // incoming
 
-class Security
-{
-
-};
-
-class Content : public ContentBase // TODO that's somewhat wrong mixing pimpl with this base
-{
-public:
-
-    inline Content(){}
-    Content(Manager *manager, const QDomElement &content);
-    QDomElement toXml(QDomDocument *doc) const;
-
-    QSharedPointer<Description> description;
-    QSharedPointer<TransportManager> transport;
-    QSharedPointer<Security> security;
-    Reason reason;
-};
-
-
-class Session : public QObject
-{
-    Q_OBJECT
-public:
-    Session(Manager *manager);
-    ~Session();
-
-    void initiate(const Content &content);
-private:
-    class Private;
-    QScopedPointer<Private> d;
-};
-
-class Application : public QObject
-{
-    Q_OBJECT
-public:
-    Application(Client *client);
-    virtual ~Application();
-
-    Client *client() const;
-    virtual void incomingSession(Session *session) = 0;
-
-    virtual QSharedPointer<Description> descriptionFromXml(const QDomElement &el) = 0;
-
-private:
-    class Private;
-    QScopedPointer<Private> d;
+    // this method is supposed to gracefully close all related sessions as a preparation for plugin unload for example
+    virtual void closeAll() = 0;
 };
 
 class Manager : public QObject
 {
     Q_OBJECT
 
-	static const int MaxSessions = 1000; //1000? just to have some limit
-
 public:
-	explicit Manager(XMPP::Client *client = 0);
-	~Manager();
+    explicit Manager(XMPP::Client *client = 0);
+    ~Manager();
 
-	XMPP::Client* client() const;
-	//Session* sessionInitiate(const Jid &to, const QDomElement &description, const QDomElement &transport);
-	// TODO void setRedirection(const Jid &to);
+    XMPP::Client* client() const;
 
-	void registerApp(const QString &ns, Application *app);
+    void setRedirection(const Jid &to);
+    const Jid &redirectionJid() const;
 
-	Session* newSession(const Jid &j);
+    void registerApp(const QString &ns, ApplicationManager *app);
+    void unregisterApp(const QString &ns);
+    Application* startApplication(const QDomElement &descriptionEl);
 
-    QSharedPointer<Description> descriptionFromXml(const QDomElement &el);
-    QSharedPointer<TransportManager> transportFromXml(const QDomElement &el);
+    void registerTransport(const QString &ns, TransportManager *transport);
+    void unregisterTransport(const QString &ns);
+    QSharedPointer<Transport> initTransport(const Jid &jid, const QDomElement &el);
+
+    /**
+     * @brief isAllowedParty checks if the remote jid allowed to initiate a session
+     * @param jid - remote jid
+     * @return true if allowed
+     */
+    bool isAllowedParty(const Jid &jid) const;
+    void setRemoteJidChecked(std::function<bool(const Jid &)> checker);
+
+
+    Session* session(const Jid &remoteJid, const QString &sid);
+    Session* newSession(const Jid &j);
+    XMPP::Stanza::Error lastError() const;
+
+signals:
+    void incomingSession(Session *);
 
 private:
     friend class JTPush;
-    bool incomingIQ(const QDomElement &iq);
+    Session *incomingSessionInitiate(const Jid &initiator, const Jingle &jingle, const QDomElement &jingleEl);
 
     class Private;
-	QScopedPointer<Private> d;
+    QScopedPointer<Private> d;
 };
 
 } // namespace Jingle

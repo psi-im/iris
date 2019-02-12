@@ -38,92 +38,6 @@ namespace Jingle {
 
 const QString NS(QStringLiteral("urn:xmpp:jingle:1"));
 
-//----------------------------------------------------------------------------
-// Manager
-//----------------------------------------------------------------------------
-class Manager::Private
-{
-public:
-    friend class Content;
-
-    XMPP::Client *client;
-    // ns -> application
-    QMap<QString,QPointer<Application>> applications;
-    // ns -> parser function
-    QMap<QString,std::function<QSharedPointer<TransportManager>(const QDomElement &)>> transportParsers;
-};
-
-Manager::Manager(Client *client) :
-    d(new Private)
-{
-    client = client;
-}
-
-Manager::~Manager()
-{
-}
-
-void Manager::registerApp(const QString &ns, Application *app)
-{
-    d->applications.insert(ns, app);
-}
-
-Session *Manager::newSession(const Jid &j)
-{
-    Q_UNUSED(j); // TODO
-    auto s = new Session(this);
-    return s;
-}
-
-QSharedPointer<Description> Manager::descriptionFromXml(const QDomElement &el)
-{
-    auto app = d->applications.value(el.namespaceURI());
-    if (!app) {
-        return QSharedPointer<Description>();
-    }
-    return app->descriptionFromXml(el);
-}
-
-QSharedPointer<TransportManager> Manager::transportFromXml(const QDomElement &el)
-{
-    auto parser = d->transportParsers.value(el.namespaceURI());
-    if (!parser) {
-        return QSharedPointer<TransportManager>();
-    }
-    return parser(el);
-}
-
-bool Manager::incomingIQ(const QDomElement &iq)
-{
-    return false; // TODO remove this when we hae something to test
-    auto jingleEl = iq.firstChildElement(QStringLiteral("jingle"));
-    if (jingleEl.isNull() || jingleEl.namespaceURI() != ::XMPP::Jingle::NS) {
-        return false;
-    }
-    Jingle jingle(this, jingleEl);
-    if (!jingle.isValid()) {
-        auto resp = createIQ(client()->doc(), "error", iq.attribute(QStringLiteral("from")), iq.attribute(QStringLiteral("id")));
-        Stanza::Error error(Stanza::Error::Cancel, Stanza::Error::BadRequest);
-        resp.appendChild(error.toXml(*client()->doc(), client()->stream().baseNS()));
-        d->client->send(resp);
-        return true;
-    }
-    // TODO check if it comes from known contacts maybe?
-    //if (jingle.)
-
-//    auto ch = jingleEl.firstChildElement();
-//    if (ch.tagName() == "content") {
-
-//    }
-
-
-//    auto it = d->nsHandlers.find(iq.namespaceURI());
-//    if (it == d->nsHandlers.end()) {
-//        return false;
-//    }
-    return true;
-}
-
 
 //----------------------------------------------------------------------------
 // Jingle
@@ -156,7 +70,6 @@ public:
     QString sid;
     Jid initiator;
     Jid responder;
-    QList<Content> content;
     Reason reason;
 };
 
@@ -165,13 +78,12 @@ Jingle::Jingle()
 
 }
 
-Jingle::Jingle(Manager *manager, const QDomElement &e)
+Jingle::Jingle(const QDomElement &e)
 {
     QString actionStr = e.attribute(QLatin1String("action"));
     Action action;
     Reason reason;
     QString sid = e.attribute(QLatin1String("sid"));
-    QList<Content> contentList;
     Jid initiator;
     Jid responder;
 
@@ -196,18 +108,7 @@ Jingle::Jingle(Manager *manager, const QDomElement &e)
             return;
         }
     }
-    QString contentTag(QStringLiteral("content"));
-    for(QDomElement ce = e.firstChildElement(contentTag);
-        !ce.isNull(); ce = ce.nextSiblingElement(contentTag)) {
 
-        auto c = Content(manager, ce);
-        if (!c.isValid()) {
-            qDebug("invalid content");
-            return;
-        }
-
-        contentList += c;
-    }
     if (!e.attribute(QLatin1String("initiator")).isEmpty()) {
         initiator = Jid(e.attribute(QLatin1String("initiator")));
         if (initiator.isNull()) {
@@ -227,8 +128,6 @@ Jingle::Jingle(Manager *manager, const QDomElement &e)
     d->action = action;
     d->sid = sid;
     d->reason = reason;
-    d->content = contentList;
-    d->initiator = initiator;
     d->responder = responder;
 }
 
@@ -253,7 +152,7 @@ Jingle::Private* Jingle::ensureD()
 
 QDomElement Jingle::toXml(QDomDocument *doc) const
 {
-    if (!d || d->sid.isEmpty() || d->action == NoAction || (!d->reason.isValid() && d->content.isEmpty())) {
+    if (!d || d->sid.isEmpty() || d->action == NoAction) {
         return QDomElement();
     }
 
@@ -272,14 +171,14 @@ QDomElement Jingle::toXml(QDomDocument *doc) const
         query.setAttribute(QLatin1String("responder"), d->responder.full());
     query.setAttribute(QLatin1String("sid"), d->sid);
 
-    if(d->action != SessionTerminate) {
-        // for session terminate, there is no content list, just
-        //   a reason for termination
-        for(const Content &c: d->content) {
-            QDomElement content = c.toXml(doc);
-            query.appendChild(content);
-        }
-    }
+//    if(d->action != SessionTerminate) {
+//        // for session terminate, there is no content list, just
+//        //   a reason for termination
+//        for(const Content &c: d->content) {
+//            QDomElement content = c.toXml(doc);
+//            query.appendChild(content);
+//        }
+//    }
     if (d->reason.isValid()) {
         query.appendChild(d->reason.toXml(doc));
     }
@@ -289,6 +188,21 @@ QDomElement Jingle::toXml(QDomDocument *doc) const
 Jingle::Action Jingle::action() const
 {
     return d->action;
+}
+
+const QString &Jingle::sid() const
+{
+    return d->sid;
+}
+
+const Jid &Jingle::initiator() const
+{
+    return d->initiator;
+}
+
+const Jid &Jingle::responder() const
+{
+    return d->responder;
 }
 
 
@@ -492,48 +406,37 @@ bool ContentBase::setCreatorAttr(QDomElement &el, Creator creator)
 }
 
 //----------------------------------------------------------------------------
-// Content
+// Application
 //----------------------------------------------------------------------------
-Content::Content(Manager *manager, const QDomElement &content) :
-    ContentBase(content)
+class ApplicationManager::Private
 {
-    QDomElement descriptionEl = content.firstChildElement(QLatin1String("description"));
-    QDomElement transportEl = content.firstChildElement(QLatin1String("transport"));
-    //QDomElement securityEl = content.firstChildElement(QLatin1String("security"));
-    if (descriptionEl.isNull() || transportEl.isNull()) {
-        return;
-    }
+public:
+    Client *client;
+};
 
-    /*
-    auto description = manager->descriptionFromXml(descriptionEl);
-    auto transport = manager->transportFromXml(transportEl);
-    if (!securityEl.isNull()) {
-        security = client->jingleManager()->securityFromXml(securityEl);
-        // if security == 0 then then its unsupported? just ignore it atm
-        // according to xtls draft responder may omit security when unsupported.
-    }
-    */
-
-    // TODO description
-    // TODO transports
-    // TODO security
+ApplicationManager::ApplicationManager(Client *client) :
+    d(new Private)
+{
+    d->client = client;
 }
 
-QDomElement Content::toXml(QDomDocument *doc) const
+ApplicationManager::~ApplicationManager()
 {
-    auto el = ContentBase::toXml(doc, "content");
-    if (el.isNull()) {  // TODO check/init other elements of content
-        return el;
-    }
 
-    /*
-    content.appendChild(description->toXml(doc));
-    content.appendChild(transport->toXml(doc));
-    if (!security.isNull()) {
-        content.appendChild(security->toXml(doc));
-    }
-    */
-    return el;
+}
+
+Client *ApplicationManager::client() const
+{
+    return d->client;
+}
+
+//----------------------------------------------------------------------------
+// TransportManager
+//----------------------------------------------------------------------------
+TransportManager::TransportManager(Manager *jingleManager) :
+    QObject(jingleManager)
+{
+
 }
 
 //----------------------------------------------------------------------------
@@ -551,12 +454,77 @@ public:
 
     ~JTPush(){}
 
-    bool take(const QDomElement &el)
+    bool take(const QDomElement &iq)
     {
-        if (el.tagName() != QLatin1String("iq") || el.attribute(QLatin1String("type")) != QLatin1String("set")) {
+        if (iq.tagName() != QLatin1String("iq") || iq.attribute(QLatin1String("type")) != QLatin1String("set")) {
             return false;
         }
-        return client()->jingleManager()->incomingIQ(el);
+        auto jingleEl = iq.firstChildElement(QStringLiteral("jingle"));
+        if (jingleEl.isNull() || jingleEl.namespaceURI() != ::XMPP::Jingle::NS) {
+            return false;
+        }
+        Jingle jingle(jingleEl);
+        if (!jingle.isValid()) {
+            respondError(iq, Stanza::Error::Cancel, Stanza::Error::BadRequest);
+            return true;
+        }
+
+        QString fromStr(iq.attribute(QStringLiteral("from")));
+        Jid from(fromStr);
+        if (jingle.action() == Jingle::SessionInitiate) {
+            if (!client()->jingleManager()->isAllowedParty(from) ||
+                    (!jingle.initiator().isEmpty() && !client()->jingleManager()->isAllowedParty(jingle.initiator()))) {
+                respondError(iq, Stanza::Error::Cancel, Stanza::Error::ServiceUnavailable);
+                return true;
+            }
+
+            Jid redirection(client()->jingleManager()->redirectionJid());
+            if (redirection.isValid()) {
+                respondError(iq, Stanza::Error::Modify, Stanza::Error::Redirect, QStringLiteral("xmpp:")+redirection.full());
+                return true;
+            }
+
+            auto session = client()->jingleManager()->session(from, jingle.sid());
+            if (session) {
+                // FIXME what if not yet acknowledged. xep-0166 has a solution for that
+                respondError(iq, Stanza::Error::Cancel, Stanza::Error::Conflict);
+                return true;
+            }
+            session = client()->jingleManager()->incomingSessionInitiate(from, jingle, jingleEl);
+            if (!session) {
+                respondError(iq, client()->jingleManager()->lastError());
+                return true;
+            }
+        } else {
+            auto session = client()->jingleManager()->session(from, jingle.sid());
+            if (session) {
+                respondError(iq, Stanza::Error::Cancel, Stanza::Error::Conflict);
+                return true;
+            }
+            if (!session->updateFromXml(jingle.action(), jingleEl)) {
+                respondError(iq, session->lastError());
+                return true;
+            }
+        }
+
+        auto resp = createIQ(client()->doc(), "result", fromStr, iq.attribute(QStringLiteral("id")));
+        client()->send(resp);
+        return true;
+    }
+
+    void respondError(const QDomElement &iq, Stanza::Error::ErrorType errType, Stanza::Error::ErrorCond errCond, const QString &text = QString())
+    {
+        auto resp = createIQ(client()->doc(), "error", iq.attribute(QStringLiteral("from")), iq.attribute(QStringLiteral("id")));
+        Stanza::Error error(errType, errCond, text);
+        resp.appendChild(error.toXml(*client()->doc(), client()->stream().baseNS()));
+        client()->send(resp);
+    }
+
+    void respondError(const QDomElement &iq, const Stanza::Error &error)
+    {
+        auto resp = createIQ(client()->doc(), "error", iq.attribute(QStringLiteral("from")), iq.attribute(QStringLiteral("id")));
+        resp.appendChild(error.toXml(*client()->doc(), client()->stream().baseNS()));
+        client()->send(resp);
     }
 };
 
@@ -568,6 +536,10 @@ class Session::Private
 {
 public:
     Manager *manager;
+    XMPP::Stanza::Error lastError;
+    QString sid;
+    Jid origFrom; // "from" attr of IQ.
+    Jid otherParty; // either "from" or initiator/responder. it's where to send all requests.
 };
 
 Session::Session(Manager *manager) :
@@ -581,42 +553,226 @@ Session::~Session()
 
 }
 
-void Session::initiate(const Content &content)
+XMPP::Stanza::Error Session::lastError() const
 {
-    Q_UNUSED(content) // TODO
+    return d->lastError;
+}
+
+bool Session::incomingInitiate(const Jid &from, const Jingle &jingle, const QDomElement &jingleEl)
+{
+    d->sid = jingle.sid();
+    d->origFrom = from;
+    d->otherParty = jingle.initiator().isValid()? jingle.initiator() : from;
+    //auto key = qMakePair(from, jingle.sid());
+
+    QString contentTag(QStringLiteral("content"));
+    for(QDomElement ce = jingleEl.firstChildElement(contentTag);
+        !ce.isNull(); ce = ce.nextSiblingElement(contentTag)) {
+
+        QDomElement descriptionEl = ce.firstChildElement(QLatin1String("description"));
+        QDomElement transportEl = ce.firstChildElement(QLatin1String("transport"));
+        QString descriptionNS = descriptionEl.namespaceURI();
+        QString transportNS = transportEl.namespaceURI();
+
+        ContentBase c(ce);
+        if (!c.isValid() || descriptionEl.isNull() || transportEl.isNull() || descriptionNS.isEmpty() || transportNS.isEmpty()) {
+            d->lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::Cancel, XMPP::Stanza::Error::BadRequest);
+            return false;
+        }
+        auto app = d->manager->startApplication(descriptionEl);
+        auto transport = d->manager->initTransport(from, transportEl);
+        if (!app || !transport) {
+            d->lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::Cancel, XMPP::Stanza::Error::BadRequest);
+            return false;
+        }
+        // TODO add to session
+    }
+
+    return true;
+    //QDomElement securityEl = content.firstChildElement(QLatin1String("security"));
+/*
+    if (jingle->action() == Jingle::Action::SessionInitiate   ||
+            jingle->action() == Jingle::Action::SessionAccept ||
+            jingle->action() == Jingle::Action::ContentAdd    ||
+            jingle->action() == Jingle::Action::ContentAccept ||
+            jingle->action() == Jingle::Action::ContentReject ||
+            jingle->action() == Jingle::Action::DescriptionInfo)
+    {
+        description = manager->descriptionFromXml(descriptionEl);
+        if (description.isNull()) {
+            return;
+        }
+    } // else description is unexpected. log it?
+
+    if (jingle->action() == Jingle::Action::SessionInitiate   ||
+            jingle->action() == Jingle::Action::SessionAccept ||
+            jingle->action() == Jingle::Action::ContentAdd    ||
+            jingle->action() == Jingle::Action::ContentAccept ||
+            jingle->action() == Jingle::Action::ContentReject)
+    {
+        // content-reject posses empty transport
+        auto transport = manager->transportFromXml(transportEl);
+    }
+    */
+    /*
+    if (!securityEl.isNull()) {
+        security = client->jingleManager()->securityFromXml(securityEl);
+        // if security == 0 then then its unsupported? just ignore it atm
+        // according to xtls draft responder may omit security when unsupported.
+    }
+    */
+
+    // TODO description
+    // TODO transports
+    // TODO security
+
+    //return client()->jingleManager()->incomingIQ(el);
+}
+
+bool Session::updateFromXml(Jingle::Action action, const QDomElement &jingleEl)
+{
+    // TODO
+    Q_UNUSED(action);
+    Q_UNUSED(jingleEl);
+    return false;
 }
 
 //----------------------------------------------------------------------------
-// Session
+// Manager
 //----------------------------------------------------------------------------
-class Application::Private
+class Manager::Private
 {
 public:
-    Client *client;
+    friend class Content;
+
+    XMPP::Client *client;
+    // ns -> application
+    QMap<QString,QPointer<ApplicationManager>> applications;
+    // ns -> parser function
+    QMap<QString,QPointer<TransportManager>> transportManagers;
+    std::function<bool(const Jid &)> remoteJidCecker;
+
+    // when set/valid any incoming session initiate will be replied with redirection error
+    Jid redirectionJid;
+    XMPP::Stanza::Error lastError;
+    QHash<QPair<Jid,QString>,Session*> sessions;
+    int maxSessions = -1; // no limit
 };
 
-Application::Application(Client *client) :
+Manager::Manager(Client *client) :
     d(new Private)
 {
-    d->client = client;
+    client = client;
 }
 
-Application::~Application()
+Manager::~Manager()
 {
-
 }
 
-Client *Application::client() const
+void Manager::setRedirection(const Jid &to)
 {
-    return d->client;
+    d->redirectionJid = to;
 }
 
-TransportManager::TransportManager(Manager *jingleManager) :
-    QObject(jingleManager)
+const Jid &Manager::redirectionJid() const
 {
-
+    return d->redirectionJid;
 }
 
+void Manager::registerApp(const QString &ns, ApplicationManager *app)
+{
+    d->applications.insert(ns, app);
+}
+
+void Manager::unregisterApp(const QString &ns)
+{
+    auto appManager = d->applications.value(ns);
+    if (appManager) {
+        appManager->closeAll();
+        d->applications.remove(ns);
+    }
+}
+
+Application* Manager::startApplication(const QDomElement &descriptionEl)
+{
+    auto appManager = d->applications.value(descriptionEl.namespaceURI());
+    if (!appManager) {
+        return NULL;
+    }
+    return appManager->startApplication(descriptionEl);
+}
+
+void Manager::registerTransport(const QString &ns, TransportManager *transport)
+{
+    d->transportManagers.insert(ns, transport);
+}
+
+void Manager::unregisterTransport(const QString &ns)
+{
+    auto trManager = d->transportManagers.value(ns);
+    if (trManager) {
+        trManager->closeAll();
+        d->transportManagers.remove(ns);
+    }
+}
+
+bool Manager::isAllowedParty(const Jid &jid) const
+{
+    if (d->remoteJidCecker) {
+        return d->remoteJidCecker(jid);
+    }
+    // REVIEW probably we can check Client's internal roster when checker is not set.
+    return true;
+}
+
+Session *Manager::session(const Jid &remoteJid, const QString &sid)
+{
+    return d->sessions.value(qMakePair(remoteJid, sid));
+}
+
+void Manager::setRemoteJidChecked(std::function<bool(const Jid &)> checker)
+{
+    d->remoteJidCecker = checker;
+}
+
+QSharedPointer<Transport> Manager::initTransport(const Jid &jid, const QDomElement &el)
+{
+    auto transportManager = d->transportManagers.value(el.namespaceURI());
+    if (!transportManager) {
+        return NULL;
+    }
+    return transportManager->sessionInitiate(jid, el);
+}
+
+Session* Manager::incomingSessionInitiate(const Jid &from, const Jingle &jingle, const QDomElement &jingleEl)
+{
+    if (d->maxSessions > 0 && d->sessions.size() == d->maxSessions) {
+        d->lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::Wait, XMPP::Stanza::Error::ResourceConstraint);
+        return NULL;
+    }
+    auto key = qMakePair(from, jingle.sid());
+    auto s = new Session(this);
+    if (s->incomingInitiate(from, jingle, jingleEl)) {
+        d->sessions.insert(key, s);
+        QMetaObject::invokeMethod(this, "incomingSession", Qt::QueuedConnection, Q_ARG(Session*, s));
+        return s;
+    }
+    d->lastError = s->lastError();
+    delete s;
+    return NULL;
+}
+
+XMPP::Stanza::Error Manager::lastError() const
+{
+    return d->lastError;
+}
+
+Session *Manager::newSession(const Jid &j)
+{
+    Q_UNUSED(j); // TODO
+    auto s = new Session(this);
+    return s;
+}
 
 } // namespace Jingle
 } // namespace XMPP

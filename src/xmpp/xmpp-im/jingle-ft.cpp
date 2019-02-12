@@ -184,23 +184,28 @@ QDomElement Received::toXml(QDomDocument *doc) const
 }
 
 //----------------------------------------------------------------------------
-// FTApplication
+// ApplicationManager
 //----------------------------------------------------------------------------
-FTApplication::FTApplication(Client *client):
-    Application(client)
+ApplicationManager::ApplicationManager(Client *client):
+    XMPP::Jingle::ApplicationManager(client)
 {
 
 }
 
-void FTApplication::incomingSession(Session *session)
+void ApplicationManager::incomingSession(Session *session)
 {
     Q_UNUSED(session) // TODO
 }
 
-QSharedPointer<Description> FTApplication::descriptionFromXml(const QDomElement &el)
+Application* ApplicationManager::startApplication(const QDomElement &el)
 {
     Q_UNUSED(el) // TODO
-    QSharedPointer<Description>();
+    return nullptr;
+}
+
+void ApplicationManager::closeAll()
+{
+
 }
 
 } // namespace FileTransfer

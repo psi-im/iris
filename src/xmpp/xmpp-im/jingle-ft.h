@@ -69,13 +69,20 @@ class Received : public ContentBase
     QDomElement toXml(QDomDocument *doc) const;
 };
 
-class FTApplication : public Application
+class Application : public XMPP::Jingle::Application
+{
+    Q_OBJECT
+
+};
+
+class ApplicationManager : public XMPP::Jingle::ApplicationManager
 {
     Q_OBJECT
 public:
-    FTApplication(Client *client);
+    ApplicationManager(Client *client);
     void incomingSession(Session *session);
-    QSharedPointer<Description> descriptionFromXml(const QDomElement &el);
+    Application *startApplication(const QDomElement &el);
+    void closeAll();
 
 private:
     Client *client;
