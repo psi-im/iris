@@ -208,6 +208,21 @@ void ApplicationManager::closeAll()
 
 }
 
+//----------------------------------------------------------------------------
+// ApplicationManager
+//----------------------------------------------------------------------------
+bool Application::setTransport(const QSharedPointer<Transport> &transport)
+{
+    // TODO
+    return false;
+}
+
+QSharedPointer<Transport> Application::transport() const
+{
+    // TODO
+    return QSharedPointer<Transport>();
+}
+
 } // namespace FileTransfer
 } // namespace Jingle
 } // namespace XMPP

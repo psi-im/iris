@@ -72,7 +72,10 @@ class Received : public ContentBase
 class Application : public XMPP::Jingle::Application
 {
     Q_OBJECT
+public:
 
+    bool setTransport(const QSharedPointer<Transport> &transport);
+    QSharedPointer<Transport> transport() const;
 };
 
 class ApplicationManager : public XMPP::Jingle::ApplicationManager

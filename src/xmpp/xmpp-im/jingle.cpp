@@ -536,6 +536,7 @@ class Session::Private
 {
 public:
     Manager *manager;
+    Session::State state = Session::Starting;
     XMPP::Stanza::Error lastError;
     QString sid;
     Jid origFrom; // "from" attr of IQ.
@@ -553,9 +554,44 @@ Session::~Session()
 
 }
 
+Session::State Session::state() const
+{
+    return d->state;
+}
+
 XMPP::Stanza::Error Session::lastError() const
 {
     return d->lastError;
+}
+
+bool Session::addContent(const QDomElement &ce)
+{
+    QDomElement descriptionEl = ce.firstChildElement(QLatin1String("description"));
+    QDomElement transportEl = ce.firstChildElement(QLatin1String("transport"));
+    QString descriptionNS = descriptionEl.namespaceURI();
+    QString transportNS = transportEl.namespaceURI();
+
+    ContentBase c(ce);
+    if (!c.isValid() || descriptionEl.isNull() || transportEl.isNull() || descriptionNS.isEmpty() || transportNS.isEmpty()) {
+        d->lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::Cancel, XMPP::Stanza::Error::BadRequest);
+        return false;
+    }
+    auto app = d->manager->startApplication(descriptionEl);
+    auto transport = d->manager->initTransport(d->origFrom, transportEl);
+    if (!app || !transport) { // not parsed
+        d->lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::Cancel, XMPP::Stanza::Error::BadRequest);
+        return false;
+    }
+
+
+
+    if (!app->setTransport(transport)) { // transport was not set. incompatible?
+        // TODO according to discussion in jdev@ we have to send transport-replace in this case
+
+
+    }
+    // TODO add to session
+    return true;
 }
 
 bool Session::incomingInitiate(const Jid &from, const Jingle &jingle, const QDomElement &jingleEl)
@@ -568,24 +604,9 @@ bool Session::incomingInitiate(const Jid &from, const Jingle &jingle, const QDom
     QString contentTag(QStringLiteral("content"));
     for(QDomElement ce = jingleEl.firstChildElement(contentTag);
         !ce.isNull(); ce = ce.nextSiblingElement(contentTag)) {
-
-        QDomElement descriptionEl = ce.firstChildElement(QLatin1String("description"));
-        QDomElement transportEl = ce.firstChildElement(QLatin1String("transport"));
-        QString descriptionNS = descriptionEl.namespaceURI();
-        QString transportNS = transportEl.namespaceURI();
-
-        ContentBase c(ce);
-        if (!c.isValid() || descriptionEl.isNull() || transportEl.isNull() || descriptionNS.isEmpty() || transportNS.isEmpty()) {
-            d->lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::Cancel, XMPP::Stanza::Error::BadRequest);
+        if (!addContent(ce)) { // not parsed
             return false;
         }
-        auto app = d->manager->startApplication(descriptionEl);
-        auto transport = d->manager->initTransport(from, transportEl);
-        if (!app || !transport) {
-            d->lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::Cancel, XMPP::Stanza::Error::BadRequest);
-            return false;
-        }
-        // TODO add to session
     }
 
     return true;

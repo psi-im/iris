@@ -149,19 +149,6 @@ protected:
     QString disposition; // default "session"
 };
 
-class Description
-{
-public:
-    enum class Type {
-        Unrecognized, // non-standard, just a default
-        FileTransfer, // urn:xmpp:jingle:apps:file-transfer:5
-    };
-private:
-    class Private;
-    Private *ensureD();
-    QSharedDataPointer<Private> d;
-};
-
 class Transport : public QObject {
     Q_OBJECT
 public:
@@ -195,9 +182,18 @@ class Session : public QObject
 {
     Q_OBJECT
 public:
+    enum State {
+        Starting,
+        Unacked,
+        Pending,
+        Active,
+        Ended
+    };
+
     Session(Manager *manager);
     ~Session();
 
+    State state() const;
     XMPP::Stanza::Error lastError() const;
 
 private:
@@ -205,6 +201,7 @@ private:
     friend class JTPush;
     bool incomingInitiate(const Jid &from, const Jingle &jingle, const QDomElement &jingleEl);
     bool updateFromXml(Jingle::Action action, const QDomElement &jingleEl);
+    bool addContent(const QDomElement &ce);
 
     class Private;
     QScopedPointer<Private> d;
@@ -215,6 +212,14 @@ class Application : public QObject
     Q_OBJECT
 public:
     using QObject::QObject;
+
+    /**
+     * @brief setTransport checks if transport is compatible and stores it
+     * @param transport
+     * @return false if not compatible
+     */
+    virtual bool setTransport(const QSharedPointer<Transport> &transport) = 0;
+    virtual QSharedPointer<Transport> transport() const = 0;
 };
 
 class ApplicationManager : public QObject
@@ -225,7 +230,7 @@ public:
     virtual ~ApplicationManager();
 
     Client *client() const;
-    virtual void incomingSession(Session *session) = 0;
+    virtual void incomingSession(Session *session) = 0; // TODO remove this?
 
     virtual Application* startApplication(const QDomElement &el) = 0;
 
