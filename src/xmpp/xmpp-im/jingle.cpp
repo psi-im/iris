@@ -652,9 +652,17 @@ bool Session::incomingInitiate(const Jid &from, const Jingle &jingle, const QDom
 
 bool Session::updateFromXml(Jingle::Action action, const QDomElement &jingleEl)
 {
-    // TODO
-    Q_UNUSED(action);
-    Q_UNUSED(jingleEl);
+    if (action == Jingle::SessionInfo) {
+
+    }
+
+    QString contentTag(QStringLiteral("content"));
+    for(QDomElement ce = jingleEl.firstChildElement(contentTag);
+        !ce.isNull(); ce = ce.nextSiblingElement(contentTag)) {
+        if (!addContent(ce)) { // not parsed
+            return false;
+        }
+    }
     return false;
 }
 

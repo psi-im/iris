@@ -178,6 +178,27 @@ class Security
 
 };
 
+/**
+ * @brief The SessionManagerPad class - TransportManager/AppManager PAD
+ *
+ * The class is intended to be used to monitor global session events
+ * as well as send them in context of specific application type.
+ *
+ * For example a session has 3 content elements (voice, video and whiteboard).
+ * voice and video are related to RTP application while whiteaboard (Jingle SXE)
+ * is a different application. Therefore the session will have 2 pads:
+ * rtp pad and whitebaord pad.
+ * The pads are connected to both session and transport/application manager
+ * and their main task to handle Jingle session-info events.
+ *
+ * SessionManagerPad is a base class for all kinds of pads.
+ * UI can connect to its signals.
+ */
+class SessionManagerPad : public QObject
+{
+    Q_OBJECT
+};
+
 class Session : public QObject
 {
     Q_OBJECT
@@ -195,6 +216,9 @@ public:
 
     State state() const;
     XMPP::Stanza::Error lastError() const;
+
+signals:
+    void padAdded(cont QString &ns);
 
 private:
     friend class Manager;
