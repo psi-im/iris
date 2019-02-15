@@ -108,6 +108,11 @@ public:
     Transport::Direction direction = Transport::Outgoing;
 };
 
+Transport::Transport()
+{
+
+}
+
 Transport::~Transport()
 {
 
@@ -235,9 +240,21 @@ QSharedPointer<XMPP::Jingle::Transport> Manager::sessionInitiate(const Jid &from
     return t;
 }
 
+SessionManagerPad *Manager::pad()
+{
+    return new Pad(this);
+}
+
 bool Manager::hasTrasport(const Jid &jid, const QString &sid) const
 {
     return d->transports.contains(qMakePair(jid, sid));
+}
+
+Pad::Pad(Manager *manager) :
+    SessionManagerPad(manager),
+    manager(manager)
+{
+
 }
 
 

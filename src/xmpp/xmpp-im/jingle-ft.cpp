@@ -203,6 +203,11 @@ Application* ApplicationManager::startApplication(const QDomElement &el)
     return nullptr;
 }
 
+SessionManagerPad *ApplicationManager::pad()
+{
+    return new Pad(this);
+}
+
 void ApplicationManager::closeAll()
 {
 
@@ -221,6 +226,13 @@ QSharedPointer<Transport> Application::transport() const
 {
     // TODO
     return QSharedPointer<Transport>();
+}
+
+Pad::Pad(ApplicationManager *manager) :
+    SessionManagerPad(manager),
+    manager(manager)
+{
+
 }
 
 } // namespace FileTransfer

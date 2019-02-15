@@ -538,6 +538,8 @@ public:
     Manager *manager;
     Session::State state = Session::Starting;
     XMPP::Stanza::Error lastError;
+    QMap<QString,SessionManagerPad*> managerPads;
+    QMap<QString,Application*> applications;
     QString sid;
     Jid origFrom; // "from" attr of IQ.
     Jid otherParty; // either "from" or initiator/responder. it's where to send all requests.
@@ -564,6 +566,16 @@ XMPP::Stanza::Error Session::lastError() const
     return d->lastError;
 }
 
+QStringList Session::allManagerPads() const
+{
+    return d->managerPads.keys();
+}
+
+SessionManagerPad *Session::pad(const QString &ns)
+{
+    return d->managerPads.value(ns);
+}
+
 bool Session::addContent(const QDomElement &ce)
 {
     QDomElement descriptionEl = ce.firstChildElement(QLatin1String("description"));
@@ -583,14 +595,22 @@ bool Session::addContent(const QDomElement &ce)
         return false;
     }
 
-
+    d->applications.insert(descriptionEl.attribute(QStringLiteral("name")), app);
 
     if (!app->setTransport(transport)) { // transport was not set. incompatible?
         // TODO according to discussion in jdev@ we have to send transport-replace in this case
-
-
     }
-    // TODO add to session
+
+    if (!d->managerPads.contains(descriptionNS)) {
+        auto *pad = d->manager->applicationPad(descriptionNS);
+        d->managerPads.insert(descriptionNS, pad);
+    }
+
+    if (!d->managerPads.contains(transportNS)) {
+        auto *pad = d->manager->transportPad(transportNS);
+        d->managerPads.insert(transportNS, pad);
+    }
+
     return true;
 }
 
@@ -676,7 +696,7 @@ public:
 
     XMPP::Client *client;
     // ns -> application
-    QMap<QString,QPointer<ApplicationManager>> applications;
+    QMap<QString,QPointer<ApplicationManager>> applicationManagers;
     // ns -> parser function
     QMap<QString,QPointer<TransportManager>> transportManagers;
     std::function<bool(const Jid &)> remoteJidCecker;
@@ -710,25 +730,35 @@ const Jid &Manager::redirectionJid() const
 
 void Manager::registerApp(const QString &ns, ApplicationManager *app)
 {
-    d->applications.insert(ns, app);
+    d->applicationManagers.insert(ns, app);
 }
 
 void Manager::unregisterApp(const QString &ns)
 {
-    auto appManager = d->applications.value(ns);
+    auto appManager = d->applicationManagers.value(ns);
     if (appManager) {
         appManager->closeAll();
-        d->applications.remove(ns);
+        d->applicationManagers.remove(ns);
     }
 }
 
 Application* Manager::startApplication(const QDomElement &descriptionEl)
 {
-    auto appManager = d->applications.value(descriptionEl.namespaceURI());
+    auto appManager = d->applicationManagers.value(descriptionEl.namespaceURI());
     if (!appManager) {
         return NULL;
     }
     return appManager->startApplication(descriptionEl);
+}
+
+SessionManagerPad *Manager::applicationPad(const QString &ns)
+{
+    auto am = d->applicationManagers.value(ns);
+    if (!am) {
+        return NULL;
+    }
+    return am->pad();
+
 }
 
 void Manager::registerTransport(const QString &ns, TransportManager *transport)
@@ -771,6 +801,15 @@ QSharedPointer<Transport> Manager::initTransport(const Jid &jid, const QDomEleme
         return NULL;
     }
     return transportManager->sessionInitiate(jid, el);
+}
+
+SessionManagerPad *Manager::transportPad(const QString &ns)
+{
+    auto transportManager = d->transportManagers.value(ns);
+    if (!transportManager) {
+        return NULL;
+    }
+    return transportManager->pad();
 }
 
 Session* Manager::incomingSessionInitiate(const Jid &from, const Jingle &jingle, const QDomElement &jingleEl)

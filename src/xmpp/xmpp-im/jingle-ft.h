@@ -31,6 +31,7 @@ namespace Jingle {
 namespace FileTransfer {
 
 extern const QString NS;
+class ApplicationManager;
 
 struct Range {
     quint64 offset = 0;
@@ -69,6 +70,16 @@ class Received : public ContentBase
     QDomElement toXml(QDomDocument *doc) const;
 };
 
+class Pad : public SessionManagerPad
+{
+    Q_OBJECT
+    // TODO
+public:
+    Pad(ApplicationManager *manager);
+private:
+    ApplicationManager *manager;
+};
+
 class Application : public XMPP::Jingle::Application
 {
     Q_OBJECT
@@ -85,6 +96,7 @@ public:
     ApplicationManager(Client *client);
     void incomingSession(Session *session);
     Application *startApplication(const QDomElement &el);
+    SessionManagerPad* pad();
     void closeAll();
 
 private:

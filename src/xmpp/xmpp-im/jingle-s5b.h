@@ -62,7 +62,7 @@ public:
         Udp
     };
 
-    inline Transport() {}
+    Transport();
     ~Transport();
 
     void start();
@@ -81,6 +81,16 @@ private:
     QScopedPointer<Private> d;
 };
 
+class Pad : public SessionManagerPad
+{
+    Q_OBJECT
+    // TODO
+public:
+    Pad(Manager *manager);
+private:
+    Manager *manager;
+};
+
 class Manager : public TransportManager {
     Q_OBJECT
 public:
@@ -89,6 +99,7 @@ public:
 
     QSharedPointer<XMPP::Jingle::Transport> sessionInitiate(const Jid &to); // outgoing. one have to call Transport::start to collect candidates
     QSharedPointer<XMPP::Jingle::Transport> sessionInitiate(const Jid &from, const QDomElement &transportEl); // incoming
+    SessionManagerPad* pad();
 
     bool hasTrasport(const Jid &jid, const QString &sid) const;
 

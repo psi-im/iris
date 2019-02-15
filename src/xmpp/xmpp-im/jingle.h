@@ -197,6 +197,8 @@ class Security
 class SessionManagerPad : public QObject
 {
     Q_OBJECT
+public:
+    using QObject::QObject;
 };
 
 class Session : public QObject
@@ -217,8 +219,11 @@ public:
     State state() const;
     XMPP::Stanza::Error lastError() const;
 
+    QStringList allManagerPads() const;
+    SessionManagerPad *pad(const QString &ns);
+
 signals:
-    void padAdded(cont QString &ns);
+    void managerPadAdded(const QString &ns);
 
 private:
     friend class Manager;
@@ -257,6 +262,7 @@ public:
     virtual void incomingSession(Session *session) = 0; // TODO remove this?
 
     virtual Application* startApplication(const QDomElement &el) = 0;
+    virtual SessionManagerPad* pad() = 0;
 
     // this method is supposed to gracefully close all related sessions as a preparation for plugin unload for example
     virtual void closeAll() = 0;
@@ -303,6 +309,7 @@ public:
 
     virtual QSharedPointer<Transport> sessionInitiate(const Jid &to) = 0; // outgoing. one have to call Transport::start to collect candidates
     virtual QSharedPointer<Transport> sessionInitiate(const Jid &from, const QDomElement &transportEl) = 0; // incoming
+    virtual SessionManagerPad* pad() = 0;
 
     // this method is supposed to gracefully close all related sessions as a preparation for plugin unload for example
     virtual void closeAll() = 0;
@@ -324,10 +331,12 @@ public:
     void registerApp(const QString &ns, ApplicationManager *app);
     void unregisterApp(const QString &ns);
     Application* startApplication(const QDomElement &descriptionEl);
+    SessionManagerPad *applicationPad(const QString &ns); // allocates new pad on application manager
 
     void registerTransport(const QString &ns, TransportManager *transport);
     void unregisterTransport(const QString &ns);
     QSharedPointer<Transport> initTransport(const Jid &jid, const QDomElement &el);
+    SessionManagerPad *transportPad(const QString &ns); // allocates new pad on transport manager
 
     /**
      * @brief isAllowedParty checks if the remote jid allowed to initiate a session
