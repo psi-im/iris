@@ -135,7 +135,16 @@ File::File(const QDomElement &file)
         }
     }
 
-    // TODO make private and fill it
+    auto p = new Private;
+    p->date = date;
+    p->mediaType = mediaType;
+    p->name = name;
+    p->desc = desc;
+    p->size = size;
+    p->range = range;
+    p->hash = hash;
+
+    d = p;
 }
 
 QDomElement File::toXml(QDomDocument *doc) const
@@ -192,11 +201,6 @@ ApplicationManager::ApplicationManager(Client *client):
 
 }
 
-void ApplicationManager::incomingSession(Session *session)
-{
-    Q_UNUSED(session) // TODO
-}
-
 Application* ApplicationManager::startApplication(const QDomElement &el)
 {
     Q_UNUSED(el) // TODO
@@ -218,7 +222,7 @@ void ApplicationManager::closeAll()
 //----------------------------------------------------------------------------
 bool Application::setTransport(const QSharedPointer<Transport> &transport)
 {
-    // TODO
+    Q_UNUSED(transport);// TODO
     return false;
 }
 
@@ -228,11 +232,36 @@ QSharedPointer<Transport> Application::transport() const
     return QSharedPointer<Transport>();
 }
 
+Jingle::Action Application::outgoingUpdateType() const
+{
+    return Jingle::NoAction; // TODO
+}
+
+bool Application::isReadyForSessionAccept() const
+{
+    return false; // TODO
+}
+
+QDomElement Application::takeOutgoingUpdate()
+{
+    return QDomElement(); // TODO
+}
+
+QDomElement Application::sessionAcceptContent() const
+{
+    return QDomElement(); // TODO
+}
+
 Pad::Pad(ApplicationManager *manager) :
     SessionManagerPad(manager),
     manager(manager)
 {
 
+}
+
+QDomElement Pad::takeOutgoingSessionInfoUpdate()
+{
+    return QDomElement(); // TODO
 }
 
 } // namespace FileTransfer

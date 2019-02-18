@@ -76,6 +76,7 @@ class Pad : public SessionManagerPad
     // TODO
 public:
     Pad(ApplicationManager *manager);
+    QDomElement takeOutgoingSessionInfoUpdate();
 private:
     ApplicationManager *manager;
 };
@@ -87,6 +88,12 @@ public:
 
     bool setTransport(const QSharedPointer<Transport> &transport);
     QSharedPointer<Transport> transport() const;
+
+    Jingle::Action outgoingUpdateType() const;
+    bool isReadyForSessionAccept() const;
+    QDomElement takeOutgoingUpdate();
+    QDomElement sessionAcceptContent() const;
+
 };
 
 class ApplicationManager : public XMPP::Jingle::ApplicationManager
@@ -94,7 +101,6 @@ class ApplicationManager : public XMPP::Jingle::ApplicationManager
     Q_OBJECT
 public:
     ApplicationManager(Client *client);
-    void incomingSession(Session *session);
     Application *startApplication(const QDomElement &el);
     SessionManagerPad* pad();
     void closeAll();

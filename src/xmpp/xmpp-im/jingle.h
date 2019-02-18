@@ -38,6 +38,8 @@ namespace Jingle {
 extern const QString NS;
 
 class Manager;
+class Session;
+
 class Jingle
 {
 public:
@@ -60,16 +62,20 @@ public:
         TransportReplace
     };
 
-    Jingle();
-    Jingle(const QDomElement &e);
+    Jingle(); // make invalid jingle element
+    Jingle(Action action, const QString &sid); // start making outgoing jingle
+    Jingle(const QDomElement &e); // likely incoming
     Jingle(const Jingle &);
     ~Jingle();
+
     QDomElement toXml(QDomDocument *doc) const;
     inline bool isValid() const { return d != nullptr; }
     Action action() const;
     const QString &sid() const;
     const Jid &initiator() const;
+    void setInitiator(const Jid &jid);
     const Jid &responder() const;
+    void setResponder(const Jid &jid);
 private:
     class Private;
     QSharedDataPointer<Private> d;
@@ -199,6 +205,7 @@ class SessionManagerPad : public QObject
     Q_OBJECT
 public:
     using QObject::QObject;
+    virtual QDomElement takeOutgoingSessionInfoUpdate();
 };
 
 class Session : public QObject
@@ -249,6 +256,10 @@ public:
      */
     virtual bool setTransport(const QSharedPointer<Transport> &transport) = 0;
     virtual QSharedPointer<Transport> transport() const = 0;
+    virtual Jingle::Action outgoingUpdateType() const = 0;
+    virtual bool isReadyForSessionAccept() const = 0;
+    virtual QDomElement takeOutgoingUpdate() = 0;
+    virtual QDomElement sessionAcceptContent() const = 0;
 };
 
 class ApplicationManager : public QObject
@@ -259,7 +270,6 @@ public:
     virtual ~ApplicationManager();
 
     Client *client() const;
-    virtual void incomingSession(Session *session) = 0; // TODO remove this?
 
     virtual Application* startApplication(const QDomElement &el) = 0;
     virtual SessionManagerPad* pad() = 0;

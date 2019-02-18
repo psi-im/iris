@@ -62,7 +62,7 @@ public:
         Udp
     };
 
-    Transport();
+    Transport(); // intentionally empty constructor. use createOutgoing/createIncoming
     ~Transport();
 
     void start();
@@ -81,12 +81,14 @@ private:
     QScopedPointer<Private> d;
 };
 
+class Manager;
 class Pad : public SessionManagerPad
 {
     Q_OBJECT
     // TODO
 public:
     Pad(Manager *manager);
+
 private:
     Manager *manager;
 };

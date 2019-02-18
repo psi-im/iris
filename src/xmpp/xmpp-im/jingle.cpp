@@ -31,6 +31,7 @@
 #include <QMap>
 #include <QMap>
 #include <QPointer>
+#include <QTimer>
 #include <functional>
 
 namespace XMPP {
@@ -70,7 +71,6 @@ public:
     QString sid;
     Jid initiator;
     Jid responder;
-    Reason reason;
 };
 
 Jingle::Jingle()
@@ -78,11 +78,17 @@ Jingle::Jingle()
 
 }
 
+Jingle::Jingle(Jingle::Action action, const QString &sid) :
+    d(new Private)
+{
+    d->action = action;
+    d->sid = sid;
+}
+
 Jingle::Jingle(const QDomElement &e)
 {
     QString actionStr = e.attribute(QLatin1String("action"));
     Action action;
-    Reason reason;
     QString sid = e.attribute(QLatin1String("sid"));
     Jid initiator;
     Jid responder;
@@ -98,15 +104,6 @@ Jingle::Jingle(const QDomElement &e)
     }
     if (!found || sid.isEmpty()) {
         return;
-    }
-
-    QDomElement re = e.firstChildElement(QLatin1String("reason"));
-    if(!re.isNull()) {
-        reason = Reason(re);
-        if (!reason.isValid()) {
-            qDebug("invalid reason");
-            return;
-        }
     }
 
     if (!e.attribute(QLatin1String("initiator")).isEmpty()) {
@@ -127,7 +124,6 @@ Jingle::Jingle(const QDomElement &e)
     d = new Private;
     d->action = action;
     d->sid = sid;
-    d->reason = reason;
     d->responder = responder;
 }
 
@@ -171,17 +167,6 @@ QDomElement Jingle::toXml(QDomDocument *doc) const
         query.setAttribute(QLatin1String("responder"), d->responder.full());
     query.setAttribute(QLatin1String("sid"), d->sid);
 
-//    if(d->action != SessionTerminate) {
-//        // for session terminate, there is no content list, just
-//        //   a reason for termination
-//        for(const Content &c: d->content) {
-//            QDomElement content = c.toXml(doc);
-//            query.appendChild(content);
-//        }
-//    }
-    if (d->reason.isValid()) {
-        query.appendChild(d->reason.toXml(doc));
-    }
     return query;
 }
 
@@ -200,11 +185,20 @@ const Jid &Jingle::initiator() const
     return d->initiator;
 }
 
+void Jingle::setInitiator(const Jid &jid)
+{
+    d->initiator = jid;
+}
+
 const Jid &Jingle::responder() const
 {
     return d->responder;
 }
 
+void Jingle::setResponder(const Jid &jid)
+{
+    d->responder = jid;
+}
 
 
 //----------------------------------------------------------------------------
@@ -528,6 +522,52 @@ public:
     }
 };
 
+//----------------------------------------------------------------------------
+// JT - Jingle Task
+//----------------------------------------------------------------------------
+class JT : public Task
+{
+    Q_OBJECT
+
+    QDomElement iq_;
+    Jid to_;
+
+    Stanza::Error error_;
+public:
+    JT(Task *parent) :
+        Task(parent)
+    {
+
+    }
+
+    ~JT(){}
+
+    void request(const Jid &to, const QDomElement &jingleEl)
+    {
+        to_ = to;
+        iq_ = createIQ(doc(), "set", to.full(), id());
+        iq_.appendChild(jingleEl);
+    }
+
+    void onGo()
+    {
+        send(iq_);
+    }
+
+    bool take(const QDomElement &x)
+    {
+        if(!iqVerify(x, to_, id()))
+            return false;
+
+        if(x.attribute("type") == "error") {
+            setError(x);
+        } else {
+            setSuccess();
+        }
+        return true;
+    }
+};
+
 
 //----------------------------------------------------------------------------
 // Session
@@ -536,6 +576,7 @@ class Session::Private
 {
 public:
     Manager *manager;
+    QTimer stepTimer;
     Session::State state = Session::Starting;
     XMPP::Stanza::Error lastError;
     QMap<QString,SessionManagerPad*> managerPads;
@@ -543,12 +584,108 @@ public:
     QString sid;
     Jid origFrom; // "from" attr of IQ.
     Jid otherParty; // either "from" or initiator/responder. it's where to send all requests.
+    bool isAccepted = false;
+    bool isOutgoing = true; // origin of the session. outgoing - initiated by local side
+    bool waitingAck = false;
+
+    void sendJingle(Jingle::Action action, QList<QDomElement> update)
+    {
+        QDomDocument &doc = *manager->client()->doc();
+        Jingle jingle(action, sid);
+        if (action == Jingle::Action::SessionInitiate) {
+            jingle.setInitiator(manager->client()->jid());
+        }
+        if (action == Jingle::Action::SessionAccept) {
+            jingle.setResponder(manager->client()->jid());
+        }
+        auto xml = jingle.toXml(&doc);
+
+        for (const QDomElement &e: update) {
+            xml.appendChild(e);
+        }
+
+        auto jt = new JT(manager->client()->rootTask());
+        jt->request(otherParty, xml);
+        QObject::connect(jt, &JT::finished, manager, [jt, jingle, this](){
+            waitingAck = false;
+            // TODO handle errors
+            planStep();
+        });
+        waitingAck = true;
+        jt->go(true);
+    }
+
+    void planStep() {
+        if (!stepTimer.isActive()) {
+            stepTimer.start();
+        }
+    }
+
+    void doStep() {
+        if (waitingAck) { // we will return here when ack is received
+            return;
+        }
+        QList<QDomElement> updateXml;
+        for (auto mp : managerPads) {
+            QDomElement el = mp->takeOutgoingSessionInfoUpdate();
+            if (!el.isNull()) {
+                updateXml.append(el);
+                // we can send session-info for just one application. so stop processing
+                sendJingle(Jingle::Action::SecurityInfo, updateXml);
+                return;
+            }
+        }
+
+        bool needCheckAcceptance = !isOutgoing && !isAccepted;
+        bool needAccept = needCheckAcceptance;
+        QMultiMap<Jingle::Action, Application*> updates;
+        for (auto app : applications) {
+            Jingle::Action updateType = app->outgoingUpdateType();
+            if (updateType != Jingle::Action::NoAction) {
+                updates.insert(updateType, app);
+                needAccept = false;
+            } else if (needCheckAcceptance && !app->isReadyForSessionAccept()) {
+                needAccept = false;
+            }
+        }
+
+        if (updates.size()) {
+            Jingle::Action action = updates.begin().key();
+            auto apps = updates.values(action);
+            for (auto app: apps) {
+                updateXml.append(app->takeOutgoingUpdate());
+            }
+            sendJingle(action, updateXml);
+        } else if (needAccept) {
+            for (auto app : applications) {
+                updateXml.append(app->sessionAcceptContent());
+            }
+            sendJingle(Jingle::Action::SessionAccept, updateXml);
+        }
+    }
+
+    Reason reason(const QDomElement &jingleEl)
+    {
+        QDomElement re = jingleEl.firstChildElement(QLatin1String("reason"));
+        Reason reason;
+        if(!re.isNull()) {
+            reason = Reason(re);
+            if (!reason.isValid()) {
+                qDebug("invalid reason");
+            }
+        }
+        return reason;
+    }
 };
 
 Session::Session(Manager *manager) :
     d(new Private)
 {
     d->manager = manager;
+    d->stepTimer.setSingleShot(true);
+    d->stepTimer.setInterval(0);
+    connect(&d->stepTimer, &QTimer::timeout, this, [this](){ d->doStep();});
+
 }
 
 Session::~Session()
@@ -629,6 +766,7 @@ bool Session::incomingInitiate(const Jid &from, const Jingle &jingle, const QDom
         }
     }
 
+    d->planStep();
     return true;
     //QDomElement securityEl = content.firstChildElement(QLatin1String("security"));
 /*
@@ -692,9 +830,9 @@ bool Session::updateFromXml(Jingle::Action action, const QDomElement &jingleEl)
 class Manager::Private
 {
 public:
-    friend class Content;
-
     XMPP::Client *client;
+    Manager *manager;
+    QScopedPointer<JTPush> pushTask;
     // ns -> application
     QMap<QString,QPointer<ApplicationManager>> applicationManagers;
     // ns -> parser function
@@ -709,13 +847,20 @@ public:
 };
 
 Manager::Manager(Client *client) :
-    d(new Private)
+    d(new Private())
 {
-    client = client;
+    d->client = client;
+    d->manager = this;
+    d->pushTask.reset(new JTPush(client->rootTask()));
 }
 
 Manager::~Manager()
 {
+}
+
+Client *Manager::client() const
+{
+    return d->client;
 }
 
 void Manager::setRedirection(const Jid &to)
@@ -820,9 +965,10 @@ Session* Manager::incomingSessionInitiate(const Jid &from, const Jingle &jingle,
     }
     auto key = qMakePair(from, jingle.sid());
     auto s = new Session(this);
-    if (s->incomingInitiate(from, jingle, jingleEl)) {
+    if (s->incomingInitiate(from, jingle, jingleEl)) { // if parsed well
         d->sessions.insert(key, s);
-        QMetaObject::invokeMethod(this, "incomingSession", Qt::QueuedConnection, Q_ARG(Session*, s));
+        // emit incomingSession makes sense when there is no unsolved conflicts in content descriptions / transports
+        // QMetaObject::invokeMethod(this, "incomingSession", Qt::QueuedConnection, Q_ARG(Session*, s));
         return s;
     }
     d->lastError = s->lastError();
@@ -842,5 +988,12 @@ Session *Manager::newSession(const Jid &j)
     return s;
 }
 
+QDomElement SessionManagerPad::takeOutgoingSessionInfoUpdate()
+{
+    return QDomElement();
+}
+
 } // namespace Jingle
 } // namespace XMPP
+
+#include "jingle.moc"

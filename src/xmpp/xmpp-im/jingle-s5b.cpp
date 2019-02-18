@@ -258,7 +258,6 @@ Pad::Pad(Manager *manager) :
 }
 
 
-
 } // namespace S5B
 } // namespace Jingle
 } // namespace XMPP
