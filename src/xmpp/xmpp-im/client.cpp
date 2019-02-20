@@ -86,6 +86,7 @@
 #include "httpfileupload.h"
 #include "jingle.h"
 #include "jingle-ft.h"
+#include "jingle-s5b.h"
 
 #ifdef Q_OS_WIN
 #define vsnprintf _vsnprintf
@@ -131,6 +132,7 @@ public:
     ResourceList resourceList;
     CapsManager *capsman = nullptr;
     S5BManager *s5bman = nullptr;
+    Jingle::S5B::Manager *jingleS5BManager = nullptr;
     IBBManager *ibbman = nullptr;
     BoBManager *bobman = nullptr;
     FileTransferManager *ftman = nullptr;
@@ -167,9 +169,12 @@ Client::Client(QObject *par)
 
     d->serverInfoManager = new ServerInfoManager(this);
     d->httpFileUploadManager = new HttpFileUploadManager(this);
+
     d->jingleManager = new Jingle::Manager(this);
-    auto ft = new Jingle::FileTransfer::ApplicationManager(this);
+    auto ft = new Jingle::FileTransfer::Manager(this);
     d->jingleManager->registerApp(Jingle::FileTransfer::NS, ft);
+    d->jingleS5BManager = new Jingle::S5B::Manager(d->jingleManager);
+    d->jingleManager->registerTransport(Jingle::S5B::NS, d->jingleS5BManager);
 }
 
 Client::~Client()
@@ -253,6 +258,11 @@ FileTransferManager *Client::fileTransferManager() const
 S5BManager *Client::s5bManager() const
 {
     return d->s5bman;
+}
+
+Jingle::S5B::Manager *Client::jingleS5BManager() const
+{
+    return d->jingleS5BManager;
 }
 
 IBBManager *Client::ibbManager() const

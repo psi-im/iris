@@ -195,24 +195,24 @@ QDomElement Received::toXml(QDomDocument *doc) const
 //----------------------------------------------------------------------------
 // ApplicationManager
 //----------------------------------------------------------------------------
-ApplicationManager::ApplicationManager(Client *client):
+Manager::Manager(Client *client):
     XMPP::Jingle::ApplicationManager(client)
 {
 
 }
 
-Application* ApplicationManager::startApplication(const QDomElement &el)
+Application* Manager::startApplication(const QDomElement &el)
 {
     Q_UNUSED(el) // TODO
     return nullptr;
 }
 
-SessionManagerPad *ApplicationManager::pad()
+SessionManagerPad *Manager::pad()
 {
     return new Pad(this);
 }
 
-void ApplicationManager::closeAll()
+void Manager::closeAll()
 {
 
 }
@@ -252,7 +252,7 @@ QDomElement Application::sessionAcceptContent() const
     return QDomElement(); // TODO
 }
 
-Pad::Pad(ApplicationManager *manager) :
+Pad::Pad(Manager *manager) :
     SessionManagerPad(manager),
     manager(manager)
 {

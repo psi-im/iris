@@ -18,14 +18,26 @@
  *
  */
 
+/*
+ * In s5b.cpp we have
+ * S5BManager        -> Jingle::S5B::Manager
+ * S5BManager::Item  -> Jingle::S5B::Transport
+ * S5BManager::Entry -> ???
+ *
+ */
+
+
 #ifndef JINGLE_S5B_H
 #define JINGLE_S5B_H
 
 #include "jingle.h"
 
+class SocksClient;
+
 namespace XMPP {
 
 class Client;
+class S5BServer;
 
 namespace Jingle {
 namespace S5B {
@@ -104,7 +116,10 @@ public:
     SessionManagerPad* pad();
 
     bool hasTrasport(const Jid &jid, const QString &sid) const;
+    void closeAll();
 
+    void setServer(S5BServer *serv);
+    bool incomingConnection(SocksClient *client, const QString &key); // returns false if key is unknown
 private:
     class Private;
     QScopedPointer<Private> d;

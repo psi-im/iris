@@ -19,6 +19,7 @@
  */
 
 #include "jingle-s5b.h"
+#include "s5b.h"
 #include "xmpp/jid/jid.h"
 #include "xmpp_client.h"
 
@@ -199,6 +200,7 @@ class Manager::Private
 {
 public:
     XMPP::Jingle::Manager *jingleManager;
+    S5BServer *serv = nullptr;
 
     // FIMME it's reuiqred to split transports by direction otherwise we gonna hit conflicts.
     // jid,transport-sid -> transport mapping
@@ -248,6 +250,32 @@ SessionManagerPad *Manager::pad()
 bool Manager::hasTrasport(const Jid &jid, const QString &sid) const
 {
     return d->transports.contains(qMakePair(jid, sid));
+}
+
+void Manager::closeAll()
+{
+
+}
+
+void Manager::setServer(S5BServer *serv)
+{
+    if(d->serv) {
+        d->serv->unlink(this);
+        d->serv = nullptr;
+    }
+
+    if(serv) {
+        d->serv = serv;
+        d->serv->link(this);
+    }
+}
+
+bool Manager::incomingConnection(SocksClient *client, const QString &key)
+{
+    // TODO
+    Q_UNUSED(client);
+    Q_UNUSED(key);
+    return false;
 }
 
 Pad::Pad(Manager *manager) :

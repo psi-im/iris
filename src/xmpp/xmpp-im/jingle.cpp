@@ -824,6 +824,15 @@ bool Session::updateFromXml(Jingle::Action action, const QDomElement &jingleEl)
     return false;
 }
 
+
+//----------------------------------------------------------------------------
+// SessionManagerPad - handle event related to a type of app/transport but not specific instance
+//----------------------------------------------------------------------------
+QDomElement SessionManagerPad::takeOutgoingSessionInfoUpdate()
+{
+    return QDomElement();
+}
+
 //----------------------------------------------------------------------------
 // Manager
 //----------------------------------------------------------------------------
@@ -988,10 +997,6 @@ Session *Manager::newSession(const Jid &j)
     return s;
 }
 
-QDomElement SessionManagerPad::takeOutgoingSessionInfoUpdate()
-{
-    return QDomElement();
-}
 
 } // namespace Jingle
 } // namespace XMPP
