@@ -201,15 +201,19 @@ Manager::Manager(Client *client):
 
 }
 
-Application* Manager::startApplication(const QDomElement &el)
+Application* Manager::startApplication(SessionManagerPad *pad, Origin creator, Origin senders)
 {
-    Q_UNUSED(el) // TODO
+    auto app = new Application(static_cast<Pad*>(pad), creator, senders); // ContentOrigin::Remote
+    if (app->isValid()) {
+        return app;
+    }
+    delete app;
     return nullptr;
 }
 
-SessionManagerPad *Manager::pad()
+SessionManagerPad *Manager::pad(Session *session)
 {
-    return new Pad(this);
+    return new Pad(this, session);
 }
 
 void Manager::closeAll()
@@ -220,10 +224,47 @@ void Manager::closeAll()
 //----------------------------------------------------------------------------
 // ApplicationManager
 //----------------------------------------------------------------------------
-bool Application::setTransport(const QSharedPointer<Transport> &transport)
+class Application::Private
 {
-    Q_UNUSED(transport);// TODO
-    return false;
+public:
+    enum State {
+        Created,
+        SettingTransport,
+        Active
+    };
+
+    State   state;
+    Pad     *pad;
+    File    file;
+    Origin  creator;
+    Origin  senders;
+    QSharedPointer<Transport> transport, newTransport;
+};
+
+Application::Application(Pad *pad, Origin creator, Origin senders) :
+    XMPP::Jingle::Application(pad),
+    d(new Private)
+{
+    d->pad     = pad;
+    d->creator = creator;
+    d->senders = senders;
+}
+
+Application::~Application()
+{
+
+}
+
+bool Application::setDescription(const QDomElement &description)
+{
+    d->file = File(description.firstChildElement("file"));
+    return d->file.isValid();
+}
+
+void Application::setTransport(const QSharedPointer<Transport> &transport)
+{
+    d->newTransport = transport;
+    d->state = Private::SettingTransport;
 }
 
 QSharedPointer<Transport> Application::transport() const
@@ -234,6 +275,22 @@ QSharedPointer<Transport> Application::transport() const
 
 Jingle::Action Application::outgoingUpdateType() const
 {
+    switch (d->state) {
+    case Private::Created:
+        break;
+    case Private::SettingTransport:
+        if (d->newTransport->features() & Transport::Reliable) {
+            d->transport = d->newTransport; //TODO this won't work. we are const...
+            d->newTransport.reset();
+        } else {
+            // TODO
+            // if transport was proposed by other side on session-initiate, we have to generate transport-replace
+            // if newTransport is a transport-replace then transport-reject has to be returned
+        }
+        break;
+    case Private::Active:
+        return d->transport->outgoingUpdateType();
+    }
     return Jingle::NoAction; // TODO
 }
 
@@ -252,9 +309,15 @@ QDomElement Application::sessionAcceptContent() const
     return QDomElement(); // TODO
 }
 
-Pad::Pad(Manager *manager) :
+bool Application::isValid() const
+{
+    return d->file.isValid();
+}
+
+Pad::Pad(Manager *manager, Session *session) :
     SessionManagerPad(manager),
-    manager(manager)
+    manager(manager),
+    session(session)
 {
 
 }
@@ -262,6 +325,11 @@ Pad::Pad(Manager *manager) :
 QDomElement Pad::takeOutgoingSessionInfoUpdate()
 {
     return QDomElement(); // TODO
+}
+
+QString Pad::ns() const
+{
+    return NS;
 }
 
 } // namespace FileTransfer

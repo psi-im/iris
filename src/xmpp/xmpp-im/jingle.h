@@ -40,6 +40,13 @@ extern const QString NS;
 class Manager;
 class Session;
 
+enum class Origin {
+    None,
+    Both, // it's default
+    Initiator,
+    Responder
+};
+
 class Jingle
 {
 public:
@@ -127,37 +134,58 @@ private:
 
 class ContentBase {
 public:
-    enum class Creator {
-        NoCreator, // not standard, just a default
-        Initiator,
-        Responder
-    };
-
-    enum class Senders {
-        Both, // it's default
-        None,
-        Initiator,
-        Responder
-    };
 
     inline ContentBase(){}
     ContentBase(const QDomElement &el);
 
-    inline bool isValid() const { return creator != Creator::NoCreator && !name.isEmpty(); }
+    inline bool isValid() const { return creator != Origin::None && !name.isEmpty(); }
 protected:
     QDomElement toXml(QDomDocument *doc, const char *tagName) const;
-    static Creator creatorAttr(const QDomElement &el);
-    static bool setCreatorAttr(QDomElement &el, Creator creator);
+    static Origin creatorAttr(const QDomElement &el);
+    static bool setCreatorAttr(QDomElement &el, Origin creator);
 
-    Creator creator = Creator::NoCreator;
+    friend class Session;
+    Origin  creator = Origin::None;
     QString name;
-    Senders senders = Senders::Both;
+    Origin  senders = Origin::Both;
     QString disposition; // default "session"
 };
 
 class Transport : public QObject {
     Q_OBJECT
 public:
+    /*
+    Categorization by speed, reliability and connectivity
+    - speed: realtim, fast, slow
+    - reliability: reliable, not reliable (some transport can both modes)
+    - connectivity: always connect, hard to connect
+
+    Some transports may change their qualities, so we have to consider worst case.
+
+    ICE-UDP: RealTime, Not Reliable, Hard To Connect
+    S5B:     Fast,     Reliable,     Hard To Connect
+    IBB:     Slow,     Reliable,     Always Connect
+
+    Also most of transports may add extra features but it's matter of configuration.
+    For example all of them can enable p2p crypto mode (<security/> should work here)
+    */
+    enum Feature {
+        // connection establishment
+        HardToConnect = 0x01,  // anything else but ibb
+        AlwaysConnect = 0x02,  // ibb. basically it's always connected
+
+        // reliability
+        NotReliable   = 0x10,  // datagram-oriented
+        Reliable      = 0x20,  // connection-orinted
+
+        // speed.
+        Slow          = 0x100, // only ibb is here probably
+        Fast          = 0x200, // basically all tcp-based and reliable part of sctp
+        RealTime      = 0x400  // it's rather about synchronization of frames with time which implies fast
+    };
+    Q_DECLARE_FLAGS(Features, Feature)
+
+
     using QObject::QObject;
 
     enum Direction { // incoming or outgoing file/data transfer.
@@ -169,15 +197,36 @@ public:
                          // for remote transport try to connect to all proposed hosts in order their priority.
                          // in-band transport may just emit updated() here
     virtual bool update(const QDomElement &el) = 0; // accepts transport element on incoming transport-info
+    virtual Jingle::Action outgoingUpdateType() const = 0;
     virtual QDomElement takeUpdate(QDomDocument *doc) = 0;
     virtual bool isValid() const = 0;
+    virtual Features features() const = 0;
 signals:
     void updated(); // found some candidates and they have to be sent. takeUpdate has to be called from this signal handler.
                     // if it's just always ready then signal has to be sent at least once otherwise session-initiate won't be sent.
     void connected(); // this signal is for app logic. maybe to finally start drawing some progress bar
 };
 
+class Application : public QObject
+{
+    Q_OBJECT
+public:
 
+    using QObject::QObject;
+
+    /**
+     * @brief setTransport checks if transport is compatible and stores it
+     * @param transport
+     * @return false if not compatible
+     */
+    virtual bool setDescription(const QDomElement &description) = 0;
+    virtual void setTransport(const QSharedPointer<Transport> &transport) = 0;
+    virtual QSharedPointer<Transport> transport() const = 0;
+    virtual Jingle::Action outgoingUpdateType() const = 0;
+    virtual bool isReadyForSessionAccept() const = 0; // has connected transport for example
+    virtual QDomElement takeOutgoingUpdate() = 0; // this may return something only when outgoingUpdateType() != NoAction
+    virtual QDomElement sessionAcceptContent() const = 0; // for example has filtered ice candidates (only connected)
+};
 
 class Security
 {
@@ -206,6 +255,7 @@ class SessionManagerPad : public QObject
 public:
     using QObject::QObject;
     virtual QDomElement takeOutgoingSessionInfoUpdate();
+    virtual QString ns() const = 0;
 };
 
 class Session : public QObject
@@ -218,6 +268,12 @@ public:
         Pending,
         Active,
         Ended
+    };
+
+    enum class Role {
+        NoRole, // not standard, just a default
+        Initiator,
+        Responder
     };
 
     Session(Manager *manager);
@@ -238,28 +294,10 @@ private:
     bool incomingInitiate(const Jid &from, const Jingle &jingle, const QDomElement &jingleEl);
     bool updateFromXml(Jingle::Action action, const QDomElement &jingleEl);
     bool addContent(const QDomElement &ce);
+    void deleteUnusedPads();
 
     class Private;
     QScopedPointer<Private> d;
-};
-
-class Application : public QObject
-{
-    Q_OBJECT
-public:
-    using QObject::QObject;
-
-    /**
-     * @brief setTransport checks if transport is compatible and stores it
-     * @param transport
-     * @return false if not compatible
-     */
-    virtual bool setTransport(const QSharedPointer<Transport> &transport) = 0;
-    virtual QSharedPointer<Transport> transport() const = 0;
-    virtual Jingle::Action outgoingUpdateType() const = 0;
-    virtual bool isReadyForSessionAccept() const = 0;
-    virtual QDomElement takeOutgoingUpdate() = 0;
-    virtual QDomElement sessionAcceptContent() const = 0;
 };
 
 class ApplicationManager : public QObject
@@ -271,8 +309,8 @@ public:
 
     Client *client() const;
 
-    virtual Application* startApplication(const QDomElement &el) = 0;
-    virtual SessionManagerPad* pad() = 0;
+    virtual Application* startApplication(SessionManagerPad *pad, Origin creator, Origin senders) = 0;
+    virtual SessionManagerPad* pad(Session *session) = 0;
 
     // this method is supposed to gracefully close all related sessions as a preparation for plugin unload for example
     virtual void closeAll() = 0;
@@ -286,39 +324,11 @@ class TransportManager : public QObject
 {
     Q_OBJECT
 public:
-    /*
-    Categorization by speed, reliability and connectivity
-    - speed: realtim, fast, slow
-    - reliability: reliable, not reliable
-    - connectivity: always connect, hard to connect
-
-    Some transports may change their qualities, so we have to consider worst case.
-
-    ICE-UDP: RealTime, Not Reliable, Hard To Connect
-    S5B:     Fast,     Reliable,     Hard To Connect
-    IBB:     Slow,     Reliable,     Always Connect
-    */
-    enum Feature {
-        // connection establishment
-        HardToConnect = 0x01,
-        AlwaysConnect = 0x02,
-
-        // reliability
-        NotReliable   = 0x10,
-        Reliable      = 0x20,
-
-        // speed
-        Slow          = 0x100,
-        Fast          = 0x200,
-        RealTime      = 0x400
-    };
 
     TransportManager(Manager *jingleManager);
 
-    Q_DECLARE_FLAGS(Features, Feature)
-
-    virtual QSharedPointer<Transport> sessionInitiate(const Jid &to) = 0; // outgoing. one have to call Transport::start to collect candidates
-    virtual QSharedPointer<Transport> sessionInitiate(const Jid &from, const QDomElement &transportEl) = 0; // incoming
+    virtual QSharedPointer<Transport> sessionInitiate(SessionManagerPad *pad, const Jid &to) = 0; // outgoing. one have to call Transport::start to collect candidates
+    virtual QSharedPointer<Transport> sessionInitiate(SessionManagerPad *pad, const Jid &from, const QDomElement &transportEl) = 0; // incoming
     virtual SessionManagerPad* pad() = 0;
 
     // this method is supposed to gracefully close all related sessions as a preparation for plugin unload for example
@@ -340,12 +350,12 @@ public:
 
     void registerApp(const QString &ns, ApplicationManager *app);
     void unregisterApp(const QString &ns);
-    Application* startApplication(const QDomElement &descriptionEl);
-    SessionManagerPad *applicationPad(const QString &ns); // allocates new pad on application manager
+    Application* startApplication(SessionManagerPad *pad, Origin creator, Origin senders);
+    SessionManagerPad *applicationPad(Session *session, const QString &ns); // allocates new pad on application manager
 
     void registerTransport(const QString &ns, TransportManager *transport);
     void unregisterTransport(const QString &ns);
-    QSharedPointer<Transport> initTransport(const Jid &jid, const QDomElement &el);
+    QSharedPointer<Transport> initTransport(SessionManagerPad *pad, const Jid &jid, const QDomElement &el);
     SessionManagerPad *transportPad(const QString &ns); // allocates new pad on transport manager
 
     /**

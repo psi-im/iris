@@ -325,10 +325,10 @@ Reason::Private* Reason::ensureD()
 //----------------------------------------------------------------------------
 ContentBase::ContentBase(const QDomElement &el)
 {
-    static QMap<QString,Senders> sendersMap({
-                                                {QStringLiteral("initiator"), Senders::Initiator},
-                                                {QStringLiteral("none"), Senders::Initiator},
-                                                {QStringLiteral("responder"), Senders::Initiator}
+    static QMap<QString,Origin> sendersMap({
+                                                {QStringLiteral("initiator"), Origin::Initiator},
+                                                {QStringLiteral("none"), Origin::Initiator},
+                                                {QStringLiteral("responder"), Origin::Initiator}
                                             });
     creator = creatorAttr(el);
     name = el.attribute(QLatin1String("name"));
@@ -347,19 +347,19 @@ QDomElement ContentBase::toXml(QDomDocument *doc, const char *tagName) const
 
     QString sendersStr;
     switch (senders) {
-    case Senders::None:
+    case Origin::None:
         sendersStr = QLatin1String("none");
         break;
 
-    case Senders::Initiator:
+    case Origin::Initiator:
         sendersStr = QLatin1String("initiator");
         break;
 
-    case Senders::Responder:
+    case Origin::Responder:
         sendersStr = QLatin1String("responder");
         break;
 
-    case Senders::Both:
+    case Origin::Both:
     default:
         break;
     }
@@ -375,23 +375,23 @@ QDomElement ContentBase::toXml(QDomDocument *doc, const char *tagName) const
 }
 
 
-ContentBase::Creator ContentBase::creatorAttr(const QDomElement &el)
+Origin ContentBase::creatorAttr(const QDomElement &el)
 {
     auto creatorStr = el.attribute(QLatin1String("creator"));
     if (creatorStr == QLatin1String("initiator")) {
-        return Creator::Initiator;
+        return Origin::Initiator;
     }
     if (creatorStr == QLatin1String("responder")) {
-        return Creator::Responder;
+        return Origin::Responder;
     }
-    return Creator::NoCreator;
+    return Origin::None;
 }
 
-bool ContentBase::setCreatorAttr(QDomElement &el, Creator creator)
+bool ContentBase::setCreatorAttr(QDomElement &el, Origin creator)
 {
-    if (creator == Creator::Initiator) {
+    if (creator == Origin::Initiator) {
         el.setAttribute(QLatin1String("creator"), QLatin1String("initiator"));
-    } else if (creator == Creator::Responder) {
+    } else if (creator == Origin::Responder) {
         el.setAttribute(QLatin1String("creator"), QLatin1String("responder"));
     } else {
         return false;
@@ -578,14 +578,14 @@ public:
     Manager *manager;
     QTimer stepTimer;
     Session::State state = Session::Starting;
+    Session::Role  role  = Session::Role::Initiator; // my role in the session
     XMPP::Stanza::Error lastError;
     QMap<QString,SessionManagerPad*> managerPads;
-    QMap<QString,Application*> applications;
+    QMap<QString,Application*> myContent;     // content::creator=(role == Session::Role::Initiator?initiator:responder)
+    QMap<QString,Application*> remoteContent; // content::creator=(role == Session::Role::Responder?initiator:responder)
     QString sid;
     Jid origFrom; // "from" attr of IQ.
     Jid otherParty; // either "from" or initiator/responder. it's where to send all requests.
-    bool isAccepted = false;
-    bool isOutgoing = true; // origin of the session. outgoing - initiated by local side
     bool waitingAck = false;
 
     void sendJingle(Jingle::Action action, QList<QDomElement> update)
@@ -636,10 +636,22 @@ public:
             }
         }
 
-        bool needCheckAcceptance = !isOutgoing && !isAccepted;
+        bool needCheckAcceptance = (role == Session::Role::Responder && state != Session::State::Active);
         bool needAccept = needCheckAcceptance;
         QMultiMap<Jingle::Action, Application*> updates;
-        for (auto app : applications) {
+
+        for (auto app : myContent) {
+            Jingle::Action updateType = app->outgoingUpdateType();
+            if (updateType != Jingle::Action::NoAction) {
+                updates.insert(updateType, app);
+                needAccept = false;
+            } else if (needCheckAcceptance && !app->isReadyForSessionAccept()) {
+                needAccept = false;
+            }
+        }
+
+        // the same for remote. where is boost::join in Qt?
+        for (auto app : remoteContent) {
             Jingle::Action updateType = app->outgoingUpdateType();
             if (updateType != Jingle::Action::NoAction) {
                 updates.insert(updateType, app);
@@ -657,7 +669,10 @@ public:
             }
             sendJingle(action, updateXml);
         } else if (needAccept) {
-            for (auto app : applications) {
+            for (auto app : myContent) {
+                updateXml.append(app->sessionAcceptContent());
+            }
+            for (auto app : remoteContent) {
                 updateXml.append(app->sessionAcceptContent());
             }
             sendJingle(Jingle::Action::SessionAccept, updateXml);
@@ -713,6 +728,11 @@ SessionManagerPad *Session::pad(const QString &ns)
     return d->managerPads.value(ns);
 }
 
+void Session::deleteUnusedPads()
+{
+    // TODO
+}
+
 bool Session::addContent(const QDomElement &ce)
 {
     QDomElement descriptionEl = ce.firstChildElement(QLatin1String("description"));
@@ -725,30 +745,31 @@ bool Session::addContent(const QDomElement &ce)
         d->lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::Cancel, XMPP::Stanza::Error::BadRequest);
         return false;
     }
-    auto app = d->manager->startApplication(descriptionEl);
-    auto transport = d->manager->initTransport(d->origFrom, transportEl);
-    if (!app || !transport) { // not parsed
-        d->lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::Cancel, XMPP::Stanza::Error::BadRequest);
-        return false;
-    }
 
-    d->applications.insert(descriptionEl.attribute(QStringLiteral("name")), app);
-
-    if (!app->setTransport(transport)) { // transport was not set. incompatible?
-        // TODO according to discussion in jdev@ we have to send transport-replace in this case
-    }
-
-    if (!d->managerPads.contains(descriptionNS)) {
-        auto *pad = d->manager->applicationPad(descriptionNS);
+    SessionManagerPad *pad = d->managerPads.value(descriptionNS);
+    if (!pad) {
+        pad = d->manager->applicationPad(this, descriptionNS);
         d->managerPads.insert(descriptionNS, pad);
     }
-
-    if (!d->managerPads.contains(transportNS)) {
-        auto *pad = d->manager->transportPad(transportNS);
-        d->managerPads.insert(transportNS, pad);
+    auto app = d->manager->startApplication(pad, c.creator, c.senders);
+    if (app->setDescription(descriptionEl)) {
+        // same for transport
+        pad = d->managerPads.value(transportNS);
+        if (!pad) {
+            auto *pad = d->manager->transportPad(transportNS);
+            d->managerPads.insert(transportNS, pad);
+        }
+        auto transport = d->manager->initTransport(pad, d->origFrom, transportEl);
+        if (transport) {
+            app->setTransport(transport);
+            return true;
+        }
+        delete app;
     }
 
-    return true;
+    d->lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::Cancel, XMPP::Stanza::Error::BadRequest);
+    deleteUnusedPads();
+    return false;
 }
 
 bool Session::incomingInitiate(const Jid &from, const Jingle &jingle, const QDomElement &jingleEl)
@@ -896,22 +917,22 @@ void Manager::unregisterApp(const QString &ns)
     }
 }
 
-Application* Manager::startApplication(const QDomElement &descriptionEl)
+Application* Manager::startApplication(SessionManagerPad *pad, Origin creator, Origin senders)
 {
-    auto appManager = d->applicationManagers.value(descriptionEl.namespaceURI());
+    auto appManager = d->applicationManagers.value(pad->ns());
     if (!appManager) {
         return NULL;
     }
-    return appManager->startApplication(descriptionEl);
+    return appManager->startApplication(pad, creator, senders);
 }
 
-SessionManagerPad *Manager::applicationPad(const QString &ns)
+SessionManagerPad *Manager::applicationPad(Session *session, const QString &ns)
 {
     auto am = d->applicationManagers.value(ns);
     if (!am) {
         return NULL;
     }
-    return am->pad();
+    return am->pad(session);
 
 }
 
@@ -948,13 +969,14 @@ void Manager::setRemoteJidChecked(std::function<bool(const Jid &)> checker)
     d->remoteJidCecker = checker;
 }
 
-QSharedPointer<Transport> Manager::initTransport(const Jid &jid, const QDomElement &el)
+QSharedPointer<Transport> Manager::initTransport(SessionManagerPad *pad,
+                                                 const Jid &jid, const QDomElement &el)
 {
     auto transportManager = d->transportManagers.value(el.namespaceURI());
     if (!transportManager) {
         return NULL;
     }
-    return transportManager->sessionInitiate(jid, el);
+    return transportManager->sessionInitiate(pad, jid, el);
 }
 
 SessionManagerPad *Manager::transportPad(const QString &ns)
