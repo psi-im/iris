@@ -118,6 +118,7 @@ public:
     QDomDocument doc;
     int id_seed = 0xaaaa;
     Task *root = nullptr;
+    QNetworkAccessManager *qnam = nullptr;
     QString host, user, pass, resource;
     QString osName, osVersion, tzname, clientName, clientVersion;
     CapsSpec caps, serverCaps;
@@ -761,6 +762,16 @@ Jid Client::jid() const
     return Jid(s);
 }
 
+void Client::setNetworkAccessManager(QNetworkAccessManager *qnam)
+{
+    d->qnam = qnam;
+}
+
+QNetworkAccessManager *Client::networkAccessManager() const
+{
+    return d->qnam;
+}
+
 void Client::ppSubscription(const Jid &j, const QString &s, const QString& n)
 {
     emit subscription(j, s, n);
@@ -1234,6 +1245,9 @@ DiscoItem Client::makeDiscoResult(const QString &node) const
     features.addFeature("urn:xmpp:ping");
     features.addFeature("urn:xmpp:time");
     features.addFeature("urn:xmpp:message-correct:0");
+    features.addFeature("urn:xmpp:jingle:1");
+    features.addFeature("urn:xmpp:jingle:transports:s5b:1");
+    features.addFeature("urn:xmpp:jingle:apps:file-transfer:5"); // TODO: since it depends on UI it needs a way to be disabled
     Hash::populateFeatures(features);
 
     // Client-specific features

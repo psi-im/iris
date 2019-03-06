@@ -95,6 +95,9 @@ namespace XMPP
         QString resource() const;
         Jid jid() const;
 
+        void setNetworkAccessManager(QNetworkAccessManager *qnam);
+        QNetworkAccessManager *networkAccessManager() const;
+
         void rosterRequest();
         void sendMessage(Message &);
         void sendSubscription(const Jid &, const QString &, const QString& nick = QString());

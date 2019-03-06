@@ -713,6 +713,11 @@ Session::State Session::state() const
     return d->state;
 }
 
+Jid Session::peer() const
+{
+    return d->otherParty;
+}
+
 XMPP::Stanza::Error Session::lastError() const
 {
     return d->lastError;
@@ -726,6 +731,27 @@ QStringList Session::allManagerPads() const
 SessionManagerPad *Session::pad(const QString &ns)
 {
     return d->managerPads.value(ns);
+}
+
+QString Session::preferredApplication() const
+{
+    // TODO some heuristics to detect preferred application
+    return QString();
+}
+
+QStringList Session::allApplicationTypes() const
+{
+    QSet<QString> ret;
+    for (auto const &k: d->managerPads.keys()) {
+        if (d->manager->isRegisteredApplication(k))
+            ret.insert(k);
+    }
+    return ret.toList();
+}
+
+void Session::reject()
+{
+    // TODO
 }
 
 void Session::deleteUnusedPads()
@@ -915,6 +941,11 @@ void Manager::unregisterApp(const QString &ns)
         appManager->closeAll();
         d->applicationManagers.remove(ns);
     }
+}
+
+bool Manager::isRegisteredApplication(const QString &ns)
+{
+    return d->applicationManagers.contains(ns);
 }
 
 Application* Manager::startApplication(SessionManagerPad *pad, Origin creator, Origin senders)

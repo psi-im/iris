@@ -280,10 +280,16 @@ public:
     ~Session();
 
     State state() const;
+    Jid peer() const;
     XMPP::Stanza::Error lastError() const;
 
     QStringList allManagerPads() const;
     SessionManagerPad *pad(const QString &ns);
+
+    QString preferredApplication() const;
+    QStringList allApplicationTypes() const;
+
+    void reject();
 
 signals:
     void managerPadAdded(const QString &ns);
@@ -350,6 +356,7 @@ public:
 
     void registerApp(const QString &ns, ApplicationManager *app);
     void unregisterApp(const QString &ns);
+    bool isRegisteredApplication(const QString &ns);
     Application* startApplication(SessionManagerPad *pad, Origin creator, Origin senders);
     SessionManagerPad *applicationPad(Session *session, const QString &ns); // allocates new pad on application manager
 
