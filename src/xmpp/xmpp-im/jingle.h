@@ -315,6 +315,7 @@ public:
     QString preferredApplication() const;
     QStringList allApplicationTypes() const;
 
+    void initiate();
     void reject();
 
     // allocates or returns existing pads
@@ -328,7 +329,6 @@ private:
     friend class JTPush;
     bool incomingInitiate(const Jid &from, const Jingle &jingle, const QDomElement &jingleEl);
     bool updateFromXml(Jingle::Action action, const QDomElement &jingleEl);
-    bool addContent(const QDomElement &ce);
 
     class Private;
     QScopedPointer<Private> d;

@@ -513,6 +513,17 @@ Session *Pad::session() const
     return _session;
 }
 
+Manager *Pad::manager() const
+{
+    return _manager;
+}
+
+void Pad::addOutgoingOffer(const File &file)
+{
+    Q_UNUSED(file)
+    // TODO
+}
+
 
 
 } // namespace FileTransfer

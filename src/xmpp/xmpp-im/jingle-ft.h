@@ -102,6 +102,8 @@ public:
     QString ns() const override;
     Session *session() const override;
     Manager *manager() const;
+
+    void addOutgoingOffer(const File &file);
 private:
     Manager *_manager;
     Session *_session;

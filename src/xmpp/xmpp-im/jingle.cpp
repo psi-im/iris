@@ -798,6 +798,11 @@ QStringList Session::allApplicationTypes() const
     return d->applicationPads.keys();
 }
 
+void Session::initiate()
+{
+    // TODO
+}
+
 void Session::reject()
 {
     // TODO
@@ -901,44 +906,6 @@ bool Session::incomingInitiate(const Jid &from, const Jingle &jingle, const QDom
 
     d->planStep();
     return true;
-    //QDomElement securityEl = content.firstChildElement(QLatin1String("security"));
-/*
-    if (jingle->action() == Jingle::Action::SessionInitiate   ||
-            jingle->action() == Jingle::Action::SessionAccept ||
-            jingle->action() == Jingle::Action::ContentAdd    ||
-            jingle->action() == Jingle::Action::ContentAccept ||
-            jingle->action() == Jingle::Action::ContentReject ||
-            jingle->action() == Jingle::Action::DescriptionInfo)
-    {
-        description = manager->descriptionFromXml(descriptionEl);
-        if (description.isNull()) {
-            return;
-        }
-    } // else description is unexpected. log it?
-
-    if (jingle->action() == Jingle::Action::SessionInitiate   ||
-            jingle->action() == Jingle::Action::SessionAccept ||
-            jingle->action() == Jingle::Action::ContentAdd    ||
-            jingle->action() == Jingle::Action::ContentAccept ||
-            jingle->action() == Jingle::Action::ContentReject)
-    {
-        // content-reject posses empty transport
-        auto transport = manager->transportFromXml(transportEl);
-    }
-    */
-    /*
-    if (!securityEl.isNull()) {
-        security = client->jingleManager()->securityFromXml(securityEl);
-        // if security == 0 then then its unsupported? just ignore it atm
-        // according to xtls draft responder may omit security when unsupported.
-    }
-    */
-
-    // TODO description
-    // TODO transports
-    // TODO security
-
-    //return client()->jingleManager()->incomingIQ(el);
 }
 
 bool Session::updateFromXml(Jingle::Action action, const QDomElement &jingleEl)
@@ -947,14 +914,73 @@ bool Session::updateFromXml(Jingle::Action action, const QDomElement &jingleEl)
 
     }
 
+    if (action != Jingle::ContentAdd) {
+        return false;
+    }
+
+    QMap<QString,Application *> addSet; // application to supported
+    bool parsed = true;
+    int unsupported = 0;
+    Reason::Condition rejectCond = Reason::Condition::Success;
+
     QString contentTag(QStringLiteral("content"));
     for(QDomElement ce = jingleEl.firstChildElement(contentTag);
         !ce.isNull(); ce = ce.nextSiblingElement(contentTag)) {
-        if (!addContent(ce)) { // not parsed
-            return false;
+        Private::AddContentError err;
+        Reason::Condition cond;
+        Application *app;
+        QString contentName = ce.attribute(QStringLiteral("name"));
+        if (!contentName.size()) {
+            parsed = false;
+            break;
+        }
+
+        std::tie(err, cond, app) = d->addContent(ce);
+        bool alreadyAdded = addSet.contains(contentName);
+        if (err != Private::AddContentError::Ok) {
+            // can't continue as well
+            if (app) { // we are going to reject it completely so delete
+                delete app;
+            }
+            if (err == Private::AddContentError::Unsupported) {
+                rejectCond = cond;
+            }
+            if (!alreadyAdded) {
+                unsupported++;
+                addSet.insert(contentName, nullptr);
+            } // else just ignore this unsupported content. we aready have one
+            continue;
+        }
+
+        auto eapp = addSet.value(contentName);
+        if (alreadyAdded && !eapp) {
+            unsupported--; // we are going to overwrite previous with successful
+        }
+        if (!eapp || eapp->wantBetterTransport(app->transport())) {
+            addSet.insert(contentName, app);
         }
     }
-    return false;
+
+    if (unsupported && rejectCond == Reason::Condition::Success) {
+        parsed = false; // the only way it's possible
+    }
+    if (!parsed) {
+        d->lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::Cancel, XMPP::Stanza::Error::BadRequest);
+        qDeleteAll(addSet);
+        return false;
+    } else if (unsupported) {
+        d->outgoingUpdateType = Jingle::Action::ContentReject;
+        Reason r(rejectCond);
+        d->outgoingUpdate = r.toXml(d->manager->client()->doc());
+        qDeleteAll(addSet);
+        return true;
+    }
+
+    for (auto const &app: addSet) {
+        d->remoteContent.insert(app->contentName(), app); // TODO check conflicts
+    }
+
+    return true;
 }
 
 
