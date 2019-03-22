@@ -117,7 +117,12 @@ public:
     Application(const QSharedPointer<Pad> &pad, const QString &contentName, Origin creator, Origin senders);
     ~Application();
 
-    QString contentName() const;
+    ApplicationManagerPad::Ptr pad() const override;
+    State state() const override;
+
+    QString contentName() const override;
+    Origin creator() const override;
+    Origin senders() const override;
     SetDescError setDescription(const QDomElement &description) override;
     void setFile(const File &file);
     bool setTransport(const QSharedPointer<Transport> &transport) override;

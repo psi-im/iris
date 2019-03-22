@@ -74,8 +74,12 @@ public:
         Udp
     };
 
-    Transport(); // intentionally empty constructor. use createOutgoing/createIncoming
+    Transport(const TransportManagerPad::Ptr &pad);
+    Transport(const TransportManagerPad::Ptr &pad, const QDomElement &transportEl);
     ~Transport();
+
+    TransportManagerPad::Ptr pad() const override;
+    void setApplication(Application *app) override;
 
     void start();
     bool update(const QDomElement &transportEl);
@@ -88,8 +92,8 @@ public:
 
 private:
     friend class Manager;
-    static QSharedPointer<XMPP::Jingle::Transport> createOutgoing(const TransportManagerPad::Ptr &pad, const Jid &to, const QString &transportSid);
-    static QSharedPointer<XMPP::Jingle::Transport> createIncoming(const TransportManagerPad::Ptr &pad, const Jid &from, const QDomElement &transportEl);
+    static QSharedPointer<XMPP::Jingle::Transport> createOutgoing(const TransportManagerPad::Ptr &pad);
+    static QSharedPointer<XMPP::Jingle::Transport> createIncoming(const TransportManagerPad::Ptr &pad, const QDomElement &transportEl);
 
     class Private;
     QScopedPointer<Private> d;
@@ -100,10 +104,15 @@ class Pad : public TransportManagerPad
     Q_OBJECT
     // TODO
 public:
+    typedef QSharedPointer<Pad> Ptr;
+
     Pad(Manager *manager, Session *session);
     QString ns() const override;
     Session *session() const override;
     TransportManager *manager() const override;
+
+    QString generateSid() const;
+    void registerSid(const QString &sid);
 private:
     Manager *_manager;
     Session *_session;
@@ -121,11 +130,14 @@ public:
     QSharedPointer<XMPP::Jingle::Transport> newTransport(const TransportManagerPad::Ptr &pad, const QDomElement &transportEl) override; // incoming
     TransportManagerPad* pad(Session *session) override;
 
-    bool hasTrasport(const Jid &jid, const QString &sid) const;
     void closeAll() override;
 
     void setServer(S5BServer *serv);
     bool incomingConnection(SocksClient *client, const QString &key); // returns false if key is unknown
+
+    QString generateSid(const Jid &remote);
+    void registerSid(const Jid &remote, const QString &sid);
+
 private:
     class Private;
     QScopedPointer<Private> d;
