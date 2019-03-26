@@ -768,6 +768,11 @@ Session::State Session::state() const
     return d->state;
 }
 
+Jid Session::me() const
+{
+    return d->manager->client()->jid();
+}
+
 Jid Session::peer() const
 {
     return d->otherParty;

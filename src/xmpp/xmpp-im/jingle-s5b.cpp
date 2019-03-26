@@ -34,7 +34,7 @@ public:
     QString host;
     Jid jid;
     quint16 port;
-    quint16 priority;
+    quint32 priority;
     Candidate::Type type;
 };
 
@@ -91,9 +91,43 @@ Candidate::Candidate(const Candidate &other) :
 
 }
 
+Candidate::Candidate(const Jid &proxy, const QString &cid) :
+    d(new Private)
+{
+    d->cid = cid;
+    d->jid = proxy;
+    d->priority = ProxyPreference << 16;
+    d->type = Proxy;
+}
+
+Candidate::Candidate(const QString &host, quint16 port, const QString &cid, Type type, quint16 localPreference) :
+    d(new Private)
+{
+    d->cid = cid;
+    d->host = host;
+    d->port = port;
+    d->type = type;
+    static const int priorities[] = {0, ProxyPreference, TunnelPreference, AssistedPreference, DirectPreference};
+    if (type >= Type(0) && type <= Direct) {
+        d->priority = (priorities[type] << 16) + localPreference;
+    } else {
+        d->priority = 0;
+    }
+}
+
 Candidate::~Candidate()
 {
 
+}
+
+Candidate::Type Candidate::type() const
+{
+    return d->type;
+}
+
+QString Candidate::cid() const
+{
+    return d->cid;
 }
 
 class Transport::Private {
@@ -101,8 +135,8 @@ public:
     Pad::Ptr pad;
     bool aborted = false;
     Application *application = nullptr;
-    QList<Candidate> localCandidates;
-    QList<Candidate> remoteCandidates;
+    QMap<QString,Candidate> localCandidates; // cid to candidate mapping
+    QMap<QString,Candidate> remoteCandidates;
     QString dstaddr;
     QString sid;
     Transport::Mode mode = Transport::Tcp;
@@ -125,6 +159,15 @@ public:
     inline Jid remoteJid() const
     {
         return pad->session()->peer();
+    }
+
+    QString generateCid() const
+    {
+        QString cid;
+        do {
+            cid = QString("%1").arg(qrand() & 0xffff, 4, 16, QChar('0'));
+        } while (localCandidates.contains(cid) || remoteCandidates.contains(cid));
+        return cid;
     }
 };
 
@@ -170,7 +213,24 @@ void Transport::setApplication(Application *app)
 
 void Transport::start()
 {
+    auto m = static_cast<Manager*>(d->pad->manager());
 
+    // TODO check for collisions all the below. We must not offer the same candidates
+    auto serv = m->socksServ();
+    if (serv) {
+        for(auto const &h: serv->hostList()) {
+            auto cid = d->generateCid();
+            d->localCandidates.insert(cid, Candidate(h, serv->port(), cid, Candidate::Direct));
+        }
+    }
+
+    Jid proxy = m->userProxy();
+    if (proxy.isValid()) {
+        auto cid = d->generateCid();
+        d->localCandidates.insert(cid, Candidate(proxy, cid));
+    }
+
+    d->pad->session()->manager()->client()->serverInfoManager();
 }
 
 bool Transport::update(const QDomElement &transportEl)
@@ -182,7 +242,7 @@ bool Transport::update(const QDomElement &transportEl)
         if (!c.isValid()) {
             return false;
         }
-        d->remoteCandidates.append(c); // TODO check for collisions!
+        d->remoteCandidates.insert(c.cid(), c); // TODO check for collisions!
     }
     // TODO handle "candidate-used" and "activted"
     return true;
@@ -206,10 +266,17 @@ QDomElement Transport::takeOutgoingUpdate()
             if (d->mode != Tcp) {
                 tel.setAttribute(QStringLiteral("mode"), "udp");
             }
-            if (d->proxy.isValid()) {
+            bool useProxy = false;
+            for (auto const &c: d->localCandidates) {
+                if (c.type() == Candidate::Proxy) {
+                    useProxy = true;
+                    break;
+                }
+            }
+            if (useProxy) {
                 QString dstaddr = QCryptographicHash::hash((d->sid +
-                                                           d->pad->session()->initiator().full() +
-                                                           d->pad->session()->responder().full()).toUtf8(),
+                                                           d->pad->session()->me().full() +
+                                                           d->pad->session()->peer().full()).toUtf8(),
                                                            QCryptographicHash::Sha1);
                 tel.setAttribute(QStringLiteral("dstaddr"), dstaddr);
             }
@@ -235,6 +302,25 @@ QString Transport::sid() const
     return d->sid;
 }
 
+bool Transport::incomingConnection(SocksClient *sc, const QString &key)
+{
+    // incoming direct connection
+#if 0
+    if(!d->allowIncoming) {
+        sc->requestDeny();
+        sc->deleteLater();
+        return;
+    }
+    if(d->mode == Transport::Udp)
+        sc->grantUDPAssociate("", 0);
+    else
+        sc->grantConnect();
+    e->relatedServer = static_cast<S5BServer *>(sender());
+    e->i->setIncomingClient(sc);
+#endif
+    return false;
+}
+
 //----------------------------------------------------------------
 // Manager
 //----------------------------------------------------------------
@@ -248,6 +334,8 @@ public:
     // FIMME it's reuiqred to split transports by direction otherwise we gonna hit conflicts.
     // jid,transport-sid -> transport mapping
     QSet<QPair<Jid,QString>> sids;
+    QHash<QString,Transport*> key2transport;
+    Jid proxy;
 };
 
 Manager::Manager(QObject *parent) :
@@ -311,9 +399,10 @@ void Manager::setServer(S5BServer *serv)
 
 bool Manager::incomingConnection(SocksClient *client, const QString &key)
 {
-    // TODO
-    Q_UNUSED(client);
-    Q_UNUSED(key);
+    auto t = d->key2transport.value(key);
+    if (t) {
+        return t->incomingConnection(client, key);
+    }
     return false;
 }
 
@@ -331,6 +420,16 @@ QString Manager::generateSid(const Jid &remote)
 void Manager::registerSid(const Jid &remote, const QString &sid)
 {
     d->sids.insert(qMakePair(remote, sid));
+}
+
+S5BServer *Manager::socksServ() const
+{
+    return d->serv;
+}
+
+Jid Manager::userProxy() const
+{
+    return d->proxy;
 }
 
 //----------------------------------------------------------------

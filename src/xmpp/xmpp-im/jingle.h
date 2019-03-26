@@ -330,9 +330,12 @@ public:
 
     Manager* manager() const;
     State state() const;
+
+    Jid me() const;
     Jid peer() const;
     Jid initiator() const;
     Jid responder() const;
+
     Origin role() const; // my role in session: initiator or responder
     XMPP::Stanza::Error lastError() const;
 
