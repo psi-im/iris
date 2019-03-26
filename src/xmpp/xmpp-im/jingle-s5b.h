@@ -68,6 +68,11 @@ public:
     inline bool isValid() const { return d != nullptr; }
     Type type() const;
     QString cid() const;
+    Jid jid() const;
+    QString host() const;
+    void setHost(const QString &host);
+    quint16 port() const;
+    void setPort(quint16 port);
 
 private:
     class Private;
