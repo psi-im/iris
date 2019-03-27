@@ -96,12 +96,13 @@ public:
     TransportManagerPad::Ptr pad() const override;
     void setApplication(Application *app) override;
 
-    void start();
-    bool update(const QDomElement &transportEl);
-    Jingle::Action outgoingUpdateType() const override;
+    void prepare() override;
+    void start() override;
+    bool update(const QDomElement &transportEl) override;
+    Action outgoingUpdateType() const override;
     QDomElement takeOutgoingUpdate() override;
-    bool isValid() const;
-    Features features() const;
+    bool isValid() const override;
+    Features features() const override;
 
     QString sid() const;
 

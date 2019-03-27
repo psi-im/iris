@@ -258,7 +258,7 @@ void Transport::setApplication(Application *app)
     d->pad->registerSid(d->sid);
 }
 
-void Transport::start()
+void Transport::prepare()
 {
     auto m = static_cast<Manager*>(d->pad->manager());
 
@@ -326,6 +326,11 @@ void Transport::start()
     // TODO nat-assisted candidates..
 }
 
+void Transport::start()
+{
+
+}
+
 bool Transport::update(const QDomElement &transportEl)
 {
     QString contentTag(QStringLiteral("candidate"));
@@ -341,9 +346,9 @@ bool Transport::update(const QDomElement &transportEl)
     return true;
 }
 
-Jingle::Action Transport::outgoingUpdateType() const
+Action Transport::outgoingUpdateType() const
 {
-    return Jingle::NoAction; // TODO
+    return Action::NoAction; // TODO
 }
 
 QDomElement Transport::takeOutgoingUpdate()
