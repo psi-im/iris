@@ -32,6 +32,7 @@
 #include <QPointer>
 #include <QTimer>
 #include <functional>
+#include <QDebug>
 
 namespace XMPP {
 namespace Jingle {
@@ -253,12 +254,13 @@ Reason::Reason(const QDomElement &e)
 
     Condition condition = NoReason;
     QString text;
+    QString rns = e.attribute(QStringLiteral("xmlns"));
 
     for (QDomElement c = e.firstChildElement(); !c.isNull(); c = c.nextSiblingElement()) {
         if (c.tagName() == QLatin1String("text")) {
             text = c.text();
         }
-        else if (c.namespaceURI() != e.namespaceURI()) {
+        else if (c.attribute(QStringLiteral("xmlns")) != rns) {
             // TODO add here all the extensions to reason.
         }
         else {
@@ -448,7 +450,7 @@ public:
             return false;
         }
         auto jingleEl = iq.firstChildElement(QStringLiteral("jingle"));
-        if (jingleEl.isNull() || jingleEl.namespaceURI() != ::XMPP::Jingle::NS) {
+        if (jingleEl.isNull() || jingleEl.attribute(QStringLiteral("xmlns")) != ::XMPP::Jingle::NS) {
             return false;
         }
         Jingle jingle(jingleEl);
@@ -767,8 +769,8 @@ public:
     {
         QDomElement descriptionEl = ce.firstChildElement(QLatin1String("description"));
         QDomElement transportEl = ce.firstChildElement(QLatin1String("transport"));
-        QString descriptionNS = descriptionEl.namespaceURI();
-        QString transportNS = transportEl.namespaceURI();
+        QString descriptionNS = descriptionEl.attribute(QStringLiteral("xmlns"));
+        QString transportNS = transportEl.attribute(QStringLiteral("xmlns"));
         typedef std::tuple<AddContentError, Reason::Condition, Application*> result;
 
         ContentBase c(ce);
