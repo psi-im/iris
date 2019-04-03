@@ -573,7 +573,7 @@ public:
     Session *q;
     Manager *manager;
     QTimer stepTimer;
-    State state = State::Created;
+    State state = State::Created; // state of session on our side. if it's incoming we start from Created anyaway but Pending state is skipped
     Origin  role  = Origin::Initiator; // my role in the session
     XMPP::Stanza::Error lastError;
     Reason terminateReason;
@@ -892,29 +892,6 @@ void Session::addContent(Application *content)
             d->stepTimer.start();
         }
     });
-    /**
-      we have d->pendingSendLocalContent,    // before it's sent to remote side
-              d->pendingAckLocalContent,     // not necessary. use lambda capture
-              d->pendingConfirmLocalContent, // send to remote side but no iq ack yet
-              d->localContent                // accepted with session-accept or content-accept
-      First we add to pendingSendLocalContent.
-      Connect signals to the content, like
-        - updated
-      If we are waiting for ack from remote, then just exit. We will get back to this later
-      If session->state is Created, then just exit. We will get back to this when session->initiate is called
-      So session was already initiated and it's a regular content add. We don't wait anythig so have to send
-      cotent-add request now.
-      call session->d->flushContentAdd() to send it.
-
-      flushContentAdd() iterates over all pendingSendLocalContent,
-         if content->outgoingUpdateType() == Action::ContentAdd then it's ready to be sent,
-            add it to temporary send list and remove from pendingSendLocalContent
-      if temporary send list is not empty then append it to pendingAckLocalContent and send content-add
-
-      On ack receive it will be decided what to do with pendingAckLocalContent. On iq timeout it will be put back
-      to pendingSendLocalContent with consequent call to flushContentAdd().
-      or on success it will added to pendingConfirmLocalContent
-     */
 }
 
 ApplicationManagerPad::Ptr Session::applicationPad(const QString &ns)
@@ -939,7 +916,7 @@ QSharedPointer<Transport> Session::newOutgoingTransport(const QString &ns)
 QString Session::preferredApplication() const
 {
     // TODO some heuristics to detect preferred application
-    return QString();
+    return d->applicationPads.keys().value(0);
 }
 
 QStringList Session::allApplicationTypes() const
@@ -1077,7 +1054,6 @@ bool Session::incomingInitiate(const Jingle &jingle, const QDomElement &jingleEl
             d->contentList.insert(ContentKey{app->contentName(), Origin::Initiator}, app);
         }
     }
-
     d->planStep();
     return true;
 }
@@ -1315,7 +1291,8 @@ Session* Manager::incomingSessionInitiate(const Jid &from, const Jingle &jingle,
     if (s->incomingInitiate(jingle, jingleEl)) { // if parsed well
         d->sessions.insert(key, s);
         // emit incomingSession makes sense when there are no unsolved conflicts in content descriptions / transports
-        // QMetaObject::invokeMethod(this, "incomingSession", Qt::QueuedConnection, Q_ARG(Session*, s));
+        //QTimer::singleShot(0,[s, this](){ emit incomingSession(s); });
+        QMetaObject::invokeMethod(this, "incomingSession", Qt::QueuedConnection, Q_ARG(Session*, s));
         return s;
     }
     d->lastError = s->lastError();
