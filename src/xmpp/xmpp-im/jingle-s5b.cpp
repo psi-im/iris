@@ -387,24 +387,25 @@ Action Transport::outgoingUpdateType() const
     return Action::NoAction; // TODO
 }
 
-QDomElement Transport::takeOutgoingUpdate()
+OutgoingUpdate Transport::takeOutgoingUpdate()
 {
-    QDomElement tel;
-    if (!isValid() || !d->application) {
-        return tel;
+    OutgoingUpdate upd;
+    State appState;
+    if (!isValid() || !d->application || (appState = d->application->state()) == State::Finished) {
+        return upd;
     }
 
-    auto appState = d->application->state();
     auto sessRole = d->pad->session()->role();
     auto doc = d->pad->session()->manager()->client()->doc();
 
     if (appState == State::PrepareLocalOffer && !d->localCandidates.isEmpty()) {
-        tel = doc->createElementNS(NS, "transport");
+        QDomElement tel = doc->createElementNS(NS, "transport");
         tel.setAttribute(QStringLiteral("sid"), d->sid);
         if (d->mode != Tcp) {
             tel.setAttribute(QStringLiteral("mode"), "udp");
         }
         bool useProxy = false;
+        QList<Candidate> candidatesToSend;
         for (auto const &c: d->localCandidates) {
             if (c.type() == Candidate::Proxy) {
                 useProxy = true;
@@ -412,6 +413,7 @@ QDomElement Transport::takeOutgoingUpdate()
             if (!c.host().isEmpty()) {
                 tel.appendChild(c.toXml(doc));
             }
+            candidatesToSend.append(c);
             d->signalingCandidates.remove(QPair<QString,Origin>{c.cid(),sessRole});
         }
         if (useProxy) {
@@ -420,9 +422,15 @@ QDomElement Transport::takeOutgoingUpdate()
                                                         d->pad->session()->peer().full()).toUtf8(),
                                                        QCryptographicHash::Sha1);
             tel.setAttribute(QStringLiteral("dstaddr"), dstaddr);
+            OutgoingUpdate{tel, [this, candidatesToSend](){
+                    for (auto const &c: candidatesToSend) {
+                        //c->
+                    }
+
+                }}; // FIXME we should update candidates status here
         }
     }
-    return tel; // TODO
+    return upd; // TODO
 }
 
 bool Transport::isValid() const

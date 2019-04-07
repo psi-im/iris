@@ -53,6 +53,14 @@ public:
         Direct
     };
 
+    enum Status {
+        New,
+        Connecting,
+        Unacked,
+        Accepted, // connected and iq acked via xmpp
+        Failed,
+    };
+
     enum {
         ProxyPreference = 10,
         TunnelPreference = 110,
@@ -102,7 +110,7 @@ public:
     void start() override;
     bool update(const QDomElement &transportEl) override;
     Action outgoingUpdateType() const override;
-    QDomElement takeOutgoingUpdate() override;
+    OutgoingUpdate takeOutgoingUpdate() override;
     bool isValid() const override;
     Features features() const override;
 
