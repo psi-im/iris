@@ -53,19 +53,20 @@ public:
         Direct
     };
 
-    enum Status {
-        New,
-        Connecting,
-        Unacked,
-        Accepted, // connected and iq acked via xmpp
-        Failed,
-    };
-
     enum {
         ProxyPreference = 10,
         TunnelPreference = 110,
         AssistedPreference = 120,
         DirectPreference = 126
+    };
+
+    enum State {
+        New,
+        Connecting, // connectint to remote candidate
+        Unacked,  // local canidate sent to remote but no iq ack yet
+        Pending,  // local canidate sent to remote, but remote didn't report success or failure on it yet
+        Accepted, // connected and iq acked via xmpp
+        Failed,
     };
 
     Candidate(const QDomElement &el);
@@ -81,6 +82,8 @@ public:
     void setHost(const QString &host);
     quint16 port() const;
     void setPort(quint16 port);
+    State state() const;
+    void setState(State s);
 
     QDomElement toXml(QDomDocument *doc) const;
 

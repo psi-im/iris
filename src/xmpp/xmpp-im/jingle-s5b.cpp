@@ -36,7 +36,8 @@ public:
     Jid jid;
     quint16 port;
     quint32 priority;
-    Candidate::Type type;
+    Candidate::Type type = Candidate::Direct;
+    Candidate::State state = Candidate::New;
 };
 
 Candidate::Candidate(const QDomElement &el)
@@ -157,6 +158,16 @@ quint16 Candidate::port() const
 void Candidate::setPort(quint16 port)
 {
     d->port = port;
+}
+
+Candidate::State Candidate::state() const
+{
+    return d->state;
+}
+
+void Candidate::setState(Candidate::State s)
+{
+    d->state = s;
 }
 
 QDomElement Candidate::toXml(QDomDocument *doc) const
@@ -406,7 +417,7 @@ OutgoingUpdate Transport::takeOutgoingUpdate()
         }
         bool useProxy = false;
         QList<Candidate> candidatesToSend;
-        for (auto const &c: d->localCandidates) {
+        for (auto &c: d->localCandidates) {
             if (c.type() == Candidate::Proxy) {
                 useProxy = true;
             }
@@ -415,6 +426,7 @@ OutgoingUpdate Transport::takeOutgoingUpdate()
             }
             candidatesToSend.append(c);
             d->signalingCandidates.remove(QPair<QString,Origin>{c.cid(),sessRole});
+            c.setState(Candidate::Unacked);
         }
         if (useProxy) {
             QString dstaddr = QCryptographicHash::hash((d->sid +
@@ -422,13 +434,12 @@ OutgoingUpdate Transport::takeOutgoingUpdate()
                                                         d->pad->session()->peer().full()).toUtf8(),
                                                        QCryptographicHash::Sha1);
             tel.setAttribute(QStringLiteral("dstaddr"), dstaddr);
-            OutgoingUpdate{tel, [this, candidatesToSend](){
-                    for (auto const &c: candidatesToSend) {
-                        //c->
-                    }
-
-                }}; // FIXME we should update candidates status here
         }
+        OutgoingUpdate{tel, [this, candidatesToSend]() mutable {
+                for (auto &c: candidatesToSend) {
+                    c.setState(Candidate::Pending);
+                }
+            }}; // FIXME we should update candidates status here
     }
     return upd; // TODO
 }
