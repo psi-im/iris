@@ -205,6 +205,7 @@ public:
     Transport *q = NULL;
     Pad::Ptr pad;
     bool aborted = false;
+    bool signalNegotiated = false;
     Application *application = nullptr;
     QMap<QString,Candidate> localCandidates; // cid to candidate mapping
     QList<Candidate> pendingLocalCandidates; // not yet sent to remote
@@ -402,7 +403,7 @@ bool Transport::update(const QDomElement &transportEl)
         bool hasMoreCandidates = false;
         for (auto &c: d->localCandidates) {
             auto s = c.state();
-            if (s < Candidate::Pending && c.priority() >= cUsed.priority()) {
+            if (s < Candidate::Pending && c.priority() > cUsed.priority()) {
                 hasMoreCandidates = true;
                 continue; // we have more high priority candidates to be handled by remote
             }
@@ -413,9 +414,30 @@ bool Transport::update(const QDomElement &transportEl)
             return true;
         }
 
-        // seems like we don't have better candidates to be sent to remote,
+        // let's check remote candidates too before we decide to use this local candidate
+        for (auto &c: d->remoteCandidates) {
+            auto s = c.state();
+            if (c.priority() > cUsed.priority() && (s == Candidate::Pending ||
+                                                    s == Candidate::Probing ||
+                                                    s == Candidate::New)) {
+                hasMoreCandidates = true;
+                continue; // we have more high priority candidates to be handled by remote
+            } else if (c.priority() == cUsed.priority() && s == Candidate::Unacked &&
+                       d->pad->session()->role() == Origin::Initiator) {
+                hasMoreCandidates = true;
+                continue; // see 2.4 Completing the Negotiation (p.4)
+            }
+            c.setState(Candidate::Discarded); // TODO stop any probing as well
+        }
+
+        if (hasMoreCandidates) {
+            return true;
+        }
+
+        // seems like we don't have better candidates,
         // so we are going to use the d->localUsedCandidate
-        return true; // TODO we have to send candidate-error and start data transfer
+        d->signalNegotiated = true;
+        return true; // TODO we have to send candidate-error if no more local candidates and start data transfer
     }
     // TODO handle "candidate-used" and "activted"
     return true;

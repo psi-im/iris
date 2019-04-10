@@ -72,14 +72,16 @@ public:
      * Remote candidates states:
      *   New          - the candidate waits its turn to start connection probing
      *   Probing      - connection probing
-     *   Accepted     - connection was successful
+     *   Pending      - connection was successful, but we didn't send candidate-used to remote
+     *   Unacked      - connection was successful and we sent candidate-used to remote but no iq ack yet
+     *   Accepted     - we sent candidate-used and got iq ack
      *   Discarded    - failed to connect to all remote candidates
      */
     enum State {
         New,
         Probing,
-        Unacked,
         Pending,
+        Unacked,
         Accepted,
         Discarded,
     };
