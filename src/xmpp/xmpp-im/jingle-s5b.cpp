@@ -40,6 +40,11 @@ public:
     Candidate::State state = Candidate::New;
 };
 
+Candidate::Candidate()
+{
+
+}
+
 Candidate::Candidate(const QDomElement &el)
 {
     bool ok;
@@ -170,6 +175,11 @@ void Candidate::setState(Candidate::State s)
     d->state = s;
 }
 
+quint32 Candidate::priority() const
+{
+    return d->priority;
+}
+
 QDomElement Candidate::toXml(QDomDocument *doc) const
 {
     auto e = doc->createElement(QStringLiteral("candidate"));
@@ -190,9 +200,9 @@ QDomElement Candidate::toXml(QDomDocument *doc) const
     return e;
 }
 
-class Transport::Private {
+class Transport::Private : public QSharedData {
 public:
-    Transport *q;
+    Transport *q = NULL;
     Pad::Ptr pad;
     bool aborted = false;
     Application *application = nullptr;
@@ -200,6 +210,7 @@ public:
     QList<Candidate> pendingLocalCandidates; // not yet sent to remote
     QMap<QString,Candidate> remoteCandidates;
     QSet<QPair<QString,Origin>> signalingCandidates; // origin here is session role. so for remote it's != session->role
+    Candidate localUsedCandidate; // we received "candidate-used" for this candidate
     QString dstaddr;
     QString sid;
     Transport::Mode mode = Transport::Tcp;
@@ -374,10 +385,37 @@ bool Transport::update(const QDomElement &transportEl)
     for(QDomElement ce = transportEl.firstChildElement(contentTag);
         !ce.isNull(); ce = ce.nextSiblingElement(contentTag)) {
         Candidate c(ce);
-        if (!c.isValid()) {
+        if (!c) {
             return false;
         }
         d->remoteCandidates.insert(c.cid(), c); // TODO check for collisions!
+    }
+    QDomElement cUsedEl = transportEl.firstChildElement(QStringLiteral("candidate-used"));
+    if (!cUsedEl.isNull()) {
+        auto cUsed = d->localCandidates.value(cUsedEl.attribute(QStringLiteral("cid")));
+        if (!cUsed) {
+            return false;
+        }
+        cUsed.setState(Candidate::Accepted);
+        d->localUsedCandidate = cUsed;
+        cUsed.setState(Candidate::Accepted);
+        bool hasMoreCandidates = false;
+        for (auto &c: d->localCandidates) {
+            auto s = c.state();
+            if (s < Candidate::Pending && c.priority() >= cUsed.priority()) {
+                hasMoreCandidates = true;
+                continue; // we have more high priority candidates to be handled by remote
+            }
+            c.setState(Candidate::Discarded);
+        }
+
+        if (hasMoreCandidates) {
+            return true;
+        }
+
+        // seems like we don't have better candidates to be sent to remote,
+        // so we are going to use the d->localUsedCandidate
+        return true; // TODO we have to send candidate-error and start data transfer
     }
     // TODO handle "candidate-used" and "activted"
     return true;
