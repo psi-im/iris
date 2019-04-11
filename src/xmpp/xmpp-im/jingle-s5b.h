@@ -89,7 +89,7 @@ public:
     Candidate();
     Candidate(const QDomElement &el);
     Candidate(const Candidate &other);
-    Candidate(const Jid &proxy, const QString &cid);
+    Candidate(const Jid &proxy, const QString &cid, quint16 localPreference = 0);
     Candidate(const QString &host, quint16 port, const QString &cid, Type type, quint16 localPreference = 0);
     ~Candidate();
     inline bool isValid() const { return d != nullptr; }
