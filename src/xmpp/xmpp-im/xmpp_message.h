@@ -25,6 +25,7 @@
 #include "xmpp_receipts.h"
 #include "xmpp_address.h"
 #include "xmpp_rosterx.h"
+#include "xmpp_forwarding.h"
 #include "xmpp_muc.h"
 
 #include <QExplicitlySharedDataPointer>
@@ -50,12 +51,6 @@ namespace XMPP {
     class Message
     {
     public:
-        enum CarbonDir : quint8 {
-            NoCarbon,
-            Received, // other party messages are sent to another own client
-            Sent      // own messages are sent from other clients
-        };
-
         // XEP-0334
         enum ProcessingHint {
             NoPermanentStore = 1,
@@ -177,14 +172,15 @@ namespace XMPP {
         const IBBData& ibbData() const;
 
         // XEP-0280 Message Carbons
-        void setDisabledCarbons(bool disabled);
-        bool isDisabledCarbons() const;
-        void setCarbonDirection(CarbonDir);
-        CarbonDir carbonDirection() const;
+        Jid displayJid() const;
+        const Message &displayMessage() const;
+        Message &displayMessage();
+        void setCarbonsPrivate(bool privare);
+        bool carbonsPrivate() const;
 
         // XEP-0297
-        void setForwardedFrom(const Jid &jid);
-        const Jid &forwardedFrom() const;
+        void setForwarded(const Forwarding &frw);
+        const Forwarding &forwarded() const;
 
         // XEP-0308
         QString replaceId() const;

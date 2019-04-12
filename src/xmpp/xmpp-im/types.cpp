@@ -26,6 +26,8 @@
 #include "xmpp_bitsofbinary.h"
 #include "xmpp_ibb.h"
 #include "xmpp_captcha.h"
+#include "xmpp_forwarding.h"
+#include "xmpp_carbons.h"
 #include "protocol.h"
 #include "xmpp/blake2/blake2qt.h"
 #define NS_XML     "http://www.w3.org/XML/1998/namespace"
@@ -1056,7 +1058,6 @@ public:
     QMap<QString,HTMLElement> htmlElements;
     QDomElement sxe;
     QList<BoBData> bobDataList;
-    Jid forwardedFrom;
 
     QList<int> mucStatuses;
     QList<MUCInvite> mucInvites;
@@ -1067,12 +1068,12 @@ public:
     bool spooled = false, wasEncrypted = false;
 
     //XEP-0280 Message Carbons
-    bool isDisabledCarbons = false;
-    Message::CarbonDir carbonDir = Message::NoCarbon; // it's a forwarded message
+    bool carbonsPrivate = false;
     Message::ProcessingHints processingHints;
     QString replaceId;
     QString originId; // XEP-0359
     Message::StanzaId stanzaId; // XEP-0359
+    Forwarding forwarding;
 };
 
 //! \brief Constructs Message with given Jid information.
@@ -1611,34 +1612,51 @@ const IBBData& Message::ibbData() const
     return d->ibbData;
 }
 
-void Message::setDisabledCarbons(bool disabled)
+Jid Message::displayJid() const
 {
-    d->isDisabledCarbons = disabled;
+    switch (d->forwarding.type()) {
+    case Forwarding::ForwardedCarbonsSent:
+        return d->forwarding.message()->to();
+    case Forwarding::ForwardedCarbonsReceived:
+        return d->forwarding.message()->from();
+    default:
+        break;
+    }
+    return from();
 }
 
-bool Message::isDisabledCarbons() const
+const Message &Message::displayMessage() const
 {
-    return d->isDisabledCarbons;
+    if (d->forwarding.isCarbons() && d->forwarding.message())
+        return *d->forwarding.message();
+    return *this;
 }
 
-void Message::setCarbonDirection(Message::CarbonDir cd)
+Message &Message::displayMessage()
 {
-    d->carbonDir = cd;
+    if (d->forwarding.isCarbons() && d->forwarding.message())
+        return *d->forwarding.message();
+    return *this;
 }
 
-Message::CarbonDir Message::carbonDirection() const
+void Message::setCarbonsPrivate(bool privare)
 {
-    return d->carbonDir;
+    d->carbonsPrivate = privare;
 }
 
-void Message::setForwardedFrom(const Jid &jid)
+bool Message::carbonsPrivate() const
 {
-    d->forwardedFrom = jid;
+    return d->carbonsPrivate;
 }
 
-const Jid &Message::forwardedFrom() const
+void Message::setForwarded(const Forwarding &frw)
 {
-    return d->forwardedFrom;
+    d->forwarding = frw;
+}
+
+const Forwarding &Message::forwarded() const
+{
+    return d->forwarding;
 }
 
 bool Message::spooled() const
@@ -1905,10 +1923,10 @@ Stanza Message::toStanza(Stream *stream) const
     }
 
     // Avoiding Carbons
-    if (isDisabledCarbons() || wasEncrypted()) {
-        QDomElement e = s.createElement("urn:xmpp:carbons:2","private");
-        s.appendChild(e);
+    if (d->carbonsPrivate || d->wasEncrypted) {
+        s.appendChild(CarbonsManager::privateElement(stream->doc()));
     }
+
     if (!d->replaceId.isEmpty()) {
         QDomElement e = s.createElement("urn:xmpp:message-correct:0", "replace");
         e.setAttribute("id", d->replaceId);
@@ -1944,6 +1962,10 @@ Stanza Message::toStanza(Stream *stream) const
         e.setAttribute(QStringLiteral("by"), d->stanzaId.by.full());
         s.appendChild(e);
     }
+
+    // XEP-0297: Stanza Forwarding
+    if (d->forwarding.type() != Forwarding::ForwardedNone)
+        s.appendChild(d->forwarding.toXml(stream));
 
     return s;
 }

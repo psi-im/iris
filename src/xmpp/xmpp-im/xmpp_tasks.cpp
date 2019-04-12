@@ -19,6 +19,7 @@
 
 #include <QRegExp>
 #include <QList>
+#include <QHash>
 #include <QTimer>
 
 #include "xmpp_tasks.h"
@@ -891,19 +892,145 @@ void JT_Message::onGo()
 //----------------------------------------------------------------------------
 class JT_PushMessage::Private {
 public:
+    struct SubsData {
+        Subscriber *sbs;
+        int userData;
+    };
     EncryptionHandler *m_encryptionHandler;
+    QHash<QString, QList<SubsData> > subsData;
+    QList<SubsData> subsMData;
+
+    QString genKey(const QString &s1, const QString &s2)
+    {
+        return QString("%1&%2").arg(s1).arg(s2);
+    }
+
+    bool processXml(const QDomElement &root, QDomElement &e, Client *c, bool nested)
+    {
+        QString tagName = e.tagName();
+        QString xmlnsStr = e.attribute(QLatin1String("xmlns"));
+        QString key = genKey(tagName, xmlnsStr);
+        if (subsData.contains(key)) {
+            QList<SubsData> sdl = subsData.value(key);
+            foreach (const SubsData &sd, sdl) {
+                if (sd.sbs->xmlEvent(root, e, c, sd.userData, nested))
+                    return true;
+                if (e.tagName() != tagName || e.attribute(QLatin1String("xmlns")) != tagName)
+                    return false;
+            }
+        }
+        return false;
+    }
+
+    bool processMessage(Message &msg, bool nested) {
+        foreach (const SubsData &sd, subsMData) {
+            if (sd.sbs->messageEvent(msg, sd.userData, nested))
+                return true;
+        }
+        return false;
+    }
 };
 
-JT_PushMessage::JT_PushMessage(Task *parent, EncryptionHandler *encryptionHandler)
-:Task(parent)
+JT_PushMessage::Subscriber::~Subscriber()
 {
-    d = new Private;
+}
+
+bool JT_PushMessage::Subscriber::xmlEvent(const QDomElement &root, QDomElement &e, Client *c, int userData, bool nested)
+{
+    Q_UNUSED(root)
+    Q_UNUSED(e)
+    Q_UNUSED(c)
+    Q_UNUSED(userData)
+    Q_UNUSED(nested)
+    return false;
+}
+
+bool JT_PushMessage::Subscriber::messageEvent(Message &msg, int userData, bool nested)
+{
+    Q_UNUSED(msg);
+    Q_UNUSED(userData);
+    Q_UNUSED(nested)
+    return false;
+}
+
+JT_PushMessage::JT_PushMessage(Task *parent, EncryptionHandler *encryptionHandler)
+    : Task(parent)
+    , d(new Private)
+{
     d->m_encryptionHandler = encryptionHandler;
 }
 
 JT_PushMessage::~JT_PushMessage()
 {
-    delete d;
+}
+
+void JT_PushMessage::subscribeXml(Subscriber *sbs, const QString &tagName, const QString &xmlnsStr, int userData)
+{
+    QString key = d->genKey(tagName, xmlnsStr);
+    QList<Private::SubsData> list = d->subsData.value(key);
+    foreach (const Private::SubsData &sd, list) {
+        if (sd.sbs == sbs)
+            return;
+    }
+    list.append({ sbs, userData });
+    d->subsData.insert(key, list);
+}
+
+void JT_PushMessage::unsubscribeXml(Subscriber *sbs, const QString &tagName, const QString &xmlnsStr)
+{
+    QString key = d->genKey(tagName, xmlnsStr);
+    QList<Private::SubsData> list = d->subsData.value(key);
+    for (int i = 0; i < list.count(); ++i) {
+        if (list.at(i).sbs == sbs) {
+            list.removeAt(i);
+            if (list.count() > 0)
+                d->subsData.insert(key, list);
+            else
+                d->subsData.remove(key);
+            break;
+        }
+    }
+}
+
+void JT_PushMessage::subscribeMessage(Subscriber *sbs, int userData)
+{
+    foreach (const Private::SubsData &sd, d->subsMData) {
+        if (sd.sbs == sbs)
+            return;
+    }
+    d->subsMData.append({ sbs, userData });
+}
+
+void JT_PushMessage::unsubscribeMessage(Subscriber *sbs)
+{
+    int sz = d->subsMData.size();
+    for (int i = 0; i < sz; ++i) {
+        if (d->subsMData.at(i).sbs == sbs) {
+            d->subsMData.removeAt(i);
+            break;
+        }
+    }
+}
+
+bool JT_PushMessage::processXmlSubscribers(QDomElement &el, Client *client, bool nested)
+{
+    bool processed = false;
+    QDomElement ch = el.firstChildElement();
+    while (!ch.isNull()) {
+        QDomElement next = ch.nextSiblingElement();
+        bool res = d->processXml(el, ch, client, nested);
+        if (res)
+            processed = true;
+        if (res || ch.isNull())
+            el.removeChild(ch);
+        ch = next;
+    }
+    return (processed && el.childNodes().length() == 0);
+}
+
+bool JT_PushMessage::processMessageSubscribers(Message &msg, bool nested)
+{
+    return d->processMessage(msg, nested);
 }
 
 bool JT_PushMessage::take(const QDomElement &e)
@@ -919,40 +1046,10 @@ bool JT_PushMessage::take(const QDomElement &e)
         return true;
     }
 
-    QDomElement forward;
-    Message::CarbonDir cd = Message::NoCarbon;
+    if (processXmlSubscribers(e1, client(), false))
+        return true;
 
-    Jid fromJid = Jid(e1.attribute(QLatin1String("from")));
-    // Check for Carbon
-    QDomNodeList list = e1.childNodes();
-    for (int i = 0; i < list.size(); ++i) {
-        QDomElement el = list.at(i).toElement();
-
-        if (el.attribute("xmlns") == QLatin1String("urn:xmpp:carbons:2")
-            && (el.tagName() == QLatin1String("received") || el.tagName() == QLatin1String("sent"))
-            && fromJid.compare(Jid(e1.attribute(QLatin1String("to"))), false)) {
-            QDomElement el1 = el.firstChildElement();
-            if (el1.tagName() == QLatin1String("forwarded")
-                && el1.attribute(QLatin1String("xmlns")) == QLatin1String("urn:xmpp:forward:0")) {
-                QDomElement el2 = el1.firstChildElement(QLatin1String("message"));
-                if (!el2.isNull()) {
-                    forward = el2;
-                    cd = el.tagName() == QLatin1String("received")? Message::Received : Message::Sent;
-                    break;
-                }
-            }
-        }
-        else if (el.tagName() == QLatin1String("forwarded")
-             && el.attribute(QLatin1String("xmlns")) == QLatin1String("urn:xmpp:forward:0")) {
-            forward = el.firstChildElement(QLatin1String("message")); // currently only messages are supportted
-            // TODO <delay> element support
-            if (!forward.isNull()) {
-                break;
-            }
-        }
-    }
-
-    Stanza s = client()->stream().createStanza(addCorrectNS(forward.isNull()? e1 : forward));
+    Stanza s = client()->stream().createStanza(addCorrectNS(e1));
     if(s.isNull()) {
         //printf("take: bad stanza??\n");
         return false;
@@ -963,10 +1060,10 @@ bool JT_PushMessage::take(const QDomElement &e)
         //printf("bad message\n");
         return false;
     }
-    if (!forward.isNull()) {
-        m.setForwardedFrom(fromJid);
-        m.setCarbonDirection(cd);
-    }
+
+    if (processMessageSubscribers(m, false))
+        return true;
+
     m.setWasEncrypted(wasEncrypted);
 
     emit message(m);
@@ -2060,48 +2157,4 @@ bool JT_CaptchaSender::take(const QDomElement &x)
     }
 
     return true;
-}
-
-//----------------------------------------------------------------------------
-// JT_MessageCarbons
-//----------------------------------------------------------------------------
-JT_MessageCarbons::JT_MessageCarbons(Task *parent)
-    : Task(parent)
-{
-
-}
-
-void JT_MessageCarbons::enable()
-{
-    _iq = createIQ(doc(), "set", "", id());
-
-    QDomElement enable = doc()->createElement("enable");
-    enable.setAttribute("xmlns", "urn:xmpp:carbons:2");
-
-    _iq.appendChild(enable);
-}
-
-void JT_MessageCarbons::disable()
-{
-    _iq = createIQ(doc(), "set", "", id());
-
-    QDomElement disable = doc()->createElement("disable");
-    disable.setAttribute("xmlns", "urn:xmpp:carbons:2");
-
-    _iq.appendChild(disable);
-}
-
-void JT_MessageCarbons::onGo()
-{
-    send(_iq);
-    setSuccess();
-}
-
-bool JT_MessageCarbons::take(const QDomElement &e)
-{
-    if (e.tagName() != "iq" || e.attribute("type") != "result")
-        return false;
-
-    bool res = iqVerify(e, Jid(), id());
-    return res;
 }
