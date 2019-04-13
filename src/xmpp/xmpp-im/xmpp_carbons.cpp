@@ -39,7 +39,7 @@ JT_MessageCarbons::JT_MessageCarbons(Task *parent)
 
 void JT_MessageCarbons::enable()
 {
-    iq = createIQ(doc(), QLatin1String("set"), QString::null, id());
+    iq = createIQ(doc(), QLatin1String("set"), QString(), id());
     QDomElement enable = doc()->createElement(QLatin1String("enable"));
     enable.setAttribute(QLatin1String("xmlns"), xmlns_carbons);
     iq.appendChild(enable);
@@ -47,7 +47,7 @@ void JT_MessageCarbons::enable()
 
 void JT_MessageCarbons::disable()
 {
-    iq = createIQ(doc(), QLatin1String("set"), QString::null, id());
+    iq = createIQ(doc(), QLatin1String("set"), QString(), id());
     QDomElement disable = doc()->createElement(QLatin1String("disable"));
     disable.setAttribute(QLatin1String("xmlns"), xmlns_carbons);
     iq.appendChild(disable);
