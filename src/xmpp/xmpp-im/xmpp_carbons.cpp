@@ -27,7 +27,7 @@
 
 using namespace XMPP;
 
-static const QLatin1String xmlns_carbons("urn:xmpp:carbons:2");
+static const QString xmlns_carbons(QStringLiteral("urn:xmpp:carbons:2"));
 
 //----------------------------------------------------------------------------
 // JT_MessageCarbons

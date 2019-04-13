@@ -27,8 +27,8 @@
 
 using namespace XMPP;
 
-static const QLatin1String xmlns_forward("urn:xmpp:forward:0");
-static const QLatin1String xmlns_delay("urn:xmpp:delay");
+static const QString xmlns_forward(QStringLiteral("urn:xmpp:forward:0"));
+static const QString xmlns_delay(QStringLiteral("urn:xmpp:delay"));
 
 //--------------------------------------------------
 // class Forwarding
