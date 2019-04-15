@@ -518,11 +518,12 @@ bool Transport::update(const QDomElement &transportEl)
         QTimer::singleShot(0, this, [this](){
             d->tryConnectToRemoteCandidate();
         });
+        return true;
     }
 
-    QDomElement cUsedEl = transportEl.firstChildElement(QStringLiteral("candidate-used"));
-    if (!cUsedEl.isNull()) {
-        auto cUsed = d->localCandidates.value(cUsedEl.attribute(QStringLiteral("cid")));
+    QDomElement el = transportEl.firstChildElement(QStringLiteral("candidate-used"));
+    if (!el.isNull()) {
+        auto cUsed = d->localCandidates.value(el.attribute(QStringLiteral("cid")));
         if (!cUsed) {
             return false;
         }
@@ -531,12 +532,33 @@ bool Transport::update(const QDomElement &transportEl)
         cUsed.setState(Candidate::Accepted);
         QTimer::singleShot(0, this, [this](){ d->updateSelfState(); });
     }
-    QDomElement cErrEl = transportEl.firstChildElement(QStringLiteral("candidate-error"));
-    if (!cUsedEl.isNull()) {
+
+    el = transportEl.firstChildElement(QStringLiteral("candidate-error"));
+    if (!el.isNull()) {
         d->remoteReportedCandidateError = true;
         QTimer::singleShot(0, this, [this](){ d->updateSelfState(); });
     }
-    // TODO handle "activted", "proxy-error"
+
+    el = transportEl.firstChildElement(QStringLiteral("activated"));
+    if (!el.isNull()) {
+        auto c = d->localCandidates.value(el.attribute(QStringLiteral("cid")));
+        if (!c) {
+            return false;
+        }
+        // c.setActivated(); // TODO
+        QTimer::singleShot(0, this, [this](){ d->updateSelfState(); });
+    }
+
+    el = transportEl.firstChildElement(QStringLiteral("proxy-error"));
+    if (!el.isNull()) {
+        auto c = d->localCandidates.value(el.attribute(QStringLiteral("cid")));
+        if (!c) {
+            return false;
+        }
+        c.setState(Candidate::Discarded);
+        QTimer::singleShot(0, this, [this](){ d->updateSelfState(); });
+    }
+    // TODO handle "activated", "proxy-error"
     return true;
 }
 
