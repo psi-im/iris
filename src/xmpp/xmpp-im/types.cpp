@@ -1639,9 +1639,9 @@ Message &Message::displayMessage()
     return *this;
 }
 
-void Message::setCarbonsPrivate(bool privare)
+void Message::setCarbonsPrivate(bool enable)
 {
-    d->carbonsPrivate = privare;
+    d->carbonsPrivate = enable;
 }
 
 bool Message::carbonsPrivate() const

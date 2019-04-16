@@ -25,7 +25,8 @@
 #include "xmpp_stream.h"
 #include "xmpp_message.h"
 
-using namespace XMPP;
+namespace XMPP
+{
 
 static const QString xmlns_forward(QStringLiteral("urn:xmpp:forward:0"));
 static const QString xmlns_delay(QStringLiteral("urn:xmpp:delay"));
@@ -231,3 +232,5 @@ void ForwardingManager::setEnabled(bool enabled)
 bool ForwardingManager::isEnabled() const {
     return d->enabled;
 }
+
+} // namespace XMPP

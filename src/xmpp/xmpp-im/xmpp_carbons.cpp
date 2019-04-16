@@ -25,7 +25,8 @@
 #include "xmpp_message.h"
 #include "xmpp_forwarding.h"
 
-using namespace XMPP;
+namespace XMPP
+{
 
 static const QString xmlns_carbons(QStringLiteral("urn:xmpp:carbons:2"));
 
@@ -185,3 +186,5 @@ void CarbonsManager::setEnabled(bool enable)
 bool CarbonsManager::isEnabled() const {
     return d->enable;
 }
+
+} //namespace XMPP

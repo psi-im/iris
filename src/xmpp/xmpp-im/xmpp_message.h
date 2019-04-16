@@ -175,7 +175,7 @@ namespace XMPP {
         Jid displayJid() const;
         const Message &displayMessage() const;
         Message &displayMessage();
-        void setCarbonsPrivate(bool privare);
+        void setCarbonsPrivate(bool enable);
         bool carbonsPrivate() const;
 
         // XEP-0297
