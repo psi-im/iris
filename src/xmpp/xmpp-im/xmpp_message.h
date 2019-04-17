@@ -65,11 +65,13 @@ namespace XMPP {
             QString id;
         };
 
-        Message(const Jid &to="");
+        Message();
+        Message(const Jid &to);
         Message(const Message &from);
         Message & operator=(const Message &from);
         ~Message();
         bool operator ==(const Message &from) const;
+        inline bool isNull() const { return d == nullptr; }
 
         Jid to() const;
         Jid from() const;
@@ -95,9 +97,9 @@ namespace XMPP {
         void setError(const Stanza::Error &err);
 
         // XEP-0060
-        const QString& pubsubNode() const;
-        const QList<PubSubItem>& pubsubItems() const;
-        const QList<PubSubRetraction>& pubsubRetractions() const;
+        QString pubsubNode() const;
+        QList<PubSubItem> pubsubItems() const;
+        QList<PubSubRetraction> pubsubRetractions() const;
 
         // XEP-0091
         QDateTime timeStamp() const;
@@ -145,12 +147,12 @@ namespace XMPP {
         void setAddresses(const AddressList &list);
 
         // XEP-144
-        const RosterExchangeItems& rosterExchangeItems() const;
+        RosterExchangeItems rosterExchangeItems() const;
         void setRosterExchangeItems(const RosterExchangeItems&);
 
         // XEP-172
         void setNick(const QString&);
-        const QString& nick() const;
+        QString nick() const;
 
         // XEP-0070
         void setHttpAuthRequest(const HttpAuthRequest&);
@@ -158,18 +160,18 @@ namespace XMPP {
 
         // XEP-0004
         void setForm(const XData&);
-        const XData& getForm() const;
+        XData getForm() const;
 
         // XEP-xxxx SXE
         void setSxe(const QDomElement&);
-        const QDomElement& sxe() const;
+        QDomElement sxe() const;
 
         // XEP-0231 bits of binary
         void addBoBData(const BoBData &);
         QList<BoBData> bobDataList() const;
 
         // XEP-0047 ibb
-        const IBBData& ibbData() const;
+        IBBData ibbData() const;
 
         // XEP-0280 Message Carbons
         Jid displayJid() const;
@@ -192,12 +194,12 @@ namespace XMPP {
 
         // MUC
         void addMUCStatus(int);
-        const QList<int>& getMUCStatuses() const;
+        QList<int> getMUCStatuses() const;
         void addMUCInvite(const MUCInvite&);
-        const QList<MUCInvite>& mucInvites() const;
+        QList<MUCInvite> mucInvites() const;
         void setMUCDecline(const MUCDecline&);
-        const MUCDecline& mucDecline() const;
-        const QString& mucPassword() const;
+        MUCDecline mucDecline() const;
+        QString mucPassword() const;
         void setMUCPassword(const QString&);
         bool hasMUCUser() const;
 
