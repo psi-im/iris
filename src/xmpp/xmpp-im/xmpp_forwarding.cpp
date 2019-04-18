@@ -91,7 +91,7 @@ QDateTime Forwarding::timeStamp() const
     return msg_.get() ? msg_->timeStamp() : QDateTime();
 }
 
-void Forwarding::setTimeStamp(QDateTime ts)
+void Forwarding::setTimeStamp(const QDateTime &ts)
 {
     ts_ = ts;
 }

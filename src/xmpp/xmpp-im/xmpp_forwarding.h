@@ -22,7 +22,7 @@
 #define XMPP_FORWARDING_H
 
 #include <memory>
-#include <QtCore>
+#include <QObject>
 #include <QDateTime>
 #include <QDomElement>
 
@@ -53,7 +53,7 @@ namespace XMPP
         bool isCarbons() const;
 
         QDateTime timeStamp() const;
-        void setTimeStamp(QDateTime ts);
+        void setTimeStamp(const QDateTime &ts);
 
         Message *message() const;
         void setMessage(const Message &msg);

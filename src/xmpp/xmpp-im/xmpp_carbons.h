@@ -22,7 +22,6 @@
 #define XMPP_CARBONS_H
 
 #include <memory>
-#include <QtCore>
 #include <QDomElement>
 
 #include "xmpp_task.h"
@@ -77,8 +76,8 @@ namespace XMPP
         void enable();
         void disable();
 
-        void onGo();
-        bool take(const QDomElement &e);
+        void onGo() override;
+        bool take(const QDomElement &e) override;
 
     private:
         QDomElement iq;

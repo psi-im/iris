@@ -902,10 +902,10 @@ public:
 
     QString genKey(const QString &s1, const QString &s2)
     {
-        return QString("%1&%2").arg(s1).arg(s2);
+        return QString(QLatin1String("%1&%2")).arg(s1, s2);
     }
 
-    bool processXml(const QDomElement &root, QDomElement &e, Client *c, bool nested)
+    bool processChildStanzaNode(const QDomElement &root, QDomElement &e, Client *c, bool nested)
     {
         QString tagName = e.tagName();
         QString xmlnsStr = e.attribute(QLatin1String("xmlns"));
@@ -1018,7 +1018,7 @@ bool JT_PushMessage::processXmlSubscribers(QDomElement &el, Client *client, bool
     QDomElement ch = el.firstChildElement();
     while (!ch.isNull()) {
         QDomElement next = ch.nextSiblingElement();
-        bool res = d->processXml(el, ch, client, nested);
+        bool res = d->processChildStanzaNode(el, ch, client, nested);
         if (res)
             processed = true;
         if (res || ch.isNull())
