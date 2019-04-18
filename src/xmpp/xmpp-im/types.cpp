@@ -1625,6 +1625,12 @@ IBBData Message::ibbData() const
     return d? d->ibbData: IBBData();
 }
 
+//! \brief Returns Jid of the remote contact
+//!
+//! Returns Jid of the remote contact for the original message
+//! which may be wrapped using carbons. It is useful when a client
+//! needs to know in which window it should display the message.
+//! So it is not always just from().
 Jid Message::displayJid() const
 {
     if (!d)
@@ -1641,6 +1647,7 @@ Jid Message::displayJid() const
     return from();
 }
 
+//! \brief Returns either the message inside the carbons or itself.
 const Message &Message::displayMessage() const
 {
     if (d && d->forwarding.isCarbons() && d->forwarding.message())
