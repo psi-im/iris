@@ -182,6 +182,7 @@ namespace XMPP {
 
         // XEP-0297
         void setForwarded(const Forwarding &frw);
+        // note, the next method has to be called only on not-null message
         const Forwarding &forwarded() const;
 
         // XEP-0308

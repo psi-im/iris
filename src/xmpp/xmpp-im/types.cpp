@@ -1673,8 +1673,7 @@ void Message::setForwarded(const Forwarding &frw)
 
 const Forwarding &Message::forwarded() const
 {
-    static Forwarding f;
-    return d ? d->forwarding : f;
+    return d->forwarding;
 }
 
 bool Message::spooled() const
