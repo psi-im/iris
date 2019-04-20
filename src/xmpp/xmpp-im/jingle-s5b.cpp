@@ -545,7 +545,7 @@ bool Transport::update(const QDomElement &transportEl)
         if (!c) {
             return false;
         }
-        // c.setActivated(); // TODO
+        c.setState(Candidate::Active);
         QTimer::singleShot(0, this, [this](){ d->updateSelfState(); });
     }
 
@@ -558,7 +558,7 @@ bool Transport::update(const QDomElement &transportEl)
         c.setState(Candidate::Discarded);
         QTimer::singleShot(0, this, [this](){ d->updateSelfState(); });
     }
-    // TODO handle "activated", "proxy-error"
+
     return true;
 }
 
