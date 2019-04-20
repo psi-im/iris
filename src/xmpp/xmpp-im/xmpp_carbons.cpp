@@ -218,3 +218,5 @@ bool CarbonsManager::isEnabled() const {
 }
 
 } //namespace XMPP
+
+#include "xmpp_carbons.moc"
