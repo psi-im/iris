@@ -26,6 +26,8 @@
 #include <QDateTime>
 #include <QDomElement>
 
+#include "xmpp_message.h"
+
 namespace XMPP
 {
     class Client;
@@ -55,7 +57,7 @@ namespace XMPP
         QDateTime timeStamp() const;
         void setTimeStamp(const QDateTime &ts);
 
-        Message *message() const;
+        Message message() const;
         void setMessage(const Message &msg);
 
         bool fromXml(const QDomElement &e, Client *client);
@@ -64,7 +66,7 @@ namespace XMPP
     private:
         Type type_;
         QDateTime ts_;
-        std::unique_ptr<Message> msg_;
+        Message msg_;
     };
 
     class ForwardingManager : public QObject

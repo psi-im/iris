@@ -1638,9 +1638,9 @@ Jid Message::displayJid() const
 
     switch (d->forwarding.type()) {
     case Forwarding::ForwardedCarbonsSent:
-        return d->forwarding.message()->to();
+        return d->forwarding.message().to();
     case Forwarding::ForwardedCarbonsReceived:
-        return d->forwarding.message()->from();
+        return d->forwarding.message().from();
     default:
         break;
     }
@@ -1648,18 +1648,10 @@ Jid Message::displayJid() const
 }
 
 //! \brief Returns either the message inside the carbons or itself.
-const Message &Message::displayMessage() const
+Message Message::displayMessage() const
 {
     if (d && d->forwarding.isCarbons() && d->forwarding.message())
-        return *d->forwarding.message();
-
-    return *this;
-}
-
-Message &Message::displayMessage()
-{
-    if (d && d->forwarding.isCarbons() && d->forwarding.message())
-        return *d->forwarding.message();
+        return d->forwarding.message();
 
     return *this;
 }

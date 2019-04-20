@@ -22,26 +22,16 @@
 #define XMPP_CARBONS_H
 
 #include <memory>
-#include <QDomElement>
+#include <QObject>
 
-#include "xmpp_task.h"
-#include "xmpp_tasks.h"
-
+class QDomDocument;
+class QDomElement;
 
 namespace XMPP
 {
     class Task;
     class Client;
-
-    class CarbonsSubscriber : public JT_PushMessage::Subscriber
-    {
-    public:
-            bool xmlEvent(const QDomElement &root, QDomElement &e, Client *client, int userData, bool nested) override;
-            bool messageEvent(Message &msg, int userData, bool nested) override;
-
-    private:
-            Forwarding frw;
-    };
+    class JT_PushMessage;
 
     class CarbonsManager : public QObject
     {
@@ -64,23 +54,6 @@ namespace XMPP
     private:
         class Private;
         std::unique_ptr<Private> d;
-    };
-
-    class JT_MessageCarbons : public Task
-    {
-        Q_OBJECT
-
-    public:
-        JT_MessageCarbons(Task *parent);
-
-        void enable();
-        void disable();
-
-        void onGo() override;
-        bool take(const QDomElement &e) override;
-
-    private:
-        QDomElement iq;
     };
 }
 

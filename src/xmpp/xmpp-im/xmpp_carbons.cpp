@@ -24,11 +24,41 @@
 #include "xmpp_xmlcommon.h"
 #include "xmpp_message.h"
 #include "xmpp_forwarding.h"
+#include "xmpp_task.h"
+#include "xmpp_tasks.h"
 
 namespace XMPP
 {
 
 static const QString xmlns_carbons(QStringLiteral("urn:xmpp:carbons:2"));
+
+
+class CarbonsSubscriber : public JT_PushMessage::Subscriber
+{
+public:
+        bool xmlEvent(const QDomElement &root, QDomElement &e, Client *client, int userData, bool nested) override;
+        bool messageEvent(Message &msg, int userData, bool nested) override;
+
+private:
+        Forwarding frw;
+};
+
+class JT_MessageCarbons : public Task
+{
+    Q_OBJECT
+
+public:
+    JT_MessageCarbons(Task *parent);
+
+    void enable();
+    void disable();
+
+    void onGo() override;
+    bool take(const QDomElement &e) override;
+
+private:
+    QDomElement iq;
+};
 
 //----------------------------------------------------------------------------
 // JT_MessageCarbons

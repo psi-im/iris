@@ -43,9 +43,8 @@ Forwarding::Forwarding()
 Forwarding::Forwarding(const Forwarding &other)
     : type_(other.type_)
     , ts_(other.ts_)
+    , msg_(other.msg_)
 {
-    if (other.msg_.get())
-        msg_.reset(new Message(*other.msg_.get()));
 }
 
 Forwarding::~Forwarding()
@@ -56,10 +55,7 @@ Forwarding & Forwarding::operator=(const Forwarding &from)
 {
     type_ = from.type_;
     ts_ = from.ts_;
-    if (from.msg_.get())
-        msg_.reset(new Message(*from.msg_.get()));
-    else
-        msg_.reset(nullptr);
+    msg_ = from.msg_;
     return *this;
 }
 
@@ -73,8 +69,7 @@ void Forwarding::setType(Type type)
         type_ = type;
         if (type == ForwardedNone) {
             ts_ = QDateTime();
-            ts_.isNull();
-            msg_.reset(nullptr);
+            msg_ = Message();
         }
     }
 }
@@ -88,7 +83,7 @@ QDateTime Forwarding::timeStamp() const
 {
     if (!ts_.isNull())
         return ts_;
-    return msg_.get() ? msg_->timeStamp() : QDateTime();
+    return msg_.timeStamp();
 }
 
 void Forwarding::setTimeStamp(const QDateTime &ts)
@@ -96,14 +91,14 @@ void Forwarding::setTimeStamp(const QDateTime &ts)
     ts_ = ts;
 }
 
-Message *Forwarding::message() const
+Message Forwarding::message() const
 {
-    return msg_.get();
+    return msg_;
 }
 
 void Forwarding::setMessage(const Message &msg)
 {
-    msg_.reset(new Message(msg));
+    msg_ = msg;
 }
 
 bool Forwarding::fromXml(const QDomElement &e, Client *client)
@@ -119,11 +114,11 @@ bool Forwarding::fromXml(const QDomElement &e, Client *client)
             if (client->pushMessage()->processXmlSubscribers(child, client, true))
                 break;
             Stanza s = client->stream().createStanza(addCorrectNS(child));
-            std::unique_ptr<Message> msg(new Message());
-            if (msg->fromStanza(s, client->manualTimeZoneOffset(), client->timeZoneOffset())) {
-                if (client->pushMessage()->processMessageSubscribers(*msg.get(), true))
+            Message msg;
+            if (msg.fromStanza(s, client->manualTimeZoneOffset(), client->timeZoneOffset())) {
+                if (client->pushMessage()->processMessageSubscribers(msg, true))
                     break;
-                msg_ = std::move(msg);
+                msg_ = msg;
                 type_ = ForwardedMessage;
                 correct = true;
             }
@@ -138,7 +133,7 @@ bool Forwarding::fromXml(const QDomElement &e, Client *client)
 
 QDomElement Forwarding::toXml(Stream *stream) const
 {
-    if (type_ == ForwardedNone || !msg_.get())
+    if (type_ == ForwardedNone || !msg_)
         return QDomElement();
 
     QDomElement e = stream->doc().createElement(QLatin1String("forwarded"));
@@ -149,7 +144,7 @@ QDomElement Forwarding::toXml(Stream *stream) const
         delay.setAttribute(QLatin1String("stamp"), ts_.toUTC().toString(Qt::ISODate) + "Z");
         e.appendChild(delay);
     }
-    e.appendChild(msg_->toStanza(stream).element());
+    e.appendChild(msg_.toStanza(stream).element());
     return e;
 }
 

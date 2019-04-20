@@ -25,7 +25,6 @@
 #include "xmpp_receipts.h"
 #include "xmpp_address.h"
 #include "xmpp_rosterx.h"
-#include "xmpp_forwarding.h"
 #include "xmpp_muc.h"
 
 #include <QExplicitlySharedDataPointer>
@@ -42,6 +41,7 @@ namespace XMPP {
     class XData;
     class BoBData;
     class IBBData;
+    class Forwarding;
 
     typedef QMap<QString, QString> StringMap;
 
@@ -72,6 +72,7 @@ namespace XMPP {
         ~Message();
         bool operator ==(const Message &from) const;
         inline bool isNull() const { return d == nullptr; }
+        inline operator bool() const { return d != nullptr; }
 
         Jid to() const;
         Jid from() const;
@@ -175,8 +176,7 @@ namespace XMPP {
 
         // XEP-0280 Message Carbons
         Jid displayJid() const;
-        const Message &displayMessage() const;
-        Message &displayMessage();
+        Message displayMessage() const;
         void setCarbonsPrivate(bool enable);
         bool carbonsPrivate() const;
 
