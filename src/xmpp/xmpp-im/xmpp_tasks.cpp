@@ -32,6 +32,7 @@
 
 using namespace XMPP;
 
+#define GET_SUBSCRIBER_ITERATOR(list, sbs) std::find_if(list.begin(), list.end(), [sbs](const Private::SubsData &value) { return value.sbs == sbs; })
 
 static QString lineEncode(QString str)
 {
@@ -896,26 +897,27 @@ public:
         Subscriber *sbs = nullptr;
         int userData = -1;
     };
+    using SubsDataList = QVector<SubsData>;
     EncryptionHandler *m_encryptionHandler;
-    QHash<QString, QList<SubsData> > subsData;
-    QList<SubsData> subsMData;
+    QHash<QString, SubsDataList> subsData;
+    SubsDataList subsMData;
 
     QString genKey(const QString &s1, const QString &s2)
     {
-        return QString(QLatin1String("%1&%2")).arg(s1, s2);
+        return QString::fromLatin1("%1&%2").arg(s1, s2);
     }
 
     bool processChildStanzaNode(const QDomElement &root, QDomElement &e, Client *c, bool nested)
     {
         QString tagName = e.tagName();
-        QString xmlnsStr = e.attribute(QLatin1String("xmlns"));
+        QString xmlnsStr = e.attribute(QString::fromLatin1("xmlns"));
         QString key = genKey(tagName, xmlnsStr);
         auto it = subsData.constFind(key);
         if (it != subsData.constEnd()) {
             foreach (const SubsData &sd, it.value()) {
                 if (sd.sbs->xmlEvent(root, e, c, sd.userData, nested))
                     return true;
-                if (e.tagName() != tagName || e.attribute(QLatin1String("xmlns")) != tagName)
+                if (e.tagName() != tagName || e.attribute(QString::fromLatin1("xmlns")) != tagName)
                     return false;
             }
         }
@@ -968,17 +970,14 @@ void JT_PushMessage::subscribeXml(Subscriber *sbs, const QString &tagName, const
 {
     QString key = d->genKey(tagName, xmlnsStr);
     auto it = d->subsData.find(key);
-    if (it == d->subsData.constEnd()) {
+    if (it != d->subsData.end()) {
+        Private::SubsDataList &list = it.value();
+        auto lit = GET_SUBSCRIBER_ITERATOR(list, sbs);
+        if (lit == list.end())
+            list.append({ sbs, userData });
+    } else {
         d->subsData.insert(key, {{ sbs, userData }});
-        return;
     }
-
-    foreach (const Private::SubsData &sd, it.value()) {
-        if (sd.sbs == sbs)
-            return;
-    }
-
-    it.value().append({ sbs, userData });
 }
 
 void JT_PushMessage::unsubscribeXml(Subscriber *sbs, const QString &tagName, const QString &xmlnsStr)
@@ -986,38 +985,30 @@ void JT_PushMessage::unsubscribeXml(Subscriber *sbs, const QString &tagName, con
     QString key = d->genKey(tagName, xmlnsStr);
     auto it = d->subsData.find(key);
     if (it != d->subsData.end()) {
-        QList<Private::SubsData> &list = it.value();
-        int cnt = list.count();
-        for (int i = 0; i < cnt; ++i) {
-            if (list.at(i).sbs == sbs) {
-                if (cnt == 1)
-                    d->subsData.erase(it);
-                else
-                    list.removeAt(i);
-                break;
-            }
+        Private::SubsDataList &list = it.value();
+        auto lit = GET_SUBSCRIBER_ITERATOR(list, sbs);
+        if (lit != list.end()) {
+            list.erase(lit);
+            if (list.isEmpty())
+                d->subsData.erase(it);
         }
     }
 }
 
 void JT_PushMessage::subscribeMessage(Subscriber *sbs, int userData)
 {
-    foreach (const Private::SubsData &sd, d->subsMData) {
-        if (sd.sbs == sbs)
-            return;
-    }
-    d->subsMData.append({ sbs, userData });
+    auto &list = d->subsMData;
+    auto lit = GET_SUBSCRIBER_ITERATOR(list, sbs);
+    if (lit == list.end())
+        list.append({ sbs, userData });
 }
 
 void JT_PushMessage::unsubscribeMessage(Subscriber *sbs)
 {
-    int sz = d->subsMData.size();
-    for (int i = 0; i < sz; ++i) {
-        if (d->subsMData.at(i).sbs == sbs) {
-            d->subsMData.removeAt(i);
-            break;
-        }
-    }
+    auto &list = d->subsMData;
+    auto lit = GET_SUBSCRIBER_ITERATOR(list, sbs);
+    if (lit != list.end())
+        list.erase(lit);
 }
 
 bool JT_PushMessage::processXmlSubscribers(QDomElement &el, Client *client, bool nested)

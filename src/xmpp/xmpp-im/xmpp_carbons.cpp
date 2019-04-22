@@ -70,17 +70,17 @@ JT_MessageCarbons::JT_MessageCarbons(Task *parent)
 
 void JT_MessageCarbons::enable()
 {
-    iq = createIQ(doc(), QLatin1String("set"), QString(), id());
-    QDomElement enable = doc()->createElement(QLatin1String("enable"));
-    enable.setAttribute(QLatin1String("xmlns"), xmlns_carbons);
+    iq = createIQ(doc(), QString::fromLatin1("set"), QString(), id());
+    QDomElement enable = doc()->createElement(QString::fromLatin1("enable"));
+    enable.setAttribute(QString::fromLatin1("xmlns"), xmlns_carbons);
     iq.appendChild(enable);
 }
 
 void JT_MessageCarbons::disable()
 {
-    iq = createIQ(doc(), QLatin1String("set"), QString(), id());
-    QDomElement disable = doc()->createElement(QLatin1String("disable"));
-    disable.setAttribute(QLatin1String("xmlns"), xmlns_carbons);
+    iq = createIQ(doc(), QString::fromLatin1("set"), QString(), id());
+    QDomElement disable = doc()->createElement(QString::fromLatin1("disable"));
+    disable.setAttribute(QString::fromLatin1("xmlns"), xmlns_carbons);
     iq.appendChild(disable);
 }
 
@@ -93,7 +93,7 @@ void JT_MessageCarbons::onGo()
 bool JT_MessageCarbons::take(const QDomElement &e)
 {
     if (iqVerify(e, Jid(), id())) {
-        if (e.attribute(QLatin1String("type")) != QLatin1String("result"))
+        if (e.attribute(QString::fromLatin1("type")) != QString::fromLatin1("result"))
             setError(e);
         else
             setSuccess();
@@ -111,8 +111,8 @@ bool CarbonsSubscriber::xmlEvent(const QDomElement &root, QDomElement &e, Client
     bool drop = false;
     frw.setType(Forwarding::ForwardedNone);
     if (!nested) {
-        Jid from(root.attribute(QLatin1String("from")));
-        Jid to(root.attribute(QLatin1String("to")));
+        Jid from(root.attribute(QStringLiteral("from")));
+        Jid to(root.attribute(QStringLiteral("to")));
         if (from.resource().isEmpty() && from.compare(to, false)) {
             QDomElement child = e.firstChildElement();
             while (!child.isNull()) {
@@ -152,14 +152,14 @@ public:
     }
 
     void subscribe() {
-        push_m->subscribeXml(sbs.get(), QLatin1String("received"), xmlns_carbons, Forwarding::ForwardedCarbonsReceived);
-        push_m->subscribeXml(sbs.get(), QLatin1String("sent"), xmlns_carbons, Forwarding::ForwardedCarbonsSent);
+        push_m->subscribeXml(sbs.get(), QString::fromLatin1("received"), xmlns_carbons, Forwarding::ForwardedCarbonsReceived);
+        push_m->subscribeXml(sbs.get(), QString::fromLatin1("sent"), xmlns_carbons, Forwarding::ForwardedCarbonsSent);
         push_m->subscribeMessage(sbs.get(), 0);
     }
 
     void unsubscribe() {
-        push_m->unsubscribeXml(sbs.get(), QLatin1String("received"), xmlns_carbons);
-        push_m->unsubscribeXml(sbs.get(), QLatin1String("sent"), xmlns_carbons);
+        push_m->unsubscribeXml(sbs.get(), QString::fromLatin1("received"), xmlns_carbons);
+        push_m->unsubscribeXml(sbs.get(), QString::fromLatin1("sent"), xmlns_carbons);
         push_m->unsubscribeMessage(sbs.get());
     }
 
@@ -182,7 +182,7 @@ CarbonsManager::~CarbonsManager()
 
 QDomElement CarbonsManager::privateElement(QDomDocument &doc)
 {
-    return doc.createElementNS(xmlns_carbons, QLatin1String("private"));
+    return doc.createElementNS(xmlns_carbons, QString::fromLatin1("private"));
 }
 
 void CarbonsManager::setEnabled(bool enable)
