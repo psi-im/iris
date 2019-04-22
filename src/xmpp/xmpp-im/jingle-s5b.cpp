@@ -375,6 +375,33 @@ public:
         pendingActions |= Private::CandidateError;
         emit q->updated();
     }
+
+    void updateMinimalPriority() {
+        quint32 prio = 0;
+        if (localUsedCandidate && minimalPriority < localUsedCandidate.priority() && localUsedCandidate.state() != Candidate::Discarded) {
+            prio = localUsedCandidate.priority();
+        } else if (remoteUsedCandidate && minimalPriority < remoteUsedCandidate.priority() && remoteUsedCandidate.state() != Candidate::Discarded) {
+            prio = remoteUsedCandidate.priority();
+        }
+        if (prio < minimalPriority) {
+            return;
+        }
+        for (auto &c: localCandidates) {
+            if (c.priority() < prio && c.state() != Candidate::Discarded) {
+                c.setState(Candidate::Discarded);
+            }
+        }
+        for (auto &c: remoteCandidates) {
+            if (c.priority() < prio && c.state() != Candidate::Discarded) {
+                c.setState(Candidate::Discarded);
+            }
+        }
+        prio >>= 16;
+        if (proxyDiscoveryInProgress && prio > Candidate::ProxyPreference) {
+            // all proxies do no make sense anymore. we have successful higher priority candidate
+            proxyDiscoveryInProgress = false;
+        }
+    }
 };
 
 Transport::Transport(const TransportManagerPad::Ptr &pad) :
@@ -563,16 +590,7 @@ bool Transport::update(const QDomElement &transportEl)
         }
         cUsed.setState(Candidate::Accepted);
         d->localUsedCandidate = cUsed;
-        for (auto &c: d->localCandidates) {
-            if (c.priority() < cUsed.priority() && c.state() != Candidate::Discarded) {
-                c.setState(Candidate::Discarded);
-            }
-        }
-        quint32 prio = cUsed.priority() >> 16;
-        if (d->proxyDiscoveryInProgress && prio > Candidate::ProxyPreference) {
-            // all proxies do no make sense anymore. we have successful higher priority candidate
-            d->proxyDiscoveryInProgress = false;
-        }
+        d->updateMinimalPriority();
         // TODO check upnp too when implemented
         d->checkAndSendLocalCandidatesExhausted();
         // TODO here we can emit connected() if did send candidate-error or candidate-used before
