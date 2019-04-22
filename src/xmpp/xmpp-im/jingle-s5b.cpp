@@ -313,6 +313,8 @@ public:
         // seems like we don't have better candidates,
         // so we are going to use the d->localUsedCandidate
         signalNegotiated = true;
+
+        // TODO emit connected() if ready
     }
 
     void tryConnectToRemoteCandidate()
@@ -360,6 +362,12 @@ public:
         // if we send candidate-error while we have unsent candidates this may trigger transport failure.
         // So for candidate-error two conditions have to be met 1) all remote failed 2) all local were sent no more
         // local candidates are expected to be discovered
+
+        // if we already sent candidate-error or candidate-used then just silently exit
+        if (remoteUsedCandidate || localReportedCandidateError || (pendingActions & Private::CandidateError)) {
+            return;
+        }
+
         for (const auto &c: remoteCandidates) {
             if (c.state() != Candidate::Discarded) {
                 // we have other cadidates to handle. so we don't need candidate-error to be sent to remote yet
@@ -400,6 +408,13 @@ public:
         if (proxyDiscoveryInProgress && prio > Candidate::ProxyPreference) {
             // all proxies do no make sense anymore. we have successful higher priority candidate
             proxyDiscoveryInProgress = false;
+        }
+        // if we discarded "used" candidates then reset them to invalid
+        if (localUsedCandidate && localUsedCandidate.state() == Candidate::Discarded) {
+            localUsedCandidate = Candidate();
+        }
+        if (remoteUsedCandidate && remoteUsedCandidate.state() == Candidate::Discarded) {
+            remoteUsedCandidate = Candidate();
         }
     }
 };
@@ -593,7 +608,6 @@ bool Transport::update(const QDomElement &transportEl)
         d->updateMinimalPriority();
         // TODO check upnp too when implemented
         d->checkAndSendLocalCandidatesExhausted();
-        // TODO here we can emit connected() if did send candidate-error or candidate-used before
         QTimer::singleShot(0, this, [this](){ d->updateSelfState(); });
         return true;
     }
@@ -607,14 +621,19 @@ bool Transport::update(const QDomElement &transportEl)
             }
         }
         d->checkAndSendLocalCandidatesExhausted();
+        QTimer::singleShot(0, this, [this](){ d->updateSelfState(); });
         return true;
     }
 
     el = transportEl.firstChildElement(QStringLiteral("activated"));
     if (!el.isNull()) {
         auto c = d->localCandidates.value(el.attribute(QStringLiteral("cid")));
-        if (!(c && c.type() == Candidate::Proxy && c.state() == Candidate::Accepted && c == d->localUsedCandidate)) {
+        if (!c) {
             return false;
+        }
+        if (!(c.type() == Candidate::Proxy && c.state() == Candidate::Accepted && c == d->localUsedCandidate)) {
+            qDebug("Received <activated> on a candidate in an inappropriate state. Ignored.");
+            return true;
         }
         c.setState(Candidate::Active);
         QTimer::singleShot(0, this, [this](){ emit connected(); });
@@ -624,11 +643,29 @@ bool Transport::update(const QDomElement &transportEl)
     el = transportEl.firstChildElement(QStringLiteral("proxy-error"));
     if (!el.isNull()) {
         auto c = d->localCandidates.value(el.attribute(QStringLiteral("cid")));
-        if (!c || c.state() != Candidate::Accepted) {
+        if (!c) {
             return false;
         }
-        c.setState(Candidate::Discarded);
-        d->checkAndSendLocalCandidatesExhausted();
+        if (c != d->localUsedCandidate || c.state() != Candidate::Accepted) {
+            qDebug("Received <proxy-error> on a candidate in an inappropriate state. Ignored.");
+            return true;
+        }
+
+        // if we got proxy-error then the transport has to be considered failed according to spec
+        // so never send proxy-error while we have unaknowledged local non-proxy candidates,
+        // but we have to follow the standard.
+
+        // Discard everything
+        for (auto &c: d->localCandidates) {
+            c.setState(Candidate::Discarded);
+        }
+        for (auto &c: d->remoteCandidates) {
+            c.setState(Candidate::Discarded);
+        }
+        d->proxyDiscoveryInProgress = false;
+        // TODO do the same for upnp when implemented
+
+        QTimer::singleShot(0, this, [this](){ emit failed(); });
         return true;
     }
 
