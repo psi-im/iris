@@ -1073,7 +1073,7 @@ public:
     QString replaceId;
     QString originId; // XEP-0359
     Message::StanzaId stanzaId; // XEP-0359
-    Forwarding forwarding;
+    Forwarding forwarding; // XEP-0297
 };
 
 #define MessageD() (d? d : (d = new Private))
@@ -1650,7 +1650,7 @@ Jid Message::displayJid() const
 //! \brief Returns either the message inside the carbons or itself.
 Message Message::displayMessage() const
 {
-    if (d && d->forwarding.isCarbons() && d->forwarding.message())
+    if (d && d->forwarding.isCarbons())
         return d->forwarding.message();
 
     return *this;

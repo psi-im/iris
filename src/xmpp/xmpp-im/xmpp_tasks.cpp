@@ -893,8 +893,8 @@ void JT_Message::onGo()
 class JT_PushMessage::Private {
 public:
     struct SubsData {
-        Subscriber *sbs;
-        int userData;
+        Subscriber *sbs = nullptr;
+        int userData = -1;
     };
     EncryptionHandler *m_encryptionHandler;
     QHash<QString, QList<SubsData> > subsData;
@@ -910,9 +910,9 @@ public:
         QString tagName = e.tagName();
         QString xmlnsStr = e.attribute(QLatin1String("xmlns"));
         QString key = genKey(tagName, xmlnsStr);
-        if (subsData.contains(key)) {
-            QList<SubsData> sdl = subsData.value(key);
-            foreach (const SubsData &sd, sdl) {
+        auto it = subsData.constFind(key);
+        if (it != subsData.constEnd()) {
+            foreach (const SubsData &sd, it.value()) {
                 if (sd.sbs->xmlEvent(root, e, c, sd.userData, nested))
                     return true;
                 if (e.tagName() != tagName || e.attribute(QLatin1String("xmlns")) != tagName)
@@ -967,27 +967,35 @@ JT_PushMessage::~JT_PushMessage()
 void JT_PushMessage::subscribeXml(Subscriber *sbs, const QString &tagName, const QString &xmlnsStr, int userData)
 {
     QString key = d->genKey(tagName, xmlnsStr);
-    QList<Private::SubsData> list = d->subsData.value(key);
-    foreach (const Private::SubsData &sd, list) {
+    auto it = d->subsData.find(key);
+    if (it == d->subsData.constEnd()) {
+        d->subsData.insert(key, {{ sbs, userData }});
+        return;
+    }
+
+    foreach (const Private::SubsData &sd, it.value()) {
         if (sd.sbs == sbs)
             return;
     }
-    list.append({ sbs, userData });
-    d->subsData.insert(key, list);
+
+    it.value().append({ sbs, userData });
 }
 
 void JT_PushMessage::unsubscribeXml(Subscriber *sbs, const QString &tagName, const QString &xmlnsStr)
 {
     QString key = d->genKey(tagName, xmlnsStr);
-    QList<Private::SubsData> list = d->subsData.value(key);
-    for (int i = 0; i < list.count(); ++i) {
-        if (list.at(i).sbs == sbs) {
-            list.removeAt(i);
-            if (list.count() > 0)
-                d->subsData.insert(key, list);
-            else
-                d->subsData.remove(key);
-            break;
+    auto it = d->subsData.find(key);
+    if (it != d->subsData.end()) {
+        QList<Private::SubsData> &list = it.value();
+        int cnt = list.count();
+        for (int i = 0; i < cnt; ++i) {
+            if (list.at(i).sbs == sbs) {
+                if (cnt == 1)
+                    d->subsData.erase(it);
+                else
+                    list.removeAt(i);
+                break;
+            }
         }
     }
 }

@@ -108,7 +108,6 @@ bool JT_MessageCarbons::take(const QDomElement &e)
 
 bool CarbonsSubscriber::xmlEvent(const QDomElement &root, QDomElement &e, Client *client, int userData, bool nested)
 {
-    Q_UNUSED(root);
     bool drop = false;
     frw.setType(Forwarding::ForwardedNone);
     if (!nested) {
@@ -147,6 +146,11 @@ bool CarbonsSubscriber::messageEvent(Message &msg, int userData, bool nested)
 
 class CarbonsManager::Private {
 public:
+    ~Private() {
+//        if (sbs.get())
+//            unsubscribe();
+    }
+
     void subscribe() {
         push_m->subscribeXml(sbs.get(), QLatin1String("received"), xmlns_carbons, Forwarding::ForwardedCarbonsReceived);
         push_m->subscribeXml(sbs.get(), QLatin1String("sent"), xmlns_carbons, Forwarding::ForwardedCarbonsSent);
@@ -174,8 +178,6 @@ CarbonsManager::CarbonsManager(JT_PushMessage *push_m)
 
 CarbonsManager::~CarbonsManager()
 {
-//    if (d->sbs.get())
-//        d->unsubscribe();
 }
 
 QDomElement CarbonsManager::privateElement(QDomDocument &doc)
@@ -201,7 +203,7 @@ void CarbonsManager::setEnabled(bool enable)
         jt->enable();
         jt->go(true);
     }
-    else if (d->sbs.get()) {
+    else {
         JT_MessageCarbons *jt = new JT_MessageCarbons(d->push_m->client()->rootTask());
         connect(jt, &JT_MessageCarbons::finished, this, [=]() {
             d->enable = false;

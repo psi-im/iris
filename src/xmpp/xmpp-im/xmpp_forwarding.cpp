@@ -53,9 +53,11 @@ Forwarding::~Forwarding()
 
 Forwarding & Forwarding::operator=(const Forwarding &from)
 {
-    type_ = from.type_;
-    ts_ = from.ts_;
-    msg_ = from.msg_;
+    if (this != &from) {
+        type_ = from.type_;
+        ts_ = from.ts_;
+        msg_ = from.msg_;
+    }
     return *this;
 }
 
@@ -63,6 +65,7 @@ Forwarding::Type Forwarding::type() const
 {
     return type_;
 }
+
 void Forwarding::setType(Type type)
 {
     if (type_ != type) {
@@ -186,6 +189,13 @@ private:
 
 class ForwardingManager::Private {
 public:
+    ~Private() {
+//        if (sbs.get()) {
+//            push_m->unsubscribeXml(sbs.get(), QLatin1String("forwarded"), xmlns_forward);
+//            push_m->unsubscribeMessage(sbs.get());
+//        }
+    }
+
     JT_PushMessage *push_m;
     std::unique_ptr<ForwardingSubscriber> sbs;
     bool enabled = false;
@@ -200,10 +210,6 @@ ForwardingManager::ForwardingManager(JT_PushMessage *push_m)
 
 ForwardingManager::~ForwardingManager()
 {
-//    if (d->sbs.get()) {
-//        d->push_m->unsubscribeXml(d->sbs.get(), QLatin1String("forwarded"), xmlns_forward);
-//        d->push_m->unsubscribeMessage(d->sbs.get());
-//    }
 }
 
 void ForwardingManager::setEnabled(bool enabled)
@@ -219,7 +225,7 @@ void ForwardingManager::setEnabled(bool enabled)
     else {
         d->push_m->unsubscribeXml(d->sbs.get(), QLatin1String("forwarded"), xmlns_forward);
         d->push_m->unsubscribeMessage(d->sbs.get());
-        d->sbs.release();
+        d->sbs.reset();
     }
     d->enabled = enabled;
 }
