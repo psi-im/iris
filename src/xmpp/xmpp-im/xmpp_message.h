@@ -41,6 +41,7 @@ namespace XMPP {
     class XData;
     class BoBData;
     class IBBData;
+    class Forwarding;
 
     typedef QMap<QString, QString> StringMap;
 
@@ -50,12 +51,6 @@ namespace XMPP {
     class Message
     {
     public:
-        enum CarbonDir : quint8 {
-            NoCarbon,
-            Received, // other party messages are sent to another own client
-            Sent      // own messages are sent from other clients
-        };
-
         // XEP-0334
         enum ProcessingHint {
             NoPermanentStore = 1,
@@ -77,6 +72,7 @@ namespace XMPP {
         ~Message();
         bool operator ==(const Message &from) const;
         inline bool isNull() const { return d == nullptr; }
+        inline operator bool() const { return d != nullptr; }
 
         Jid to() const;
         Jid from() const;
@@ -179,14 +175,15 @@ namespace XMPP {
         IBBData ibbData() const;
 
         // XEP-0280 Message Carbons
-        void setDisabledCarbons(bool disabled);
-        bool isDisabledCarbons() const;
-        void setCarbonDirection(CarbonDir);
-        CarbonDir carbonDirection() const;
+        Jid displayJid() const;
+        Message displayMessage() const;
+        void setCarbonsPrivate(bool enable);
+        bool carbonsPrivate() const;
 
         // XEP-0297
-        void setForwardedFrom(const Jid &jid);
-        Jid forwardedFrom() const;
+        void setForwarded(const Forwarding &frw);
+        // note, the next method has to be called only on not-null message
+        const Forwarding &forwarded() const;
 
         // XEP-0308
         QString replaceId() const;

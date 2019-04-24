@@ -72,6 +72,8 @@ HEADERS += \
     $$PWD/xmpp-im/xmpp_subsets.h \
     $$PWD/xmpp-im/xmpp_captcha.h \
     $$PWD/xmpp-im/xmpp_features.h \
+    $$PWD/xmpp-im/xmpp_forwarding.h \
+    $$PWD/xmpp-im/xmpp_carbons.h \
     $$PWD/xmpp-im/xmpp_agentitem.h \
     $$PWD/xmpp-im/xmpp_discoitem.h \
     $$PWD/xmpp-im/xmpp_bitsofbinary.h \
@@ -97,6 +99,8 @@ SOURCES += \
     $$PWD/xmpp-im/types.cpp \
     $$PWD/xmpp-im/client.cpp \
     $$PWD/xmpp-im/xmpp_features.cpp \
+    $$PWD/xmpp-im/xmpp_forwarding.cpp \
+    $$PWD/xmpp-im/xmpp_carbons.cpp \
     $$PWD/xmpp-im/xmpp_discoitem.cpp \
     $$PWD/xmpp-im/xmpp_discoinfotask.cpp \
     $$PWD/xmpp-im/xmpp_xdata.cpp \

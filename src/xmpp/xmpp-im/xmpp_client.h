@@ -50,9 +50,11 @@ namespace XMPP {
     class Stream;
     class Task;
     class CapsManager;
+    class CarbonsManager;
     class EncryptionHandler;
     class ServerInfoManager;
     class HttpFileUploadManager;
+    class JT_PushMessage;
 
     namespace Jingle {
         class Manager;
@@ -138,6 +140,8 @@ namespace XMPP
         BoBManager *bobManager() const;
         JidLinkManager *jidLinkManager() const;
         CapsManager *capsManager() const;
+        CarbonsManager *carbonsManager() const;
+        JT_PushMessage *pushMessage() const;
         ServerInfoManager *serverInfoManager() const;
         HttpFileUploadManager *httpFileUploadManager() const;
         Jingle::Manager* jingleManager() const;
