@@ -1,4 +1,4 @@
-/*
+﻿/*
  * jignle-s5b.cpp - Jingle SOCKS5 transport
  * Copyright (C) 2019  Sergey Ilinykh
  *
@@ -84,6 +84,12 @@ Candidate::Candidate(const QDomElement &el)
                                    };
     auto candidateType = types.value(ct);
     if (ct.isEmpty() || candidateType == None) {
+        return;
+    }
+
+    if ((candidateType == Proxy && !jid.isValid()) ||
+            (candidateType != Proxy && (host.isEmpty() || !port)))
+    {
         return;
     }
 
@@ -205,20 +211,26 @@ QDomElement Candidate::toXml(QDomDocument *doc) const
     return e;
 }
 
+void Candidate::connectToHost(std::function<void(bool)> callback)
+{
+    // TODO negotiate socks5 connection to host and port
+    Q_UNUSED(callback)
+}
+
 class Transport::Private : public QSharedData {
 public:
     enum PendingActions {
-        NewCandidate,
-        CandidateUsed,
-        CandidateError,
-        Activated,
-        ProxyError
+        NewCandidate    = 1,
+        CandidateUsed   = 2,
+        CandidateError  = 4,
+        Activated       = 8,
+        ProxyError      = 16
     };
 
     Transport *q = NULL;
     Pad::Ptr pad;
+    bool waitingAck = true;
     bool aborted = false;
-    bool signalNegotiated = false;
     bool remoteReportedCandidateError = false;
     bool localReportedCandidateError = false;
     bool proxyDiscoveryInProgress = false; // if we have valid proxy requests
@@ -273,50 +285,6 @@ public:
         return false;
     }
 
-    void updateSelfState()
-    {
-        // TODO code below is from handler of "candidate-used". it has to be updated
-        bool hasMoreCandidates = false;
-        for (auto &c: localCandidates) {
-            auto s = c.state();
-            if (s < Candidate::Pending && c.priority() > localUsedCandidate.priority()) {
-                hasMoreCandidates = true;
-                continue; // we have more high priority candidates to be handled by remote
-            }
-            c.setState(Candidate::Discarded);
-        }
-
-        if (hasMoreCandidates) {
-            return;
-        }
-
-        // let's check remote candidates too before we decide to use this local candidate
-        for (auto &c: remoteCandidates) {
-            auto s = c.state();
-            if (c.priority() > localUsedCandidate.priority() && (s == Candidate::Pending ||
-                                                    s == Candidate::Probing ||
-                                                    s == Candidate::New)) {
-                hasMoreCandidates = true;
-                continue; // we have more high priority candidates to be handled by remote
-            } else if (c.priority() == localUsedCandidate.priority() && s == Candidate::Unacked &&
-                       pad->session()->role() == Origin::Initiator) {
-                hasMoreCandidates = true;
-                continue; // see 2.4 Completing the Negotiation (p.4)
-            }
-            c.setState(Candidate::Discarded); // TODO stop any probing as well
-        }
-
-        if (hasMoreCandidates) {
-            return;
-        }
-
-        // seems like we don't have better candidates,
-        // so we are going to use the d->localUsedCandidate
-        signalNegotiated = true;
-
-        // TODO emit connected() if ready
-    }
-
     void tryConnectToRemoteCandidate()
     {
         if (application->state() != State::Connecting) {
@@ -355,35 +323,96 @@ public:
         return false;
     }
 
-    void checkAndSendLocalCandidatesExhausted()
+    void checkAndFinishNegotiation()
     {
+        // Why we can't send candidate-used/error right when this happens:
         // so the situation: we discarded all remote candidates (failed to connect)
         // but we have some local candidates which are still in Probing state (upnp for example)
         // if we send candidate-error while we have unsent candidates this may trigger transport failure.
         // So for candidate-error two conditions have to be met 1) all remote failed 2) all local were sent no more
         // local candidates are expected to be discovered
 
-        // if we already sent candidate-error or candidate-used then just silently exit
-        if (remoteUsedCandidate || localReportedCandidateError || (pendingActions & Private::CandidateError)) {
+        if (application->state() != State::Connecting) {
+            return; // we can't finish anything in this state. Only Connecting is acceptable
+        }
+
+        // sort out already handled states or states which will bring us here a little later
+        if (waitingAck || pendingActions || hasUnaknowledgedLocalCandidates())
+        {
+            // waitingAck some query waits for ack and in the callback this func will be called again
+            // pendingActions means we reported to app we have data to send but the app didn't take this data yet,
+            // but as soon as it's taken it will switch to waitingAck.
+            // And with unacknowledged local candidates we can't send used/error as well as report connected()/failure()
+            // until tried them all
             return;
         }
 
+        // if we already sent used/error. In other words if we already have finished local part of negotiation
+        if (localReportedCandidateError || remoteUsedCandidate) {
+            // maybe it's time to report connected()/failure()
+            if (remoteReportedCandidateError || localUsedCandidate) {
+                // so remote seems to be finished too.
+                // tell application about it and it has to change its state immediatelly
+                if (localUsedCandidate || remoteUsedCandidate) {
+                    auto c = localUsedCandidate? localUsedCandidate : remoteUsedCandidate;
+                    if (c.type() == Candidate::Proxy) {
+                        // If it's proxy, first it has to be activated
+                        if (localUsedCandidate) {
+                            // it's our side who proposed proxy. so we have to connect to it and activate
+                            c.connectToHost([this](bool success){
+                                if (success) {
+                                    pendingActions |= Private::Activated;
+                                } else {
+                                    pendingActions |= Private::ProxyError;
+                                }
+                                emit q->updated();
+                            });
+                        } else {
+                            return; // let's just wait for <activated> from remote
+                        }
+                    } else {
+                        c.setState(Candidate::Active);
+                        emit q->connected();
+                    }
+                } else {
+                    emit q->failed();
+                }
+            } // else we have to wait till remote reports its status
+            return;
+        }
+
+        // if we are here then neither candidate-used nor candidate-error was sent to remote,
+        // but we can send it now.
+        // first let's check if we can send candidate-used
+        bool allRemoteDiscarded = true;
+        bool hasConnectedRemoteCandidate = false;
         for (const auto &c: remoteCandidates) {
-            if (c.state() != Candidate::Discarded) {
-                // we have other cadidates to handle. so we don't need candidate-error to be sent to remote yet
-                return;
+            auto s = c.state();
+            if (s != Candidate::Discarded) {
+                allRemoteDiscarded = false;
+            }
+            if (s == Candidate::Pending) { // connected but not yet sent
+                hasConnectedRemoteCandidate = true;
             }
         }
-        if (hasUnaknowledgedLocalCandidates()) {
+
+        // if we have connection to remote candidate it's time to send it
+        if (hasConnectedRemoteCandidate) {
+            pendingActions |= Private::CandidateUsed;
+            emit q->updated();
             return;
         }
 
-        // so no pending local candidates discovery and all discovered candidates were already sent to remote.
-        // since all remote candidates are failed as well, we can't do anything here. time to accept the failure.
-        pendingActions |= Private::CandidateError;
-        emit q->updated();
+        if (allRemoteDiscarded) {
+            pendingActions |= Private::CandidateError;
+            emit q->updated();
+            return;
+        }
+
+        // apparently we haven't connected anywhere but there are more remote candidates to try
     }
 
+    // take used-candidate with highest priority and discard all with lower. also update used candidates themselves
     void updateMinimalPriority() {
         quint32 prio = 0;
         if (localUsedCandidate && minimalPriority < localUsedCandidate.priority() && localUsedCandidate.state() != Candidate::Discarded) {
@@ -415,6 +444,16 @@ public:
         }
         if (remoteUsedCandidate && remoteUsedCandidate.state() == Candidate::Discarded) {
             remoteUsedCandidate = Candidate();
+        }
+        if (localUsedCandidate && remoteUsedCandidate) {
+            if (application->creator() == pad->session()->role()) {
+                // i'm initiator. see 2.4.4
+                localUsedCandidate.setState(Candidate::Discarded);
+                localUsedCandidate = Candidate();
+            } else {
+                remoteUsedCandidate.setState(Candidate::Discarded);
+                remoteUsedCandidate = Candidate();
+            }
         }
     }
 };
@@ -531,7 +570,7 @@ void Transport::prepare()
                     emit updated();
                 } else if (!d->proxiesInDiscoCount) {
                     // it's possible it was our last hope and probaby we have to send candidate-error now.
-                    d->checkAndSendLocalCandidatesExhausted();
+                    d->checkAndFinishNegotiation();
                 }
             });
             query->requestProxyInfo(j);
@@ -557,7 +596,7 @@ void Transport::prepare()
         } else if (items.count() == 0) {
             // seems like we don't have any proxy
             d->proxyDiscoveryInProgress = false;
-            d->checkAndSendLocalCandidatesExhausted();
+            d->checkAndFinishNegotiation();
         }
     });
 
@@ -590,6 +629,7 @@ bool Transport::update(const QDomElement &transportEl)
         candidatesAdded++;
     }
     if (candidatesAdded) {
+        d->pendingActions &= ~Private::CandidateError;
         d->localReportedCandidateError = false;
         QTimer::singleShot(0, this, [this](){
             d->tryConnectToRemoteCandidate();
@@ -606,9 +646,7 @@ bool Transport::update(const QDomElement &transportEl)
         cUsed.setState(Candidate::Accepted);
         d->localUsedCandidate = cUsed;
         d->updateMinimalPriority();
-        // TODO check upnp too when implemented
-        d->checkAndSendLocalCandidatesExhausted();
-        QTimer::singleShot(0, this, [this](){ d->updateSelfState(); });
+        QTimer::singleShot(0, this, [this](){ d->checkAndFinishNegotiation(); });
         return true;
     }
 
@@ -620,8 +658,7 @@ bool Transport::update(const QDomElement &transportEl)
                 c.setState(Candidate::Discarded);
             }
         }
-        d->checkAndSendLocalCandidatesExhausted();
-        QTimer::singleShot(0, this, [this](){ d->updateSelfState(); });
+        QTimer::singleShot(0, this, [this](){ d->checkAndFinishNegotiation(); });
         return true;
     }
 
@@ -674,7 +711,7 @@ bool Transport::update(const QDomElement &transportEl)
 
 Action Transport::outgoingUpdateType() const
 {
-    if (isValid() && d->application) {
+    if (isValid() && d->application && d->pendingActions) {
         // if we are preparing local offer and have at least one candidate, we have to sent it.
         // otherwise it's not first update to remote from this transport, so we have to send just signalling candidates
         if ((d->application->state() == State::PrepareLocalOffer && d->localCandidates.size()) ||

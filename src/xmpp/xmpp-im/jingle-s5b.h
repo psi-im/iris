@@ -110,6 +110,7 @@ public:
 
     QDomElement toXml(QDomDocument *doc) const;
 
+    void connectToHost(std::function<void (bool)> callback);
 private:
     class Private;
     QExplicitlySharedDataPointer<Private> d;
