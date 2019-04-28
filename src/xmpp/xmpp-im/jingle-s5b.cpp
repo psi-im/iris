@@ -240,7 +240,6 @@ public:
     Application *application = nullptr;
     QMap<QString,Candidate> localCandidates; // cid to candidate mapping
     QMap<QString,Candidate> remoteCandidates;
-    QSet<QPair<QString,Origin>> signalingCandidates; // origin here is session role. so for remote it's != session->role
     Candidate localUsedCandidate; // we received "candidate-used" for this candidate from localCandidates list
     Candidate remoteUsedCandidate; // we sent "candidate-used" for this candidate from remoteCandidates list
     QString dstaddr;
@@ -259,6 +258,11 @@ public:
         Q_ASSERT(application);
         auto senders = application->senders();
         return senders == Origin::Both || senders == negateOrigin(application->creator());
+    }
+
+    bool amICreator() const
+    {
+        return application->creator() == pad->session()->role();
     }
 
     inline Jid remoteJid() const
@@ -355,26 +359,28 @@ public:
                 // tell application about it and it has to change its state immediatelly
                 if (localUsedCandidate || remoteUsedCandidate) {
                     auto c = localUsedCandidate? localUsedCandidate : remoteUsedCandidate;
-                    if (c.type() == Candidate::Proxy) {
-                        // If it's proxy, first it has to be activated
-                        if (localUsedCandidate) {
-                            // it's our side who proposed proxy. so we have to connect to it and activate
-                            c.connectToHost([this](bool success){
-                                if (success) {
-                                    pendingActions |= Private::Activated;
-                                } else {
-                                    pendingActions |= Private::ProxyError;
-                                }
-                                emit q->updated();
-                            });
+                    if (c.state() != Candidate::Active) {
+                        if (c.type() == Candidate::Proxy) {
+                            // If it's proxy, first it has to be activated
+                            if (localUsedCandidate) {
+                                // it's our side who proposed proxy. so we have to connect to it and activate
+                                c.connectToHost([this](bool success){
+                                    if (success) {
+                                        pendingActions |= Private::Activated;
+                                    } else {
+                                        pendingActions |= Private::ProxyError;
+                                    }
+                                    emit q->updated();
+                                });
+                            } // else so it's remote proxy. let's just wait for <activated> from remote
                         } else {
-                            return; // let's just wait for <activated> from remote
+                            c.setState(Candidate::Active);
                         }
-                    } else {
-                        c.setState(Candidate::Active);
+                    }
+                    if (c.state() == Candidate::Active) {
                         emit q->connected();
                     }
-                } else {
+                } else { // both sides reported candidate error
                     emit q->failed();
                 }
             } // else we have to wait till remote reports its status
@@ -446,7 +452,7 @@ public:
             remoteUsedCandidate = Candidate();
         }
         if (localUsedCandidate && remoteUsedCandidate) {
-            if (application->creator() == pad->session()->role()) {
+            if (amICreator()) {
                 // i'm initiator. see 2.4.4
                 localUsedCandidate.setState(Candidate::Discarded);
                 localUsedCandidate = Candidate();
@@ -549,8 +555,8 @@ void Transport::prepare()
                 bool candidateUpdated = false;
                 auto c = d->localCandidates.value(cid);
                 if (c && c.state() == Candidate::Probing) {
-                    if (query->success()) {
-                        auto sh = query->proxyInfo();
+                    auto sh = query->proxyInfo();
+                    if (query->success() && !sh.host().isEmpty() && sh.port()) {
                         // it can be discarded by this moment (e.g. got success on a higher priority candidate).
                         // so we have to check.
                         c.setHost(sh.host());
@@ -599,10 +605,6 @@ void Transport::prepare()
             d->checkAndFinishNegotiation();
         }
     });
-
-    for (auto const &c: d->localCandidates) {
-        d->signalingCandidates.insert(QPair<QString,Origin>{c.cid(),d->pad->session()->role()});
-    }
 
     // TODO nat-assisted candidates..
     emit updated();
@@ -715,8 +717,7 @@ Action Transport::outgoingUpdateType() const
         // if we are preparing local offer and have at least one candidate, we have to sent it.
         // otherwise it's not first update to remote from this transport, so we have to send just signalling candidates
         if ((d->application->state() == State::PrepareLocalOffer && d->localCandidates.size()) ||
-                (d->application->state() > State::PrepareLocalOffer && d->application->state() < State::Finished &&
-                 !d->signalingCandidates.isEmpty()))
+                (d->application->state() > State::PrepareLocalOffer && d->application->state() < State::Finished))
         {
             return Action::TransportInfo;
         }
@@ -732,26 +733,27 @@ OutgoingUpdate Transport::takeOutgoingUpdate()
         return upd;
     }
 
-    auto sessRole = d->pad->session()->role();
     auto doc = d->pad->session()->manager()->client()->doc();
 
-    if (appState == State::PrepareLocalOffer && !d->localCandidates.isEmpty()) {
-        QDomElement tel = doc->createElementNS(NS, "transport");
-        tel.setAttribute(QStringLiteral("sid"), d->sid);
-        if (d->mode != Tcp) {
-            tel.setAttribute(QStringLiteral("mode"), "udp");
-        }
+    QDomElement tel = doc->createElementNS(NS, "transport");
+    tel.setAttribute(QStringLiteral("sid"), d->sid);
+    if (d->amICreator() && d->mode != Tcp) {
+        tel.setAttribute(QStringLiteral("mode"), "udp");
+    }
+
+    if (d->pendingActions & Private::NewCandidate) {
+        d->pendingActions &= ~Private::NewCandidate;
         bool useProxy = false;
         QList<Candidate> candidatesToSend;
         for (auto &c: d->localCandidates) {
+            if (c.state() != Candidate::New) {
+                continue;
+            }
             if (c.type() == Candidate::Proxy) {
                 useProxy = true;
             }
-            if (!c.host().isEmpty()) {
-                tel.appendChild(c.toXml(doc));
-            }
+            tel.appendChild(c.toXml(doc));
             candidatesToSend.append(c);
-            d->signalingCandidates.remove(QPair<QString,Origin>{c.cid(),sessRole});
             c.setState(Candidate::Unacked);
         }
         if (useProxy) {
@@ -761,12 +763,86 @@ OutgoingUpdate Transport::takeOutgoingUpdate()
                                                        QCryptographicHash::Sha1);
             tel.setAttribute(QStringLiteral("dstaddr"), dstaddr);
         }
-        OutgoingUpdate{tel, [this, candidatesToSend]() mutable {
+        if (!candidatesToSend.isEmpty()) {
+            d->waitingAck = true;
+            upd = OutgoingUpdate{tel, [this, candidatesToSend]() mutable {
+                d->waitingAck = false;
                 for (auto &c: candidatesToSend) {
-                    c.setState(Candidate::Pending);
+                    if (c.state() == Candidate::Unacked) {
+                        c.setState(Candidate::Pending);
+                    }
                 }
-            }}; // FIXME we should update candidates status here
+                d->checkAndFinishNegotiation();
+            }};
+        }
+    } else if (d->pendingActions & Private::CandidateUsed) {
+        d->pendingActions &= ~Private::NewCandidate;
+        // we should have the only remote candidate in Pending state
+        for (auto &c: d->remoteCandidates) {
+            if (c.state() != Candidate::Pending) {
+                continue;
+            }
+            auto el = tel.appendChild(doc->createElement(QStringLiteral("candidate-used"))).toElement();
+            el.setAttribute(QStringLiteral("cid"), c.cid());
+            c.setState(Candidate::Unacked);
+
+            d->waitingAck = true;
+            upd = OutgoingUpdate{tel, [this, c]() mutable {
+                d->waitingAck = false;
+                if (c.state() == Candidate::Unacked) {
+                    c.setState(Candidate::Accepted);
+                    d->remoteUsedCandidate = c;
+                }
+                d->checkAndFinishNegotiation();
+            }};
+
+            break;
+        }
+    } else if (d->pendingActions & Private::CandidateError) {
+        d->pendingActions &= ~Private::CandidateError;
+        // we are here because all remote are already in Discardd state
+        tel.appendChild(doc->createElement(QStringLiteral("candidate-error")));
+        d->waitingAck = true;
+        upd = OutgoingUpdate{tel, [this]() mutable {
+            d->waitingAck = false;
+            d->localReportedCandidateError = true;
+            d->checkAndFinishNegotiation();
+        }};
+    } else if (d->pendingActions & Private::Activated) {
+        d->pendingActions &= ~Private::Activated;
+        if (d->localUsedCandidate) {
+            auto cand = d->localUsedCandidate;
+            auto el = tel.appendChild(doc->createElement(QStringLiteral("activated"))).toElement();
+            el.setAttribute(QStringLiteral("cid"), cand.cid());
+            d->waitingAck = true;
+            upd = OutgoingUpdate{tel, [this, cand]() mutable {
+                d->waitingAck = false;
+                if (cand.state() != Candidate::Accepted || d->localUsedCandidate != cand) {
+                    return; // seems like state was changed while we was waiting for an ack
+                }
+                cand.setState(Candidate::Active);
+                d->checkAndFinishNegotiation();
+            }};
+        }
+    } else if (d->pendingActions & Private::ProxyError) {
+        // we send proxy error only for local proxy
+        d->pendingActions &= ~Private::ProxyError;
+        if (d->localUsedCandidate) {
+            auto cand = d->localUsedCandidate;
+            tel.appendChild(doc->createElement(QStringLiteral("proxy-error")));
+            d->waitingAck = true;
+            upd = OutgoingUpdate{tel, [this, cand]() mutable {
+                d->waitingAck = false;
+                if (cand.state() != Candidate::Accepted || d->localUsedCandidate != cand) {
+                    return; // seems like state was changed while we was waiting for an ack
+                }
+                cand.setState(Candidate::Discarded);
+                d->localUsedCandidate = Candidate();
+                emit failed();
+            }};
+        }
     }
+
     return upd; // TODO
 }
 
