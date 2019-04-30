@@ -391,6 +391,7 @@ signals:
     void managerPadAdded(const QString &ns);
     void activated();
     void terminated();
+    void newContentReceived();
 
 private:
     friend class Manager;

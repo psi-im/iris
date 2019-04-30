@@ -577,8 +577,6 @@ public:
     Origin  role  = Origin::Initiator; // my role in the session
     XMPP::Stanza::Error lastError;
     Reason terminateReason;
-    Action outgoingUpdateType = Action::NoAction;
-    QDomElement outgoingUpdate;
     QMap<QString,QWeakPointer<ApplicationManagerPad>> applicationPads;
     QMap<QString,QWeakPointer<TransportManagerPad>> transportPads;
     //QMap<QString,Application*> myContent;     // content::creator=(role == Session::Role::Initiator?initiator:responder)
@@ -793,7 +791,7 @@ public:
         Unsupported
     };
 
-    std::tuple<AddContentError, Reason::Condition, Application*> addContent(const QDomElement &ce)
+    std::tuple<AddContentError, Reason::Condition, Application*> parseContent(const QDomElement &ce)
     {
         QDomElement descriptionEl = ce.firstChildElement(QLatin1String("description"));
         QDomElement transportEl = ce.firstChildElement(QLatin1String("transport"));
@@ -834,6 +832,62 @@ public:
         }
 
         return result{Unparsed, Reason::Success, nullptr};
+    }
+
+
+    typedef std::tuple<AddContentError, Reason::Condition, QList<Application*>, QList<QDomElement>> ParseContentListResult;
+
+    ParseContentListResult parseContentList(const QDomElement &jingleEl)
+    {
+        QMap<QString,Application *> addSet;
+        QMap<QString,std::pair<QDomElement,Reason::Condition>> rejectSet;
+
+        QString contentTag(QStringLiteral("content"));
+        for(QDomElement ce = jingleEl.firstChildElement(contentTag);
+            !ce.isNull(); ce = ce.nextSiblingElement(contentTag))
+        {
+
+            Private::AddContentError err;
+            Reason::Condition cond;
+            Application *app;
+
+            std::tie(err, cond, app) = parseContent(ce);
+            if (err == Private::AddContentError::Unparsed) {
+                lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::Cancel, XMPP::Stanza::Error::BadRequest);
+                qDeleteAll(addSet);
+                return ParseContentListResult(Unparsed, cond, QList<Application*>(), QList<QDomElement>());
+            }
+
+            auto contentName = app->contentName();
+            auto it = addSet.find(contentName);
+            if (err != Private::AddContentError::Ok) {
+                // can't continue as well
+                if (app) { // we are going to reject it completely so delete
+                    delete app;
+                }
+
+                if (it == addSet.end()) {
+                    rejectSet.insert(contentName, std::make_pair(ce, cond));
+                }
+                continue;
+            }
+
+            rejectSet.remove(contentName);
+            if (it == addSet.end() || (*it)->wantBetterTransport(app->transport())) { // probably not wantBetterTransport but wantBetterApplication
+                delete *it; // unpreferred app
+                *it = app;
+            }
+        }
+
+        if (rejectSet.size()) {
+            QList<QDomElement> rejectList;
+            for (auto const &i: rejectSet) {
+                rejectList.append(i.first);
+            }
+            return ParseContentListResult(Unsupported, rejectSet.first().second, addSet.values(), rejectList);
+        }
+
+        return ParseContentListResult(Ok, Reason::Success, addSet.values(), QList<QDomElement>());
     }
 };
 
@@ -1029,142 +1083,78 @@ bool Session::incomingInitiate(const Jingle &jingle, const QDomElement &jingleEl
     if (jingle.initiator().isValid() && !jingle.initiator().compare(d->origFrom)) {
         d->otherParty = jingle.initiator();
     }
-    //auto key = qMakePair(from, jingle.sid());
 
-    QMap<QString,std::tuple<Reason::Condition, Application *>> addSet; // application to supported
+    Private::AddContentError err;
+    Reason::Condition cond;
+    QList<Application *> apps;
+    QList<QDomElement> rejects;
 
-    QString contentTag(QStringLiteral("content"));
-    for(QDomElement ce = jingleEl.firstChildElement(contentTag);
-        !ce.isNull(); ce = ce.nextSiblingElement(contentTag)) {
-        Private::AddContentError err;
-        Reason::Condition cond;
-        Application *app;
-        auto r = d->addContent(ce);
-        std::tie(err, cond, app) = r;
-        if (err == Private::AddContentError::Unparsed) {
-            for (auto const &i: addSet) {
-                delete std::get<1>(i);
-            }
-            d->lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::Cancel, XMPP::Stanza::Error::BadRequest);
-            return false;
-        }
-        if (err == Private::AddContentError::Unsupported) {
-            if (cond == Reason::Condition::UnsupportedTransports) {
-
-            }
-            // can't continue as well
-            for (auto const &i: addSet) {
-                delete std::get<1>(i);
-            }
-            d->outgoingUpdateType = Action::SessionTerminate;
-            Reason r(cond);
-            d->outgoingUpdate = r.toXml(d->manager->client()->doc());
-            return true;
-        }
-        QString contentName = ce.attribute(QStringLiteral("name"));
-        if (err == Private::AddContentError::Ok) {
-            auto et = addSet.value(contentName);
-            auto eapp = std::get<1>(et);
-            if (!eapp || eapp->wantBetterTransport(app->transport())) {
-                addSet.insert(contentName, std::make_tuple(cond,app));
-            }
-        } else if (!std::get<1>(addSet.value(contentName))) {
-            // something unsupported. but lets parse all items. maybe it will get replaced
-            addSet.insert(contentName, std::make_tuple(cond,app));
-        }
-
-        // TODO at this point if all addSet items have application it's success,
-        // otherwise we have to think what to do with this. for example replace transport if it's unsupported.
-
-        for (auto const &i: addSet) {
-            Reason::Condition cond;
-            Application *app;
-            std::tie(cond, app) = i;
-            if (!app) {
-                // TODO
-                return false; // FIXME. memory release
-            }
+    std::tie(err, cond, apps, rejects) = d->parseContentList(jingleEl);
+    switch (err) {
+    case Private::AddContentError::Unparsed:
+        return false;
+    case Private::AddContentError::Unsupported:
+        QTimer::singleShot(0, this, [this, cond](){
+            d->sendJingle(Action::SessionTerminate, QList<QDomElement>() << Reason(cond).toXml(d->manager->client()->doc()));
+            d->state = State::Finished;
+            emit terminated();
+        });
+        return true;
+    case Private::AddContentError::Ok:
+        for (auto app: apps) {
             d->contentList.insert(ContentKey{app->contentName(), Origin::Initiator}, app);
         }
+        d->planStep();
+        return true;
     }
-    d->planStep();
-    return true;
+
+    return false;
 }
 
 bool Session::updateFromXml(Action action, const QDomElement &jingleEl)
 {
+    if (d->state == State::Finished) {
+        d->lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::Cancel, XMPP::Stanza::Error::UnexpectedRequest); // TODO OutOfOrder
+        return false;
+    }
+
     if (action == Action::SessionInfo) {
 
     }
 
-    if (action != Action::ContentAdd) {
-        return false;
-    }
-
-    QMap<QString,Application *> addSet; // application to supported
-    bool parsed = true;
-    int unsupported = 0;
-    Reason::Condition rejectCond = Reason::Condition::Success;
-
-    QString contentTag(QStringLiteral("content"));
-    for(QDomElement ce = jingleEl.firstChildElement(contentTag);
-        !ce.isNull(); ce = ce.nextSiblingElement(contentTag)) {
+    if (action == Action::ContentAdd) {
         Private::AddContentError err;
         Reason::Condition cond;
-        Application *app;
-        QString contentName = ce.attribute(QStringLiteral("name"));
-        if (!contentName.size()) {
-            parsed = false;
+        QList<Application *> apps;
+        QList<QDomElement> rejects;
+
+        std::tie(err, cond, apps, rejects) = d->parseContentList(jingleEl);
+        switch (err) {
+        case Private::AddContentError::Unparsed:
+            return false;
+        case Private::AddContentError::Unsupported:
+            QTimer::singleShot(0, this, [this, cond, rejects]() mutable {
+                rejects += Reason(cond).toXml(d->manager->client()->doc());
+                d->sendJingle(Action::ContentReject, rejects);
+            });
+            break;
+        case Private::AddContentError::Ok:
             break;
         }
 
-        std::tie(err, cond, app) = d->addContent(ce);
-        bool alreadyAdded = addSet.contains(contentName);
-        if (err != Private::AddContentError::Ok) {
-            // can't continue as well
-            if (app) { // we are going to reject it completely so delete
-                delete app;
+        if (apps.size()) {
+            Origin remoteRole = negateOrigin(d->role);
+            for (auto app: apps) {
+                d->contentList.insert(ContentKey{app->contentName(), remoteRole}, app); // TODO check conflicts
             }
-            if (err == Private::AddContentError::Unsupported) {
-                rejectCond = cond;
-            }
-            if (!alreadyAdded) {
-                unsupported++;
-                addSet.insert(contentName, nullptr);
-            } // else just ignore this unsupported content. we aready have one
-            continue;
+            QTimer::singleShot(0, this, [this](){ emit newContentReceived(); });
         }
 
-        auto eapp = addSet.value(contentName);
-        if (alreadyAdded && !eapp) {
-            unsupported--; // we are going to overwrite previous with successful
-        }
-        if (!eapp || eapp->wantBetterTransport(app->transport())) {
-            addSet.insert(contentName, app);
-        }
-    }
-
-    if (unsupported && rejectCond == Reason::Condition::Success) {
-        parsed = false; // the only way it's possible
-    }
-    if (!parsed) {
-        d->lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::Cancel, XMPP::Stanza::Error::BadRequest);
-        qDeleteAll(addSet);
-        return false;
-    } else if (unsupported) {
-        d->outgoingUpdateType = Action::ContentReject;
-        Reason r(rejectCond);
-        d->outgoingUpdate = r.toXml(d->manager->client()->doc());
-        qDeleteAll(addSet);
         return true;
     }
 
-    Origin remoteRole = negateOrigin(d->role);
-    for (auto const &app: addSet) {
-        d->contentList.insert(ContentKey{app->contentName(), remoteRole}, app); // TODO check conflicts
-    }
-
-    return true;
+    d->lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::Cancel, XMPP::Stanza::Error::UnexpectedRequest);
+    return false;
 }
 
 
