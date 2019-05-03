@@ -229,6 +229,8 @@ public:
 
     Transport *q = NULL;
     Pad::Ptr pad;
+    bool meCreator = true; // content.content is local side
+    bool connectionStarted = false; // where start() was called
     bool waitingAck = true;
     bool aborted = false;
     bool remoteReportedCandidateError = false;
@@ -245,25 +247,6 @@ public:
     QString dstaddr;
     QString sid;
     Transport::Mode mode = Transport::Tcp;
-
-    bool amISender() const
-    {
-        Q_ASSERT(application);
-        auto senders = application->senders();
-        return senders == Origin::Both || senders == application->creator();
-    }
-
-    bool amIReceiver() const
-    {
-        Q_ASSERT(application);
-        auto senders = application->senders();
-        return senders == Origin::Both || senders == negateOrigin(application->creator());
-    }
-
-    bool amICreator() const
-    {
-        return application->creator() == pad->session()->role();
-    }
 
     inline Jid remoteJid() const
     {
@@ -291,7 +274,7 @@ public:
 
     void tryConnectToRemoteCandidate()
     {
-        if (application->state() != State::Connecting) {
+        if (!connectionStarted) {
             return; // will come back later
         }
         quint64 priority = 0;
@@ -336,7 +319,7 @@ public:
         // So for candidate-error two conditions have to be met 1) all remote failed 2) all local were sent no more
         // local candidates are expected to be discovered
 
-        if (application->state() != State::Connecting) {
+        if (!connectionStarted) {
             return; // we can't finish anything in this state. Only Connecting is acceptable
         }
 
@@ -452,7 +435,7 @@ public:
             remoteUsedCandidate = Candidate();
         }
         if (localUsedCandidate && remoteUsedCandidate) {
-            if (amICreator()) {
+            if (meCreator) {
                 // i'm initiator. see 2.4.4
                 localUsedCandidate.setState(Candidate::Discarded);
                 localUsedCandidate = Candidate();
@@ -478,6 +461,7 @@ Transport::Transport(const TransportManagerPad::Ptr &pad) :
 Transport::Transport(const TransportManagerPad::Ptr &pad, const QDomElement &transportEl) :
     Transport::Transport(pad)
 {
+    d->meCreator = false;
     d->dstaddr = transportEl.attribute(QStringLiteral("dstaddr"));
     d->sid = transportEl.attribute(QStringLiteral("sid"));
     if (d->sid.isEmpty() || !update(transportEl)) {
@@ -496,18 +480,13 @@ TransportManagerPad::Ptr Transport::pad() const
     return d->pad.staticCast<TransportManagerPad>();
 }
 
-void Transport::setApplication(Application *app)
-{
-    d->application = app;
-    if (app->creator() == d->pad->session()->role()) { // I'm a creator
-        d->sid = d->pad->generateSid();
-    }
-    d->pad->registerSid(d->sid);
-}
-
 void Transport::prepare()
 {
     auto m = static_cast<Manager*>(d->pad->manager());
+    if (d->meCreator) {
+        d->sid = d->pad->generateSid();
+    }
+    d->pad->registerSid(d->sid);
 
     auto serv = m->socksServ();
     if (serv) {
@@ -610,9 +589,11 @@ void Transport::prepare()
     emit updated();
 }
 
+// we got content acceptance from any side and not can connect
 void Transport::start()
 {
-    // TODO start connecting to remote candidates
+    d->connectionStarted = true;
+    d->tryConnectToRemoteCandidate();
 }
 
 bool Transport::update(const QDomElement &transportEl)
@@ -711,25 +692,15 @@ bool Transport::update(const QDomElement &transportEl)
     return false;
 }
 
-Action Transport::outgoingUpdateType() const
+bool Transport::hasUpdates() const
 {
-    if (isValid() && d->application && d->pendingActions) {
-        // if we are preparing local offer and have at least one candidate, we have to sent it.
-        // otherwise it's not first update to remote from this transport, so we have to send just signalling candidates
-        if ((d->application->state() == State::PrepareLocalOffer && d->localCandidates.size()) ||
-                (d->application->state() > State::PrepareLocalOffer && d->application->state() < State::Finished))
-        {
-            return Action::TransportInfo;
-        }
-    }
-    return Action::NoAction; // TODO
+    return isValid() && d->pendingActions;
 }
 
-OutgoingUpdate Transport::takeOutgoingUpdate()
+OutgoingTransportInfoUpdate Transport::takeOutgoingUpdate()
 {
-    OutgoingUpdate upd;
-    State appState;
-    if (!isValid() || !d->application || (appState = d->application->state()) == State::Finished) {
+    OutgoingTransportInfoUpdate upd;
+    if (!isValid()) {
         return upd;
     }
 
@@ -737,7 +708,7 @@ OutgoingUpdate Transport::takeOutgoingUpdate()
 
     QDomElement tel = doc->createElementNS(NS, "transport");
     tel.setAttribute(QStringLiteral("sid"), d->sid);
-    if (d->amICreator() && d->mode != Tcp) {
+    if (d->meCreator && d->mode != Tcp) {
         tel.setAttribute(QStringLiteral("mode"), "udp");
     }
 
@@ -765,7 +736,7 @@ OutgoingUpdate Transport::takeOutgoingUpdate()
         }
         if (!candidatesToSend.isEmpty()) {
             d->waitingAck = true;
-            upd = OutgoingUpdate{tel, [this, candidatesToSend]() mutable {
+            upd = OutgoingTransportInfoUpdate{tel, [this, candidatesToSend]() mutable {
                 d->waitingAck = false;
                 for (auto &c: candidatesToSend) {
                     if (c.state() == Candidate::Unacked) {
@@ -787,7 +758,7 @@ OutgoingUpdate Transport::takeOutgoingUpdate()
             c.setState(Candidate::Unacked);
 
             d->waitingAck = true;
-            upd = OutgoingUpdate{tel, [this, c]() mutable {
+            upd = OutgoingTransportInfoUpdate{tel, [this, c]() mutable {
                 d->waitingAck = false;
                 if (c.state() == Candidate::Unacked) {
                     c.setState(Candidate::Accepted);
@@ -803,7 +774,7 @@ OutgoingUpdate Transport::takeOutgoingUpdate()
         // we are here because all remote are already in Discardd state
         tel.appendChild(doc->createElement(QStringLiteral("candidate-error")));
         d->waitingAck = true;
-        upd = OutgoingUpdate{tel, [this]() mutable {
+        upd = OutgoingTransportInfoUpdate{tel, [this]() mutable {
             d->waitingAck = false;
             d->localReportedCandidateError = true;
             d->checkAndFinishNegotiation();
@@ -815,7 +786,7 @@ OutgoingUpdate Transport::takeOutgoingUpdate()
             auto el = tel.appendChild(doc->createElement(QStringLiteral("activated"))).toElement();
             el.setAttribute(QStringLiteral("cid"), cand.cid());
             d->waitingAck = true;
-            upd = OutgoingUpdate{tel, [this, cand]() mutable {
+            upd = OutgoingTransportInfoUpdate{tel, [this, cand]() mutable {
                 d->waitingAck = false;
                 if (cand.state() != Candidate::Accepted || d->localUsedCandidate != cand) {
                     return; // seems like state was changed while we was waiting for an ack
@@ -831,7 +802,7 @@ OutgoingUpdate Transport::takeOutgoingUpdate()
             auto cand = d->localUsedCandidate;
             tel.appendChild(doc->createElement(QStringLiteral("proxy-error")));
             d->waitingAck = true;
-            upd = OutgoingUpdate{tel, [this, cand]() mutable {
+            upd = OutgoingTransportInfoUpdate{tel, [this, cand]() mutable {
                 d->waitingAck = false;
                 if (cand.state() != Candidate::Accepted || d->localUsedCandidate != cand) {
                     return; // seems like state was changed while we was waiting for an ack

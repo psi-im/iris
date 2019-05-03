@@ -131,13 +131,12 @@ public:
     ~Transport();
 
     TransportManagerPad::Ptr pad() const override;
-    void setApplication(Application *app) override;
 
     void prepare() override;
     void start() override;
     bool update(const QDomElement &transportEl) override;
-    Action outgoingUpdateType() const override;
-    OutgoingUpdate takeOutgoingUpdate() override;
+    bool hasUpdates() const override;
+    OutgoingTransportInfoUpdate takeOutgoingUpdate() override;
     bool isValid() const override;
     Features features() const override;
 
