@@ -16,7 +16,6 @@
  * along with this library.  If not, see <https://www.gnu.org/licenses/>.
  *
  */
-
 #include "jingle-s5b.h"
 #include "s5b.h"
 #include "xmpp/jid/jid.h"
