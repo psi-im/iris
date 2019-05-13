@@ -387,7 +387,6 @@ public:
     bool proxyDiscoveryInProgress = false; // if we have valid proxy requests
     quint16 pendingActions = 0;
     int proxiesInDiscoCount = 0;
-    quint32 minimalPriority = 0;
     Application *application = nullptr;
     QMap<QString,Candidate> localCandidates; // cid to candidate mapping
     QMap<QString,Candidate> remoteCandidates;
@@ -611,14 +610,13 @@ public:
     // take used-candidate with highest priority and discard all with lower. also update used candidates themselves
     void updateMinimalPriority() {
         quint32 prio = 0;
-        if (localUsedCandidate && minimalPriority < localUsedCandidate.priority() && localUsedCandidate.state() != Candidate::Discarded) {
+        if (localUsedCandidate && localUsedCandidate.state() != Candidate::Discarded) {
             prio = localUsedCandidate.priority();
-        } else if (remoteUsedCandidate && minimalPriority < remoteUsedCandidate.priority() && remoteUsedCandidate.state() != Candidate::Discarded) {
+        }
+        if (remoteUsedCandidate && prio < remoteUsedCandidate.priority() && remoteUsedCandidate.state() != Candidate::Discarded) {
             prio = remoteUsedCandidate.priority();
         }
-        if (prio < minimalPriority) {
-            return;
-        }
+
         for (auto &c: localCandidates) {
             if (c.priority() < prio && c.state() != Candidate::Discarded) {
                 c.setState(Candidate::Discarded);
@@ -646,9 +644,11 @@ public:
                 // i'm initiator. see 2.4.4
                 localUsedCandidate.setState(Candidate::Discarded);
                 localUsedCandidate = Candidate();
+                remoteReportedCandidateError = true; // as a sign of completeness even if not true
             } else {
                 remoteUsedCandidate.setState(Candidate::Discarded);
                 remoteUsedCandidate = Candidate();
+                //localReportedCandidateError = true; // as a sign of completeness even if not true
             }
         }
     }
@@ -812,10 +812,10 @@ bool Transport::update(const QDomElement &transportEl)
 {
     // we can just on type of elements in transport-info
     // so return as soon as any type handled. Though it leaves a room for  remote to send invalid transport-info
-    QString contentTag(QStringLiteral("candidate"));
+    QString candidateTag(QStringLiteral("candidate"));
     int candidatesAdded = 0;
-    for(QDomElement ce = transportEl.firstChildElement(contentTag);
-        !ce.isNull(); ce = ce.nextSiblingElement(contentTag)) {
+    for(QDomElement ce = transportEl.firstChildElement(candidateTag);
+        !ce.isNull(); ce = ce.nextSiblingElement(candidateTag)) {
         Candidate c(ce);
         if (!c) {
             return false;
