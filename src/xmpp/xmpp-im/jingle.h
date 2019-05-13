@@ -419,6 +419,7 @@ public:
     Jid peer() const;
     Jid initiator() const;
     Jid responder() const;
+    QString sid() const;
 
     Origin role() const; // my role in session: initiator or responder
     XMPP::Stanza::Error lastError() const;
@@ -449,6 +450,7 @@ public:
     TransportManagerPad::Ptr transportPadFactory(const QString &ns);
 signals:
     void managerPadAdded(const QString &ns);
+    void initiated();
     void activated();
     void terminated();
     void newContentReceived();
@@ -533,7 +535,7 @@ public:
 
     Session* session(const Jid &remoteJid, const QString &sid);
     Session* newSession(const Jid &j);
-    QString generateSessionId(const Jid &peer);
+    QString registerSession(Session *session);
     XMPP::Stanza::Error lastError() const;
 
 signals:

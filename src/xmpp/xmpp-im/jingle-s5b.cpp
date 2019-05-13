@@ -115,6 +115,11 @@ private:
 class Candidate::Private : public QObject, public QSharedData {
     Q_OBJECT
 public:
+    ~Private()
+    {
+        delete socksClient;
+    }
+
     QString cid;
     QString host;
     Jid jid;
@@ -125,6 +130,32 @@ public:
 
     quint16 localPort = 0; // where Psi actually listens. e.g. with NAT-assited candidats it may be different from just port
     SocksClient *socksClient = nullptr;
+
+    void connectToHost(const QString &key, State successState, std::function<void(bool)> callback, bool isUdp)
+    {
+        socksClient = new SocksClient;
+
+        connect(socksClient, &SocksClient::connected, [this, callback, successState](){
+            state = successState;
+            callback(true);
+        });
+        connect(socksClient, &SocksClient::error, [this, callback](int error){
+            Q_UNUSED(error);
+            state = Candidate::Discarded;
+            callback(false);
+        });
+        //connect(&t, SIGNAL(timeout()), SLOT(trySendUDP()));
+
+        socksClient->connectToHost(host, port, key, 0, isUdp);
+    }
+
+    void setupIncomingSocksClient()
+    {
+        connect(socksClient, &SocksClient::error, [this](int error){
+            Q_UNUSED(error);
+            state = Candidate::Discarded;
+        });
+    }
 };
 
 Candidate::Candidate()
@@ -226,9 +257,6 @@ Candidate::Candidate(const QString &host, quint16 port, const QString &cid, Type
 
 Candidate::~Candidate()
 {
-    if (d) { // if it's valid candidate
-        delete d->socksClient;
-    }
 }
 
 Candidate::Type Candidate::type() const
@@ -313,20 +341,7 @@ QDomElement Candidate::toXml(QDomDocument *doc) const
 
 void Candidate::connectToHost(const QString &key, State successState, std::function<void(bool)> callback, bool isUdp)
 {
-    d->socksClient = new SocksClient;
-
-    QObject::connect(d->socksClient, &SocksClient::connected, [this, callback, successState](){
-        d->state = successState;
-        callback(true);
-    });
-    QObject::connect(d->socksClient, &SocksClient::error, [this, callback](int error){
-        Q_UNUSED(error);
-        d->state = Candidate::Discarded;
-        callback(false);
-    });
-    //connect(&t, SIGNAL(timeout()), SLOT(trySendUDP()));
-
-    d->socksClient->connectToHost(d->host, d->port, key, 0, isUdp);
+    d->connectToHost(key, successState, callback, isUdp);
 }
 
 bool Candidate::incomingConnection(SocksClient *sc)
@@ -335,11 +350,8 @@ bool Candidate::incomingConnection(SocksClient *sc)
         return false;
     }
     d->socksClient = sc;
-    QObject::connect(d->socksClient, &SocksClient::error, [this](int error){
-        Q_UNUSED(error);
-        d->state = Candidate::Discarded;
-    });
-    return false;
+    d->setupIncomingSocksClient();
+    return true;
 }
 
 SocksClient *Candidate::takeSocksClient()
@@ -353,7 +365,8 @@ SocksClient *Candidate::takeSocksClient()
     return c;
 }
 
-class Transport::Private : public QSharedData {
+class Transport::Private
+{
 public:
     enum PendingActions {
         NewCandidate    = 1,
