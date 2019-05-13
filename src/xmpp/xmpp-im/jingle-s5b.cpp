@@ -233,7 +233,7 @@ Candidate::Candidate(const Jid &proxy, const QString &cid, quint16 localPreferen
     d->jid = proxy;
     d->priority = (ProxyPreference << 16) + localPreference;
     d->type = Proxy;
-    d->state = Probing;
+    d->state = Probing; // FIXME?
 }
 
 Candidate::Candidate(const QString &host, quint16 port, const QString &cid, Type type, quint16 localPreference) :
@@ -311,6 +311,7 @@ Candidate::State Candidate::state() const
 
 void Candidate::setState(Candidate::State s)
 {
+    // don't close sockets here since pending events may change state machine or remote side and closed socket may break it
     d->state = s;
 }
 
@@ -378,7 +379,7 @@ public:
 
     Transport *q = nullptr;
     Pad::Ptr pad;
-    bool meCreator = true; // content.content is local side
+    bool meCreator = true; // content created on local side
     bool connectionStarted = false; // where start() was called
     bool waitingAck = true;
     bool aborted = false;
@@ -481,14 +482,17 @@ public:
         // now we have to connect to maxNew candidate
         lastConnectionStart.start();
         QString key = maxNew.type() == Candidate::Proxy? dstaddr : directAddr;
+        maxNew.setState(Candidate::Probing);
         maxNew.connectToHost(key, Candidate::Pending, [this, maxNew](bool success) {
             // candidate's status had to be changed by connectToHost, so we don't set it again
-            // if our candidate has higher priority than any of local or remoteUsedCandidate then set it as "used"
-            if (success && (!remoteUsedCandidate || remoteUsedCandidate.priority() < maxNew.priority()) &&
-                    ((!localUsedCandidate || localUsedCandidate.priority() < maxNew.priority())))
-            {
-                remoteUsedCandidate = maxNew;
-                localUsedCandidate = Candidate();
+            if (success) {
+                // discard all current in-progress connections with <= priority
+                for (auto &c: remoteCandidates) {
+                    if (c != maxNew && c.state() == Candidate::Probing && c.priority() <= maxNew.priority()) {
+                        c.setState(Candidate::Discarded);
+                    }
+                }
+
                 updateMinimalPriority();
             }
             checkAndFinishNegotiation();
@@ -567,6 +571,8 @@ public:
                     }
                     if (c.state() == Candidate::Active) {
                         connection.reset(new Connection(c.takeSocksClient(), mode));
+                        localCandidates.clear();
+                        remoteCandidates.clear();
                         emit q->connected();
                     }
                 } else { // both sides reported candidate error
@@ -640,7 +646,7 @@ public:
             remoteUsedCandidate = Candidate();
         }
         if (localUsedCandidate && remoteUsedCandidate) {
-            if (meCreator) {
+            if (pad->session()->role() == Origin::Initiator) {
                 // i'm initiator. see 2.4.4
                 localUsedCandidate.setState(Candidate::Discarded);
                 localUsedCandidate = Candidate();
@@ -648,7 +654,7 @@ public:
             } else {
                 remoteUsedCandidate.setState(Candidate::Discarded);
                 remoteUsedCandidate = Candidate();
-                //localReportedCandidateError = true; // as a sign of completeness even if not true
+                localReportedCandidateError = true; // as a sign of completeness even if not true
             }
         }
     }
@@ -869,7 +875,11 @@ bool Transport::update(const QDomElement &transportEl)
         }
         c.setState(Candidate::Active);
         d->connection.reset(new Connection(c.takeSocksClient(), d->mode));
-        QTimer::singleShot(0, this, [this](){ emit connected(); });
+        QTimer::singleShot(0, this, [this](){
+            d->localCandidates.clear();
+            d->remoteCandidates.clear();
+            emit connected();
+        });
         return true;
     }
 
@@ -957,8 +967,9 @@ OutgoingTransportInfoUpdate Transport::takeOutgoingUpdate()
             }};
         }
     } else if (d->pendingActions & Private::CandidateUsed) {
-        d->pendingActions &= ~Private::NewCandidate;
-        // we should have the only remote candidate in Pending state
+        d->pendingActions &= ~Private::CandidateUsed;
+        // we should have the only remote candidate in Pending state.
+        // all other has to be discarded by priority check
         for (auto &c: d->remoteCandidates) {
             if (c.state() != Candidate::Pending) {
                 continue;
