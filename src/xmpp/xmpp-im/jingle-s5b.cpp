@@ -233,7 +233,7 @@ Candidate::Candidate(const Jid &proxy, const QString &cid, quint16 localPreferen
     d->jid = proxy;
     d->priority = (ProxyPreference << 16) + localPreference;
     d->type = Proxy;
-    d->state = Probing; // FIXME?
+    d->state = Probing; // it's probing because it's a local side proxy and host and port are unknown
 }
 
 Candidate::Candidate(const QString &host, quint16 port, const QString &cid, Type type, quint16 localPreference) :
@@ -342,11 +342,13 @@ QDomElement Candidate::toXml(QDomDocument *doc) const
 
 void Candidate::connectToHost(const QString &key, State successState, std::function<void(bool)> callback, bool isUdp)
 {
+    qDebug() << "connect to host with " << d->cid << "candidate";
     d->connectToHost(key, successState, callback, isUdp);
 }
 
 bool Candidate::incomingConnection(SocksClient *sc)
 {
+    qDebug() << "incoming connection on" << d->cid << "candidate";
     if (d->socksClient) {
         return false;
     }
@@ -357,6 +359,7 @@ bool Candidate::incomingConnection(SocksClient *sc)
 
 SocksClient *Candidate::takeSocksClient()
 {
+    qDebug() << "taking socket from " << d->cid << "candidate";
     if (!d->socksClient) {
         return nullptr;
     }
@@ -527,8 +530,8 @@ public:
         // So for candidate-error two conditions have to be met 1) all remote failed 2) all local were sent no more
         // local candidates are expected to be discovered
 
-        if (!connectionStarted) {
-            return; // we can't finish anything in this state. Only Connecting is acceptable
+        if (!connectionStarted || connection) { // if not started or already finished
+            return;
         }
 
         // sort out already handled states or states which will bring us here a little later
@@ -712,6 +715,7 @@ void Transport::prepare()
             Candidate c(h, serv->port(), d->generateCid(), Candidate::Direct);
             if (!d->isDup(c)) {
                 d->localCandidates.insert(c.cid(), c);
+                d->pendingActions |= Private::NewCandidate;
             }
         }
     }
@@ -1061,8 +1065,8 @@ Connection::Ptr Transport::connection() const
 bool Transport::incomingConnection(SocksClient *sc)
 {
     if (!d->connection) {
+        auto s = sc->abstractSocket();
         for (auto &c: d->localCandidates) {
-            auto s = sc->abstractSocket();
             if (s->localPort() == c.localPort() && c.state() == Candidate::Pending) {
                 if(d->mode == Transport::Udp)
                     sc->grantUDPAssociate("", 0);
