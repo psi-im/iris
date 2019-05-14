@@ -57,7 +57,7 @@ public:
         if (client->isOpen()) {
             setOpenMode(client->openMode());
         } else {
-            qWarning("Creating S5B Transport connection on closed SockClient connection");
+            qWarning("Creating S5B Transport connection on closed SockClient connection %p", client);
         }
     }
 
@@ -134,14 +134,17 @@ public:
     void connectToHost(const QString &key, State successState, std::function<void(bool)> callback, bool isUdp)
     {
         socksClient = new SocksClient;
+        qDebug() << "connect to host with " << cid << "candidate and socks client" << socksClient;
 
         connect(socksClient, &SocksClient::connected, [this, callback, successState](){
             state = successState;
+            qDebug() << "socks client"  << socksClient << "is connected";
             callback(true);
         });
         connect(socksClient, &SocksClient::error, [this, callback](int error){
             Q_UNUSED(error);
             state = Candidate::Discarded;
+            qDebug() << "socks client"  << socksClient << "failed to connect";
             callback(false);
         });
         //connect(&t, SIGNAL(timeout()), SLOT(trySendUDP()));
@@ -342,13 +345,12 @@ QDomElement Candidate::toXml(QDomDocument *doc) const
 
 void Candidate::connectToHost(const QString &key, State successState, std::function<void(bool)> callback, bool isUdp)
 {
-    qDebug() << "connect to host with " << d->cid << "candidate";
     d->connectToHost(key, successState, callback, isUdp);
 }
 
 bool Candidate::incomingConnection(SocksClient *sc)
 {
-    qDebug() << "incoming connection on" << d->cid << "candidate";
+    qDebug() << "incoming connection on" << d->cid << "candidate with socks client" << sc;
     if (d->socksClient) {
         return false;
     }
@@ -359,7 +361,7 @@ bool Candidate::incomingConnection(SocksClient *sc)
 
 SocksClient *Candidate::takeSocksClient()
 {
-    qDebug() << "taking socket from " << d->cid << "candidate";
+    qDebug() << "taking socks client" << d->socksClient << "from " << d->cid << "candidate";
     if (!d->socksClient) {
         return nullptr;
     }
@@ -489,13 +491,16 @@ public:
         maxNew.connectToHost(key, Candidate::Pending, [this, maxNew](bool success) {
             // candidate's status had to be changed by connectToHost, so we don't set it again
             if (success) {
-                // discard all current in-progress connections with <= priority
+                // let's reject candidates which are meaningless to try
                 for (auto &c: remoteCandidates) {
-                    if (c != maxNew && c.state() == Candidate::Probing && c.priority() <= maxNew.priority()) {
+                    if (c.state() == Candidate::New && c.priority() <= maxNew.priority()) {
                         c.setState(Candidate::Discarded);
                     }
                 }
-
+                if (proxyDiscoveryInProgress && (maxNew.priority() >> 16) > Candidate::ProxyPreference) {
+                    proxyDiscoveryInProgress = false; // doesn't make sense anymore
+                }
+                // TODO do the same for upnp
                 updateMinimalPriority();
             }
             checkAndFinishNegotiation();
@@ -848,10 +853,16 @@ bool Transport::update(const QDomElement &transportEl)
         if (!cUsed) {
             return false;
         }
-        cUsed.setState(Candidate::Accepted);
-        d->localUsedCandidate = cUsed;
-        d->updateMinimalPriority();
-        QTimer::singleShot(0, this, [this](){ d->checkAndFinishNegotiation(); });
+        if (cUsed.state() == Candidate::Pending) {
+            cUsed.setState(Candidate::Accepted);
+            d->localUsedCandidate = cUsed;
+            d->updateMinimalPriority();
+            QTimer::singleShot(0, this, [this](){ d->checkAndFinishNegotiation(); });
+        } else {
+            //seems like we already rejected the candidate and either remote side already know about it or will soon
+            d->localUsedCandidate = Candidate();
+            d->remoteReportedCandidateError = true; // as a sign remote has finished
+        }
         return true;
     }
 
