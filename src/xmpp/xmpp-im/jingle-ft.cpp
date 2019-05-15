@@ -482,8 +482,15 @@ bool Application::setTransport(const QSharedPointer<Transport> &transport)
             connect(d->connection.data(), &Connection::readyRead, this, [this](){
                 // TODO read data
             });
+            connect(d->connection.data(), &Connection::bytesWritten, this, [this](qint64 bytes){
+                if (d->pad->session()->role() == d->senders) {
+                    // write next port of data
+
+                }
+            });
             d->setState(State::Active);
         });
+
         connect(transport.data(), &Transport::failed, this, [this](){
             if (d->availableTransports.size()) { // we can do transport-replace here
                 // TODO
