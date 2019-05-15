@@ -54,6 +54,8 @@ public:
         mode(mode)
     {
         connect(client, &SocksClient::readyRead, this, &Connection::readyRead);
+        connect(client, &SocksClient::bytesWritten, this, &Connection::bytesWritten);
+        connect(client, &SocksClient::aboutToClose, this, &Connection::aboutToClose);
         if (client->isOpen()) {
             setOpenMode(client->openMode());
         } else {
@@ -404,6 +406,7 @@ public:
     Transport::Mode mode = Transport::Tcp;
     QTimer probingTimer;
     QElapsedTimer lastConnectionStart;
+    size_t blockSize = 8129;
 
     QSharedPointer<Connection> connection;
 
@@ -845,6 +848,13 @@ bool Transport::update(const QDomElement &transportEl)
 {
     // we can just on type of elements in transport-info
     // so return as soon as any type handled. Though it leaves a room for  remote to send invalid transport-info
+    auto bs = transportEl.attribute(QString::fromLatin1("block-size"));
+    if (!bs.isEmpty()) {
+        size_t bsn = bs.toULongLong();
+        if (bsn && bsn <= d->blockSize) {
+            d->blockSize = bsn;
+        }
+    }
     QString candidateTag(QStringLiteral("candidate"));
     int candidatesAdded = 0;
     for(QDomElement ce = transportEl.firstChildElement(candidateTag);
@@ -967,6 +977,7 @@ OutgoingTransportInfoUpdate Transport::takeOutgoingUpdate()
     if (d->meCreator && d->mode != Tcp) {
         tel.setAttribute(QStringLiteral("mode"), "udp");
     }
+    tel.setAttribute(QString::fromLatin1("block-size"), qulonglong(d->blockSize));
 
     if (d->pendingActions & Private::NewCandidate) {
         d->pendingActions &= ~Private::NewCandidate;
@@ -1089,6 +1100,11 @@ QString Transport::sid() const
 Connection::Ptr Transport::connection() const
 {
     return d->connection.staticCast<XMPP::Jingle::Connection>();
+}
+
+size_t Transport::blockSize() const
+{
+    return d->blockSize;
 }
 
 bool Transport::incomingConnection(SocksClient *sc)
