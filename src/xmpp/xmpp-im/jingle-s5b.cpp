@@ -526,6 +526,24 @@ public:
         return false;
     }
 
+    Candidate preferredCandidate() const
+    {
+        if (localUsedCandidate) {
+            if (remoteUsedCandidate) {
+                if (localUsedCandidate.priority() == remoteUsedCandidate.priority()) {
+                    if (pad->session()->role() == Origin::Initiator) {
+                        return remoteUsedCandidate;
+                    }
+                    return localUsedCandidate;
+                }
+                return localUsedCandidate.priority() > remoteUsedCandidate.priority()?
+                            localUsedCandidate : remoteUsedCandidate;
+            }
+            return localUsedCandidate;
+        }
+        return remoteUsedCandidate;
+    }
+
     void checkAndFinishNegotiation()
     {
         // Why we can't send candidate-used/error right when this happens:
@@ -556,10 +574,10 @@ public:
             if (remoteReportedCandidateError || localUsedCandidate) {
                 // so remote seems to be finished too.
                 // tell application about it and it has to change its state immediatelly
-                if (localUsedCandidate || remoteUsedCandidate) {
-                    auto c = localUsedCandidate? localUsedCandidate : remoteUsedCandidate;
+                auto c = preferredCandidate();
+                if (c) {
                     if (c.state() != Candidate::Active) {
-                        if (c.type() == Candidate::Proxy) {
+                        if (c.type() == Candidate::Proxy && c == localUsedCandidate) { // local proxy
                             // If it's proxy, first it has to be activated
                             if (localUsedCandidate) {
                                 // it's our side who proposed proxy. so we have to connect to it and activate
