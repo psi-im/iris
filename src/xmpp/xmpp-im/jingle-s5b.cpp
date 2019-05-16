@@ -792,6 +792,9 @@ void Transport::prepare()
     auto serv = m->socksServ();
     if (serv) {
         for(auto const &h: serv->hostList()) {
+            if (!serv->port() || h.isEmpty()) {
+                continue;
+            }
             Candidate c(h, serv->port(), d->generateCid(), Candidate::Direct);
             if (!d->isDup(c)) {
                 d->localCandidates.insert(c.cid(), c);
