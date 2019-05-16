@@ -432,6 +432,13 @@ public:
             return;
         }
         emit q->progress(device->pos());
+        bytesLeft -= sz;
+        if (!bytesLeft) {
+            if (closeDeviceOnFinish) {
+                device->close();
+            }
+            setState(State::Finished);
+        }
     }
 
     void readNextBlockFromTransport()
@@ -458,6 +465,14 @@ public:
                 return;
             }
             emit q->progress(device->pos());
+            bytesLeft -= sz;
+        }
+        if (!bytesLeft) {
+            if (closeDeviceOnFinish) {
+                device->close();
+            }
+            // TODO send <received>
+            setState(State::Finished);
         }
     }
 };
