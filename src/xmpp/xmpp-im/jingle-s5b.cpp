@@ -768,7 +768,9 @@ Transport::Transport(const TransportManagerPad::Ptr &pad, const QDomElement &tra
 
 Transport::~Transport()
 {
-    static_cast<Manager*>(d->pad->manager())->removeKeyMapping(d->directAddr);
+    if (d) {
+        static_cast<Manager*>(d->pad->manager())->removeKeyMapping(d->directAddr);
+    }
 }
 
 TransportManagerPad::Ptr Transport::pad() const
