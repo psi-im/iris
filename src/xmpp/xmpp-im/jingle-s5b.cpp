@@ -1173,13 +1173,17 @@ bool Transport::incomingConnection(SocksClient *sc)
     if (!d->connection) {
         auto s = sc->abstractSocket();
         for (auto &c: d->localCandidates) {
-            if (s->localPort() == c.localPort() && (c.state() == Candidate::Pending || c.state() == Candidate::Unacked)) {
+            if (s->localPort() == c.localPort() &&
+                    (c.state() == Candidate::Pending || c.state() == Candidate::Unacked) &&
+                    c.incomingConnection(sc))
+            {
+
                 if(d->mode == Transport::Udp)
                     sc->grantUDPAssociate("", 0);
                 else
                     sc->grantConnect();
                 // we can also remember the server it comes from. static_cast<S5BServer *>(sender())
-                return c.incomingConnection(sc);
+                return true;
             }
         }
     }
