@@ -87,6 +87,16 @@ public:
         return client->bytesToWrite();
     }
 
+    void close()
+    {
+        if (client) {
+            client->disconnect(this);
+        }
+        XMPP::Jingle::Connection::close();
+        client->deleteLater();
+        client = nullptr;
+    }
+
 protected:
     qint64 writeData(const char *data, qint64 maxSize)
     {
