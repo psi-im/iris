@@ -29,6 +29,7 @@
 #include "im.h"
 #include "jingle-s5b.h"
 #include "socks.h"
+#include "tcpportreserver.h"
 
 #ifdef Q_OS_WIN
 # include <windows.h>
@@ -62,6 +63,155 @@ static bool haveHost(const StreamHostList &list, const Jid &j)
     return false;
 }
 
+
+
+
+
+
+
+class S5BServer::Item : public QObject
+{
+    Q_OBJECT
+public:
+    SocksClient *client;
+    QString host;
+    QTimer expire;
+
+    Item(SocksClient *c) : QObject(0)
+    {
+        client = c;
+        connect(client, &SocksClient::incomingMethods, [this](int methods){
+            if(methods & SocksClient::AuthNone)
+                client->chooseMethod(SocksClient::AuthNone);
+            else
+                doError();
+        });
+        connect(client, &SocksClient::incomingConnectRequest, [this](const QString &_host, int port)
+        {
+            if(port == 0) {
+                host = _host;
+                client->disconnect(this);
+                emit result(true);
+            }
+            else
+                doError();
+        });
+        connect(client, &SocksClient::error, [this](){ doError(); });
+        connect(&expire, SIGNAL(timeout()), SLOT(doError()));
+        resetExpiration();
+    }
+
+    ~Item()
+    {
+        delete client;
+    }
+
+    void resetExpiration()
+    {
+        expire.start(30000);
+    }
+
+signals:
+    void result(bool);
+
+private slots:
+    void doError()
+    {
+        expire.stop();
+        delete client;
+        client = 0;
+        result(false);
+    }
+};
+
+class S5BServer : public QObject
+{
+    Q_OBJECT
+
+    QSharedPointer<QTcpServer> serverSocket;
+    SocksServer serv;
+public:
+    S5BServer(QSharedPointer<QTcpServer> serverSocket) :
+        serverSocket(serverSocket)
+    {
+        serverSocket.data().setProperty("s5b", QVariant::fromValue<S5BServer*>(this));
+        serv.setServerSocket(serverSocket.data());
+        connect(&serv, &SocksServer::incomingReady, this, [this]() {
+            Item *i = new Item(d->serv.takeIncoming());
+#ifdef S5B_DEBUG
+            qDebug("S5BServer: incoming connection from %s:%d\n", qPrintable(i->client->peerAddress().toString()), i->client->peerPort());
+#endif
+            connect(i, SIGNAL(result(bool)), [this](bool success){
+                Item *i = static_cast<Item *>(sender());
+            #ifdef S5B_DEBUG
+                qDebug("S5BServer item result: %d\n", success);
+            #endif
+                if(!success) {
+                    d->itemList.removeAll(i);
+                    delete i;
+                    return;
+                }
+
+                SocksClient *c = i->client;
+                i->client = 0;
+                QString key = i->host;
+                d->itemList.removeAll(i);
+                delete i;
+
+                emit incomingConnection(c, key);
+                if (!c->isOpen()) {
+                    delete client
+                }
+            });
+            d->itemList.append(i);
+        });// SLOT(ss_incomingReady()));
+        connect(&serv, SIGNAL(incomingUDP(QString,int,QHostAddress,int,QByteArray)), SLOT(ss_incomingUDP(QString,int,QHostAddress,int,QByteArray)));
+    }
+
+signals:
+    void incomingConnection(SocksClient *c, const QString &key);
+};
+
+/**
+ * @brief The S5BLocalServers class represents a pack of local socks servers
+ * required for file transfer. Some of them are unique just for this
+ * trasfer (Direct), others are shared among all accounts and transfers
+ * (custom NAT forwarded ports).
+ */
+class S5BServersPack : public QObject
+{
+    Q_OBJECT
+
+    QList<S5BServer*> _servers;
+    TcpPortDiscoverer *discoverer;
+public:
+    S5BServersPack(TcpPortDiscoverer *discoverer) :
+        discoverer(discoverer)
+    {
+        for (auto &p: discoverer->takePorts()) {
+            auto s = p.server->property("s5b").toValue<S5BServer*>();
+            if (!s) {
+                s = new S5BServer(p.server);
+            }
+            connect(s, &S5BServer::incomingConnection, this, &S5BServersPack::incomingConnection);
+            _servers.append(new S5BServer(p));
+        }
+    }
+
+    ~S5BServersPack()
+    {
+        delete discoverer; // this will close some not needed anymore servers
+    }
+
+    QList<S5BServer*> candidates()
+    {
+        return _servers;
+    }
+signals:
+    void incomingConnection(SocksClient *client, const QString &key);
+};
+
+class ServersSet;
 class S5BManager::Item : public QObject
 {
     Q_OBJECT
@@ -84,6 +234,7 @@ public:
     SocksUDP *client_out_udp = nullptr;
     S5BConnector *conn = nullptr;
     S5BConnector *proxy_conn = nullptr;
+    S5BServersManager::S5BLocalServers *localServ = nullptr;
     bool wantFast = false;
     StreamHost proxy;
     int targetMode = 0; // requester sets this once it figures it out
@@ -560,7 +711,7 @@ public:
     QString sid;
     JT_S5B *query = nullptr;
     StreamHost proxyInfo;
-    QPointer<S5BServer> relatedServer;
+    QPointer<S5BServersManager> relatedServer;
 
     bool udp_init = false;
     QHostAddress udp_addr;
@@ -571,7 +722,7 @@ class S5BManager::Private
 {
 public:
     Client *client;
-    S5BServer *serv;
+    S5BServersManager *serv;
     QList<Entry*> activeList;
     S5BConnectionList incomingConns;
     JT_PushS5B *ps;
@@ -614,12 +765,12 @@ Client *S5BManager::client() const
     return d->client;
 }
 
-S5BServer *S5BManager::server() const
+S5BServersManager *S5BManager::server() const
 {
     return d->serv;
 }
 
-void S5BManager::setServer(S5BServer *serv)
+void S5BManager::setServer(S5BServersManager *serv)
 {
     if(d->serv) {
         d->serv->unlink(this);
@@ -839,7 +990,7 @@ void S5BManager::srv_incomingReady(SocksClient *sc, const QString &key)
         sc->grantUDPAssociate("", 0);
     else
         sc->grantConnect();
-    e->relatedServer = static_cast<S5BServer *>(sender());
+    e->relatedServer = static_cast<S5BServersManager *>(sender());
     e->i->setIncomingClient(sc);
 }
 
@@ -1210,14 +1361,15 @@ void S5BManager::Item::handleFast(const StreamHostList &hosts, const QString &iq
 void S5BManager::Item::doOutgoing()
 {
     StreamHostList hosts;
-    S5BServer *serv = m->server();
-    if(serv && serv->isActive() && !haveHost(in_hosts, self)) {
-        QStringList hostList = serv->hostList();
-        foreach (const QString & it, hostList) {
+    S5BServersManager *servMng = m->server();
+    if(servMng && !haveHost(in_hosts, self) && (localServ = servMng->newTransfer())) {
+        //QStringList hostList = serv->hostList();
+        auto candidates = localServ->candidates();
+        foreach (const auto &c, c) {
             StreamHost h;
             h.setJid(self);
-            h.setHost(it);
-            h.setPort(serv->port());
+            h.setHost(c.publishHost());
+            h.setPort(c.publishPort());
             hosts += h;
         }
     }
@@ -1967,76 +2119,14 @@ void S5BConnector::man_udpSuccess(const Jid &streamHost)
     }
 }
 
+
+
 //----------------------------------------------------------------------------
 // S5BServer
 //----------------------------------------------------------------------------
-class S5BServer::Item : public QObject
-{
-    Q_OBJECT
-public:
-    SocksClient *client;
-    QString host;
-    QTimer expire;
 
-    Item(SocksClient *c) : QObject(0)
-    {
-        client = c;
-        connect(client, SIGNAL(incomingMethods(int)), SLOT(sc_incomingMethods(int)));
-        connect(client, SIGNAL(incomingConnectRequest(QString,int)), SLOT(sc_incomingConnectRequest(QString,int)));
-        connect(client, SIGNAL(error(int)), SLOT(sc_error(int)));
 
-        connect(&expire, SIGNAL(timeout()), SLOT(doError()));
-        resetExpiration();
-    }
-
-    ~Item()
-    {
-        delete client;
-    }
-
-    void resetExpiration()
-    {
-        expire.start(30000);
-    }
-
-signals:
-    void result(bool);
-
-private slots:
-    void doError()
-    {
-        expire.stop();
-        delete client;
-        client = 0;
-        result(false);
-    }
-
-    void sc_incomingMethods(int m)
-    {
-        if(m & SocksClient::AuthNone)
-            client->chooseMethod(SocksClient::AuthNone);
-        else
-            doError();
-    }
-
-    void sc_incomingConnectRequest(const QString &_host, int port)
-    {
-        if(port == 0) {
-            host = _host;
-            client->disconnect(this);
-            emit result(true);
-        }
-        else
-            doError();
-    }
-
-    void sc_error(int)
-    {
-        doError();
-    }
-};
-
-class S5BServer::Private
+class S5BServersManager::Private
 {
 public:
     SocksServer serv;
@@ -2044,22 +2134,30 @@ public:
     QList<S5BManager*> manList;
     QList<Jingle::S5B::Manager*> jingleManagerList;
     QList<Item*> itemList;
+    TcpPortReserver *tcpPortReserver = nullptr;
 };
 
-S5BServer::S5BServer(QObject *parent)
-:QObject(parent)
+
+
+S5BServersManager::S5BServersManager(QObject *parent)
+    :QObject(parent)
 {
     d = new Private;
     connect(&d->serv, SIGNAL(incomingReady()), SLOT(ss_incomingReady()));
     connect(&d->serv, SIGNAL(incomingUDP(QString,int,QHostAddress,int,QByteArray)), SLOT(ss_incomingUDP(QString,int,QHostAddress,int,QByteArray)));
 }
 
-S5BServer::~S5BServer()
+S5BServersManager::~S5BServersManager()
 {
     unlinkAll();
     delete d;
 }
 
+bool S5BServersManager::setTcpPortReserver(TcpPortReserver *tcpReserver)
+{
+    d->tcpPortReserver = tcpReserver;
+}
+#if 0
 bool S5BServer::isActive() const
 {
     return d->serv.isActive();
@@ -2084,6 +2182,7 @@ void S5BServer::setHostList(const QStringList &list)
 
 QStringList S5BServer::hostList() const
 {
+
     return d->hostList;
 }
 
@@ -2091,8 +2190,16 @@ int S5BServer::port() const
 {
     return d->serv.port();
 }
+#endif
 
-void S5BServer::ss_incomingReady()
+
+
+ServersSet* S5BServersManager::newTransfer()
+{
+    auto ss = new S5BLocalServers(d->tcpPortReserver->scopeFactory(QString::fromLatin1("s5b"))->disco());
+}
+
+void S5BServersManager::ss_incomingReady()
 {
     Item *i = new Item(d->serv.takeIncoming());
 #ifdef S5B_DEBUG
@@ -2102,7 +2209,7 @@ void S5BServer::ss_incomingReady()
     d->itemList.append(i);
 }
 
-void S5BServer::ss_incomingUDP(const QString &host, int port, const QHostAddress &addr, int sourcePort, const QByteArray &data)
+void S5BServersManager::ss_incomingUDP(const QString &host, int port, const QHostAddress &addr, int sourcePort, const QByteArray &data)
 {
     if(port != 0 && port != 1)
         return;
@@ -2121,23 +2228,9 @@ void S5BServer::ss_incomingUDP(const QString &host, int port, const QHostAddress
     }
 }
 
-void S5BServer::item_result(bool b)
+void S5BServersManager::item_result(bool b)
 {
-    Item *i = static_cast<Item *>(sender());
-#ifdef S5B_DEBUG
-    qDebug("S5BServer item result: %d\n", b);
-#endif
-    if(!b) {
-        d->itemList.removeAll(i);
-        delete i;
-        return;
-    }
 
-    SocksClient *c = i->client;
-    i->client = 0;
-    QString key = i->host;
-    d->itemList.removeAll(i);
-    delete i;
 
 
     for (Jingle::S5B::Manager *m: d->jingleManagerList) {
@@ -2162,27 +2255,27 @@ void S5BServer::item_result(bool b)
     delete c;
 }
 
-void S5BServer::link(S5BManager *m)
+void S5BServersManager::link(S5BManager *m)
 {
     d->manList.append(m);
 }
 
-void S5BServer::unlink(S5BManager *m)
+void S5BServersManager::unlink(S5BManager *m)
 {
     d->manList.removeAll(m);
 }
 
-void S5BServer::link(Jingle::S5B::Manager *m)
+void S5BServersManager::link(Jingle::S5B::Manager *m)
 {
     d->jingleManagerList.append(m);
 }
 
-void S5BServer::unlink(Jingle::S5B::Manager *m)
+void S5BServersManager::unlink(Jingle::S5B::Manager *m)
 {
     d->jingleManagerList.removeAll(m);
 }
 
-void S5BServer::unlinkAll()
+void S5BServersManager::unlinkAll()
 {
     auto jl = d->jingleManagerList;
     d->jingleManagerList.clear(); // clear early for setServer optimization
@@ -2196,12 +2289,12 @@ void S5BServer::unlinkAll()
     d->manList.clear();
 }
 
-const QList<S5BManager*> & S5BServer::managerList() const
+const QList<S5BManager*> & S5BServersManager::managerList() const
 {
     return d->manList;
 }
 
-void S5BServer::writeUDP(const QHostAddress &addr, int port, const QByteArray &data)
+void S5BServersManager::writeUDP(const QHostAddress &addr, int port, const QByteArray &data)
 {
     d->serv.writeUDP(addr, port, data);
 }

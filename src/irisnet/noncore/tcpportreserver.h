@@ -1,5 +1,5 @@
 /*
- * tcpportreserver.cpp - dialog for handling tabbed chats
+ * tcpportreserver.cpp - a utility to bind local tcp server sockets
  * Copyright (C) 2019  Sergey Ilinykh
  *
  * This program is free software; you can redistribute it and/or
@@ -21,32 +21,99 @@
 #define TCPPORTRESERVER_H
 
 #include <QObject>
+#include <QSharedPointer>
+#include <QVariant>
 
 class QTcpServer;
 class QHostAddress;
 
 namespace XMPP {
 
+class TcpPortScope;
+/**
+ * @brief The TcpPortDiscoverer class
+ *
+ * Discovers / starts listening on a set of unique tcp ports.
+ */
+class TcpPortDiscoverer : public QObject
+{
+    Q_OBJECT
+public:
+    enum PortType {
+        Direct     = 0x1,
+        NatAssited = 0x2,
+        Tunneled   = 0x4
+    };
+    Q_DECLARE_FLAGS(PortTypes, PortType)
+
+    struct Port
+    {
+        PortType portType;
+        QSharedPointer<QTcpServer> server;
+        QString  publishHost;
+        quint16  publishPort;
+        QVariant meta;
+    };
+
+    TcpPortDiscoverer(TcpPortScope *scope);
+    bool setExternalHost(const QString &extHost, quint16 extPort, const QHostAddress &localIp, quint16 localPort);
+
+    PortTypes inProgressPortTypes() const;
+    QList<Port> takePorts();
+public slots:
+    void start(); // it's autocalled after outside worldis notified about this new discoverer
+    void stop();
+signals:
+    void portAvailable();
+private:
+    TcpPortScope *scope = nullptr;
+    QList<Port> ports;
+};
+
+class TcpPortReserver;
+/**
+ * @brief The TcpPortScope class
+ *
+ * Handles scopes of ports. For example just S5B dedicated ports.
+ * There only on scope instance per scope id
+ */
+class TcpPortScope: public QObject
+{
+    Q_OBJECT
+public:
+    TcpPortScope(const QString &scopeId, TcpPortReserver *reserver);
+    ~TcpPortScope();
+    TcpPortDiscoverer* disco();
+private:
+
+    friend class TcpPortDiscoverer;
+    QSharedPointer<QTcpServer> bind(const QHostAddress &addr, quint16 port);
+
+private:
+    class Private;
+    QScopedPointer<Private> d;
+};
+
+
+/**
+ * @brief The TcpPortReserver class
+ * This class should have the only instance per application
+ */
 class TcpPortReserver : public QObject
 {
     Q_OBJECT
 public:
     explicit TcpPortReserver(QObject *parent = nullptr);
     ~TcpPortReserver();
-
-    // port withing instanceId are uique but can be the same withing the same scopeId
-    // scopes never intersect
-    QList<QTcpServer*> borrow(const QString &scopeId, const QString &intanceId);
-    void setExternalHost(const QString &scopeId, const QString &extHost, quint16 extPort, const QHostAddress &localIp, quint16 localPort);
-
+    TcpPortScope *scopeFactory(const QString &id);
 signals:
+    void newDiscoverer(TcpPortDiscoverer *discoverer);
 
 public slots:
-private:
-    class Private;
-    QScopedPointer<Private> d;
 };
 
 } // namespace XMPP
+
+Q_DECLARE_OPERATORS_FOR_FLAGS(XMPP::TcpPortDiscoverer::PortTypes)
 
 #endif // TCPPORTRESERVER_H

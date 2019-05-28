@@ -1,5 +1,5 @@
 /*
- * tcpportreserver.cpp - dialog for handling tabbed chats
+ * tcpportreserver.cpp - a utility to bind local tcp server sockets
  * Copyright (C) 2019  Sergey Ilinykh
  *
  * This program is free software; you can redistribute it and/or
@@ -18,37 +18,42 @@
  */
 
 #include <QNetworkInterface>
+#include <QTcpServer>
+#include <QTcpSocket>
 
 #include "tcpportreserver.h"
 #include "ice176.h"
 
 namespace XMPP {
 
-struct StaticForwarding
-{
-    QString extHost;
-    quint16 extPort;
-    QHostAddress localIp;
-    quint16 localPort;
-};
-
-struct TcpPortReserver::Private
-{
-    QMap<QString,StaticForwarding> staticForwarding;
-};
-
-TcpPortReserver::TcpPortReserver(QObject *parent) : QObject(parent),
-  d(new Private)
+TcpPortDiscoverer::TcpPortDiscoverer(TcpPortScope *scope) :
+    QObject(scope),
+    scope(scope)
 {
 
 }
 
-TcpPortReserver::~TcpPortReserver()
+bool TcpPortDiscoverer::setExternalHost(const QString &extHost, quint16 extPort, const QHostAddress &localAddr, quint16 localPort)
 {
-
+    auto server = scope->bind(localAddr, localPort);
+    if (!server) {
+        return false;
+    }
+    Port p;
+    p.portType = NatAssited;
+    p.server = server;
+    p.publishHost = extHost;
+    p.publishPort = extPort;
+    ports.append(p);
+    return true;
 }
 
-QList<QTcpServer *> TcpPortReserver::borrow(const QString &scopeId, const QString &intanceId)
+TcpPortDiscoverer::PortTypes TcpPortDiscoverer::inProgressPortTypes() const
+{
+    return 0; // same as for stop()
+}
+
+void TcpPortDiscoverer::start()
 {
     QList<QHostAddress> listenAddrs;
     foreach(const QNetworkInterface &ni, QNetworkInterface::allInterfaces())
@@ -84,13 +89,110 @@ QList<QTcpServer *> TcpPortReserver::borrow(const QString &scopeId, const QStrin
         }
     }
 
-    return QList<QTcpServer *>(); // FIXME
+    for (auto &h: listenAddrs) {
+        auto server = scope->bind(h, 0);
+        if (!server) {
+            continue;
+        }
+        Port p;
+        p.portType = Direct;
+        p.server = server;
+        p.publishHost = server->serverAddress().toString();
+        p.publishPort = server->serverPort();
+        ports.append(p);
+    }
+}
+
+void TcpPortDiscoverer::stop()
+{
+    // nothing really to do here. but if we invent extension interface it can call stop on subdisco
+}
+
+QList<TcpPortDiscoverer::Port> TcpPortDiscoverer::takePorts()
+{
+    auto ret = ports;
+    ports.clear();
+    for (auto &p: ret) {
+        p.server->disconnect(this);
+    }
+    return ret;
+}
+
+// --------------------------------------------------------------------------
+// TcpPortScope
+// --------------------------------------------------------------------------
+struct TcpPortScope::Private
+{
+    QString id;
+    QHash<QPair<QHostAddress,quint16>, QWeakPointer<QTcpServer>> servers;
+};
+
+
+TcpPortScope::TcpPortScope(const QString &scopeId, TcpPortReserver *reserver) :
+    QObject(reserver),
+    d(new Private)
+{
+    d->id = scopeId;
+}
+
+TcpPortScope::~TcpPortScope()
+{
+
+}
+
+TcpPortDiscoverer *TcpPortScope::disco()
+{
+    auto discoverer = new TcpPortDiscoverer(this);
+    QMetaObject::invokeMethod(parent(), "newDiscoverer", Q_ARG(TcpPortDiscoverer*, discoverer));
+    QMetaObject::invokeMethod(discoverer, "start", Qt::QueuedConnection, Q_ARG(TcpPortDiscoverer*, discoverer));
+    return discoverer;
+}
+
+QSharedPointer<QTcpServer> TcpPortScope::bind(const QHostAddress &addr, quint16 port)
+{
+    if (port) {
+        auto srv = d->servers.value(qMakePair(addr,port)).toStrongRef();
+        if (srv) {
+            return srv;
+        }
+    }
+    auto s = new QTcpServer(this);
+    if (!s->listen(addr, port)) {
+        delete s;
+        return QSharedPointer<QTcpServer>();
+    }
+
+    QSharedPointer<QTcpServer> shared(s, [](QTcpServer *s){
+        auto scope = qobject_cast<TcpPortScope*>(s->parent());
+        scope->d->servers.remove(qMakePair(s->serverAddress(),s->serverPort()));
+    });
+    d->servers.insert(qMakePair(s->serverAddress(), s->serverPort()), shared.toWeakRef());
+
+    return shared;
 }
 
 
-void TcpPortReserver::setExternalHost(const QString &scopeId, const QString &extHost, quint16 extPort, const QHostAddress &localIp, quint16 localPort)
+// --------------------------------------------------------------------------
+// TcpPortScope
+// --------------------------------------------------------------------------
+TcpPortReserver::TcpPortReserver(QObject *parent) : QObject(parent)
 {
-    d->staticForwarding.insert(scopeId, StaticForwarding{extHost, extPort, localIp, localPort});
+
+}
+
+TcpPortReserver::~TcpPortReserver()
+{
+
+}
+
+TcpPortScope *TcpPortReserver::scopeFactory(const QString &id)
+{
+    auto scope = findChild<TcpPortScope*>(id, Qt::FindDirectChildrenOnly);
+    if (!scope) {
+        scope = new TcpPortScope(id, this);
+        scope->setParent(this);
+    }
+    return scope;
 }
 
 } // namespace XMPP

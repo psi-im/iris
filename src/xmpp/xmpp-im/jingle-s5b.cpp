@@ -1244,7 +1244,7 @@ class Manager::Private
 {
 public:
     XMPP::Jingle::Manager *jingleManager = nullptr;
-    S5BServer *serv = nullptr;
+    S5BServersManager *serv = nullptr;
 
     // FIMME it's reuiqred to split transports by direction otherwise we gonna hit conflicts.
     // jid,transport-sid -> transport mapping
@@ -1313,7 +1313,7 @@ void Manager::closeAll()
     emit abortAllRequested();
 }
 
-void Manager::setServer(S5BServer *serv)
+void Manager::setServer(S5BServersManager *serv)
 {
     if(d->serv) {
         d->serv->unlink(this);
@@ -1372,7 +1372,7 @@ void Manager::registerSid(const Jid &remote, const QString &sid)
     d->sids.insert(qMakePair(remote, sid));
 }
 
-S5BServer *Manager::socksServ() const
+S5BServersManager *Manager::socksServ() const
 {
     return d->serv;
 }

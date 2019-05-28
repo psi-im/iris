@@ -43,9 +43,10 @@ namespace XMPP
 
     class StreamHost;
     class Client;
+    class TcpPortReserver;
     class S5BConnection;
     class S5BManager;
-    class S5BServer;
+    class S5BServersManager;
     class JT_PushS5B;
     struct S5BRequest;
     typedef QList<StreamHost> StreamHostList;
@@ -151,8 +152,8 @@ namespace XMPP
 
         static const char* ns();
         Client *client() const;
-        S5BServer *server() const;
-        void setServer(S5BServer *s);
+        S5BServersManager *server() const;
+        void setServer(S5BServersManager *s);
         JT_PushS5B *jtPush() const;
 
         bool isAcceptableSID(const Jid &peer, const QString &sid) const;
@@ -200,7 +201,7 @@ namespace XMPP
         void con_unlink(S5BConnection *);
         void con_sendUDP(S5BConnection *, const QByteArray &buf);
 
-        friend class S5BServer;
+        friend class S5BServersManager;
         bool srv_ownsHash(const QString &key) const;
         void srv_incomingReady(SocksClient *sc, const QString &key);
         void srv_incomingUDP(bool init, const QHostAddress &addr, int port, const QString &key, const QByteArray &data);
@@ -243,22 +244,26 @@ namespace XMPP
     };
 
     // listens on a port for serving
-    class S5BServer : public QObject
+    class S5BServersManager : public QObject
     {
         Q_OBJECT
     public:
-        S5BServer(QObject *par=0);
-        ~S5BServer();
-
+        S5BServersManager(QObject *par=0);
+        ~S5BServersManager();
+#if 0
         bool isActive() const;
         bool start(int port);
         void stop();
         int port() const;
         void setHostList(const QStringList &);
         QStringList hostList() const;
+#endif
+        bool setTcpPortReserver(TcpPortReserver *tcpReserver);
 
         class Item;
 
+        class S5BLocalServers;
+        S5BLocalServers *newTransfer();
     private slots:
         void ss_incomingReady();
         void ss_incomingUDP(const QString &host, int port, const QHostAddress &addr, int sourcePort, const QByteArray &data);
