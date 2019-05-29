@@ -140,7 +140,7 @@ public:
     Candidate::Type type = Candidate::Direct;
     Candidate::State state = Candidate::New;
 
-    quint16 localPort = 0; // where Psi actually listens. e.g. with NAT-assited candidats it may be different from just port
+    TcpPortServer::Ptr server;
     SocksClient *socksClient = nullptr;
 
     void connectToHost(const QString &key, State successState, std::function<void(bool)> callback, bool isUdp)
@@ -251,12 +251,34 @@ Candidate::Candidate(const Jid &proxy, const QString &cid, quint16 localPreferen
     d->state = Probing; // it's probing because it's a local side proxy and host and port are unknown
 }
 
-Candidate::Candidate(const QString &host, quint16 port, const QString &cid, Type type, quint16 localPreference) :
+Candidate::Candidate(const TcpPortServer::Ptr &server, const QString &cid, quint16 localPreference) :
     d(new Private)
 {
+    Type type = None;
+    switch (server->portType()) {
+    case TcpPortServer::Direct:
+        type = Candidate::Direct;
+        break;
+    case TcpPortServer::NatAssited:
+        type = Candidate::Assisted;
+        break;
+    case TcpPortServer::Tunneled:
+        type = Candidate::Tunnel;
+        break;
+    case TcpPortServer::NoType:
+    default:
+        type = None;
+    }
+
+    if (type == None) {
+        d.reset();
+        return;
+    }
+
+    d->server = server;
     d->cid = cid;
-    d->host = host;
-    d->port = port;
+    d->host = server->publishHost();
+    d->port = server->publishPort();
     d->type = type;
     static const int priorities[] = {0, ProxyPreference, TunnelPreference, AssistedPreference, DirectPreference};
     if (type >= Type(0) && type <= Direct) {
@@ -264,9 +286,7 @@ Candidate::Candidate(const QString &host, quint16 port, const QString &cid, Type
     } else {
         d->priority = 0;
     }
-    if (type == Direct) {
-        d->localPort = port;
-    }
+
     d->state = New;
 }
 
@@ -311,12 +331,12 @@ void Candidate::setPort(quint16 port)
 
 quint16 Candidate::localPort() const
 {
-    return d->localPort;
+    return d->server ? d->server->serverPort() : 0;
 }
 
-void Candidate::setLocalPort(quint16 port)
+QHostAddress Candidate::localAddress() const
 {
-    d->localPort = port;
+    return d->server ? d->server->serverAddress() : QHostAddress();
 }
 
 Candidate::State Candidate::state() const
@@ -798,18 +818,14 @@ void Transport::prepare()
     d->directAddr = makeKey(d->sid, d->pad->session()->initiator(), d->pad->session()->responder());
     m->addKeyMapping(d->directAddr, this);
 
+    auto scope = d->pad->discoScope();
+    auto disco = scope->disco(); // FIXME store and handle signale. delete when not needed
 
-    auto serv = m->socksServ();
-    if (serv) {
-        for(auto const &h: serv->hostList()) {
-            if (!serv->port() || h.isEmpty()) {
-                continue;
-            }
-            Candidate c(h, serv->port(), d->generateCid(), Candidate::Direct);
-            if (!d->isDup(c)) {
-                d->localCandidates.insert(c.cid(), c);
-                d->pendingActions |= Private::NewCandidate;
-            }
+    for (auto serv: disco->takeServers()) {
+        Candidate c(serv, d->generateCid());
+        if (c.isValid() && !d->isDup(c)) {
+            d->localCandidates.insert(c.cid(), c);
+            d->pendingActions |= Private::NewCandidate;
         }
     }
 
@@ -1273,9 +1289,6 @@ Manager::Manager(QObject *parent) :
 Manager::~Manager()
 {
     d->jingleManager->unregisterTransport(NS);
-    if (d->serv) {
-        d->serv->unlink(this);
-    }
 }
 
 Transport::Features Manager::features() const
@@ -1311,21 +1324,6 @@ TransportManagerPad* Manager::pad(Session *session)
 void Manager::closeAll()
 {
     emit abortAllRequested();
-}
-
-void Manager::setServer(S5BServersManager *serv)
-{
-    if(d->serv) {
-        d->serv->unlink(this);
-        d->serv = nullptr;
-    }
-
-    if(serv) {
-        d->serv = serv;
-        d->serv->link(this);
-    } else {
-        d->serv = nullptr;
-    }
 }
 
 void Manager::addKeyMapping(const QString &key, Transport *transport)
@@ -1372,11 +1370,6 @@ void Manager::registerSid(const Jid &remote, const QString &sid)
     d->sids.insert(qMakePair(remote, sid));
 }
 
-S5BServersManager *Manager::socksServ() const
-{
-    return d->serv;
-}
-
 Jid Manager::userProxy() const
 {
     return d->proxy;
@@ -1389,7 +1382,8 @@ Pad::Pad(Manager *manager, Session *session) :
     _manager(manager),
     _session(session)
 {
-
+    auto reserver = _session->manager()->client()->tcpPortReserver();
+    _discoScope = reserver->scope(QString::fromLatin1("s5b"));
 }
 
 QString Pad::ns() const

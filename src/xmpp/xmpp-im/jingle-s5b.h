@@ -30,6 +30,7 @@
 #define JINGLE_S5B_H
 
 #include "jingle.h"
+#include "tcpportreserver.h"
 
 class QHostAddress;
 class SocksClient;
@@ -37,7 +38,6 @@ class SocksClient;
 namespace XMPP {
 
 class Client;
-class S5BServersManager;
 
 namespace Jingle {
 namespace S5B {
@@ -95,8 +95,9 @@ public:
     Candidate(const QDomElement &el);
     Candidate(const Candidate &other);
     Candidate(const Jid &proxy, const QString &cid, quint16 localPreference = 0);
-    Candidate(const QString &host, quint16 port, const QString &cid, Type type, quint16 localPreference = 0);
+    Candidate(const TcpPortServer::Ptr &server, const QString &cid, quint16 localPreference = 0);
     ~Candidate();
+    Candidate& operator=(const Candidate& other) = default;
     inline bool isValid() const { return d != nullptr; }
     inline operator bool() const { return isValid(); }
     Type type() const;
@@ -107,7 +108,7 @@ public:
     quint16 port() const;
     void setPort(quint16 port);
     quint16 localPort() const;
-    void setLocalPort(quint16 port);
+    QHostAddress localAddress() const;
     State state() const;
     void setState(State s);
     quint32 priority() const;
@@ -181,9 +182,12 @@ public:
 
     QString generateSid() const;
     void registerSid(const QString &sid);
+
+    inline TcpPortScope *discoScope() const { return _discoScope; }
 private:
     Manager *_manager;
     Session *_session;
+    TcpPortScope *_discoScope;
 };
 
 class Manager : public TransportManager {
@@ -200,14 +204,11 @@ public:
 
     void closeAll() override;
 
-    void setServer(S5BServersManager *serv);
     bool incomingConnection(SocksClient *client, const QString &key); // returns false if key is unknown
     bool incomingUDP(bool init, const QHostAddress &addr, int port, const QString &key, const QByteArray &data);
 
     QString generateSid(const Jid &remote);
     void registerSid(const Jid &remote, const QString &sid);
-
-    S5BServersManager* socksServ() const;
 
     /**
      * @brief userProxy returns custom (set by user) SOCKS proxy JID

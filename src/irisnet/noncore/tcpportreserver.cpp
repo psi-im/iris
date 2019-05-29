@@ -39,16 +39,16 @@ bool TcpPortDiscoverer::setExternalHost(const QString &extHost, quint16 extPort,
     if (!server) {
         return false;
     }
-    Port p;
-    p.portType = NatAssited;
-    p.server = server;
+    TcpPortServer::Port p;
+    p.portType = TcpPortServer::NatAssited;
     p.publishHost = extHost;
     p.publishPort = extPort;
-    ports.append(p);
+    server->setPortInfo(p);
+    servers.append(server);
     return true;
 }
 
-TcpPortDiscoverer::PortTypes TcpPortDiscoverer::inProgressPortTypes() const
+TcpPortServer::PortTypes TcpPortDiscoverer::inProgressPortTypes() const
 {
     return 0; // same as for stop()
 }
@@ -94,12 +94,12 @@ void TcpPortDiscoverer::start()
         if (!server) {
             continue;
         }
-        Port p;
-        p.portType = Direct;
-        p.server = server;
+        TcpPortServer::Port p;
+        p.portType = TcpPortServer::Direct;
         p.publishHost = server->serverAddress().toString();
         p.publishPort = server->serverPort();
-        ports.append(p);
+        server->setPortInfo(p);
+        servers.append(server);
     }
 }
 
@@ -108,12 +108,12 @@ void TcpPortDiscoverer::stop()
     // nothing really to do here. but if we invent extension interface it can call stop on subdisco
 }
 
-QList<TcpPortDiscoverer::Port> TcpPortDiscoverer::takePorts()
+QList<TcpPortServer::Ptr> TcpPortDiscoverer::takeServers()
 {
-    auto ret = ports;
-    ports.clear();
+    auto ret = servers;
+    servers.clear();
     for (auto &p: ret) {
-        p.server->disconnect(this);
+        p->disconnect(this);
     }
     return ret;
 }
@@ -124,7 +124,7 @@ QList<TcpPortDiscoverer::Port> TcpPortDiscoverer::takePorts()
 struct TcpPortScope::Private
 {
     QString id;
-    QHash<QPair<QHostAddress,quint16>, QWeakPointer<QTcpServer>> servers;
+    QHash<QPair<QHostAddress,quint16>, QWeakPointer<TcpPortServer>> servers;
 };
 
 
@@ -148,7 +148,12 @@ TcpPortDiscoverer *TcpPortScope::disco()
     return discoverer;
 }
 
-QSharedPointer<QTcpServer> TcpPortScope::bind(const QHostAddress &addr, quint16 port)
+void TcpPortScope::destroyServer(TcpPortServer *server)
+{
+    delete server;
+}
+
+TcpPortServer::Ptr TcpPortScope::bind(const QHostAddress &addr, quint16 port)
 {
     if (port) {
         auto srv = d->servers.value(qMakePair(addr,port)).toStrongRef();
@@ -156,17 +161,23 @@ QSharedPointer<QTcpServer> TcpPortScope::bind(const QHostAddress &addr, quint16 
             return srv;
         }
     }
-    auto s = new QTcpServer(this);
-    if (!s->listen(addr, port)) {
-        delete s;
-        return QSharedPointer<QTcpServer>();
+    auto socket = new QTcpServer(this);
+    if (!socket->listen(addr, port)) {
+        delete socket;
+        return TcpPortServer::Ptr();
     }
+    auto server = makeServer(socket);
 
-    QSharedPointer<QTcpServer> shared(s, [](QTcpServer *s){
+    TcpPortServer::Ptr shared(server, [](TcpPortServer *s){
         auto scope = qobject_cast<TcpPortScope*>(s->parent());
-        scope->d->servers.remove(qMakePair(s->serverAddress(),s->serverPort()));
+        if (scope) {
+            scope->d->servers.remove(qMakePair(s->serverAddress(),s->serverPort()));
+            scope->destroyServer(s);
+        } else {
+            delete s;
+        }
     });
-    d->servers.insert(qMakePair(s->serverAddress(), s->serverPort()), shared.toWeakRef());
+    d->servers.insert(qMakePair(socket->serverAddress(), socket->serverPort()), shared.toWeakRef());
 
     return shared;
 }
@@ -185,14 +196,24 @@ TcpPortReserver::~TcpPortReserver()
 
 }
 
-TcpPortScope *TcpPortReserver::scopeFactory(const QString &id)
+TcpPortScope *TcpPortReserver::scope(const QString &id)
 {
-    auto scope = findChild<TcpPortScope*>(id, Qt::FindDirectChildrenOnly);
-    if (!scope) {
-        scope = new TcpPortScope(id, this);
-        scope->setParent(this);
+    return findChild<TcpPortScope*>(id, Qt::FindDirectChildrenOnly);
+}
+
+void TcpPortReserver::registerScope(const QString &id, TcpPortScope *scope)
+{
+    scope->setObjectName(id);
+    scope->setParent(this);
+}
+
+TcpPortScope *TcpPortReserver::unregisterScope(const QString &id)
+{
+    auto s = scope(id);
+    if (s) {
+        s->setParent(nullptr);
     }
-    return scope;
+    return s;
 }
 
 } // namespace XMPP

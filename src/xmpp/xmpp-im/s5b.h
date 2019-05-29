@@ -23,6 +23,7 @@
 #include <QObject>
 #include <QList>
 #include <QHostAddress>
+#include <tcpportreserver.h>
 
 #include "bytestream.h"
 #include "xmpp_bytestream.h"
@@ -153,7 +154,9 @@ namespace XMPP
         static const char* ns();
         Client *client() const;
         S5BServersManager *server() const;
+#if 0
         void setServer(S5BServersManager *s);
+#endif
         JT_PushS5B *jtPush() const;
 
         bool isAcceptableSID(const Jid &peer, const QString &sid) const;
@@ -243,45 +246,11 @@ namespace XMPP
         void man_udpSuccess(const Jid &streamHost);
     };
 
-    // listens on a port for serving
-    class S5BServersManager : public QObject
+
+    class S5BServersProducer : public TcpPortScope
     {
-        Q_OBJECT
-    public:
-        S5BServersManager(QObject *par=0);
-        ~S5BServersManager();
-#if 0
-        bool isActive() const;
-        bool start(int port);
-        void stop();
-        int port() const;
-        void setHostList(const QStringList &);
-        QStringList hostList() const;
-#endif
-        bool setTcpPortReserver(TcpPortReserver *tcpReserver);
-
-        class Item;
-
-        class S5BLocalServers;
-        S5BLocalServers *newTransfer();
-    private slots:
-        void ss_incomingReady();
-        void ss_incomingUDP(const QString &host, int port, const QHostAddress &addr, int sourcePort, const QByteArray &data);
-        void item_result(bool);
-
-    private:
-        class Private;
-        Private *d;
-
-        friend class S5BManager;
-        friend class Jingle::S5B::Manager;
-        void link(S5BManager *);
-        void unlink(S5BManager *);
-        void link(Jingle::S5B::Manager *m);
-        void unlink(Jingle::S5B::Manager *m);
-        void unlinkAll();
-        const QList<S5BManager*> & managerList() const;
-        void writeUDP(const QHostAddress &addr, int port, const QByteArray &data);
+    protected:
+        TcpPortServer* makeServer(QTcpServer *socket);
     };
 
     class JT_S5B : public Task

@@ -69,7 +69,7 @@ static bool haveHost(const StreamHostList &list, const Jid &j)
 
 
 
-class S5BServer::Item : public QObject
+class S5BIncomingConnection : public QObject
 {
     Q_OBJECT
 public:
@@ -77,7 +77,7 @@ public:
     QString host;
     QTimer expire;
 
-    Item(SocksClient *c) : QObject(0)
+    S5BIncomingConnection(SocksClient *c) : QObject(0)
     {
         client = c;
         connect(client, &SocksClient::incomingMethods, [this](int methods){
@@ -91,6 +91,7 @@ public:
             if(port == 0) {
                 host = _host;
                 client->disconnect(this);
+                expire.stop();
                 emit result(true);
             }
             else
@@ -101,7 +102,7 @@ public:
         resetExpiration();
     }
 
-    ~Item()
+    ~S5BIncomingConnection()
     {
         delete client;
     }
@@ -124,30 +125,29 @@ private slots:
     }
 };
 
-class S5BServer : public QObject
+class S5BServer : public TcpPortServer
 {
     Q_OBJECT
 
-    QSharedPointer<QTcpServer> serverSocket;
     SocksServer serv;
+    QList<S5BIncomingConnection*> itemList;
 public:
-    S5BServer(QSharedPointer<QTcpServer> serverSocket) :
-        serverSocket(serverSocket)
+    S5BServer(QTcpServer *serverSocket) :
+        TcpPortServer(serverSocket)
     {
-        serverSocket.data().setProperty("s5b", QVariant::fromValue<S5BServer*>(this));
-        serv.setServerSocket(serverSocket.data());
+        serv.setServerSocket(serverSocket);
         connect(&serv, &SocksServer::incomingReady, this, [this]() {
-            Item *i = new Item(d->serv.takeIncoming());
+            S5BIncomingConnection *i = new S5BIncomingConnection(serv.takeIncoming());
 #ifdef S5B_DEBUG
             qDebug("S5BServer: incoming connection from %s:%d\n", qPrintable(i->client->peerAddress().toString()), i->client->peerPort());
 #endif
             connect(i, SIGNAL(result(bool)), [this](bool success){
-                Item *i = static_cast<Item *>(sender());
+                S5BIncomingConnection *i = static_cast<S5BIncomingConnection *>(sender());
             #ifdef S5B_DEBUG
                 qDebug("S5BServer item result: %d\n", success);
             #endif
                 if(!success) {
-                    d->itemList.removeAll(i);
+                    itemList.removeAll(i);
                     delete i;
                     return;
                 }
@@ -155,63 +155,79 @@ public:
                 SocksClient *c = i->client;
                 i->client = 0;
                 QString key = i->host;
-                d->itemList.removeAll(i);
+                itemList.removeAll(i);
                 delete i;
 
                 emit incomingConnection(c, key);
                 if (!c->isOpen()) {
-                    delete client
+                    delete c;
                 }
             });
-            d->itemList.append(i);
+            itemList.append(i);
         });// SLOT(ss_incomingReady()));
         connect(&serv, SIGNAL(incomingUDP(QString,int,QHostAddress,int,QByteArray)), SLOT(ss_incomingUDP(QString,int,QHostAddress,int,QByteArray)));
+    }
+
+    void writeUDP(const QHostAddress &addr, int port, const QByteArray &data)
+    {
+        serv.writeUDP(addr, port, data);
+    }
+
+    bool isActive() const
+    {
+        return serv.isActive();
     }
 
 signals:
     void incomingConnection(SocksClient *c, const QString &key);
 };
 
-/**
- * @brief The S5BLocalServers class represents a pack of local socks servers
- * required for file transfer. Some of them are unique just for this
- * trasfer (Direct), others are shared among all accounts and transfers
- * (custom NAT forwarded ports).
- */
-class S5BServersPack : public QObject
+#if 0
+void S5BServersManager::ss_incomingUDP(const QString &host, int port, const QHostAddress &addr, int sourcePort, const QByteArray &data)
 {
-    Q_OBJECT
+    if(port != 0 && port != 1)
+        return;
 
-    QList<S5BServer*> _servers;
-    TcpPortDiscoverer *discoverer;
-public:
-    S5BServersPack(TcpPortDiscoverer *discoverer) :
-        discoverer(discoverer)
-    {
-        for (auto &p: discoverer->takePorts()) {
-            auto s = p.server->property("s5b").toValue<S5BServer*>();
-            if (!s) {
-                s = new S5BServer(p.server);
-            }
-            connect(s, &S5BServer::incomingConnection, this, &S5BServersPack::incomingConnection);
-            _servers.append(new S5BServer(p));
+    for (Jingle::S5B::Manager *m: d->jingleManagerList) {
+        if (m->incomingUDP(port == 1 ? true : false, addr, sourcePort, host, data)) {
+            return;
         }
     }
 
-    ~S5BServersPack()
-    {
-        delete discoverer; // this will close some not needed anymore servers
+    foreach(S5BManager* m, d->manList) {
+        if(m->srv_ownsHash(host)) {
+            m->srv_incomingUDP(port == 1 ? true : false, addr, sourcePort, host, data);
+            return;
+        }
+    }
+}
+
+void S5BServersManager::item_result(bool b)
+{
+    for (Jingle::S5B::Manager *m: d->jingleManagerList) {
+        if (m->incomingConnection(c, key)) {
+            return;
+        }
     }
 
-    QList<S5BServer*> candidates()
-    {
-        return _servers;
+    // find the appropriate manager for this incoming connection
+    foreach(S5BManager *m, d->manList) {
+        if(m->srv_ownsHash(key)) {
+            m->srv_incomingReady(c, key);
+            return;
+        }
     }
-signals:
-    void incomingConnection(SocksClient *client, const QString &key);
-};
 
-class ServersSet;
+#ifdef S5B_DEBUG
+    qDebug("S5BServer item result: unknown hash [%s]\n", qPrintable(key));
+#endif
+
+    // throw it away
+    delete c;
+}
+#endif
+
+
 class S5BManager::Item : public QObject
 {
     Q_OBJECT
@@ -765,11 +781,16 @@ Client *S5BManager::client() const
     return d->client;
 }
 
+
+
+
 S5BServersManager *S5BManager::server() const
 {
     return d->serv;
 }
 
+#warning "update me"
+#if 0
 void S5BManager::setServer(S5BServersManager *serv)
 {
     if(d->serv) {
@@ -782,6 +803,7 @@ void S5BManager::setServer(S5BServersManager *serv)
         d->serv->link(this);
     }
 }
+#endif
 
 JT_PushS5B* S5BManager::jtPush() const
 {
@@ -2120,185 +2142,6 @@ void S5BConnector::man_udpSuccess(const Jid &streamHost)
 }
 
 
-
-//----------------------------------------------------------------------------
-// S5BServer
-//----------------------------------------------------------------------------
-
-
-class S5BServersManager::Private
-{
-public:
-    SocksServer serv;
-    QStringList hostList;
-    QList<S5BManager*> manList;
-    QList<Jingle::S5B::Manager*> jingleManagerList;
-    QList<Item*> itemList;
-    TcpPortReserver *tcpPortReserver = nullptr;
-};
-
-
-
-S5BServersManager::S5BServersManager(QObject *parent)
-    :QObject(parent)
-{
-    d = new Private;
-    connect(&d->serv, SIGNAL(incomingReady()), SLOT(ss_incomingReady()));
-    connect(&d->serv, SIGNAL(incomingUDP(QString,int,QHostAddress,int,QByteArray)), SLOT(ss_incomingUDP(QString,int,QHostAddress,int,QByteArray)));
-}
-
-S5BServersManager::~S5BServersManager()
-{
-    unlinkAll();
-    delete d;
-}
-
-bool S5BServersManager::setTcpPortReserver(TcpPortReserver *tcpReserver)
-{
-    d->tcpPortReserver = tcpReserver;
-}
-#if 0
-bool S5BServer::isActive() const
-{
-    return d->serv.isActive();
-}
-
-bool S5BServer::start(int port)
-{
-    d->serv.stop();
-    //return d->serv.listen(port, true);
-    return d->serv.listen(port);
-}
-
-void S5BServer::stop()
-{
-    d->serv.stop();
-}
-
-void S5BServer::setHostList(const QStringList &list)
-{
-    d->hostList = list;
-}
-
-QStringList S5BServer::hostList() const
-{
-
-    return d->hostList;
-}
-
-int S5BServer::port() const
-{
-    return d->serv.port();
-}
-#endif
-
-
-
-ServersSet* S5BServersManager::newTransfer()
-{
-    auto ss = new S5BLocalServers(d->tcpPortReserver->scopeFactory(QString::fromLatin1("s5b"))->disco());
-}
-
-void S5BServersManager::ss_incomingReady()
-{
-    Item *i = new Item(d->serv.takeIncoming());
-#ifdef S5B_DEBUG
-    qDebug("S5BServer: incoming connection from %s:%d\n", qPrintable(i->client->peerAddress().toString()), i->client->peerPort());
-#endif
-    connect(i, SIGNAL(result(bool)), SLOT(item_result(bool)));
-    d->itemList.append(i);
-}
-
-void S5BServersManager::ss_incomingUDP(const QString &host, int port, const QHostAddress &addr, int sourcePort, const QByteArray &data)
-{
-    if(port != 0 && port != 1)
-        return;
-
-    for (Jingle::S5B::Manager *m: d->jingleManagerList) {
-        if (m->incomingUDP(port == 1 ? true : false, addr, sourcePort, host, data)) {
-            return;
-        }
-    }
-
-    foreach(S5BManager* m, d->manList) {
-        if(m->srv_ownsHash(host)) {
-            m->srv_incomingUDP(port == 1 ? true : false, addr, sourcePort, host, data);
-            return;
-        }
-    }
-}
-
-void S5BServersManager::item_result(bool b)
-{
-
-
-
-    for (Jingle::S5B::Manager *m: d->jingleManagerList) {
-        if (m->incomingConnection(c, key)) {
-            return;
-        }
-    }
-
-    // find the appropriate manager for this incoming connection
-    foreach(S5BManager *m, d->manList) {
-        if(m->srv_ownsHash(key)) {
-            m->srv_incomingReady(c, key);
-            return;
-        }
-    }
-
-#ifdef S5B_DEBUG
-    qDebug("S5BServer item result: unknown hash [%s]\n", qPrintable(key));
-#endif
-
-    // throw it away
-    delete c;
-}
-
-void S5BServersManager::link(S5BManager *m)
-{
-    d->manList.append(m);
-}
-
-void S5BServersManager::unlink(S5BManager *m)
-{
-    d->manList.removeAll(m);
-}
-
-void S5BServersManager::link(Jingle::S5B::Manager *m)
-{
-    d->jingleManagerList.append(m);
-}
-
-void S5BServersManager::unlink(Jingle::S5B::Manager *m)
-{
-    d->jingleManagerList.removeAll(m);
-}
-
-void S5BServersManager::unlinkAll()
-{
-    auto jl = d->jingleManagerList;
-    d->jingleManagerList.clear(); // clear early for setServer optimization
-    for(Jingle::S5B::Manager *m : jl) {
-        m->setServer(nullptr);
-    }
-
-    foreach(S5BManager *m, d->manList) {
-        m->srv_unlink();
-    }
-    d->manList.clear();
-}
-
-const QList<S5BManager*> & S5BServersManager::managerList() const
-{
-    return d->manList;
-}
-
-void S5BServersManager::writeUDP(const QHostAddress &addr, int port, const QByteArray &data)
-{
-    d->serv.writeUDP(addr, port, data);
-}
-
 //----------------------------------------------------------------------------
 // JT_S5B
 //----------------------------------------------------------------------------
@@ -2659,6 +2502,11 @@ void StreamHost::setPort(int port)
 void StreamHost::setIsProxy(bool b)
 {
     proxy = b;
+}
+
+TcpPortServer *S5BServersProducer::makeServer(QTcpServer *socket)
+{
+    return new S5BServer(socket);
 }
 
 }

@@ -23,11 +23,45 @@
 #include <QObject>
 #include <QSharedPointer>
 #include <QVariant>
-
-class QTcpServer;
-class QHostAddress;
+#include <QTcpServer>
 
 namespace XMPP {
+
+class TcpPortServer : public QObject
+{
+    Q_OBJECT
+public:
+    using Ptr = QSharedPointer<TcpPortServer>;
+
+    enum PortType {
+        NoType     = 0x0,
+        Direct     = 0x1,
+        NatAssited = 0x2,
+        Tunneled   = 0x4
+    };
+    Q_DECLARE_FLAGS(PortTypes, PortType)
+
+    struct Port
+    {
+        PortType portType = NoType;
+        QString  publishHost;
+        quint16  publishPort = 0;
+        QVariant meta;
+    };
+
+    inline TcpPortServer(QTcpServer *serverSocket) : serverSocket(serverSocket) {}
+    inline void            setPortInfo(const Port &port) { this->port = port; }
+    inline QHostAddress    serverAddress() const { return serverSocket->serverAddress(); }
+    inline quint16         serverPort() const { return serverSocket->serverPort(); }
+    inline const QString  &publishHost() const { return port.publishHost; }
+    inline quint16         publishPort() const { return port.publishPort; }
+    inline PortType        portType() const { return port.portType; }
+    inline const QVariant &meta() const { return port.meta; }
+
+protected:
+    QTcpServer *serverSocket = nullptr;
+    Port port;
+};
 
 class TcpPortScope;
 /**
@@ -39,35 +73,20 @@ class TcpPortDiscoverer : public QObject
 {
     Q_OBJECT
 public:
-    enum PortType {
-        Direct     = 0x1,
-        NatAssited = 0x2,
-        Tunneled   = 0x4
-    };
-    Q_DECLARE_FLAGS(PortTypes, PortType)
-
-    struct Port
-    {
-        PortType portType;
-        QSharedPointer<QTcpServer> server;
-        QString  publishHost;
-        quint16  publishPort;
-        QVariant meta;
-    };
 
     TcpPortDiscoverer(TcpPortScope *scope);
     bool setExternalHost(const QString &extHost, quint16 extPort, const QHostAddress &localIp, quint16 localPort);
 
-    PortTypes inProgressPortTypes() const;
-    QList<Port> takePorts();
+    TcpPortServer::PortTypes inProgressPortTypes() const;
+    QList<TcpPortServer::Ptr> takeServers();
 public slots:
-    void start(); // it's autocalled after outside worldis notified about this new discoverer
+    void start(); // it's autocalled after outside world is notified about this new discoverer
     void stop();
 signals:
     void portAvailable();
 private:
     TcpPortScope *scope = nullptr;
-    QList<Port> ports;
+    QList<TcpPortServer::Ptr> servers;
 };
 
 class TcpPortReserver;
@@ -84,10 +103,13 @@ public:
     TcpPortScope(const QString &scopeId, TcpPortReserver *reserver);
     ~TcpPortScope();
     TcpPortDiscoverer* disco();
+protected:
+    virtual TcpPortServer* makeServer(QTcpServer *socket) = 0;
+    virtual void destroyServer(TcpPortServer *server);
 private:
 
     friend class TcpPortDiscoverer;
-    QSharedPointer<QTcpServer> bind(const QHostAddress &addr, quint16 port);
+    TcpPortServer::Ptr bind(const QHostAddress &addr, quint16 port);
 
 private:
     class Private;
@@ -105,7 +127,17 @@ class TcpPortReserver : public QObject
 public:
     explicit TcpPortReserver(QObject *parent = nullptr);
     ~TcpPortReserver();
-    TcpPortScope *scopeFactory(const QString &id);
+
+    /**
+     * @brief scope returns a registered scope corresponding to scope id
+     * @param id
+     * @return scope
+     * @note Do not reparent the object
+     */
+    TcpPortScope *scope(const QString &id);
+
+    void registerScope(const QString &id, TcpPortScope *scope);
+    TcpPortScope *unregisterScope(const QString &id);
 signals:
     void newDiscoverer(TcpPortDiscoverer *discoverer);
 
@@ -114,6 +146,6 @@ public slots:
 
 } // namespace XMPP
 
-Q_DECLARE_OPERATORS_FOR_FLAGS(XMPP::TcpPortDiscoverer::PortTypes)
+Q_DECLARE_OPERATORS_FOR_FLAGS(XMPP::TcpPortServer::PortTypes)
 
 #endif // TCPPORTRESERVER_H
