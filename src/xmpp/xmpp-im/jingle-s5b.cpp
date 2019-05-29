@@ -1290,7 +1290,6 @@ class Manager::Private
 {
 public:
     XMPP::Jingle::Manager *jingleManager = nullptr;
-    S5BServersManager *serv = nullptr;
 
     // FIMME it's reuiqred to split transports by direction otherwise we gonna hit conflicts.
     // jid,transport-sid -> transport mapping

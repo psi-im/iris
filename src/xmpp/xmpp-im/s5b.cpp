@@ -244,13 +244,14 @@ public:
     StreamHostList in_hosts;
     JT_S5B *task = nullptr;
     JT_S5B *proxy_task = nullptr;
+    QSharedPointer<S5BServer> relatedServer;
     SocksClient *client = nullptr;
     SocksClient *client_out = nullptr;
     SocksUDP *client_udp = nullptr;
     SocksUDP *client_out_udp = nullptr;
     S5BConnector *conn = nullptr;
     S5BConnector *proxy_conn = nullptr;
-    S5BServersManager::S5BLocalServers *localServ = nullptr;
+    //S5BServersManager::S5BLocalServers *localServ = nullptr;
     bool wantFast = false;
     StreamHost proxy;
     int targetMode = 0; // requester sets this once it figures it out
@@ -727,7 +728,6 @@ public:
     QString sid;
     JT_S5B *query = nullptr;
     StreamHost proxyInfo;
-    QPointer<S5BServersManager> relatedServer;
 
     bool udp_init = false;
     QHostAddress udp_addr;
@@ -738,7 +738,6 @@ class S5BManager::Private
 {
 public:
     Client *client;
-    S5BServersManager *serv;
     QList<Entry*> activeList;
     S5BConnectionList incomingConns;
     JT_PushS5B *ps;
@@ -753,7 +752,6 @@ S5BManager::S5BManager(Client *parent)
 
     d = new Private;
     d->client = parent;
-    d->serv = 0;
 
     d->ps = new JT_PushS5B(d->client->rootTask());
     connect(d->ps, SIGNAL(incoming(S5BRequest)), SLOT(ps_incoming(S5BRequest)));
@@ -763,7 +761,6 @@ S5BManager::S5BManager(Client *parent)
 
 S5BManager::~S5BManager()
 {
-    setServer(0);
     while (!d->incomingConns.isEmpty()) {
         delete d->incomingConns.takeFirst();
     }
@@ -780,30 +777,6 @@ Client *S5BManager::client() const
 {
     return d->client;
 }
-
-
-
-
-S5BServersManager *S5BManager::server() const
-{
-    return d->serv;
-}
-
-#warning "update me"
-#if 0
-void S5BManager::setServer(S5BServersManager *serv)
-{
-    if(d->serv) {
-        d->serv->unlink(this);
-        d->serv = 0;
-    }
-
-    if(serv) {
-        d->serv = serv;
-        d->serv->link(this);
-    }
-}
-#endif
 
 JT_PushS5B* S5BManager::jtPush() const
 {
@@ -1005,14 +978,12 @@ void S5BManager::srv_incomingReady(SocksClient *sc, const QString &key)
     Entry *e = findEntryByHash(key);
     if(!e->i->allowIncoming) {
         sc->requestDeny();
-        sc->deleteLater();
         return;
     }
     if(e->c->d->mode == S5BConnection::Datagram)
         sc->grantUDPAssociate("", 0);
     else
         sc->grantConnect();
-    e->relatedServer = static_cast<S5BServersManager *>(sender());
     e->i->setIncomingClient(sc);
 }
 
@@ -1045,11 +1016,6 @@ void S5BManager::srv_incomingUDP(bool init, const QHostAddress &addr, int port, 
         return;
 
     e->c->man_udpReady(data);
-}
-
-void S5BManager::srv_unlink()
-{
-    d->serv = 0;
 }
 
 void S5BManager::con_connect(S5BConnection *c)
@@ -1112,8 +1078,8 @@ void S5BManager::con_sendUDP(S5BConnection *c, const QByteArray &buf)
     if(!e->udp_init)
         return;
 
-    if(e->relatedServer)
-        e->relatedServer->writeUDP(e->udp_addr, e->udp_port, buf);
+    if(e->i->relatedServer)
+        e->i->relatedServer->writeUDP(e->udp_addr, e->udp_port, buf);
 }
 
 void S5BManager::item_accepted()
@@ -1383,18 +1349,23 @@ void S5BManager::Item::handleFast(const StreamHostList &hosts, const QString &iq
 void S5BManager::Item::doOutgoing()
 {
     StreamHostList hosts;
-    S5BServersManager *servMng = m->server();
-    if(servMng && !haveHost(in_hosts, self) && (localServ = servMng->newTransfer())) {
-        //QStringList hostList = serv->hostList();
-        auto candidates = localServ->candidates();
-        foreach (const auto &c, c) {
+    auto disco = m->client()->tcpPortReserver()->scope(QString::fromLatin1("s5b"))->disco();
+    if(!haveHost(in_hosts, self)) {
+        foreach (auto &c, disco->takeServers()) {
+            relatedServer = c.staticCast<S5BServer>();
+            connect(relatedServer.data(), &S5BServer::incomingConnection, this, [this](SocksClient *c, const QString &key) {
+                if (key == this->key) {
+                    m->srv_incomingReady(c, key);
+                }
+            });
             StreamHost h;
             h.setJid(self);
-            h.setHost(c.publishHost());
-            h.setPort(c.publishPort());
+            h.setHost(c->publishHost());
+            h.setPort(c->publishPort());
             hosts += h;
         }
     }
+    delete disco; // FIXME we could start listening for signals instead. it may send us upnp candidate
 
     // if the proxy is valid, then it's ok to add (the manager already ensured that it doesn't conflict)
     if(proxy.jid().isValid())

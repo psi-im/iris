@@ -47,7 +47,6 @@ namespace XMPP
     class TcpPortReserver;
     class S5BConnection;
     class S5BManager;
-    class S5BServersManager;
     class JT_PushS5B;
     struct S5BRequest;
     typedef QList<StreamHost> StreamHostList;
@@ -153,10 +152,6 @@ namespace XMPP
 
         static const char* ns();
         Client *client() const;
-        S5BServersManager *server() const;
-#if 0
-        void setServer(S5BServersManager *s);
-#endif
         JT_PushS5B *jtPush() const;
 
         bool isAcceptableSID(const Jid &peer, const QString &sid) const;
@@ -204,11 +199,10 @@ namespace XMPP
         void con_unlink(S5BConnection *);
         void con_sendUDP(S5BConnection *, const QByteArray &buf);
 
-        friend class S5BServersManager;
+        friend class S5BServer;
         bool srv_ownsHash(const QString &key) const;
         void srv_incomingReady(SocksClient *sc, const QString &key);
         void srv_incomingUDP(bool init, const QHostAddress &addr, int port, const QString &key, const QByteArray &data);
-        void srv_unlink();
 
         friend class Item;
         void doSuccess(const Jid &peer, const QString &id, const Jid &streamHost);
