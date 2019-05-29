@@ -449,6 +449,7 @@ public:
     QTimer probingTimer;
     QElapsedTimer lastConnectionStart;
     size_t blockSize = 8192;
+    TcpPortDiscoverer *disco = nullptr;
 
     QSharedPointer<Connection> connection;
 
@@ -556,10 +557,7 @@ public:
                     if (!hasUnckeckedNew) {
                         pendingActions &= ~Private::NewCandidate; // just if we had it for example after proxy discovery
                     }
-                    if (proxyDiscoveryInProgress && (mnc.priority() >> 16) > Candidate::ProxyPreference) {
-                        proxyDiscoveryInProgress = false; // doesn't make sense anymore
-                    }
-                    // TODO do the same for upnp
+                    setLocalProbingMinimalPreference(mnc.priority() >> 16);
                     updateMinimalPriority();
                 }
                 checkAndFinishNegotiation();
@@ -567,13 +565,40 @@ public:
         }
     }
 
+    /**
+     * @brief limitTcpDiscoByMinimalPreference take upper part of candidate preference (type preference)
+     *        and drops lower priority pending local servers disco
+     * @param preference
+     */
+    void setLocalProbingMinimalPreference(quint32 preference)
+    {
+        if (proxyDiscoveryInProgress && preference > Candidate::ProxyPreference) {
+            proxyDiscoveryInProgress = false; // doesn't make sense anymore
+        }
+
+        // and now local ports discoverer..
+        if (!disco) {
+            return;
+        }
+        TcpPortServer::PortTypes types = TcpPortServer::Direct;
+        if (preference >= Candidate::AssistedPreference) {
+            types |= TcpPortServer::NatAssited;
+        }
+        if (preference >= Candidate::TunnelPreference) {
+            types |= TcpPortServer::Tunneled;
+        }
+        if (!disco->setTypeMask(types)) {
+            delete disco;
+            disco = nullptr;
+        }
+    }
+
     bool hasUnaknowledgedLocalCandidates() const
     {
         // now ensure all local were sent to remote and no hope left
-        if (proxyDiscoveryInProgress) {
+        if (proxyDiscoveryInProgress || (disco && !disco->isDepleted())) {
             return true;
         }
-        // Note: When upnp support is added we have one more check here
 
         // now local candidates
         for (const auto &c: localCandidates) {
@@ -717,10 +742,7 @@ public:
             }
         }
         prio >>= 16;
-        if (proxyDiscoveryInProgress && prio > Candidate::ProxyPreference) {
-            // all proxies do no make sense anymore. we have successful higher priority candidate
-            proxyDiscoveryInProgress = false;
-        }
+        setLocalProbingMinimalPreference(prio);
         // if we discarded "used" candidates then reset them to invalid
         if (localUsedCandidate && localUsedCandidate.state() == Candidate::Discarded) {
             localUsedCandidate = Candidate();
@@ -750,7 +772,18 @@ public:
             }
         }
         if (!haveNewCandidates) {
-            pendingActions &= ~Private::NewCandidate;
+            pendingActions &= ~NewCandidate;
+        }
+    }
+
+    void onLocalServerDiscovered()
+    {
+        for (auto serv: disco->takeServers()) {
+            Candidate c(serv, generateCid());
+            if (c.isValid() && !isDup(c) && c.priority()) {
+                localCandidates.insert(c.cid(), c);
+                pendingActions |= NewCandidate;
+            }
         }
     }
 
@@ -819,15 +852,12 @@ void Transport::prepare()
     m->addKeyMapping(d->directAddr, this);
 
     auto scope = d->pad->discoScope();
-    auto disco = scope->disco(); // FIXME store and handle signale. delete when not needed
+    d->disco = scope->disco(); // FIXME store and handle signale. delete when not needed
 
-    for (auto serv: disco->takeServers()) {
-        Candidate c(serv, d->generateCid());
-        if (c.isValid() && !d->isDup(c)) {
-            d->localCandidates.insert(c.cid(), c);
-            d->pendingActions |= Private::NewCandidate;
-        }
-    }
+    connect(d->disco, &TcpPortDiscoverer::portAvailable, this, [this](){
+        d->onLocalServerDiscovered();
+    });
+    d->onLocalServerDiscovered();
 
     Jid proxy = m->userProxy();
     if (proxy.isValid()) {
@@ -1029,7 +1059,7 @@ bool Transport::update(const QDomElement &transportEl)
             c.setState(Candidate::Discarded);
         }
         d->proxyDiscoveryInProgress = false;
-        // TODO do the same for upnp when implemented
+        delete d->disco;
 
         QTimer::singleShot(0, this, [this](){ emit failed(); });
         return true;

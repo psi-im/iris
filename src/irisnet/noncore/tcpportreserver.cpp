@@ -35,6 +35,9 @@ TcpPortDiscoverer::TcpPortDiscoverer(TcpPortScope *scope) :
 
 bool TcpPortDiscoverer::setExternalHost(const QString &extHost, quint16 extPort, const QHostAddress &localAddr, quint16 localPort)
 {
+    if (!(typeMask & TcpPortServer::NatAssited)) {
+        return false; // seems like we don't need nat-assited
+    }
     auto server = scope->bind(localAddr, localPort);
     if (!server) {
         return false;
@@ -51,6 +54,24 @@ bool TcpPortDiscoverer::setExternalHost(const QString &extHost, quint16 extPort,
 TcpPortServer::PortTypes TcpPortDiscoverer::inProgressPortTypes() const
 {
     return 0; // same as for stop()
+}
+
+bool TcpPortDiscoverer::isDepleted() const
+{
+    return servers.size() == 0; // TODO and no active subdiscoveries
+}
+
+TcpPortServer::PortTypes TcpPortDiscoverer::setTypeMask(TcpPortServer::PortTypes mask)
+{
+    this->typeMask = mask;
+    // drop ready ports if any
+    std::remove_if(servers.begin(), servers.end(), [mask](auto &s){ return !(s->portType() & mask); });
+
+    TcpPortServer::PortTypes pendingTypes;
+    for (auto &s: servers) pendingTypes |= s->portType();
+
+    // TODO drop pending subdiscoveries too and update pendingType when implemented
+    return pendingTypes;
 }
 
 void TcpPortDiscoverer::start()

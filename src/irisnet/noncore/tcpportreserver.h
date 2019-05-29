@@ -78,6 +78,19 @@ public:
     bool setExternalHost(const QString &extHost, quint16 extPort, const QHostAddress &localIp, quint16 localPort);
 
     TcpPortServer::PortTypes inProgressPortTypes() const;
+    bool isDepleted() const;
+
+    /**
+     * @brief setTypeMask sets expected port types mask and frees unnecessary resources
+     * @param mask
+     * @return remaining port types
+     */
+    XMPP::TcpPortServer::PortTypes setTypeMask(TcpPortServer::PortTypes mask);
+
+    /**
+     * @brief takeServers takes all discovered servers
+     * @return
+     */
     QList<TcpPortServer::Ptr> takeServers();
 public slots:
     void start(); // it's autocalled after outside world is notified about this new discoverer
@@ -85,6 +98,7 @@ public slots:
 signals:
     void portAvailable();
 private:
+    TcpPortServer::PortTypes typeMask = TcpPortServer::PortTypes(TcpPortServer::Direct | TcpPortServer::NatAssited | TcpPortServer::Tunneled);
     TcpPortScope *scope = nullptr;
     QList<TcpPortServer::Ptr> servers;
 };
