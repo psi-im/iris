@@ -130,6 +130,7 @@ class S5BServer : public TcpPortServer
     Q_OBJECT
 
     SocksServer serv;
+    QSet<QString> keys;
 public:
     S5BServer(QTcpServer *serverSocket) :
         TcpPortServer(serverSocket)
@@ -176,6 +177,21 @@ public:
     bool isActive() const
     {
         return serv.isActive();
+    }
+
+    bool hasKey(const QString &key)
+    {
+        return keys.contains(key);
+    }
+
+    void registerKey(const QString &key)
+    {
+        keys.insert(key);
+    }
+
+    void unregisterKey(const QString &key)
+    {
+        keys.remove(key);
     }
 
 signals:
@@ -849,15 +865,15 @@ bool S5BManager::isAcceptableSID(const Jid &peer, const QString &sid) const
     QString key = makeKey(sid, d->client->jid(), peer);
     QString key_out = makeKey(sid, peer, d->client->jid()); //not valid in muc via proxy
 
-    // if we have a server, then check through it
-    if(d->serv) {
-        if(findServerEntryByHash(key) || findServerEntryByHash(key_out))
-            return false;
+    foreach(Entry *e, d->activeList) {
+        if(e->i) {
+            if (e->i->key == key || e->i->key == key_out)
+                return false;
+            else if (e->i->relatedServer && (e->i->relatedServer->hasKey(key) || e->i->relatedServer->hasKey(key_out)))
+                return false;
+        }
     }
-    else {
-        if(findEntryByHash(key) || findEntryByHash(key_out))
-            return false;
-    }
+
     return true;
 }
 
@@ -906,17 +922,6 @@ S5BManager::Entry *S5BManager::findEntryBySID(const Jid &peer, const QString &si
 {
     foreach(Entry *e, d->activeList) {
         if(e->i && e->i->peer.compare(peer) && e->sid == sid)
-            return e;
-    }
-    return 0;
-}
-
-S5BManager::Entry *S5BManager::findServerEntryByHash(const QString &key) const
-{
-    const QList<S5BManager*> &manList = d->serv->managerList();
-    foreach(S5BManager *m, manList) {
-        Entry *e = m->findEntryByHash(key);
-        if(e)
             return e;
     }
     return 0;
@@ -1204,6 +1209,11 @@ S5BManager::Item::~Item()
 
 void S5BManager::Item::resetConnection()
 {
+    if (relatedServer) {
+        relatedServer->unregisterKey(key);
+        relatedServer.reset();
+    }
+
     delete task;
     task = nullptr;
 
@@ -1309,6 +1319,7 @@ void S5BManager::Item::doOutgoing()
     if(!haveHost(in_hosts, self)) {
         foreach (auto &c, disco->takeServers()) {
             relatedServer = c.staticCast<S5BServer>();
+            relatedServer->registerKey(key);
             connect(relatedServer.data(), &S5BServer::incomingConnection, this, [this](SocksClient *c, const QString &key) {
                 if (key == this->key) {
                     m->srv_incomingReady(c, key);

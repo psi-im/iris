@@ -114,14 +114,14 @@ class TcpPortScope: public QObject
 {
     Q_OBJECT
 public:
-    TcpPortScope(const QString &scopeId, TcpPortReserver *reserver);
+    TcpPortScope();
     ~TcpPortScope();
     TcpPortDiscoverer* disco();
 protected:
     virtual TcpPortServer* makeServer(QTcpServer *socket) = 0;
     virtual void destroyServer(TcpPortServer *server);
-private:
 
+private:
     friend class TcpPortDiscoverer;
     TcpPortServer::Ptr bind(const QHostAddress &addr, quint16 port);
 

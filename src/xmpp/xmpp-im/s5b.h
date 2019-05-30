@@ -186,7 +186,6 @@ namespace XMPP
         Entry *findEntry(Item *) const;
         Entry *findEntryByHash(const QString &key) const;
         Entry *findEntryBySID(const Jid &peer, const QString &sid) const;
-        Entry *findServerEntryByHash(const QString &key) const;
 
         void entryContinue(Entry *e);
         void queryProxy(Entry *e);

@@ -144,16 +144,13 @@ QList<TcpPortServer::Ptr> TcpPortDiscoverer::takeServers()
 // --------------------------------------------------------------------------
 struct TcpPortScope::Private
 {
-    QString id;
     QHash<QPair<QHostAddress,quint16>, QWeakPointer<TcpPortServer>> servers;
 };
 
 
-TcpPortScope::TcpPortScope(const QString &scopeId, TcpPortReserver *reserver) :
-    QObject(reserver),
+TcpPortScope::TcpPortScope() :
     d(new Private)
 {
-    d->id = scopeId;
 }
 
 TcpPortScope::~TcpPortScope()
