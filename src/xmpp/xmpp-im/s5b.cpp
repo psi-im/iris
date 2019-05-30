@@ -130,42 +130,42 @@ class S5BServer : public TcpPortServer
     Q_OBJECT
 
     SocksServer serv;
-    QList<S5BIncomingConnection*> itemList;
 public:
     S5BServer(QTcpServer *serverSocket) :
         TcpPortServer(serverSocket)
     {
         serv.setServerSocket(serverSocket);
         connect(&serv, &SocksServer::incomingReady, this, [this]() {
-            S5BIncomingConnection *i = new S5BIncomingConnection(serv.takeIncoming());
+            S5BIncomingConnection *inConn = new S5BIncomingConnection(serv.takeIncoming());
 #ifdef S5B_DEBUG
             qDebug("S5BServer: incoming connection from %s:%d\n", qPrintable(i->client->peerAddress().toString()), i->client->peerPort());
 #endif
-            connect(i, SIGNAL(result(bool)), [this](bool success){
-                S5BIncomingConnection *i = static_cast<S5BIncomingConnection *>(sender());
-            #ifdef S5B_DEBUG
+            connect(inConn, &S5BIncomingConnection::result, this, [this, inConn](bool success){
+#ifdef S5B_DEBUG
                 qDebug("S5BServer item result: %d\n", success);
-            #endif
+#endif
                 if(!success) {
-                    itemList.removeAll(i);
-                    delete i;
+                    delete inConn;
                     return;
                 }
 
-                SocksClient *c = i->client;
-                i->client = 0;
-                QString key = i->host;
-                itemList.removeAll(i);
-                delete i;
+                SocksClient *c = inConn->client;
+                inConn->client = 0;
+                QString key = inConn->host;
+                delete inConn;
 
                 emit incomingConnection(c, key);
                 if (!c->isOpen()) {
                     delete c;
                 }
             });
-            itemList.append(i);
-        });// SLOT(ss_incomingReady()));
-        connect(&serv, SIGNAL(incomingUDP(QString,int,QHostAddress,int,QByteArray)), SLOT(ss_incomingUDP(QString,int,QHostAddress,int,QByteArray)));
+        });
+        connect(&serv, &SocksServer::incomingUDP, this, [this](const QString &host, int port, const QHostAddress &addr, int sourcePort, const QByteArray &data){
+            if(port != 0 && port != 1)
+                return;
+            bool isInit = port == 1;
+            emit incomingUdp(isInit, addr, sourcePort, host, data);
+        });
     }
 
     void writeUDP(const QHostAddress &addr, int port, const QByteArray &data)
@@ -180,52 +180,8 @@ public:
 
 signals:
     void incomingConnection(SocksClient *c, const QString &key);
+    void incomingUdp(bool isInit, const QHostAddress &addr, int sourcePort, const QString &key, const QByteArray &data);
 };
-
-#if 0
-void S5BServersManager::ss_incomingUDP(const QString &host, int port, const QHostAddress &addr, int sourcePort, const QByteArray &data)
-{
-    if(port != 0 && port != 1)
-        return;
-
-    for (Jingle::S5B::Manager *m: d->jingleManagerList) {
-        if (m->incomingUDP(port == 1 ? true : false, addr, sourcePort, host, data)) {
-            return;
-        }
-    }
-
-    foreach(S5BManager* m, d->manList) {
-        if(m->srv_ownsHash(host)) {
-            m->srv_incomingUDP(port == 1 ? true : false, addr, sourcePort, host, data);
-            return;
-        }
-    }
-}
-
-void S5BServersManager::item_result(bool b)
-{
-    for (Jingle::S5B::Manager *m: d->jingleManagerList) {
-        if (m->incomingConnection(c, key)) {
-            return;
-        }
-    }
-
-    // find the appropriate manager for this incoming connection
-    foreach(S5BManager *m, d->manList) {
-        if(m->srv_ownsHash(key)) {
-            m->srv_incomingReady(c, key);
-            return;
-        }
-    }
-
-#ifdef S5B_DEBUG
-    qDebug("S5BServer item result: unknown hash [%s]\n", qPrintable(key));
-#endif
-
-    // throw it away
-    delete c;
-}
-#endif
 
 
 class S5BManager::Item : public QObject
@@ -1356,6 +1312,11 @@ void S5BManager::Item::doOutgoing()
             connect(relatedServer.data(), &S5BServer::incomingConnection, this, [this](SocksClient *c, const QString &key) {
                 if (key == this->key) {
                     m->srv_incomingReady(c, key);
+                }
+            });
+            connect(relatedServer.data(), &S5BServer::incomingUdp, this, [this](bool isInit, const QHostAddress &addr, int sourcePort, const QString &key, const QByteArray &data) {
+                if (key == this->key) {
+                    m->srv_incomingUDP(isInit, addr, sourcePort, key, data);
                 }
             });
             StreamHost h;
