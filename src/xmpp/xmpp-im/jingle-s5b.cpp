@@ -129,9 +129,13 @@ class Candidate::Private : public QObject, public QSharedData {
 public:
     ~Private()
     {
+        if (server) {
+            server->unregisterKey(transport->directAddr());
+        }
         delete socksClient;
     }
 
+    Transport *transport;
     QString cid;
     QString host;
     Jid jid;
@@ -140,7 +144,7 @@ public:
     Candidate::Type type = Candidate::Direct;
     Candidate::State state = Candidate::New;
 
-    TcpPortServer::Ptr server;
+    QSharedPointer<S5BServer> server;
     SocksClient *socksClient = nullptr;
 
     void connectToHost(const QString &key, State successState, std::function<void(bool)> callback, bool isUdp)
@@ -178,7 +182,7 @@ Candidate::Candidate()
 
 }
 
-Candidate::Candidate(const QDomElement &el)
+Candidate::Candidate(Transport *transport, const QDomElement &el)
 {
     bool ok;
     QString host(el.attribute(QStringLiteral("host")));
@@ -225,6 +229,7 @@ Candidate::Candidate(const QDomElement &el)
     }
 
     auto d = new Private;
+    d->transport = transport;
     d->cid = cid;
     d->host = host;
     d->jid = jid;
@@ -241,9 +246,10 @@ Candidate::Candidate(const Candidate &other) :
 
 }
 
-Candidate::Candidate(const Jid &proxy, const QString &cid, quint16 localPreference) :
+Candidate::Candidate(Transport *transport, const Jid &proxy, const QString &cid, quint16 localPreference) :
     d(new Private)
 {
+    d->transport = transport;
     d->cid = cid;
     d->jid = proxy;
     d->priority = (ProxyPreference << 16) + localPreference;
@@ -251,7 +257,7 @@ Candidate::Candidate(const Jid &proxy, const QString &cid, quint16 localPreferen
     d->state = Probing; // it's probing because it's a local side proxy and host and port are unknown
 }
 
-Candidate::Candidate(const TcpPortServer::Ptr &server, const QString &cid, quint16 localPreference) :
+Candidate::Candidate(Transport *transport, const TcpPortServer::Ptr &server, const QString &cid, quint16 localPreference) :
     d(new Private)
 {
     Type type = None;
@@ -275,7 +281,8 @@ Candidate::Candidate(const TcpPortServer::Ptr &server, const QString &cid, quint
         return;
     }
 
-    d->server = server;
+    d->transport = transport;
+    d->server = server.staticCast<S5BServer>();
     d->cid = cid;
     d->host = server->publishHost();
     d->port = server->publishPort();
@@ -779,7 +786,9 @@ public:
     void onLocalServerDiscovered()
     {
         for (auto serv: disco->takeServers()) {
-            Candidate c(serv, generateCid());
+            auto s5bserv = serv.staticCast<S5BServer>();
+            s5bserv->registerKey(directAddr);
+            Candidate c(q, serv, generateCid());
             if (c.isValid() && !isDup(c) && c.priority()) {
                 localCandidates.insert(c.cid(), c);
                 pendingActions |= NewCandidate;
@@ -861,7 +870,7 @@ void Transport::prepare()
 
     Jid proxy = m->userProxy();
     if (proxy.isValid()) {
-        Candidate c(proxy, d->generateCid());
+        Candidate c(this, proxy, d->generateCid());
         if (!d->isDup(c)) {
             d->localCandidates.insert(c.cid(), c);
         }
@@ -930,13 +939,13 @@ void Transport::prepare()
                 localPref = 1;
                 userProxyFound = true;
             }
-            Candidate c(i.jid(), d->generateCid(), localPref);
+            Candidate c(this, i.jid(), d->generateCid(), localPref);
             d->localCandidates.insert(c.cid(), c);
 
             queryProxy(i.jid(), c.cid());
         }
         if (!userProxyFound) {
-            Candidate c(userProxy, d->generateCid(), 1);
+            Candidate c(this, userProxy, d->generateCid(), 1);
             d->localCandidates.insert(c.cid(), c);
             queryProxy(userProxy, c.cid());
         } else if (items.count() == 0) {
@@ -974,7 +983,7 @@ bool Transport::update(const QDomElement &transportEl)
     int candidatesAdded = 0;
     for(QDomElement ce = transportEl.firstChildElement(candidateTag);
         !ce.isNull(); ce = ce.nextSiblingElement(candidateTag)) {
-        Candidate c(ce);
+        Candidate c(this, ce);
         if (!c) {
             return false;
         }
@@ -1214,6 +1223,11 @@ QString Transport::sid() const
     return d->sid;
 }
 
+QString Transport::directAddr() const
+{
+    return d->directAddr;
+}
+
 Connection::Ptr Transport::connection() const
 {
     return d->connection.staticCast<XMPP::Jingle::Connection>();
@@ -1392,6 +1406,10 @@ QString Manager::generateSid(const Jid &remote)
         key = qMakePair(remote, sid);
     } while (d->sids.contains(key));
     return sid;
+
+    // TODO check key in servers
+    //QList<TcpPortServer*> servers = d->jingleManager->client()->tcpPortReserver()->scope(QString::fromLatin1("s5b"))
+    //        ->allServers();
 }
 
 void Manager::registerSid(const Jid &remote, const QString &sid)

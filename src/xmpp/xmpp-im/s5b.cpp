@@ -64,142 +64,6 @@ static bool haveHost(const StreamHostList &list, const Jid &j)
 }
 
 
-
-
-
-
-
-class S5BIncomingConnection : public QObject
-{
-    Q_OBJECT
-public:
-    SocksClient *client;
-    QString host;
-    QTimer expire;
-
-    S5BIncomingConnection(SocksClient *c) : QObject(0)
-    {
-        client = c;
-        connect(client, &SocksClient::incomingMethods, [this](int methods){
-            if(methods & SocksClient::AuthNone)
-                client->chooseMethod(SocksClient::AuthNone);
-            else
-                doError();
-        });
-        connect(client, &SocksClient::incomingConnectRequest, [this](const QString &_host, int port)
-        {
-            if(port == 0) {
-                host = _host;
-                client->disconnect(this);
-                expire.stop();
-                emit result(true);
-            }
-            else
-                doError();
-        });
-        connect(client, &SocksClient::error, [this](){ doError(); });
-        connect(&expire, SIGNAL(timeout()), SLOT(doError()));
-        resetExpiration();
-    }
-
-    ~S5BIncomingConnection()
-    {
-        delete client;
-    }
-
-    void resetExpiration()
-    {
-        expire.start(30000);
-    }
-
-signals:
-    void result(bool);
-
-private slots:
-    void doError()
-    {
-        expire.stop();
-        delete client;
-        client = 0;
-        result(false);
-    }
-};
-
-class S5BServer : public TcpPortServer
-{
-    Q_OBJECT
-
-    SocksServer serv;
-    QSet<QString> keys;
-public:
-    S5BServer(QTcpServer *serverSocket) :
-        TcpPortServer(serverSocket)
-    {
-        serv.setServerSocket(serverSocket);
-        connect(&serv, &SocksServer::incomingReady, this, [this]() {
-            S5BIncomingConnection *inConn = new S5BIncomingConnection(serv.takeIncoming());
-#ifdef S5B_DEBUG
-            qDebug("S5BServer: incoming connection from %s:%d\n", qPrintable(i->client->peerAddress().toString()), i->client->peerPort());
-#endif
-            connect(inConn, &S5BIncomingConnection::result, this, [this, inConn](bool success){
-#ifdef S5B_DEBUG
-                qDebug("S5BServer item result: %d\n", success);
-#endif
-                if(!success) {
-                    delete inConn;
-                    return;
-                }
-
-                SocksClient *c = inConn->client;
-                inConn->client = 0;
-                QString key = inConn->host;
-                delete inConn;
-
-                emit incomingConnection(c, key);
-                if (!c->isOpen()) {
-                    delete c;
-                }
-            });
-        });
-        connect(&serv, &SocksServer::incomingUDP, this, [this](const QString &host, int port, const QHostAddress &addr, int sourcePort, const QByteArray &data){
-            if(port != 0 && port != 1)
-                return;
-            bool isInit = port == 1;
-            emit incomingUdp(isInit, addr, sourcePort, host, data);
-        });
-    }
-
-    void writeUDP(const QHostAddress &addr, int port, const QByteArray &data)
-    {
-        serv.writeUDP(addr, port, data);
-    }
-
-    bool isActive() const
-    {
-        return serv.isActive();
-    }
-
-    bool hasKey(const QString &key)
-    {
-        return keys.contains(key);
-    }
-
-    void registerKey(const QString &key)
-    {
-        keys.insert(key);
-    }
-
-    void unregisterKey(const QString &key)
-    {
-        keys.remove(key);
-    }
-
-signals:
-    void incomingConnection(SocksClient *c, const QString &key);
-    void incomingUdp(bool isInit, const QHostAddress &addr, int sourcePort, const QString &key, const QByteArray &data);
-};
-
-
 class S5BManager::Item : public QObject
 {
     Q_OBJECT
@@ -2447,9 +2311,148 @@ void StreamHost::setIsProxy(bool b)
     proxy = b;
 }
 
+//----------------------------------------------------------------------------
+// S5BServersProducer
+//----------------------------------------------------------------------------
 TcpPortServer *S5BServersProducer::makeServer(QTcpServer *socket)
 {
     return new S5BServer(socket);
+}
+
+//----------------------------------------------------------------------------
+// S5BIncomingConnection
+//----------------------------------------------------------------------------
+class S5BIncomingConnection : public QObject
+{
+    Q_OBJECT
+public:
+    SocksClient *client;
+    QString host;
+    QTimer expire;
+
+    S5BIncomingConnection(SocksClient *c) : QObject(0)
+    {
+        client = c;
+        connect(client, &SocksClient::incomingMethods, [this](int methods){
+            if(methods & SocksClient::AuthNone)
+                client->chooseMethod(SocksClient::AuthNone);
+            else
+                doError();
+        });
+        connect(client, &SocksClient::incomingConnectRequest, [this](const QString &_host, int port)
+        {
+            if(port == 0) {
+                host = _host;
+                client->disconnect(this);
+                expire.stop();
+                emit result(true);
+            }
+            else
+                doError();
+        });
+        connect(client, &SocksClient::error, [this](){ doError(); });
+        connect(&expire, SIGNAL(timeout()), SLOT(doError()));
+        resetExpiration();
+    }
+
+    ~S5BIncomingConnection()
+    {
+        delete client;
+    }
+
+    void resetExpiration()
+    {
+        expire.start(30000);
+    }
+
+signals:
+    void result(bool);
+
+private slots:
+    void doError()
+    {
+        expire.stop();
+        delete client;
+        client = 0;
+        result(false);
+    }
+};
+
+//----------------------------------------------------------------------------
+// S5BServer
+//----------------------------------------------------------------------------
+struct S5BServer::Private
+{
+    SocksServer serv;
+    QSet<QString> keys;
+};
+
+S5BServer::S5BServer(QTcpServer *serverSocket) :
+    TcpPortServer(serverSocket),
+    d(new Private)
+{
+    d->serv.setServerSocket(serverSocket);
+    connect(&d->serv, &SocksServer::incomingReady, this, [this]() {
+        S5BIncomingConnection *inConn = new S5BIncomingConnection(d->serv.takeIncoming());
+#ifdef S5B_DEBUG
+        qDebug("S5BServer: incoming connection from %s:%d\n", qPrintable(i->client->peerAddress().toString()), i->client->peerPort());
+#endif
+        connect(inConn, &S5BIncomingConnection::result, this, [this, inConn](bool success){
+#ifdef S5B_DEBUG
+            qDebug("S5BServer item result: %d\n", success);
+#endif
+            if(!success) {
+                delete inConn;
+                return;
+            }
+
+            SocksClient *c = inConn->client;
+            inConn->client = 0;
+            QString key = inConn->host;
+            delete inConn;
+
+            emit incomingConnection(c, key);
+            if (!c->isOpen()) {
+                delete c;
+            }
+        });
+    });
+    connect(&d->serv, &SocksServer::incomingUDP, this, [this](const QString &host, int port, const QHostAddress &addr, int sourcePort, const QByteArray &data){
+        if(port != 0 && port != 1)
+            return;
+        bool isInit = port == 1;
+        emit incomingUdp(isInit, addr, sourcePort, host, data);
+    });
+}
+
+S5BServer::~S5BServer()
+{
+    // basically to make QScopedPointer happy
+}
+
+void S5BServer::writeUDP(const QHostAddress &addr, int port, const QByteArray &data)
+{
+    d->serv.writeUDP(addr, port, data);
+}
+
+bool S5BServer::isActive() const
+{
+    return d->serv.isActive();
+}
+
+bool S5BServer::hasKey(const QString &key)
+{
+    return d->keys.contains(key);
+}
+
+void S5BServer::registerKey(const QString &key)
+{
+    d->keys.insert(key);
+}
+
+void S5BServer::unregisterKey(const QString &key)
+{
+    d->keys.remove(key);
 }
 
 }

@@ -243,7 +243,30 @@ namespace XMPP
     class S5BServersProducer : public TcpPortScope
     {
     protected:
-        TcpPortServer* makeServer(QTcpServer *socket);
+        TcpPortServer* makeServer(QTcpServer *socket); // in fact returns S5BServer
+    };
+
+    class S5BServer : public TcpPortServer
+    {
+        Q_OBJECT
+
+    public:
+        S5BServer(QTcpServer *serverSocket);
+        ~S5BServer();
+
+        void writeUDP(const QHostAddress &addr, int port, const QByteArray &data);
+        bool isActive() const;
+        bool hasKey(const QString &key);
+        void registerKey(const QString &key);
+        void unregisterKey(const QString &key);
+
+    signals:
+        void incomingConnection(SocksClient *c, const QString &key);
+        void incomingUdp(bool isInit, const QHostAddress &addr, int sourcePort, const QString &key, const QByteArray &data);
+
+    private:
+        class Private;
+        QScopedPointer<Private> d;
     };
 
     class JT_S5B : public Task

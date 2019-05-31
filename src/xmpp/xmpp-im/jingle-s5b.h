@@ -92,10 +92,10 @@ public:
     };
 
     Candidate();
-    Candidate(const QDomElement &el);
+    Candidate(Transport *transport, const QDomElement &el);
     Candidate(const Candidate &other);
-    Candidate(const Jid &proxy, const QString &cid, quint16 localPreference = 0);
-    Candidate(const TcpPortServer::Ptr &server, const QString &cid, quint16 localPreference = 0);
+    Candidate(Transport *transport, const Jid &proxy, const QString &cid, quint16 localPreference = 0);
+    Candidate(Transport *transport, const TcpPortServer::Ptr &server, const QString &cid, quint16 localPreference = 0);
     ~Candidate();
     Candidate& operator=(const Candidate& other) = default;
     inline bool isValid() const { return d != nullptr; }
@@ -153,6 +153,7 @@ public:
     Features features() const override;
 
     QString sid() const;
+    QString directAddr() const;
     Connection::Ptr connection() const;
     size_t blockSize() const;
 private:
