@@ -166,6 +166,18 @@ TcpPortDiscoverer *TcpPortScope::disco()
     return discoverer;
 }
 
+QList<TcpPortServer::Ptr> TcpPortScope::allServers() const
+{
+    QList<TcpPortServer::Ptr> ret;
+    for (auto &s: d->servers) {
+        auto sl = s.lock();
+        if (sl) {
+            ret.append(sl);
+        }
+    }
+    return ret;
+}
+
 void TcpPortScope::destroyServer(TcpPortServer *server)
 {
     delete server;

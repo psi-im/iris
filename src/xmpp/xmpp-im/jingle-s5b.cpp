@@ -790,6 +790,19 @@ public:
             s5bserv->registerKey(directAddr);
             Candidate c(q, serv, generateCid());
             if (c.isValid() && !isDup(c) && c.priority()) {
+                QObject::connect(s5bserv.data(), &S5BServer::incomingConnection, q, [this, c](SocksClient *sc, const QString &key) {
+                    if (!connection && key == directAddr && (c.state() == Candidate::Pending || c.state() == Candidate::Unacked)) {
+                        if(mode == Transport::Udp)
+                            sc->grantUDPAssociate("", 0);
+                        else
+                            sc->grantConnect();
+                        // TODO mark the candidate as connected and report to remote side if it's time
+                        return;
+                    }
+
+                    sc->requestDeny();
+                    sc->deleteLater();
+                });
                 localCandidates.insert(c.cid(), c);
                 pendingActions |= NewCandidate;
             }
@@ -955,7 +968,6 @@ void Transport::prepare()
         }
     });
 
-    // TODO nat-assisted candidates..
     emit updated();
 }
 
@@ -1399,17 +1411,23 @@ bool Manager::incomingUDP(bool init, const QHostAddress &addr, int port, const Q
 
 QString Manager::generateSid(const Jid &remote)
 {
+    auto servers = d->jingleManager->client()->tcpPortReserver()->
+            scope(QString::fromLatin1("s5b"))->allServers();
     QString sid;
     QPair<Jid,QString> key;
+    QString key1;
+    QString key2;
+    auto servChecker = [&](const TcpPortServer::Ptr &s){
+        return s.staticCast<S5BServer>()->hasKey(key1) || s.staticCast<S5BServer>()->hasKey(key2);
+    };
+
     do {
         sid = QString("s5b_%1").arg(qrand() & 0xffff, 4, 16, QChar('0'));
         key = qMakePair(remote, sid);
-    } while (d->sids.contains(key));
+        key1 = makeKey(sid, remote, d->jingleManager->client()->jid());
+        key2 = makeKey(sid, d->jingleManager->client()->jid(), remote);
+    } while (d->sids.contains(key) || std::find_if(servers.begin(), servers.end(), servChecker) != servers.end());
     return sid;
-
-    // TODO check key in servers
-    //QList<TcpPortServer*> servers = d->jingleManager->client()->tcpPortReserver()->scope(QString::fromLatin1("s5b"))
-    //        ->allServers();
 }
 
 void Manager::registerSid(const Jid &remote, const QString &sid)

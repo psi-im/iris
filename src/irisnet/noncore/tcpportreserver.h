@@ -117,6 +117,7 @@ public:
     TcpPortScope();
     ~TcpPortScope();
     TcpPortDiscoverer* disco();
+    QList<TcpPortServer::Ptr> allServers() const;
 protected:
     virtual TcpPortServer* makeServer(QTcpServer *socket) = 0;
     virtual void destroyServer(TcpPortServer *server);
