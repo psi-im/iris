@@ -48,6 +48,7 @@ bool TcpPortDiscoverer::setExternalHost(const QString &extHost, quint16 extPort,
     p.publishPort = extPort;
     server->setPortInfo(p);
     servers.append(server);
+    emit portAvailable();
     return true;
 }
 
@@ -93,6 +94,8 @@ void TcpPortDiscoverer::start()
                 continue;
             }
 
+            //if(h.protocol() == QAbstractSocket::IPv4Protocol) continue;
+
             // don't put the same address in twice.
             //   this also means that if there are
             //   two link-local ipv6 interfaces
@@ -117,10 +120,16 @@ void TcpPortDiscoverer::start()
         }
         TcpPortServer::Port p;
         p.portType = TcpPortServer::Direct;
-        p.publishHost = server->serverAddress().toString();
+        QHostAddress addr = server->serverAddress();
+        addr.setScopeId(QString());
+        p.publishHost = addr.toString();
         p.publishPort = server->serverPort();
         server->setPortInfo(p);
         servers.append(server);
+    }
+
+    if (listenAddrs.size()) {
+        emit portAvailable();
     }
 }
 
@@ -162,7 +171,7 @@ TcpPortDiscoverer *TcpPortScope::disco()
 {
     auto discoverer = new TcpPortDiscoverer(this);
     QMetaObject::invokeMethod(parent(), "newDiscoverer", Q_ARG(TcpPortDiscoverer*, discoverer));
-    QMetaObject::invokeMethod(discoverer, "start", Qt::QueuedConnection, Q_ARG(TcpPortDiscoverer*, discoverer));
+    QMetaObject::invokeMethod(discoverer, "start");
     return discoverer;
 }
 

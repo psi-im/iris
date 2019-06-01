@@ -357,6 +357,20 @@ void Candidate::setState(Candidate::State s)
     d->state = s;
 }
 
+const char *Candidate::stateText(Candidate::State s)
+{
+    switch (s) {
+    case New: return "New";
+    case Probing: return "Probing";
+    case Pending: return "Pending";
+    case Unacked: return "Unacked";
+    case Accepted: return "Accepted";
+    case Active: return "Active";
+    case Discarded: return "Discarded";
+    }
+    return nullptr;
+}
+
 quint32 Candidate::priority() const
 {
     return d->priority;
@@ -417,6 +431,11 @@ void Candidate::deleteSocksClient()
     d->socksClient = nullptr;
 }
 
+TcpPortServer::Ptr Candidate::server() const
+{
+    return d->server.staticCast<TcpPortServer>();
+}
+
 bool Candidate::operator==(const Candidate &other) const
 {
     return d.data() == other.d.data();
@@ -436,7 +455,7 @@ public:
     Transport *q = nullptr;
     Pad::Ptr pad;
     bool meCreator = true; // content created on local side
-    bool connectionStarted = false; // where start() was called
+    bool transportStarted = false; // where start() was called
     bool waitingAck = true;
     bool aborted = false;
     bool remoteReportedCandidateError = false;
@@ -492,13 +511,13 @@ public:
 
     void tryConnectToRemoteCandidate()
     {
-        if (!connectionStarted) {
+        if (!transportStarted) {
             return; // will come back later
         }
         quint64 maxProbingPrio = 0;
         quint64 maxNewPrio = 0;
         Candidate maxProbing;
-        QList<Candidate> maxNew;
+        QList<Candidate> maxNew; // keeps highest (same) priority New candidates
 
         /*
          We have to find highest-priority already connecting candidate and highest-priority new candidate.
@@ -510,6 +529,7 @@ public:
          In all the other cases just return and wait for events.
         */
 
+        qDebug("tryConnectToRemoteCandidate()");
         for (auto &c: remoteCandidates) {
             if (c.state() == Candidate::New) {
                 if (c.priority() > maxNewPrio) {
@@ -526,21 +546,26 @@ public:
             }
         }
         if (maxNew.isEmpty()) {
+            qDebug("  tryConnectToRemoteCandidate() no maxNew candidates");
             return; // nowhere to connect
         }
 
+        // check if we have to hang on for a little if a higher priority candidate is Probing
         if (maxProbing) {
             if (maxNewPrio < maxProbing.priority()) {
                 if (probingTimer.isActive()) {
+                    qDebug("  tryConnectToRemoteCandidate() timer is already active. let's wait");
                     return; // we will come back here soon
                 }
                 qint64 msToFuture = 200 - lastConnectionStart.elapsed();
                 if (msToFuture > 0) { // seems like we have to rescheduler for future
                     probingTimer.start(int(msToFuture));
+                    qDebug("  tryConnectToRemoteCandidate() too early. timer started. let's wait");
                     return;
                 }
             }
         }
+        probingTimer.start(200); // for the next candidate if any
 
         // now we have to connect to maxNew candidates
         for (auto &mnc: maxNew) {
@@ -618,7 +643,7 @@ public:
         return false;
     }
 
-    Candidate preferredCandidate() const
+    Candidate preferredUsedCandidate() const
     {
         if (localUsedCandidate) {
             if (remoteUsedCandidate) {
@@ -645,7 +670,8 @@ public:
         // So for candidate-error two conditions have to be met 1) all remote failed 2) all local were sent no more
         // local candidates are expected to be discovered
 
-        if (!connectionStarted || connection) { // if not started or already finished
+        if (!transportStarted || connection) { // if not started or already finished
+            qDebug("checkAndFinishNegotiation not finished: !connectionStarted || connection");
             return;
         }
 
@@ -657,6 +683,7 @@ public:
             // but as soon as it's taken it will switch to waitingAck.
             // And with unacknowledged local candidates we can't send used/error as well as report connected()/failure()
             // until tried them all
+            qDebug("checkAndFinishNegotiation not finished: waitingAck || pendingActions || hasUnaknowledgedLocalCandidates()");
             return;
         }
 
@@ -666,7 +693,7 @@ public:
             if (remoteReportedCandidateError || localUsedCandidate) {
                 // so remote seems to be finished too.
                 // tell application about it and it has to change its state immediatelly
-                auto c = preferredCandidate();
+                auto c = preferredUsedCandidate();
                 if (c) {
                     if (c.state() != Candidate::Active) {
                         if (c.type() == Candidate::Proxy && c == localUsedCandidate) { // local proxy
@@ -690,13 +717,16 @@ public:
                     if (c.state() == Candidate::Active) {
                         handleConnected(c);
                     }
+                    else qDebug("checkAndFinishNegotiation not finished: preferred is not Active");
                 } else { // both sides reported candidate error
                     emit q->failed();
                 }
             } // else we have to wait till remote reports its status
+            else qDebug("checkAndFinishNegotiation not finished: remote didn't reported yet");
             return;
         }
 
+        qDebug("checkAndFinishNegotiation not finished: trying to send condidate-used/error if any");
         // if we are here then neither candidate-used nor candidate-error was sent to remote,
         // but we can send it now.
         // first let's check if we can send candidate-used
@@ -704,6 +734,7 @@ public:
         bool hasConnectedRemoteCandidate = false;
         for (const auto &c: remoteCandidates) {
             auto s = c.state();
+            qDebug() << "  candidate " << c.cid() << " is " << Candidate::stateText(s);
             if (s != Candidate::Discarded) {
                 allRemoteDiscarded = false;
             }
@@ -715,16 +746,19 @@ public:
         // if we have connection to remote candidate it's time to send it
         if (hasConnectedRemoteCandidate) {
             pendingActions |= Private::CandidateUsed;
+            qDebug("checkAndFinishNegotiation: used");
             emit q->updated();
             return;
         }
 
         if (allRemoteDiscarded) {
             pendingActions |= Private::CandidateError;
+            qDebug("checkAndFinishNegotiation: error");
             emit q->updated();
             return;
         }
 
+        qDebug("checkAndFinishNegotiation not finished: there are more remote candidates to try");
         // apparently we haven't connected anywhere but there are more remote candidates to try
     }
 
@@ -790,13 +824,14 @@ public:
             s5bserv->registerKey(directAddr);
             Candidate c(q, serv, generateCid());
             if (c.isValid() && !isDup(c) && c.priority()) {
-                QObject::connect(s5bserv.data(), &S5BServer::incomingConnection, q, [this, c](SocksClient *sc, const QString &key) {
+                QObject::connect(s5bserv.data(), &S5BServer::incomingConnection, q, [this, c](SocksClient *sc, const QString &key) mutable {
                     if (!connection && key == directAddr && (c.state() == Candidate::Pending || c.state() == Candidate::Unacked)) {
+                        c.incomingConnection(sc);
+                        c.server().data()->disconnect(q); // drop this connection.
                         if(mode == Transport::Udp)
                             sc->grantUDPAssociate("", 0);
                         else
                             sc->grantConnect();
-                        // TODO mark the candidate as connected and report to remote side if it's time
                         return;
                     }
 
@@ -974,7 +1009,7 @@ void Transport::prepare()
 // we got content acceptance from any side and not can connect
 void Transport::start()
 {
-    d->connectionStarted = true;
+    d->transportStarted = true;
     d->tryConnectToRemoteCandidate();
     // if there is no higher priority candidates than ours but they are already connected then
     d->checkAndFinishNegotiation();
@@ -1038,6 +1073,7 @@ bool Transport::update(const QDomElement &transportEl)
                 c.setState(Candidate::Discarded);
             }
         }
+        qDebug("recv candidate-error: all local pending candidates were discarded");
         QTimer::singleShot(0, this, [this](){ d->checkAndFinishNegotiation(); });
         return true;
     }

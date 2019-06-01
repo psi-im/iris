@@ -111,6 +111,7 @@ public:
     QHostAddress localAddress() const;
     State state() const;
     void setState(State s);
+    static const char *stateText(State s);
     quint32 priority() const;
 
     QDomElement toXml(QDomDocument *doc) const;
@@ -119,6 +120,7 @@ public:
     bool incomingConnection(SocksClient *sc);
     SocksClient* takeSocksClient();
     void deleteSocksClient();
+    TcpPortServer::Ptr server() const;
 
     bool operator==(const Candidate &other) const;
     inline bool operator!=(const Candidate &other) const { return !(*this == other); }
