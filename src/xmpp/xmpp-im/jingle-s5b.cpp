@@ -24,6 +24,7 @@
 #include "socks.h"
 
 #include <QElapsedTimer>
+#include <QNetworkInterface>
 #include <QTimer>
 
 namespace XMPP {
@@ -124,6 +125,83 @@ private:
     }
 };
 
+class V6LinkLocalSocksConnector : public  QObject
+{
+    Q_OBJECT
+
+    QMap<QString,SocksClient*> clients;
+    SocksClient *client = nullptr;
+public:
+    using QObject::QObject;
+
+    void connectToHost(const QHostAddress &proxyHost, int proxyPort, const QString &host, bool udpMode)
+    {
+        foreach(const QNetworkInterface &ni, QNetworkInterface::allInterfaces())
+        {
+            if (!(ni.flags() & (QNetworkInterface::IsUp | QNetworkInterface::IsRunning))) {
+                continue;
+            }
+            if (ni.flags() & QNetworkInterface::IsLoopBack) {
+                continue;
+            }
+            QList<QNetworkAddressEntry> entries = ni.addressEntries();
+            foreach(const QNetworkAddressEntry &na, entries)
+            {
+                QHostAddress ha = na.ip();
+                if (ha.protocol() == QAbstractSocket::IPv6Protocol &&
+                #if QT_VERSION >= QT_VERSION_CHECK(5,11,0)
+                        ha.isLinkLocal()
+                #else
+                        XMPP::Ice176::isIPv6LinkLocalAddress(ha)
+                #endif
+                        ) // && proxyHost.isInSubnet(ha, na.prefixLength())
+                {
+                    auto client = new SocksClient(this);
+                    clients.insert(ni.name(), client);
+                    break;
+                }
+            }
+        }
+
+        if (!clients.size()) {
+            emit ready();
+            return;
+        }
+
+        QHostAddress ph(proxyHost);
+        for (auto it = clients.begin(); it != clients.end(); ++it) {
+            QString name = it.key();
+            SocksClient *client = it.value();
+            connect(client, &SocksClient::connected, this, [this, name, client](){
+                this->client = client;
+                clients.remove(name);
+                qDeleteAll(clients);
+                emit ready();
+            });
+            connect(client, &SocksClient::error, this, [this, name, client](int error){
+                Q_UNUSED(error);
+                clients.remove(name);
+                delete client;
+                if (clients.isEmpty()) {
+                    emit ready();
+                }
+            }, Qt::QueuedConnection);
+            ph.setScopeId(name);
+            client->connectToHost(ph.toString(), proxyPort, host, 0, udpMode);
+        }
+    }
+
+    SocksClient* takeClient()
+    {
+        auto c = client;
+        client = nullptr;
+        return c;
+    }
+
+signals:
+    void ready();
+};
+
 class Candidate::Private : public QObject, public QSharedData {
     Q_OBJECT
 public:
@@ -149,23 +227,55 @@ public:
 
     void connectToHost(const QString &key, State successState, std::function<void(bool)> callback, bool isUdp)
     {
-        socksClient = new SocksClient;
-        qDebug() << "connect to host with " << cid << "candidate and socks client" << socksClient;
+        QHostAddress ha(host);
+        if (!ha.isNull() && ha.protocol() == QAbstractSocket::IPv6Protocol && ha.scopeId().isEmpty() &&
+        #if QT_VERSION >= QT_VERSION_CHECK(5,11,0)
+                ha.isLinkLocal()
+        #else
+                XMPP::Ice176::isIPv6LinkLocalAddress(ha)
+        #endif
+                )
+        {
+            qDebug() << "connect to host with " << cid << "candidate using V6LinkLocalSocksConnector";
+            // we have link local address without scope. We have to enumerate all possible scopes.
+            auto v6llConnector = new V6LinkLocalSocksConnector(this);
+            connect(v6llConnector, &V6LinkLocalSocksConnector::ready, this, [this, v6llConnector, callback, successState]() {
+                socksClient = v6llConnector->takeClient();
+                socksClient->setParent(nullptr);
+                delete v6llConnector;
+                if (state == Candidate::Discarded) {
+                    return;
+                }
 
-        connect(socksClient, &SocksClient::connected, [this, callback, successState](){
-            state = successState;
-            qDebug() << "socks client"  << socksClient << "is connected";
-            callback(true);
-        });
-        connect(socksClient, &SocksClient::error, [this, callback](int error){
-            Q_UNUSED(error);
-            state = Candidate::Discarded;
-            qDebug() << "socks client"  << socksClient << "failed to connect";
-            callback(false);
-        });
-        //connect(&t, SIGNAL(timeout()), SLOT(trySendUDP()));
+                if (socksClient) {
+                    state = successState;
+                    qDebug() << "socks client"  << socksClient << "is connected";
+                    callback(true);
+                    return;
+                }
+                state = Candidate::Discarded;
+                qDebug() << "socks client"  << socksClient << "failed to connect";
+                callback(false);
+            });
+            v6llConnector->connectToHost(ha, port, key, isUdp);
+        } else {
+            socksClient = new SocksClient;
+            qDebug() << "connect to host with " << cid << "candidate and socks client" << socksClient;
+            connect(socksClient, &SocksClient::connected, [this, callback, successState](){
+                state = successState;
+                qDebug() << "socks client"  << socksClient << "is connected";
+                callback(true);
+            });
+            connect(socksClient, &SocksClient::error, [this, callback](int error){
+                Q_UNUSED(error);
+                state = Candidate::Discarded;
+                qDebug() << "socks client"  << socksClient << "failed to connect";
+                callback(false);
+            });
+            //connect(&t, SIGNAL(timeout()), SLOT(trySendUDP()));
 
-        socksClient->connectToHost(host, port, key, 0, isUdp);
+            socksClient->connectToHost(host, port, key, 0, isUdp);
+        }
     }
 
     void setupIncomingSocksClient()
@@ -507,6 +617,97 @@ public:
             }
         }
         return false;
+    }
+
+    void discoS5BProxy()
+    {
+        auto m = static_cast<Manager*>(pad->manager());
+        Jid proxy = m->userProxy();
+        if (proxy.isValid()) {
+            Candidate c(q, proxy, generateCid());
+            if (!isDup(c)) {
+                localCandidates.insert(c.cid(), c);
+            }
+        }
+
+        proxyDiscoveryInProgress = true;
+        QList<QSet<QString>> featureOptions = {{"http://jabber.org/protocol/bytestreams"}};
+        pad->session()->manager()->client()->serverInfoManager()->
+                queryServiceInfo(QStringLiteral("proxy"),
+                                 QStringLiteral("bytestreams"),
+                                 featureOptions,
+                                 QRegExp("proxy.*|socks.*|stream.*|s5b.*"),
+                                 ServerInfoManager::SQ_CheckAllOnNoMatch,
+                                 [this](const QList<DiscoItem> &items)
+        {
+            if (!proxyDiscoveryInProgress) { // check if new results are ever/still expected
+                // seems like we have successful connection via higher priority channel. so nobody cares about proxy
+                return;
+            }
+            auto m = static_cast<Manager*>(pad->manager());
+            Jid userProxy = m->userProxy();
+
+            // queries proxy's host/port and sends the candidate to remote
+            auto queryProxy = [this](const Jid &j, const QString &cid) {
+                proxiesInDiscoCount++;
+                auto query = new JT_S5B(pad->session()->manager()->client()->rootTask());
+                connect(query, &JT_S5B::finished, q, [this,query,cid](){
+                    if (!proxyDiscoveryInProgress) {
+                        return;
+                    }
+                    bool candidateUpdated = false;
+                    auto c = localCandidates.value(cid);
+                    if (c && c.state() == Candidate::Probing) {
+                        auto sh = query->proxyInfo();
+                        if (query->success() && !sh.host().isEmpty() && sh.port()) {
+                            // it can be discarded by this moment (e.g. got success on a higher priority candidate).
+                            // so we have to check.
+                            c.setHost(sh.host());
+                            c.setPort(sh.port());
+                            c.setState(Candidate::New);
+                            candidateUpdated = true;
+                            pendingActions |= Private::NewCandidate;
+                        } else {
+                            c.setState(Candidate::Discarded);
+                        }
+                    }
+                    proxiesInDiscoCount--;
+                    if (!proxiesInDiscoCount) {
+                        proxyDiscoveryInProgress = false;
+                    }
+                    if (candidateUpdated) {
+                        emit q->updated();
+                    } else if (!proxiesInDiscoCount) {
+                        // it's possible it was our last hope and probaby we have to send candidate-error now.
+                        checkAndFinishNegotiation();
+                    }
+                });
+                query->requestProxyInfo(j);
+                query->go(true);
+            };
+
+            bool userProxyFound = !userProxy.isValid();
+            for (const auto i: items) {
+                int localPref = 0;
+                if (!userProxyFound && i.jid() == userProxy) {
+                    localPref = 1;
+                    userProxyFound = true;
+                }
+                Candidate c(q, i.jid(), generateCid(), localPref);
+                localCandidates.insert(c.cid(), c);
+
+                queryProxy(i.jid(), c.cid());
+            }
+            if (!userProxyFound) {
+                Candidate c(q, userProxy, generateCid(), 1);
+                localCandidates.insert(c.cid(), c);
+                queryProxy(userProxy, c.cid());
+            } else if (items.count() == 0) {
+                // seems like we don't have any proxy
+                proxyDiscoveryInProgress = false;
+                checkAndFinishNegotiation();
+            }
+        });
     }
 
     void tryConnectToRemoteCandidate()
@@ -915,93 +1116,7 @@ void Transport::prepare()
         d->onLocalServerDiscovered();
     });
     d->onLocalServerDiscovered();
-
-    Jid proxy = m->userProxy();
-    if (proxy.isValid()) {
-        Candidate c(this, proxy, d->generateCid());
-        if (!d->isDup(c)) {
-            d->localCandidates.insert(c.cid(), c);
-        }
-    }
-
-    d->proxyDiscoveryInProgress = true;
-    QList<QSet<QString>> featureOptions = {{"http://jabber.org/protocol/bytestreams"}};
-    d->pad->session()->manager()->client()->serverInfoManager()->
-            queryServiceInfo(QStringLiteral("proxy"),
-                             QStringLiteral("bytestreams"),
-                             featureOptions,
-                             QRegExp("proxy.*|socks.*|stream.*|s5b.*"),
-                             ServerInfoManager::SQ_CheckAllOnNoMatch,
-                             [this](const QList<DiscoItem> &items)
-    {
-        if (!d->proxyDiscoveryInProgress) { // check if new results are ever/still expected
-            // seems like we have successful connection via higher priority channel. so nobody cares about proxy
-            return;
-        }
-        auto m = static_cast<Manager*>(d->pad->manager());
-        Jid userProxy = m->userProxy();
-
-        // queries proxy's host/port and sends the candidate to remote
-        auto queryProxy = [this](const Jid &j, const QString &cid) {
-            d->proxiesInDiscoCount++;
-            auto query = new JT_S5B(d->pad->session()->manager()->client()->rootTask());
-            connect(query, &JT_S5B::finished, this, [this,query,cid](){
-                if (!d->proxyDiscoveryInProgress) {
-                    return;
-                }
-                bool candidateUpdated = false;
-                auto c = d->localCandidates.value(cid);
-                if (c && c.state() == Candidate::Probing) {
-                    auto sh = query->proxyInfo();
-                    if (query->success() && !sh.host().isEmpty() && sh.port()) {
-                        // it can be discarded by this moment (e.g. got success on a higher priority candidate).
-                        // so we have to check.
-                        c.setHost(sh.host());
-                        c.setPort(sh.port());
-                        c.setState(Candidate::New);
-                        candidateUpdated = true;
-                        d->pendingActions |= Private::NewCandidate;
-                    } else {
-                        c.setState(Candidate::Discarded);
-                    }
-                }
-                d->proxiesInDiscoCount--;
-                if (!d->proxiesInDiscoCount) {
-                    d->proxyDiscoveryInProgress = false;
-                }
-                if (candidateUpdated) {
-                    emit updated();
-                } else if (!d->proxiesInDiscoCount) {
-                    // it's possible it was our last hope and probaby we have to send candidate-error now.
-                    d->checkAndFinishNegotiation();
-                }
-            });
-            query->requestProxyInfo(j);
-            query->go(true);
-        };
-
-        bool userProxyFound = !userProxy.isValid();
-        for (const auto i: items) {
-            int localPref = 0;
-            if (!userProxyFound && i.jid() == userProxy) {
-                localPref = 1;
-                userProxyFound = true;
-            }
-            Candidate c(this, i.jid(), d->generateCid(), localPref);
-            d->localCandidates.insert(c.cid(), c);
-
-            queryProxy(i.jid(), c.cid());
-        }
-        if (!userProxyFound) {
-            Candidate c(this, userProxy, d->generateCid(), 1);
-            d->localCandidates.insert(c.cid(), c);
-            queryProxy(userProxy, c.cid());
-        } else if (items.count() == 0) {
-            // seems like we don't have any proxy
-            d->proxyDiscoveryInProgress = false;
-            d->checkAndFinishNegotiation();
-        }
-    });
+    d->discoS5BProxy();
 
     emit updated();
 }

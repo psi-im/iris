@@ -94,8 +94,6 @@ void TcpPortDiscoverer::start()
                 continue;
             }
 
-            //if(h.protocol() == QAbstractSocket::IPv4Protocol) continue;
-
             // don't put the same address in twice.
             //   this also means that if there are
             //   two link-local ipv6 interfaces
