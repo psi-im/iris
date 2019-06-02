@@ -17,15 +17,6 @@
  *
  */
 
-/*
- * In s5b.cpp we have
- * S5BManager        -> Jingle::S5B::Manager
- * S5BManager::Item  -> Jingle::S5B::Transport
- * S5BManager::Entry -> ???
- *
- */
-
-
 #ifndef JINGLE_S5B_H
 #define JINGLE_S5B_H
 
@@ -160,8 +151,6 @@ public:
     size_t blockSize() const;
 private:
     friend class S5BServersManager;
-    bool incomingConnection(SocksClient *sc);
-    bool incomingUDP(bool init, const QHostAddress &addr, int port, const QString &key, const QByteArray &data);
 
     friend class Manager;
     static QSharedPointer<XMPP::Jingle::Transport> createOutgoing(const TransportManagerPad::Ptr &pad);
@@ -206,9 +195,6 @@ public:
     TransportManagerPad* pad(Session *session) override;
 
     void closeAll() override;
-
-    bool incomingConnection(SocksClient *client, const QString &key); // returns false if key is unknown
-    bool incomingUDP(bool init, const QHostAddress &addr, int port, const QString &key, const QByteArray &data);
 
     QString generateSid(const Jid &remote);
     void registerSid(const Jid &remote, const QString &sid);
