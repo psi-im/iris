@@ -195,6 +195,7 @@ public:
     SocksClient* takeClient()
     {
         auto c = client;
+        c->setParent(nullptr);
         client = nullptr;
         return c;
     }
@@ -242,7 +243,6 @@ public:
             auto v6llConnector = new V6LinkLocalSocksConnector(this);
             connect(v6llConnector, &V6LinkLocalSocksConnector::ready, this, [this, v6llConnector, callback, successState]() {
                 socksClient = v6llConnector->takeClient();
-                socksClient->setParent(nullptr);
                 delete v6llConnector;
                 if (state == Candidate::Discarded) {
                     return;
