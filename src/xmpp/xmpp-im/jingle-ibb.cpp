@@ -59,6 +59,11 @@ Transport::Transport(const TransportManagerPad::Ptr &pad, const QDomElement &tra
     d(new Private)
 {
     d->pad = pad;
+    update(transportEl);
+    if (d->sid.isEmpty()) {
+        d.reset();
+        return;
+    }
 }
 
 Transport::~Transport()

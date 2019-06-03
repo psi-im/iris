@@ -195,8 +195,10 @@ public:
     SocksClient* takeClient()
     {
         auto c = client;
-        c->setParent(nullptr);
-        client = nullptr;
+        if (c) {
+            c->setParent(nullptr);
+            client = nullptr;
+        }
         return c;
     }
 
