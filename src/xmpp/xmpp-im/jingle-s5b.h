@@ -150,11 +150,7 @@ public:
     Connection::Ptr connection() const;
     size_t blockSize() const;
 private:
-    friend class S5BServersManager;
-
     friend class Manager;
-    static QSharedPointer<XMPP::Jingle::Transport> createOutgoing(const TransportManagerPad::Ptr &pad);
-    static QSharedPointer<XMPP::Jingle::Transport> createIncoming(const TransportManagerPad::Ptr &pad, const QDomElement &transportEl);
 
     class Private;
     QScopedPointer<Private> d;

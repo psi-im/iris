@@ -18,24 +18,47 @@
  */
 
 #include "jingle-ibb.h"
+#include "xmpp/jid/jid.h"
 
 namespace XMPP {
 namespace Jingle {
 namespace IBB {
 
+class Connection : public XMPP::Jingle::Connection
+{
+    Q_OBJECT
+
+    Jid peer;
+    QString sid;
+    size_t blockSize;
+public:
+    Connection(const Jid &jid, const QString &sid, size_t blockSize) :
+        peer(jid),
+        sid(sid),
+        blockSize(blockSize)
+    {
+
+    }
+};
+
 struct Transport::Private
 {
     TransportManagerPad::Ptr pad;
+    QString sid;
+    QSharedPointer<Connection> connection;
+    size_t blockSize = 4096;
 };
 
-Transport::Transport(const TransportManagerPad::Ptr &pad)
+Transport::Transport(const TransportManagerPad::Ptr &pad) :
+    d(new Private)
 {
-
+    d->pad = pad;
 }
 
-Transport::Transport(const TransportManagerPad::Ptr &pad, const QDomElement &transportEl)
+Transport::Transport(const TransportManagerPad::Ptr &pad, const QDomElement &transportEl) :
+    d(new Private)
 {
-
+    d->pad = pad;
 }
 
 Transport::~Transport()
@@ -50,17 +73,23 @@ TransportManagerPad::Ptr Transport::pad() const
 
 void Transport::prepare()
 {
-
+    emit updated();
 }
 
 void Transport::start()
 {
-
+    d->connection.reset(new Connection(d->pad->session()->peer(), d->sid, d->blockSize));
 }
 
 bool Transport::update(const QDomElement &transportEl)
 {
-
+    auto bs = transportEl.attribute(QString::fromLatin1("block-size"));
+    if (!bs.isEmpty()) {
+        size_t bsn = bs.toULongLong();
+        if (bsn && bsn <= d->blockSize) {
+            d->blockSize = bsn;
+        }
+    }
 }
 
 bool Transport::hasUpdates() const
@@ -80,32 +109,22 @@ bool Transport::isValid() const
 
 Transport::Features Transport::features() const
 {
-
+    return AlwaysConnect | Reliable | Slow;
 }
 
 QString Transport::sid() const
 {
-
+    return d->sid;
 }
 
 Connection::Ptr Transport::connection() const
 {
-
+    return d->connection.staticCast<XMPP::Jingle::Connection>();
 }
 
 size_t Transport::blockSize() const
 {
-
-}
-
-QSharedPointer<XMPP::Jingle::Transport> Transport::createOutgoing(const TransportManagerPad::Ptr &pad)
-{
-    return QSharedPointer<XMPP::Jingle::Transport>();
-}
-
-QSharedPointer<XMPP::Jingle::Transport> Transport::createIncoming(const TransportManagerPad::Ptr &pad, const QDomElement &transportEl)
-{
-    return QSharedPointer<XMPP::Jingle::Transport>();
+    return d->blockSize;
 }
 
 Pad::Pad(Manager *manager, Session *session)
@@ -120,17 +139,17 @@ QString Pad::ns() const
 
 Session *Pad::session() const
 {
-
+    return nullptr;
 }
 
 TransportManager *Pad::manager() const
 {
-
+    return nullptr;
 }
 
 QString Pad::generateSid() const
 {
-
+    return QString();
 }
 
 void Pad::registerSid(const QString &sid)
