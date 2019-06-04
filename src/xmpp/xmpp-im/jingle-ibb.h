@@ -46,7 +46,6 @@ public:
     bool isValid() const override;
     Features features() const override;
 
-    QString sid() const;
     Connection::Ptr connection() const;
     size_t blockSize() const;
 private:
@@ -70,7 +69,8 @@ public:
     TransportManager *manager() const override;
 
     QString generateSid() const;
-    void registerSid(const QString &sid);
+    bool registerSid(const QString &sid);
+    void forgetSid(const QString &sid);
 private:
     Manager *_manager;
     Session *_session;
@@ -91,7 +91,8 @@ public:
     void closeAll() override;
 
     QString generateSid(const Jid &remote);
-    void registerSid(const Jid &remote, const QString &sid);
+    bool registerSid(const Jid &remote, const QString &sid);
+    void forgetSid(const Jid &remote, const QString &sid);
 private:
     class Private;
     QScopedPointer<Private> d;
