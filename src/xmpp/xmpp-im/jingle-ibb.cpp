@@ -20,6 +20,7 @@
 #include "jingle-ibb.h"
 #include "xmpp/jid/jid.h"
 #include "xmpp_client.h"
+#include "xmpp_ibb.h"
 
 namespace XMPP {
 namespace Jingle {
@@ -29,14 +30,17 @@ class Connection : public XMPP::Jingle::Connection
 {
     Q_OBJECT
 public:
+    Client *client;
     Jid peer;
     QString sid;
     size_t blockSize;
+    BSConnection *connection = nullptr;
 
     bool offerSent = false;
     bool offerReceived = false;
 
-    Connection(const Jid &jid, const QString &sid, size_t blockSize) :
+    Connection(Client *client, const Jid &jid, const QString &sid, size_t blockSize) :
+        client(client),
         peer(jid),
         sid(sid),
         blockSize(blockSize)
@@ -46,7 +50,10 @@ public:
 
     void checkAndStartConnection()
     {
-        // TODO
+        if (offerReceived && offerSent) {
+            connection = client->ibbManager()->createConnection();
+            //connection->setP
+        }
     }
 };
 
@@ -62,7 +69,7 @@ struct Transport::Private
     QSharedPointer<Connection> makeConnection(const Jid &jid, const QString &sid, size_t blockSize)
     {
         // TODO connect some signals
-        return QSharedPointer<Connection>::create(jid, sid, blockSize);
+        return QSharedPointer<Connection>::create(pad->session()->manager()->client(), jid, sid, blockSize);
     }
 };
 
