@@ -22,22 +22,28 @@
 #include "xmpp_client.h"
 #include "xmpp_ibb.h"
 
+#include <QTimer>
+
 namespace XMPP {
 namespace Jingle {
 namespace IBB {
 
+const QString NS(QStringLiteral("urn:xmpp:jingle:transports:ibb:1"));
+
 class Connection : public XMPP::Jingle::Connection
 {
     Q_OBJECT
+
 public:
     Client *client;
     Jid peer;
     QString sid;
     size_t blockSize;
-    BSConnection *connection = nullptr;
+    IBBConnection *connection = nullptr;
 
     bool offerSent = false;
     bool offerReceived = false;
+    bool closing = false;
 
     Connection(Client *client, const Jid &jid, const QString &sid, size_t blockSize) :
         client(client),
@@ -48,12 +54,74 @@ public:
 
     }
 
-    void checkAndStartConnection()
+    void setConnection(IBBConnection *c)
     {
-        if (offerReceived && offerSent) {
-            connection = client->ibbManager()->createConnection();
-            //connection->setP
+        connection = c;
+        connect(c, &IBBConnection::readyRead, this, &Connection::readyRead);
+        connect(c, &IBBConnection::bytesWritten, this, &Connection::bytesWritten);
+        connect(c, &IBBConnection::connectionClosed, this, &Connection::handleIBBClosed);
+        connect(c, &IBBConnection::delayedCloseFinished, this, &Connection::handleIBBClosed);
+        connect(c, &IBBConnection::aboutToClose, this, &Connection::aboutToClose);
+        connect(c, &IBBConnection::connected, this, [this](){ setOpenMode(connection->openMode()); emit connected(); });
+    }
+
+    qint64 bytesAvailable() const
+    {
+        return XMPP::Jingle::Connection::bytesAvailable() + (connection? connection->bytesAvailable() : 0);
+    }
+
+    qint64 bytesToWrite() const
+    {
+        return XMPP::Jingle::Connection::bytesToWrite() + (connection? connection->bytesToWrite() : 0);
+    }
+
+    void close()
+    {
+        if (connection) {
+            connection->close();
+            setOpenMode(connection->openMode());
+        } else {
+            XMPP::Jingle::Connection::close();
+            emit connectionClosed();
         }
+    }
+
+signals:
+    void connected();
+
+protected:
+    qint64 writeData(const char *data, qint64 maxSize)
+    {
+        return connection->write(data, maxSize);
+    }
+
+    qint64 readData(char *data, qint64 maxSize)
+    {
+        quint64 ret = connection->read(data, maxSize);
+        if (closing && !bytesAvailable()) {
+            postCloseAllDataRead();
+        }
+        return ret;
+    }
+
+private:
+
+    void handleIBBClosed()
+    {
+        closing = true;
+        if (bytesAvailable())
+            setOpenMode(QIODevice::ReadOnly);
+        else
+            postCloseAllDataRead();
+        emit connectionClosed();
+    }
+
+    void postCloseAllDataRead()
+    {
+        closing = false;
+        connection->deleteLater();
+        connection = nullptr;
+        setOpenMode(QIODevice::NotOpen);
     }
 };
 
@@ -66,10 +134,23 @@ struct Transport::Private
     size_t defaultBlockSize = 4096;
     bool started = false;
 
-    QSharedPointer<Connection> makeConnection(const Jid &jid, const QString &sid, size_t blockSize)
+    void checkAndStartConnection(QSharedPointer<Connection> &c)
     {
-        // TODO connect some signals
-        return QSharedPointer<Connection>::create(pad->session()->manager()->client(), jid, sid, blockSize);
+        if (!c->connection && c->offerReceived && c->offerSent && pad->session()->role() == Origin::Initiator) {
+            auto con = pad->session()->manager()->client()->ibbManager()->createConnection();
+            auto ibbcon = static_cast<IBBConnection*>(con);
+            ibbcon->setPacketSize(defaultBlockSize);
+            c->setConnection(ibbcon);
+            ibbcon->connectToJid(pad->session()->peer(), c->sid);
+        }
+    }
+
+    void handleConnected(const QSharedPointer<Connection> &c)
+    {
+        if (c) {
+            readyConnections.append(c);
+            emit q->connected();
+        }
     }
 };
 
@@ -78,6 +159,13 @@ Transport::Transport(const TransportManagerPad::Ptr &pad) :
 {
     d->q = this;
     d->pad = pad.staticCast<Pad>();
+    connect(pad->manager(), &TransportManager::abortAllRequested, this, [this](){
+        for(auto &c: d->connections) {
+            c->close();
+        }
+        //d->aborted = true;
+        emit failed();
+    });
 }
 
 Transport::Transport(const TransportManagerPad::Ptr &pad, const QDomElement &transportEl) :
@@ -105,9 +193,26 @@ TransportManagerPad::Ptr Transport::pad() const
 void Transport::prepare()
 {
     if (d->connections.isEmpty()) { // seems like outgoing
-        QString sid = d->pad->generateSid();
-        auto conn = d->makeConnection(d->pad->session()->peer(), sid, d->defaultBlockSize);
-        d->connections.insert(sid, conn);
+        auto conn = d->pad->makeConnection(QString(), d->defaultBlockSize);
+        auto ibbConn = conn.staticCast<Connection>();
+        connect(ibbConn.data(), &Connection::connected, this, [this](){
+            auto c = static_cast<Connection*>(sender());
+            d->handleConnected(d->connections.value(c->sid));
+        });
+        d->connections.insert(ibbConn->sid, ibbConn);
+
+        connect(ibbConn.data(), &Connection::connectionClosed, this, [this](){
+            Connection *c = static_cast<Connection*>(sender());
+            d->connections.remove(c->sid);
+            QMutableListIterator<QSharedPointer<Connection>> it(d->readyConnections);
+            while (it.hasNext()) {
+                auto &p = it.next();
+                if (p.data() == c) {
+                    it.remove();
+                    break;
+                }
+            }
+        });
     }
     emit updated();
 }
@@ -117,7 +222,7 @@ void Transport::start()
     d->started = true;
 
     for (auto &c: d->connections) {
-        c->checkAndStartConnection();
+        d->checkAndStartConnection(c);
     }
 }
 
@@ -139,10 +244,15 @@ bool Transport::update(const QDomElement &transportEl)
 
     auto it = d->connections.find(sid);
     if (it == d->connections.end()) {
-        if (!d->pad->registerSid(sid)) {
-            return false; // TODO we need last error somewhere
+        auto c = d->pad->makeConnection(sid, bs_final);
+        if (c) {
+            auto ibbc = c.staticCast<Connection>();
+            it = d->connections.insert(ibbc->sid, ibbc);
+            connect(ibbc.data(), &Connection::connected, this, [this](){
+                auto c = static_cast<Connection*>(sender());
+                d->handleConnected(d->connections.value(c->sid));
+            });
         }
-        it = d->connections.insert(sid, d->makeConnection(d->pad->session()->peer(), sid, bs_final));
     } else {
         if (bs_final < (*it)->blockSize) {
             (*it)->blockSize = bs_final;
@@ -151,7 +261,7 @@ bool Transport::update(const QDomElement &transportEl)
 
     (*it)->offerReceived = true;
     if (d->started) {
-        (*it)->checkAndStartConnection();
+        d->checkAndStartConnection(it.value());
     }
     return true;
 }
@@ -192,7 +302,7 @@ OutgoingTransportInfoUpdate Transport::takeOutgoingUpdate()
 
     upd = OutgoingTransportInfoUpdate{tel, [this, connection]() mutable {
         if (d->started)
-            connection->checkAndStartConnection();
+            d->checkAndStartConnection(connection);
     }};
 
     connection->offerSent = true;
@@ -211,7 +321,7 @@ Transport::Features Transport::features() const
 
 Connection::Ptr Transport::connection() const
 {
-    return d->readyConnections.takeLast();
+    return d->readyConnections.isEmpty()? Connection::Ptr() : d->readyConnections.takeFirst().staticCast<XMPP::Jingle::Connection>();
 }
 
 size_t Transport::blockSize() const
@@ -240,24 +350,15 @@ TransportManager *Pad::manager() const
     return _manager;
 }
 
-QString Pad::generateSid() const
+Connection::Ptr Pad::makeConnection(const QString &sid, size_t blockSize)
 {
-    return _manager->generateSid(_session->peer());
-}
-
-bool Pad::registerSid(const QString &sid)
-{
-    return _manager->registerSid(_session->peer(), sid);
-}
-
-void Pad::forgetSid(const QString &sid)
-{
-    _manager->forgetSid(_session->peer(), sid);
+    return _manager->makeConnection(_session->peer(), sid, blockSize);
 }
 
 struct Manager::Private
 {
-    QSet<QPair<Jid,QString>> sids;
+    QHash<QPair<Jid,QString>,QSharedPointer<Connection>> connections;
+    XMPP::Jingle::Manager *jingleManager = nullptr;
 };
 
 Manager::Manager(QObject *parent) :
@@ -267,35 +368,83 @@ Manager::Manager(QObject *parent) :
 
 }
 
-QString Manager::generateSid(const Jid &remote)
+Manager::~Manager()
 {
-    QString sid;
-    QPair<Jid,QString> key;
-    do {
-        sid = QString("ibb_%1").arg(qrand() & 0xffff, 4, 16, QChar('0'));
-        key = qMakePair(remote, sid);
-    } while (d->sids.contains(key));
 
-    d->sids.insert(key);
-    return sid;
 }
 
-bool Manager::registerSid(const Jid &remote, const QString &sid)
+Transport::Features Manager::features() const
 {
-    QPair<Jid,QString> key = qMakePair(remote, sid);
-    if (d->sids.contains(key)) {
-        return false;
+    return Transport::AlwaysConnect | Transport::Reliable | Transport::Slow;
+}
+
+void Manager::setJingleManager(XMPP::Jingle::Manager *jm)
+{
+    d->jingleManager = jm;
+}
+
+QSharedPointer<XMPP::Jingle::Transport> Manager::newTransport(const TransportManagerPad::Ptr &pad)
+{
+    return QSharedPointer<XMPP::Jingle::Transport>(new Transport(pad));
+}
+
+QSharedPointer<XMPP::Jingle::Transport> Manager::newTransport(const TransportManagerPad::Ptr &pad, const QDomElement &transportEl)
+{
+    auto t = new Transport(pad, transportEl);
+    QSharedPointer<XMPP::Jingle::Transport> ret(t);
+    if (t->isValid()) {
+        return ret;
     }
-    d->sids.insert(key);
-    return true;
+    return QSharedPointer<XMPP::Jingle::Transport>();
 }
 
-void Manager::forgetSid(const Jid &remote, const QString &sid)
+TransportManagerPad* Manager::pad(Session *session)
 {
-    QPair<Jid,QString> key = qMakePair(remote, sid);
-    d->sids.remove(key);
+    return new Pad(this, session);
+}
+
+void Manager::closeAll()
+{
+    emit abortAllRequested();
+}
+
+XMPP::Jingle::Connection::Ptr Manager::makeConnection(const Jid &peer, const QString &sid, size_t blockSize)
+{
+    if (!sid.isEmpty() && d->connections.contains(qMakePair(peer, sid))) {
+        qWarning("sid %s was already registered for %s", qPrintable(sid), qPrintable(peer.full()));
+        return Connection::Ptr();
+    }
+    QString s(sid);
+    if (s.isEmpty()) {
+        QPair<Jid,QString> key;
+        do {
+            s = QString("ibb_%1").arg(qrand() & 0xffff, 4, 16, QChar('0'));
+            key = qMakePair(peer, s);
+        } while (d->connections.contains(key));
+    }
+    auto conn = QSharedPointer<Connection>::create(d->jingleManager->client(), peer, sid, blockSize);
+    d->connections.insert(qMakePair(peer, sid), conn);
+    connect(conn.data(), &Connection::connectionClosed, this, [this](){
+        Connection *c = static_cast<Connection*>(sender());
+        d->connections.remove(qMakePair(c->peer, c->sid));
+    });
+
+    return conn.staticCast<XMPP::Jingle::Connection>();
+}
+
+bool Manager::handleIncoming(IBBConnection *c)
+{
+    auto conn = d->connections.value(qMakePair(c->peer(), c->sid()));
+    if (conn) {
+        conn->setConnection(c);
+        QTimer::singleShot(0, c, &IBBConnection::accept);
+        return true;
+    }
+    return false;
 }
 
 } // namespace IBB
 } // namespace Jingle
 } // namespace XMPP
+
+#include "jingle-ibb.moc"

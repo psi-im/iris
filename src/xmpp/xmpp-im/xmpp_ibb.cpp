@@ -409,7 +409,7 @@ BSConnection *IBBManager::createConnection()
 
 IBBConnection *IBBManager::takeIncoming()
 {
-    return d->incomingConns.isEmpty()? 0 : d->incomingConns.takeFirst();
+    return d->incomingConns.isEmpty()? nullptr : d->incomingConns.takeFirst();
 }
 
 void IBBManager::ibb_incomingRequest(const Jid &from, const QString &id,
