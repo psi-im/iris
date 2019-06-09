@@ -38,7 +38,7 @@ public:
     Client *client;
     Jid peer;
     QString sid;
-    size_t blockSize;
+    size_t _blockSize;
     IBBConnection *connection = nullptr;
 
     bool offerSent = false;
@@ -50,7 +50,7 @@ public:
         client(client),
         peer(jid),
         sid(sid),
-        blockSize(blockSize)
+        _blockSize(blockSize)
     {
 
     }
@@ -64,6 +64,11 @@ public:
         connect(c, &IBBConnection::delayedCloseFinished, this, &Connection::handleIBBClosed);
         connect(c, &IBBConnection::aboutToClose, this, &Connection::aboutToClose);
         connect(c, &IBBConnection::connected, this, [this](){ setOpenMode(connection->openMode()); emit connected(); });
+    }
+
+    size_t blockSize() const
+    {
+        return _blockSize;
     }
 
     qint64 bytesAvailable() const
@@ -259,8 +264,8 @@ bool Transport::update(const QDomElement &transportEl)
             });
         }
     } else {
-        if (bs_final < (*it)->blockSize) {
-            (*it)->blockSize = bs_final;
+        if (bs_final < (*it)->_blockSize) {
+            (*it)->_blockSize = bs_final;
         }
     }
 
@@ -304,7 +309,7 @@ OutgoingTransportInfoUpdate Transport::takeOutgoingUpdate()
 
     QDomElement tel = doc->createElementNS(NS, "transport");
     tel.setAttribute(QStringLiteral("sid"), connection->sid);
-    tel.setAttribute(QString::fromLatin1("block-size"), qulonglong(connection->blockSize));
+    tel.setAttribute(QString::fromLatin1("block-size"), qulonglong(connection->_blockSize));
 
     upd = OutgoingTransportInfoUpdate{tel, [this, connection]() mutable {
         if (d->started)
@@ -328,11 +333,6 @@ Transport::Features Transport::features() const
 Connection::Ptr Transport::connection() const
 {
     return d->readyConnections.isEmpty()? Connection::Ptr() : d->readyConnections.takeFirst().staticCast<XMPP::Jingle::Connection>();
-}
-
-size_t Transport::blockSize() const
-{
-    return d->defaultBlockSize;
 }
 
 Pad::Pad(Manager *manager, Session *session)

@@ -49,7 +49,7 @@ public:
     Features features() const override;
 
     Connection::Ptr connection() const;
-    size_t blockSize() const;
+
 private:
     friend class Manager;
 

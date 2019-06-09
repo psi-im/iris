@@ -165,7 +165,7 @@ void IBBConnection::close()
         trySend();
 
         // if there is data pending to be written, then pend the closing
-        if(bytesToWrite() > 0) {
+        if(bytesToWrite() > 0 || d->closing) {
             return;
         }
     }
