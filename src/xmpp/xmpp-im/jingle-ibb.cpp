@@ -44,6 +44,7 @@ public:
     bool offerSent = false;
     bool offerReceived = false;
     bool closing = false;
+    bool finished = false;
 
     Connection(Client *client, const Jid &jid, const QString &sid, size_t blockSize) :
         client(client),
@@ -113,15 +114,16 @@ private:
             setOpenMode(QIODevice::ReadOnly);
         else
             postCloseAllDataRead();
-        emit connectionClosed();
     }
 
     void postCloseAllDataRead()
     {
         closing = false;
+        finished = true;
         connection->deleteLater();
         connection = nullptr;
         setOpenMode(QIODevice::NotOpen);
+        emit connectionClosed();
     }
 };
 
@@ -136,7 +138,7 @@ struct Transport::Private
 
     void checkAndStartConnection(QSharedPointer<Connection> &c)
     {
-        if (!c->connection && c->offerReceived && c->offerSent && pad->session()->role() == Origin::Initiator) {
+        if (!c->connection && !c->finished && c->offerReceived && c->offerSent && pad->session()->role() == Origin::Initiator) {
             auto con = pad->session()->manager()->client()->ibbManager()->createConnection();
             auto ibbcon = static_cast<IBBConnection*>(con);
             ibbcon->setPacketSize(defaultBlockSize);
@@ -182,7 +184,10 @@ Transport::Transport(const TransportManagerPad::Ptr &pad, const QDomElement &tra
 
 Transport::~Transport()
 {
-
+    // we have to mark all of them as finished just in case they are captured somewhere else
+    for (auto &c: d->connections) {
+        c->finished = true;
+    }
 }
 
 TransportManagerPad::Ptr Transport::pad() const
@@ -261,7 +266,8 @@ bool Transport::update(const QDomElement &transportEl)
 
     (*it)->offerReceived = true;
     if (d->started) {
-        d->checkAndStartConnection(it.value());
+        auto c = it.value();
+        QTimer::singleShot(0, this, [this,c]() mutable { d->checkAndStartConnection(c); });
     }
     return true;
 }
@@ -311,7 +317,7 @@ OutgoingTransportInfoUpdate Transport::takeOutgoingUpdate()
 
 bool Transport::isValid() const
 {
-    return true;
+    return d;
 }
 
 Transport::Features Transport::features() const
@@ -422,8 +428,8 @@ XMPP::Jingle::Connection::Ptr Manager::makeConnection(const Jid &peer, const QSt
             key = qMakePair(peer, s);
         } while (d->connections.contains(key));
     }
-    auto conn = QSharedPointer<Connection>::create(d->jingleManager->client(), peer, sid, blockSize);
-    d->connections.insert(qMakePair(peer, sid), conn);
+    auto conn = QSharedPointer<Connection>::create(d->jingleManager->client(), peer, s, blockSize);
+    d->connections.insert(qMakePair(peer, s), conn);
     connect(conn.data(), &Connection::connectionClosed, this, [this](){
         Connection *c = static_cast<Connection*>(sender());
         d->connections.remove(qMakePair(c->peer, c->sid));
