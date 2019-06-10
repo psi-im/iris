@@ -391,6 +391,7 @@ public:
     QSharedPointer<Transport> transport;
     Connection::Ptr connection;
     QStringList availableTransports;
+    bool transportReady = false; // when prepare local offer finished for the transport
     bool transportFailed = false;
     bool closeDeviceOnFinish = true;
     bool waitTransportAccept = false;
@@ -621,9 +622,11 @@ Action Application::outgoingUpdateType() const
         if (d->transportFailed && !d->transport)
             return Action::ContentReject; // case me=initiator was already handled by this momemnt
 
-        if (d->transport->hasUpdates())
+        if (d->transport->hasUpdates() || d->transportReady) {
+            d->transportReady = true;
             return d->creator == d->pad->session()->role()? Action::ContentAdd :
                                                             (d->transportFailed? Action::ContentAccept : Action::TransportReplace);
+        }
         break;
     case State::Connecting:
     case State::Active:
@@ -657,18 +660,20 @@ OutgoingUpdate Application::takeOutgoingUpdate()
 
     auto client = d->pad->session()->manager()->client();
     auto doc = client->doc();
+
+    // content-remove or content-reject
+    if (d->transportFailed && (d->state >= State::Active || !d->transport)) {
+        ContentBase cb(d->creator, d->contentName);
+        QList<QDomElement> updates;
+        updates << cb.toXml(doc, "content");
+        updates << Reason(Reason::Condition::FailedTransport).toXml(doc);
+        return OutgoingUpdate{updates, [this](){
+                d->setState(State::Finished);
+            }
+        };
+    }
+
     if (d->state == State::PrepareLocalOffer) { // basically when we come to this function Created is possible only for outgoing content
-        if (d->transportFailed && !d->transport) {
-            ContentBase cb(d->creator, d->contentName);
-            QList<QDomElement> updates;
-            updates << cb.toXml(doc, "content");
-            updates << Reason(Reason::Condition::FailedTransport).toXml(doc);
-
-            return OutgoingUpdate{updates, [this](){
-                    d->setState(State::Finished);
-                }};
-        }
-
         if (!d->transport->hasUpdates()) { // failed to select next transport. can't continue
             return OutgoingUpdate();
         }
@@ -703,17 +708,6 @@ OutgoingUpdate Application::takeOutgoingUpdate()
             }};
     }
     if (d->state == State::Connecting || d->state == State::Active || d->state == State::Pending) {
-        if (d->transportFailed && (d->state == State::Active || !d->transport)) {
-            ContentBase cb(d->creator, d->contentName);
-            QList<QDomElement> updates;
-            updates << cb.toXml(doc, "content");
-            updates << Reason(Reason::Condition::FailedTransport).toXml(doc);
-            return OutgoingUpdate{updates, [this](){
-                    d->setState(State::Finished);
-                }
-            };
-        }
-
         if (d->transport->hasUpdates()) { // failed to select next transport. can't continue
             QDomElement tel;
             OutgoingUpdateCB trCallback;
@@ -730,17 +724,6 @@ OutgoingUpdate Application::takeOutgoingUpdate()
         }
     }
     if (d->state == State::Finishing) {
-        if (d->transportFailed) {
-            ContentBase cb(d->creator, d->contentName);
-            QList<QDomElement> updates;
-            updates << cb.toXml(doc, "content");
-            updates << Reason(Reason::Condition::FailedTransport).toXml(doc);
-            return OutgoingUpdate{updates, [this](){
-                    d->setState(State::Finished);
-                }
-            };
-        }
-        // else send <received>
         ContentBase cb(d->pad->session()->role(), d->contentName);
         return OutgoingUpdate{QList<QDomElement>() << cb.toXml(doc, "received"), [this](){
                 d->setState(State::Finished);
