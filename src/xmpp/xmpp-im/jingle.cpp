@@ -1208,6 +1208,75 @@ public:
         return true;
     }
 
+    bool handleIncomingTransportReplace(const QDomElement &jingleEl)
+    {
+        QList<QPair<Application*,QSharedPointer<Transport>>> apps;
+        QList<QPair<Application*,QDomElement>> toReject;
+        QString contentTag(QStringLiteral("content"));
+        for(QDomElement ce = jingleEl.firstChildElement(contentTag);
+            !ce.isNull(); ce = ce.nextSiblingElement(contentTag))
+        {
+            ContentBase cb(ce);
+            auto transportEl = ce.firstChildElement(QString::fromLatin1("transport"));
+            QString transportNS = transportEl.attribute(QStringLiteral("xmlns"));
+            if (!cb.isValid() || transportEl.isNull() || transportNS.isEmpty()) {
+                lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::Cancel, XMPP::Stanza::Error::BadRequest);
+                return false;
+            }
+            Application *app = contentList.value(ContentKey{cb.name, cb.creator});
+            if (!app) continue; //wtf?
+
+            auto trPad = q->transportPadFactory(transportNS);
+            if (!trPad) {
+                toReject.append(qMakePair(app, transportEl));
+                continue;
+            }
+
+            auto transport = trPad->manager()->newTransport(trPad, transportEl);
+            if (!transport) {
+                toReject.append(qMakePair(app, transportEl));
+                continue;
+            }
+
+            apps.append(qMakePair(app, transport));
+        }
+
+        for (auto &v: apps) {
+            if (!v.first->setTransport(v.second)) {
+                // TODO
+            }
+        }
+
+        planStep();
+        return true;
+    }
+
+    bool handleIncomingTransportAccept(const QDomElement &jingleEl)
+    {
+        QSet<Application*> apps;
+        QString contentTag(QStringLiteral("content"));
+        for(QDomElement ce = jingleEl.firstChildElement(contentTag);
+            !ce.isNull(); ce = ce.nextSiblingElement(contentTag))
+        {
+            ContentBase cb(ce);
+            if (!cb.isValid()) {
+                lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::Cancel, XMPP::Stanza::Error::BadRequest);
+                return false;
+            }
+            Application *app = contentList.value(ContentKey{cb.name, cb.creator});
+            if (app) {
+                apps.insert(app);
+            }
+        }
+
+        for (auto app: apps) {
+            app->setTransportAccepted();
+        }
+
+        planStep();
+        return true;
+    }
+
     bool handleIncomingTransportInfo(const QDomElement &jingleEl)
     {
         QString contentTag(QStringLiteral("content"));
@@ -1498,13 +1567,13 @@ bool Session::updateFromXml(Action action, const QDomElement &jingleEl)
     case Action::SessionTerminate:
         return d->handleIncomingSessionTerminate(jingleEl);
     case Action::TransportAccept:
-        break;
+        return d->handleIncomingTransportAccept(jingleEl);
     case Action::TransportInfo:
         return d->handleIncomingTransportInfo(jingleEl);
     case Action::TransportReject:
         break;
     case Action::TransportReplace:
-        break;
+        return d->handleIncomingTransportReplace(jingleEl);
     case Action::NoAction:
     default:
         break;
