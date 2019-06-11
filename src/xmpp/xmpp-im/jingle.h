@@ -390,6 +390,7 @@ public:
     virtual OutgoingUpdate takeOutgoingUpdate() = 0; // this may return something only when outgoingUpdateType() != NoAction
     virtual bool wantBetterTransport(const QSharedPointer<Transport> &) const = 0;
     virtual bool selectNextTransport() = 0;
+    virtual bool replaceTransport(const QSharedPointer<Transport> &transport) = 0;
     virtual void setTransportAccepted() = 0;
 
     /**
@@ -425,6 +426,8 @@ public:
     QString sid() const;
 
     Origin role() const; // my role in session: initiator or responder
+    Origin peerRole() const;
+
     XMPP::Stanza::Error lastError() const;
 
     // make new local content but do not add it to session yet

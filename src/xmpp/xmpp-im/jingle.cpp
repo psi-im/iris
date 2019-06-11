@@ -1210,8 +1210,8 @@ public:
 
     bool handleIncomingTransportReplace(const QDomElement &jingleEl)
     {
-        QList<QPair<Application*,QSharedPointer<Transport>>> apps;
-        QList<QPair<Application*,QDomElement>> toReject;
+        QList<std::tuple<Application*,QSharedPointer<Transport>,QDomElement>> passed;
+        QList<QDomElement> toReject;
         QString contentTag(QStringLiteral("content"));
         for(QDomElement ce = jingleEl.firstChildElement(contentTag);
             !ce.isNull(); ce = ce.nextSiblingElement(contentTag))
@@ -1228,23 +1228,31 @@ public:
 
             auto trPad = q->transportPadFactory(transportNS);
             if (!trPad) {
-                toReject.append(qMakePair(app, transportEl));
+                toReject.append(ce);
                 continue;
             }
 
             auto transport = trPad->manager()->newTransport(trPad, transportEl);
             if (!transport) {
-                toReject.append(qMakePair(app, transportEl));
+                toReject.append(ce);
                 continue;
             }
 
-            apps.append(qMakePair(app, transport));
+            passed.append(std::make_tuple(app, transport, ce));
         }
 
-        for (auto &v: apps) {
-            if (!v.first->setTransport(v.second)) {
-                // TODO
+        for (auto &v: passed) {
+            Application *app;
+            QSharedPointer<Transport> transport;
+            QDomElement ce;
+            std::tie(app,transport,ce) = v;
+            if (!app->replaceTransport(transport)) { // app should generate transport accept eventually. content-accept will work too if the content wasn't accepted yet
+                toReject.append(ce);
             }
+        }
+
+        if (toReject.size()) {
+            outgoingUpdates.insert(Action::TransportReject, OutgoingUpdate{toReject,OutgoingUpdateCB()});
         }
 
         planStep();
@@ -1365,6 +1373,11 @@ QString Session::sid() const
 Origin Session::role() const
 {
     return d->role;
+}
+
+Origin Session::peerRole() const
+{
+    return negateOrigin(d->role);
 }
 
 XMPP::Stanza::Error Session::lastError() const
