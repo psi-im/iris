@@ -39,6 +39,7 @@ namespace XMPP {
 namespace Jingle {
 
 const QString NS(QStringLiteral("urn:xmpp:jingle:1"));
+const QString ERROR_NS(QStringLiteral("urn:xmpp:jingle:errors:1"));
 
 
 //----------------------------------------------------------------------------
@@ -504,8 +505,12 @@ public:
 
             auto session = client()->jingleManager()->session(from, jingle.sid());
             if (session) {
-                // FIXME what if not yet acknowledged. xep-0166 has a solution for that
-                respondError(iq, Stanza::Error::Cancel, Stanza::Error::Conflict);
+                if (session->role() == Origin::Initiator) { //
+                    respondTieBreak(iq);
+                } else {
+                    // second session from this peer with the same sid.
+                    respondError(iq, Stanza::Error::Cancel, Stanza::Error::BadRequest);
+                }
                 return true;
             }
             session = client()->jingleManager()->incomingSessionInitiate(from, jingle, jingleEl);
@@ -520,7 +525,7 @@ public:
                     auto resp = createIQ(client()->doc(), "result", fromStr, iq.attribute(QStringLiteral("id")));
                     client()->send(resp);
                 } else {
-                    auto el = client()->doc()->createElementNS(QString::fromLatin1("urn:xmpp:jingle:errors:1"), QStringLiteral("unknown-session"));
+                    auto el = client()->doc()->createElementNS(ERROR_NS, QStringLiteral("unknown-session"));
                     respondError(iq, Stanza::Error::Cancel, Stanza::Error::ItemNotFound, QString(), el);
                 }
                 return true;
@@ -547,6 +552,13 @@ public:
         }
         resp.appendChild(errEl);
         client()->send(resp);
+    }
+
+    void respondTieBreak(const QDomElement &iq)
+    {
+        Stanza::Error error(Stanza::Error::Cancel, Stanza::Error::Conflict);
+        ErrorUtil::fill(*client()->doc(), error, ErrorUtil::TieBreak);
+        respondError(iq, error);
     }
 
     void respondError(const QDomElement &iq, const Stanza::Error &error)
@@ -1040,6 +1052,9 @@ public:
                 }
                 lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::Cancel, err == Private::AddContentError::Unexpected?
                                                     XMPP::Stanza::Error::UnexpectedRequest : XMPP::Stanza::Error::BadRequest);
+                if (err == Private::AddContentError::Unexpected) {
+                    ErrorUtil::fill(jingleEl.ownerDocument(), lastError, ErrorUtil::OutOfOrder);
+                }
                 return std::tuple<bool,QList<Application*>>(false, QList<Application*>());
             }
 
@@ -1104,6 +1119,9 @@ public:
         case Private::AddContentError::Unparsed:
         case Private::AddContentError::Unexpected:
             lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::Cancel, XMPP::Stanza::Error::BadRequest);
+            if (err == Private::AddContentError::Unexpected) {
+                ErrorUtil::fill(jingleEl.ownerDocument(), lastError, ErrorUtil::OutOfOrder);
+            }
             return false;
         case Private::AddContentError::Unsupported:
             rejects += Reason(cond).toXml(manager->client()->doc());
@@ -1552,7 +1570,8 @@ bool Session::incomingInitiate(const Jingle &jingle, const QDomElement &jingleEl
 bool Session::updateFromXml(Action action, const QDomElement &jingleEl)
 {
     if (d->state == State::Finished) {
-        d->lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::Cancel, XMPP::Stanza::Error::UnexpectedRequest); // TODO OutOfOrder
+        d->lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::Cancel, XMPP::Stanza::Error::UnexpectedRequest);
+        ErrorUtil::fill(jingleEl.ownerDocument(), d->lastError, ErrorUtil::OutOfOrder);
         return false;
     }
 
@@ -1734,6 +1753,12 @@ Session *Manager::session(const Jid &remoteJid, const QString &sid)
     return d->sessions.value(qMakePair(remoteJid, sid));
 }
 
+void Manager::detachSession(Session *s)
+{
+    s->disconnect(this);
+    d->sessions.remove(qMakePair(s->peer(), s->sid()));
+}
+
 void Manager::setRemoteJidChecker(std::function<bool(const Jid &)> checker)
 {
     d->remoteJidCecker = checker;
@@ -1828,6 +1853,33 @@ NetworkDatagram Connection::receiveDatagram(qint64 maxSize)
 size_t Connection::blockSize() const
 {
     return 0; // means "block" is not applicable for this kind of connection
+}
+
+const char* ErrorUtil::names[ErrorUtil::Last] = {"out-of-order","tie-break", "unknown-session", "unsupported-info"};
+
+Stanza::Error ErrorUtil::make(QDomDocument &doc, int jingleCond, int type, int condition, const QString &text)
+{
+    auto el = doc.createElementNS(ERROR_NS, QString::fromLatin1(names[jingleCond]));
+    return Stanza::Error(type, condition, text, el);
+}
+
+void ErrorUtil::fill(QDomDocument doc, Stanza::Error &error, int jingleCond)
+{
+    error.appSpec = doc.createElementNS(ERROR_NS, QString::fromLatin1(names[jingleCond]));
+}
+
+int ErrorUtil::jingleCondition(const Stanza::Error &error)
+{
+    if (error.appSpec.attribute(QString::fromLatin1("xmlns")) != ERROR_NS) {
+        return UnknownError;
+    }
+    QString tagName = error.appSpec.tagName();
+    for (int i = 0; i < int(sizeof(names) / sizeof(names[0])); ++i) {
+        if (tagName == names[i]) {
+            return i;
+        }
+    }
+    return UnknownError;
 }
 
 

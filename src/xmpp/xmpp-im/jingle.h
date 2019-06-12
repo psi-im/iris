@@ -111,6 +111,25 @@ typedef std::function<void ()> OutgoingUpdateCB;
 typedef std::tuple<QList<QDomElement>, OutgoingUpdateCB> OutgoingUpdate; // list of elements to b inserted to <jingle> and success callback
 typedef std::tuple<QDomElement, OutgoingUpdateCB> OutgoingTransportInfoUpdate; // transport element and success callback
 
+class ErrorUtil
+{
+public:
+    enum {
+        UnknownError, // unparsed/unknown error
+        OutOfOrder,
+        TieBreak,
+        UnknownSession,
+        UnsupportedInfo,
+        Last
+    };
+
+    static const char* names[Last];
+
+    static XMPP::Stanza::Error make(QDomDocument &doc, int jingleCond, int type=XMPP::Stanza::Error::Cancel, int condition=XMPP::Stanza::Error::UndefinedCondition, const QString &text=QString());
+    static void fill(QDomDocument doc, XMPP::Stanza::Error &error, int jingleCond);
+    static int jingleCondition(const XMPP::Stanza::Error &error);
+};
+
 class Jingle
 {
 public:
@@ -549,6 +568,7 @@ public:
     QString registerSession(Session *session);
     XMPP::Stanza::Error lastError() const;
 
+    void detachSession(Session *s); // disconnect the session from manager
 signals:
     void incomingSession(Session *);
 
