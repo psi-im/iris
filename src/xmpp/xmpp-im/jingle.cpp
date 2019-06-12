@@ -1256,6 +1256,13 @@ public:
                 continue;
             }
 
+            auto tfo = app->transportReplaceOrigin();
+            // if transport recovery is in progress and I as an inititiator started it then forbid remote transport-replace
+            if (tfo != Origin::None && tfo != q->peerRole() && role == Origin::Initiator) {
+                lastError = ErrorUtil::makeTieBreak(*manager->client()->doc());
+                return false;
+            }
+
             passed.append(std::make_tuple(app, transport, ce));
         }
 
@@ -1880,6 +1887,11 @@ int ErrorUtil::jingleCondition(const Stanza::Error &error)
         }
     }
     return UnknownError;
+}
+
+Stanza::Error ErrorUtil::makeTieBreak(QDomDocument &doc)
+{
+    return make(doc, TieBreak, XMPP::Stanza::Error::Cancel, XMPP::Stanza::Error::Conflict);
 }
 
 

@@ -389,6 +389,7 @@ public:
     Origin  creator;
     Origin  senders;
     Origin  transportFailedOrigin = Origin::None;
+    XMPP::Stanza::Error lastError;
     QSharedPointer<Transport> transport;
     Connection::Ptr connection;
     QStringList availableTransports;
@@ -503,6 +504,11 @@ void Application::setState(State state)
     d->setState(state);
 }
 
+Stanza::Error Application::lastError() const
+{
+    return d->lastError;
+}
+
 QString Application::contentName() const
 {
     return d->contentName;
@@ -612,22 +618,22 @@ bool Application::setTransport(const QSharedPointer<Transport> &transport)
     return true;
 }
 
+Origin Application::transportReplaceOrigin() const
+{
+    return d->transportFailedOrigin;
+}
+
 bool Application::replaceTransport(const QSharedPointer<Transport> &transport)
 {
-    // remote party called transport-replace
-    auto peerRole = d->pad->session()->peerRole();
-    // if transport recovery is in progress and I as an inititiator started it then forbid remote transport-replace
-    if (d->transportFailedOrigin != Origin::None && d->transportFailedOrigin != peerRole && d->pad->session()->role() == Origin::Initiator) {
-        // TODO tie-break
-        return false;
-    }
     auto prev = d->transportFailedOrigin;
-    d->transportFailedOrigin = peerRole;
+    d->transportFailedOrigin = d->pad->session()->peerRole();
     auto ret = setTransport(transport);
     if (ret)
         d->waitTransportAccept = false;
-    else
+    else {
         d->transportFailedOrigin = prev;
+        d->lastError.reset();
+    }
 
     return ret;
 }
