@@ -211,13 +211,13 @@ class Candidate::Private : public QObject, public QSharedData {
 public:
     ~Private()
     {
-        if (server) {
+        if (server && transport) {
             server->unregisterKey(transport->directAddr());
         }
         delete socksClient;
     }
 
-    Transport *transport;
+    QPointer<Transport> transport;
     QString cid;
     QString host;
     Jid jid;
@@ -1150,6 +1150,12 @@ Transport::~Transport()
         static_cast<Manager*>(d->pad->manager())->removeKeyMapping(d->directAddr);
         for (auto &c: d->remoteCandidates) {
             c.deleteSocksClient();
+        }
+        for (auto &c: d->remoteCandidates) {
+            auto srv = c.server();
+            if (srv) {
+                srv.staticCast<S5BServer>()->unregisterKey(d->directAddr);
+            }
         }
     }
 }

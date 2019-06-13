@@ -689,6 +689,8 @@ public:
                 lastError = jt->error();
                 if (ErrorUtil::jingleCondition(lastError) != ErrorUtil::TieBreak)
                     setSessionFinished();
+                else
+                    planStep();
             }
         });
         waitingAck = true;
