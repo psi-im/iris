@@ -143,7 +143,7 @@ struct Transport::Private
     bool started = false;
     bool initialOfferSent = false; // if we ever sent anything
 
-    void checkAndStartConnection(QSharedPointer<Connection> &c)
+    void checkAndStartConnection(const QSharedPointer<Connection> &c)
     {
         if (!c->connection && !c->finished && c->offerReceived && c->offerSent && pad->session()->role() == Origin::Initiator) {
             auto con = pad->session()->manager()->client()->ibbManager()->createConnection();

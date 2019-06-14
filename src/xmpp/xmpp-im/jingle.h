@@ -441,14 +441,13 @@ public:
     virtual bool accept(const QDomElement &el) = 0; // remote accepted our content
     virtual void start() = 0;
 
-protected:
     /**
      * @brief incomingTransportReplace it's jingle transport-replace
      * @param transport
      * @return
      */
     virtual bool incomingTransportReplace(const QSharedPointer<Transport> &transport) = 0;
-    virtual bool incomingTransportAccept(const QSharedPointer<Transport> &transport) = 0;
+    virtual bool incomingTransportAccept(const QDomElement &transportEl) = 0;
 
 signals:
     void updated(); // signal for session it has to send updates to remote. so it will follow with takeOutgoingUpdate() eventually

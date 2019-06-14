@@ -1292,8 +1292,6 @@ public:
 
     bool handleIncomingTransportAccept(const QDomElement &jingleEl)
     {
-        QList<std::tuple<Application*,QSharedPointer<Transport>,QDomElement>> passed;
-        QList<QDomElement> toReject;
         QString contentTag(QStringLiteral("content"));
         for(QDomElement ce = jingleEl.firstChildElement(contentTag);
             !ce.isNull(); ce = ce.nextSiblingElement(contentTag))
@@ -1307,37 +1305,9 @@ public:
             }
             Application *app = contentList.value(ContentKey{cb.name, cb.creator});
             if (!app || !app->transport() || app->transport()->pad()->ns() != transportNS || !app->incomingTransportAccept(transportEl)) {
-                toReject.append(ce);
-                continue;
+                lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::Cancel, XMPP::Stanza::Error::BadRequest);
+                return false;
             }
-
-            auto trPad = q->transportPadFactory(transportNS);
-            if (!trPad) {
-                toReject.append(ce);
-                continue;
-            }
-
-            auto transport = trPad->manager()->newTransport(trPad, transportEl);
-            if (!transport) {
-                toReject.append(ce);
-                continue;
-            }
-
-            passed.append(std::make_tuple(app, transport, ce));
-        }
-
-        for (auto &v: passed) {
-            Application *app;
-            QSharedPointer<Transport> transport;
-            QDomElement ce;
-            std::tie(app,transport,ce) = v;
-            if (!app->incomingTransportAccept(transport)) { // app should generate transport accept eventually. content-accept will work too if the content wasn't accepted yet
-                toReject.append(ce);
-            }
-        }
-
-        if (toReject.size()) {
-            outgoingUpdates.insert(Action::TransportReject, OutgoingUpdate{toReject,OutgoingUpdateCB()});
         }
 
         planStep();
@@ -1539,6 +1509,10 @@ void Session::initiate()
 
 void Session::terminate(Reason::Condition cond, const QString &comment)
 {
+    if (d->role == Origin::Initiator && d->state == State::PrepareLocalOffer) {
+        d->setSessionFinished();
+        return;
+    }
     d->state = State::Finishing;
     d->terminateReason = Reason(cond, comment);
     d->planStep();

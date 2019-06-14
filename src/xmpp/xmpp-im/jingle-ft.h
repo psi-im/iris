@@ -148,7 +148,7 @@ public:
 
 protected:
     bool incomingTransportReplace(const QSharedPointer<Transport> &transport) override;
-    bool incomingTransportAccept(const QSharedPointer<Transport> &transport) override;
+    bool incomingTransportAccept(const QDomElement &transportEl) override;
 
 signals:
     void deviceRequested(quint64 offset, quint64 size);

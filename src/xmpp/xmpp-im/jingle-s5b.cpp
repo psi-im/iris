@@ -397,7 +397,7 @@ Candidate::Candidate(Transport *transport, const TcpPortServer::Ptr &server, con
     d->transport = transport;
     d->server = server.staticCast<S5BServer>();
     d->cid = cid;
-    d->host = "192.168.0.44";//server->publishHost();
+    d->host = server->publishHost();
     d->port = server->publishPort();
     d->type = type;
     static const int priorities[] = {0, ProxyPreference, TunnelPreference, AssistedPreference, DirectPreference};
@@ -1184,7 +1184,7 @@ void Transport::prepare()
     });
     d->onLocalServerDiscovered();
 
-    //d->discoS5BProxy();
+    d->discoS5BProxy();
 
     emit updated();
 }
