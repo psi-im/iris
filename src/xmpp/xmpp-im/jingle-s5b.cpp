@@ -397,7 +397,7 @@ Candidate::Candidate(Transport *transport, const TcpPortServer::Ptr &server, con
     d->transport = transport;
     d->server = server.staticCast<S5BServer>();
     d->cid = cid;
-    d->host = server->publishHost();
+    d->host = "192.168.0.44";//server->publishHost();
     d->port = server->publishPort();
     d->type = type;
     static const int priorities[] = {0, ProxyPreference, TunnelPreference, AssistedPreference, DirectPreference};
@@ -571,6 +571,7 @@ public:
     Pad::Ptr pad;
     bool meCreator = true; // content created on local side
     bool transportStarted = false; // where start() was called
+    bool offerSent = false;
     bool waitingAck = true;
     bool aborted = false;
     bool remoteReportedCandidateError = false;
@@ -1183,7 +1184,7 @@ void Transport::prepare()
     });
     d->onLocalServerDiscovered();
 
-    d->discoS5BProxy();
+    //d->discoS5BProxy();
 
     emit updated();
 }
@@ -1312,6 +1313,25 @@ bool Transport::update(const QDomElement &transportEl)
     return false;
 }
 
+
+bool Transport::isInitialOfferReady() const
+{
+    return isValid() && (d->pendingActions || d->offerSent);
+}
+
+OutgoingTransportInfoUpdate Transport::takeInitialOffer()
+{
+    d->offerSent = true;
+    auto upd = takeOutgoingUpdate();
+    auto tel = std::get<0>(upd);
+    if (d->meCreator && d->mode != Tcp) {
+        tel.setAttribute(QStringLiteral("mode"), "udp");
+    }
+    tel.setAttribute(QString::fromLatin1("block-size"), qulonglong(d->blockSize));
+
+    return upd;
+}
+
 bool Transport::hasUpdates() const
 {
     return isValid() && d->pendingActions;
@@ -1328,10 +1348,6 @@ OutgoingTransportInfoUpdate Transport::takeOutgoingUpdate()
 
     QDomElement tel = doc->createElementNS(NS, "transport");
     tel.setAttribute(QStringLiteral("sid"), d->sid);
-    if (d->meCreator && d->mode != Tcp) {
-        tel.setAttribute(QStringLiteral("mode"), "udp");
-    }
-    tel.setAttribute(QString::fromLatin1("block-size"), qulonglong(d->blockSize));
 
     if (d->pendingActions & Private::NewCandidate) {
         d->pendingActions &= ~Private::NewCandidate;
@@ -1623,3 +1639,4 @@ void Pad::registerSid(const QString &sid)
 } // namespace XMPP
 
 #include "jingle-s5b.moc"
+

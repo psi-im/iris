@@ -366,7 +366,9 @@ public:
                                 // for remote transport try to connect to all proposed hosts in order their priority.
                                 // in-band transport may just emit updated() here
     virtual bool update(const QDomElement &el) = 0; // accepts transport element on incoming transport-info
+    virtual bool isInitialOfferReady() const = 0;
     virtual bool hasUpdates() const = 0;
+    virtual OutgoingTransportInfoUpdate takeInitialOffer() = 0;
     virtual OutgoingTransportInfoUpdate takeOutgoingUpdate() = 0;
     virtual bool isValid() const = 0;
     virtual Features features() const = 0;
@@ -408,12 +410,28 @@ public:
      */
     virtual bool setTransport(const QSharedPointer<Transport> &transport) = 0;
     virtual QSharedPointer<Transport> transport() const = 0;
-    virtual Action outgoingUpdateType() const = 0;
-    virtual OutgoingUpdate takeOutgoingUpdate() = 0; // this may return something only when outgoingUpdateType() != NoAction
+
+    /**
+     * @brief evaluateOutgoingUpdate computes and prepares next update which will be taken with takeOutgoingUpdate
+     *   The updated will be taked immediately if considered to be most preferred among other updates types of
+     *   other applications.
+     * @return update type
+     */
+    virtual Action evaluateOutgoingUpdate() = 0;
+    virtual OutgoingUpdate takeOutgoingUpdate() = 0; // this may return something only when evaluateOutgoingUpdate() != NoAction
+
+    /**
+     * @brief wantBetterTransport checks if the transport is a better match for the application
+     * @return
+     */
     virtual bool wantBetterTransport(const QSharedPointer<Transport> &) const = 0;
+
+    /**
+     * @brief selectNextTransport selects next transport from compatible transports list.
+     *   The list is usually store in the application
+     * @return
+     */
     virtual bool selectNextTransport() = 0;
-    virtual bool replaceTransport(const QSharedPointer<Transport> &transport) = 0;
-    virtual void setTransportAccepted() = 0;
 
     /**
      * @brief prepare to send content-add/session-initiate
@@ -422,6 +440,15 @@ public:
     virtual void prepare() = 0;
     virtual bool accept(const QDomElement &el) = 0; // remote accepted our content
     virtual void start() = 0;
+
+protected:
+    /**
+     * @brief incomingTransportReplace it's jingle transport-replace
+     * @param transport
+     * @return
+     */
+    virtual bool incomingTransportReplace(const QSharedPointer<Transport> &transport) = 0;
+    virtual bool incomingTransportAccept(const QSharedPointer<Transport> &transport) = 0;
 
 signals:
     void updated(); // signal for session it has to send updates to remote. so it will follow with takeOutgoingUpdate() eventually

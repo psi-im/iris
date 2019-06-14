@@ -751,7 +751,7 @@ public:
              */
             Action expectedContentAction = role == Origin::Initiator? Action::ContentAdd : Action::ContentAccept;
             for (const auto &c: contentList) {
-                auto out = c->outgoingUpdateType();
+                auto out = c->evaluateOutgoingUpdate();
                 if (out == Action::ContentReject) { // yeah we are rejecting local content. invalid?
                     lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::Cancel, XMPP::Stanza::Error::BadRequest);
                     setSessionFinished();
@@ -821,7 +821,7 @@ public:
         QMultiMap<Action, Application*> updates;
 
         for (auto app : signalingContent) {
-            Action updateType = app->outgoingUpdateType();
+            Action updateType = app->evaluateOutgoingUpdate();
             if (updateType != Action::NoAction) {
                 updates.insert(updateType, app);
             }
@@ -869,7 +869,7 @@ public:
     void addAndInitContent(Origin creator, Application *content)
     {
         contentList.insert(ContentKey{content->contentName(), creator}, content);
-        if (state != State::Created && content->outgoingUpdateType() != Action::NoAction) {
+        if (state != State::Created && content->evaluateOutgoingUpdate() != Action::NoAction) {
             signalingContent.insert(content);
         }
         QObject::connect(content, &Application::updated, q, [this, content](){
@@ -1245,7 +1245,10 @@ public:
                 return false;
             }
             Application *app = contentList.value(ContentKey{cb.name, cb.creator});
-            if (!app) continue; //wtf?
+            if (!app) {
+                toReject.append(ce);
+                continue;
+            }
 
             auto trPad = q->transportPadFactory(transportNS);
             if (!trPad) {
@@ -1274,7 +1277,7 @@ public:
             QSharedPointer<Transport> transport;
             QDomElement ce;
             std::tie(app,transport,ce) = v;
-            if (!app->replaceTransport(transport)) { // app should generate transport accept eventually. content-accept will work too if the content wasn't accepted yet
+            if (!app->incomingTransportReplace(transport)) { // app should generate transport accept eventually. content-accept will work too if the content wasn't accepted yet
                 toReject.append(ce);
             }
         }
@@ -1289,24 +1292,52 @@ public:
 
     bool handleIncomingTransportAccept(const QDomElement &jingleEl)
     {
-        QSet<Application*> apps;
+        QList<std::tuple<Application*,QSharedPointer<Transport>,QDomElement>> passed;
+        QList<QDomElement> toReject;
         QString contentTag(QStringLiteral("content"));
         for(QDomElement ce = jingleEl.firstChildElement(contentTag);
             !ce.isNull(); ce = ce.nextSiblingElement(contentTag))
         {
             ContentBase cb(ce);
-            if (!cb.isValid()) {
+            auto transportEl = ce.firstChildElement(QString::fromLatin1("transport"));
+            QString transportNS = transportEl.attribute(QStringLiteral("xmlns"));
+            if (!cb.isValid() || transportEl.isNull() || transportNS.isEmpty()) {
                 lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::Cancel, XMPP::Stanza::Error::BadRequest);
                 return false;
             }
             Application *app = contentList.value(ContentKey{cb.name, cb.creator});
-            if (app) {
-                apps.insert(app);
+            if (!app || !app->transport() || app->transport()->pad()->ns() != transportNS || !app->incomingTransportAccept(transportEl)) {
+                toReject.append(ce);
+                continue;
+            }
+
+            auto trPad = q->transportPadFactory(transportNS);
+            if (!trPad) {
+                toReject.append(ce);
+                continue;
+            }
+
+            auto transport = trPad->manager()->newTransport(trPad, transportEl);
+            if (!transport) {
+                toReject.append(ce);
+                continue;
+            }
+
+            passed.append(std::make_tuple(app, transport, ce));
+        }
+
+        for (auto &v: passed) {
+            Application *app;
+            QSharedPointer<Transport> transport;
+            QDomElement ce;
+            std::tie(app,transport,ce) = v;
+            if (!app->incomingTransportAccept(transport)) { // app should generate transport accept eventually. content-accept will work too if the content wasn't accepted yet
+                toReject.append(ce);
             }
         }
 
-        for (auto app: apps) {
-            app->setTransportAccepted();
+        if (toReject.size()) {
+            outgoingUpdates.insert(Action::TransportReject, OutgoingUpdate{toReject,OutgoingUpdateCB()});
         }
 
         planStep();
