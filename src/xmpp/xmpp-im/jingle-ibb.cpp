@@ -405,7 +405,8 @@ Manager::Manager(QObject *parent) :
 
 Manager::~Manager()
 {
-
+    if (d->jingleManager)
+        d->jingleManager->unregisterTransport(NS);
 }
 
 Transport::Features Manager::features() const

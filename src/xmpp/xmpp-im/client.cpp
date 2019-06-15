@@ -194,6 +194,7 @@ Client::~Client()
     delete d->ftman;
     delete d->ibbman;
     delete d->s5bman;
+    delete d->jingleManager;
     delete d->root;
     delete d;
     //fprintf(stderr, "\tClient::~Client\n");

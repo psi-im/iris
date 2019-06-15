@@ -337,6 +337,12 @@ Manager::Manager(QObject *parent):
 
 }
 
+Manager::~Manager()
+{
+    if (jingleManager)
+        jingleManager->unregisterApp(NS);
+}
+
 void Manager::setJingleManager(XMPP::Jingle::Manager *jm)
 {
     jingleManager = jm;
@@ -762,11 +768,7 @@ OutgoingUpdate Application::takeOutgoingUpdate()
             d->file.setThumbnail(thumb);
         }
         contentEl.appendChild(doc->createElementNS(NS, QString::fromLatin1("description"))).appendChild(d->file.toXml(doc));
-        if (d->transport->hasUpdates()) {
-            std::tie(transportEl, transportCB) = d->transport->takeOutgoingUpdate();
-        } else {
-            transportEl = doc->createElementNS(d->transport->pad()->ns(), QString::fromLatin1("transport"));
-        }
+        std::tie(transportEl, transportCB) = d->transport->takeInitialOffer();
         contentEl.appendChild(transportEl);
 
         d->setState(State::Unacked);
@@ -783,6 +785,7 @@ OutgoingUpdate Application::takeOutgoingUpdate()
         return OutgoingUpdate{updates, transportCB};
     case Action::TransportReplace:
     case Action::TransportAccept:
+    {
         Q_ASSERT(d->transport->isInitialOfferReady());
         d->transportReplaceState = State::Unacked;
         std::tie(transportEl, transportCB) = d->transport->takeInitialOffer();
@@ -794,6 +797,9 @@ OutgoingUpdate Application::takeOutgoingUpdate()
                 }
                 d->transportReplaceState = action == Action::TransportReplace? State::Pending : State::Finished;
             }};
+    }
+    default:
+        break;
     }
 
     return OutgoingUpdate(); // TODO
@@ -852,9 +858,16 @@ bool Application::accept(const QDomElement &el)
 
 bool Application::incomingTransportAccept(const QDomElement &transportEl)
 {
+    if (d->transportReplaceOrigin != d->pad->session()->role()) {
+        d->lastError = ErrorUtil::makeOutOfOrder(*d->pad->doc());
+        return false;
+    }
     if (d->transport->update(transportEl)) {
         d->transportReplaceOrigin = Origin::None;
         d->transportReplaceState = State::Finished;
+        if (d->state >= State::Connecting) {
+            d->transport->start();
+        }
         emit updated();
         return true;
     }

@@ -1310,13 +1310,18 @@ bool Transport::update(const QDomElement &transportEl)
         return true;
     }
 
-    return false;
+    // Seems like we got an empty transport. It's still valid though.
+    QTimer::singleShot(0, this, [this](){ d->checkAndFinishNegotiation(); });
+
+    return true;
 }
 
 
 bool Transport::isInitialOfferReady() const
 {
-    return isValid() && (d->pendingActions || d->offerSent);
+    return isValid() && (d->pendingActions || d->offerSent ||
+                         (d->localCandidates.isEmpty() && !d->proxyDiscoveryInProgress &&
+                          !(d->disco && d->disco->inProgressPortTypes())));
 }
 
 OutgoingTransportInfoUpdate Transport::takeInitialOffer()
@@ -1324,6 +1329,7 @@ OutgoingTransportInfoUpdate Transport::takeInitialOffer()
     d->offerSent = true;
     auto upd = takeOutgoingUpdate();
     auto tel = std::get<0>(upd);
+
     if (d->meCreator && d->mode != Tcp) {
         tel.setAttribute(QStringLiteral("mode"), "udp");
     }
@@ -1449,6 +1455,11 @@ OutgoingTransportInfoUpdate Transport::takeOutgoingUpdate()
         } else {
             qWarning("Got ProxyError pending action but no local used candidate is not set");
         }
+    } else {
+        d->waitingAck = true;
+        upd = OutgoingTransportInfoUpdate{tel, [this]() mutable {
+            d->waitingAck = false;
+        }};
     }
 
     return upd; // TODO
@@ -1499,6 +1510,23 @@ Manager::Manager(QObject *parent) :
     TransportManager(parent),
     d(new Private)
 {
+
+}
+
+Manager::~Manager()
+{
+    if (d->jingleManager)
+        d->jingleManager->unregisterTransport(NS);
+}
+
+Transport::Features Manager::features() const
+{
+    return Transport::Reliable | Transport::Fast;
+}
+
+void Manager::setJingleManager(XMPP::Jingle::Manager *jm)
+{
+    d->jingleManager = jm;
     // ensure S5BManager is initialized
     QTimer::singleShot(0, [this](){
         auto jt = d->jingleManager->client()->s5bManager()->jtPush();
@@ -1510,21 +1538,6 @@ Manager::Manager(QObject *parent) :
             }
         });
     });
-}
-
-Manager::~Manager()
-{
-    d->jingleManager->unregisterTransport(NS);
-}
-
-Transport::Features Manager::features() const
-{
-    return Transport::Reliable | Transport::Fast;
-}
-
-void Manager::setJingleManager(XMPP::Jingle::Manager *jm)
-{
-    d->jingleManager = jm;
 }
 
 QSharedPointer<XMPP::Jingle::Transport> Manager::newTransport(const TransportManagerPad::Ptr &pad)

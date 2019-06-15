@@ -1640,6 +1640,11 @@ QDomElement SessionManagerPad::takeOutgoingSessionInfoUpdate()
     return QDomElement();
 }
 
+QDomDocument *SessionManagerPad::doc() const
+{
+    return session()->manager()->client()->doc();
+}
+
 //----------------------------------------------------------------------------
 // Manager
 //----------------------------------------------------------------------------
@@ -1670,6 +1675,7 @@ public:
 };
 
 Manager::Manager(Client *client) :
+    QObject(client),
     d(new Private())
 {
     d->client = client;
@@ -1679,6 +1685,12 @@ Manager::Manager(Client *client) :
 
 Manager::~Manager()
 {
+    for (auto &m: d->transportManagers) {
+        m->setJingleManager(nullptr);
+    }
+    for (auto &m: d->applicationManagers) {
+        m->setJingleManager(nullptr);
+    }
 }
 
 Client *Manager::client() const
@@ -1902,6 +1914,11 @@ int ErrorUtil::jingleCondition(const Stanza::Error &error)
 Stanza::Error ErrorUtil::makeTieBreak(QDomDocument &doc)
 {
     return make(doc, TieBreak, XMPP::Stanza::Error::Cancel, XMPP::Stanza::Error::Conflict);
+}
+
+Stanza::Error ErrorUtil::makeOutOfOrder(QDomDocument &doc)
+{
+    return make(doc, OutOfOrder, XMPP::Stanza::Error::Cancel, XMPP::Stanza::Error::UnexpectedRequest);
 }
 
 

@@ -126,7 +126,10 @@ public:
     static const char* names[Last];
 
     static XMPP::Stanza::Error make(QDomDocument &doc, int jingleCond, int type=XMPP::Stanza::Error::Cancel, int condition=XMPP::Stanza::Error::UndefinedCondition, const QString &text=QString());
+
     static XMPP::Stanza::Error makeTieBreak(QDomDocument &doc);
+    static XMPP::Stanza::Error makeOutOfOrder(QDomDocument &doc);
+
     static void fill(QDomDocument doc, XMPP::Stanza::Error &error, int jingleCond);
     static int jingleCondition(const XMPP::Stanza::Error &error);
 };
@@ -246,6 +249,7 @@ public:
     virtual QDomElement takeOutgoingSessionInfoUpdate();
     virtual QString ns() const = 0;
     virtual Session *session() const = 0;
+    QDomDocument* doc() const;
 };
 
 class TransportManager;

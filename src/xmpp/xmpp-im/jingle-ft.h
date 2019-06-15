@@ -164,6 +164,7 @@ class Manager : public XMPP::Jingle::ApplicationManager
     Q_OBJECT
 public:
     Manager(QObject *parent = nullptr);
+    ~Manager();
     void setJingleManager(XMPP::Jingle::Manager *jm);
     Application *startApplication(const ApplicationManagerPad::Ptr &pad, const QString &contentName, Origin creator, Origin senders);
     ApplicationManagerPad *pad(Session *session); // pad factory
