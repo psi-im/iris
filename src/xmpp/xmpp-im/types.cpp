@@ -29,6 +29,7 @@
 #include "xmpp_captcha.h"
 #include "protocol.h"
 #include "xmpp/blake2/blake2qt.h"
+#include "xmpp_reference.h"
 #define NS_XML     "http://www.w3.org/XML/1998/namespace"
 
 namespace XMPP
@@ -1074,7 +1075,7 @@ public:
     QString replaceId;
     QString originId; // XEP-0359
     Message::StanzaId stanzaId; // XEP-0359
-    Reference reference; // XEP-0732
+    Reference reference; // XEP-0385 and XEP-0372
 };
 
 #define MessageD() (d? d : (d = new Private))
@@ -1974,6 +1975,11 @@ Stanza Message::toStanza(Stream *stream) const
         s.appendChild(e);
     }
 
+    // XEP-0372 and XEP-0385
+    if (d->reference.isValid()) {
+        s.appendChild(d->reference.toXml(&s.doc()));
+    }
+
     return s;
 }
 
@@ -2320,6 +2326,13 @@ bool Message::fromStanza(const Stanza &s, bool useTimeZoneOffset, int timeZoneOf
     if (!t.isNull()) {
         d->replaceId = t.attribute("id");
     }
+
+    // XEP-0385 SIMS and XEP-0372 Reference
+    t = childElementsByTagNameNS(root, REFERENCE_NS, QString::fromLatin1("reference")).item(0).toElement();
+    if (!t.isNull()) {
+        d->reference.fromXml(t);
+    }
+
     return true;
 }
 

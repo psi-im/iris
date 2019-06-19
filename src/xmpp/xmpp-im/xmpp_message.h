@@ -214,7 +214,7 @@ namespace XMPP {
         QString originId() const;
         void setOriginId(const QString &id);
 
-        // XEP-0732
+        // XEP-0385 and XEP-0372
         Reference reference() const;
         void setReference(const Reference &r);
 

@@ -32,8 +32,8 @@ public:
     Reference::Type type;
     QString uri;
     QString anchor;
-    int     begin = 0;
-    int     end   = 0;
+    int     begin = -1;
+    int     end   = -1;
     MediaSharing mediaSharing;
 };
 
@@ -178,6 +178,9 @@ bool Reference::fromXml(const QDomElement &e)
 
 QDomElement Reference::toXml(QDomDocument *doc) const
 {
+    if (!d) {
+        return QDomElement();
+    }
     auto root = doc->createElementNS(REFERENCE_NS, QString::fromLatin1("reference"));
     root.setAttribute(QString::fromLatin1("uri"), d->uri);
     root.setAttribute(QString::fromLatin1("type"), QString(d->type == Reference::Mention? "mention": "data"));
