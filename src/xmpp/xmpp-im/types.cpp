@@ -25,6 +25,7 @@
 #include "xmpp_xmlcommon.h"
 #include "xmpp_bitsofbinary.h"
 #include "xmpp_ibb.h"
+#include "xmpp_reference.h"
 #include "xmpp_captcha.h"
 #include "protocol.h"
 #include "xmpp/blake2/blake2qt.h"
@@ -1073,6 +1074,7 @@ public:
     QString replaceId;
     QString originId; // XEP-0359
     Message::StanzaId stanzaId; // XEP-0359
+    Reference reference; // XEP-0732
 };
 
 #define MessageD() (d? d : (d = new Private))
@@ -1557,6 +1559,16 @@ QString Message::originId() const
 void Message::setOriginId(const QString &id)
 {
     MessageD()->originId = id;
+}
+
+Reference Message::reference() const
+{
+    return d? d->reference: Reference();
+}
+
+void Message::setReference(const Reference &r)
+{
+    MessageD()->reference = r;
 }
 
 QString Message::invite() const
