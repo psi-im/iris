@@ -132,7 +132,7 @@ bool Reference::fromXml(const QDomElement &e)
     else
         return false;
 
-    int beginN, endN;
+    int beginN = -1, endN = -1;
     bool ok;
     if (!begin.isEmpty() && !(beginN = begin.toInt(&ok),ok)) {
         return false;
@@ -176,8 +176,33 @@ bool Reference::fromXml(const QDomElement &e)
     return true;
 }
 
-QDomElement Reference::toXml(QDomDocument *) const
+QDomElement Reference::toXml(QDomDocument *doc) const
 {
-    return QDomElement();
+    auto root = doc->createElementNS(REFERENCE_NS, QString::fromLatin1("reference"));
+    root.setAttribute(QString::fromLatin1("uri"), d->uri);
+    root.setAttribute(QString::fromLatin1("type"), QString(d->type == Reference::Mention? "mention": "data"));
+
+    if (d->mediaSharing.file.isValid() && d->mediaSharing.sources.count()) {
+        auto msEl = doc->createElementNS(MEDIASHARING_NS, QString::fromLatin1("media-sharing"));
+        root.appendChild(msEl);
+        msEl.appendChild(d->mediaSharing.file.toXml(doc));
+        auto sourcesEl = msEl.appendChild(doc->createElement(QString::fromLatin1("sources"))).toElement();
+        for (auto const &s: d->mediaSharing.sources) {
+            auto sEl = sourcesEl.appendChild(doc->createElementNS(REFERENCE_NS, QString::fromLatin1("reference"))).toElement();
+            sEl.setAttribute(QString::fromLatin1("uri"), s);
+            sEl.setAttribute(QString::fromLatin1("type"), QString::fromLatin1("data"));
+        }
+    }
+
+    if (d->begin != -1)
+        root.setAttribute(QString::fromLatin1("begin"), d->begin);
+
+    if (d->end != -1)
+        root.setAttribute(QString::fromLatin1("end"), d->end);
+
+    if (!d->anchor.isEmpty())
+        root.setAttribute(QString::fromLatin1("anchor"), d->anchor);
+
+    return root;
 }
 
