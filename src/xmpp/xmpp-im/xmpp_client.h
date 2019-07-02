@@ -135,7 +135,7 @@ namespace XMPP
 
         void setFeatures(const Features& f);
         const Features& features() const;
-        DiscoItem makeDiscoResult(const QString &node = QString::null) const;
+        DiscoItem makeDiscoResult(const QString &node = QString()) const;
 
         void setTcpPortReserver(TcpPortReserver *portReserver);
         TcpPortReserver *tcpPortReserver() const;

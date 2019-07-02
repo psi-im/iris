@@ -125,7 +125,7 @@ public:
         ports = newPorts;
 
         // keep ports in sorted order
-        qSort(ports);
+        std::sort(ports.begin(), ports.end());
 
         foreach(int x, added)
         {
