@@ -255,7 +255,7 @@ private slots:
 
         // eat all packets
         while(sock->hasPendingDatagrams())
-            sock->readDatagram(0, 0);
+            sock->readDatagram(nullptr, 0);
     }
 
 private:

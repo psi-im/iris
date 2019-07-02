@@ -161,7 +161,7 @@ using namespace XMPP;
 
     void StringPrepCache::cleanup()
     {
-        _instance.reset(0);
+        _instance.reset(nullptr);
     }
 
     StringPrepCache *StringPrepCache::instance()

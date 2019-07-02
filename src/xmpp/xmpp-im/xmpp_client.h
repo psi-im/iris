@@ -73,7 +73,7 @@ namespace XMPP
         Q_OBJECT
 
     public:
-        Client(QObject *parent=0);
+        Client(QObject *parent=nullptr);
         ~Client();
 
         bool isActive() const;
