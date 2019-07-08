@@ -39,6 +39,8 @@ struct Range {
     quint64 length = 0;
     Hash hash;
 
+    inline Range() {}
+    inline Range(quint64 offset, quint64 length) : offset(offset), length(length) {}
     inline bool isValid() const { return hash.isValid() || offset || length; }
     QDomElement toXml(QDomDocument *doc) const;
 };
