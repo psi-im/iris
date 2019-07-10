@@ -36,7 +36,7 @@ class Manager;
 
 struct Range {
     quint64 offset = 0;
-    quint64 length = 0;
+    quint64 length = 0; // 0 - from offset to the end of the file
     Hash hash;
 
     inline Range() {}
@@ -169,7 +169,7 @@ protected:
     bool incomingTransportAccept(const QDomElement &transportEl) override;
 
 signals:
-    void deviceRequested(quint64 offset, quint64 size);
+    void deviceRequested(quint64 offset, quint64 size); // if size = 0 then it's reamaining part of the file
     void progress(quint64 offset);
 
 private:

@@ -131,8 +131,8 @@ File::File(const QDomElement &file)
                 }
             }
             if (ce.hasAttribute(QLatin1String("length"))) {
-                range.offset = ce.attribute(QLatin1String("length")).toULongLong(&ok);
-                if (!ok) {
+                range.length = ce.attribute(QLatin1String("length")).toULongLong(&ok);
+                if (!ok || !range.length) { // length should absent if we need to read till end of file. 0-length is nonsense
                     return;
                 }
             }
