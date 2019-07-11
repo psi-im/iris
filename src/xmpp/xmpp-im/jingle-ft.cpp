@@ -60,6 +60,7 @@ public:
     quint64   size = 0;
     Range     range;
     bool      rangeSupported = false;
+    bool      hasSize = false;
     QList<Hash> hashes;
     Thumbnail thumbnail;
     File::Spectrum audioSpectrum;
@@ -95,6 +96,7 @@ File::File(const QDomElement &file)
     QString     desc;
     size_t      size = 0;
     bool        rangeSupported = false;
+    bool        hasSize = false;
     Range       range;
     QList<Hash> hashes;
     Thumbnail   thumbnail;
@@ -122,6 +124,7 @@ File::File(const QDomElement &file)
             if (!ok) {
                 return;
             }
+            hasSize = true;
 
         } else if (ce.tagName() == QLatin1String("range")) {
             if (ce.hasAttribute(QLatin1String("offset"))) {
@@ -197,6 +200,7 @@ File::File(const QDomElement &file)
     p->desc = desc;
     p->size = size;
     p->rangeSupported = rangeSupported;
+    p->hasSize = hasSize;
     p->range = range;
     p->hashes = hashes;
     p->thumbnail = thumbnail;
@@ -284,6 +288,11 @@ bool File::hasComputedHashes() const
     return false;
 }
 
+bool File::hasSize() const
+{
+    return d->hasSize;
+}
+
 QDateTime File::date() const
 {
     return d? d->date : QDateTime();
@@ -366,6 +375,7 @@ void File::setName(const QString &name)
 void File::setSize(quint64 size)
 {
     ensureD()->size = size;
+    d->hasSize = true;
 }
 
 void File::setRange(const Range &range)

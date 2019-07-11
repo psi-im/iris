@@ -69,6 +69,7 @@ public:
     QDomElement toXml(QDomDocument *doc) const;
     bool merge(const File &other);
     bool hasComputedHashes() const;
+    bool hasSize() const;
 
     QDateTime date()  const;
     QString   description() const;
