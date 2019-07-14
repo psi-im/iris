@@ -153,6 +153,18 @@ public:
     bool setTransport(const QSharedPointer<Transport> &transport) override;
     QSharedPointer<Transport> transport() const override;
 
+    /**
+     * @brief setStreamingMode enables external download control.
+     *  So Jingle-FT won't request output device but instead underlying established
+     *  connection will be emitted (see connectionReady() signal).
+     *  The connection is an XMPP::Jingle::Connection::Ptr instance.
+     *  When the connection is not needed anymore, one can just destroy jingle
+     *  session or remove the Application from the session.
+     *  Make sure to set the mode before connection is established.
+     * @param mode
+     */
+    void setStreamingMode(bool mode = true);
+
     Action evaluateOutgoingUpdate() override;
     OutgoingUpdate takeOutgoingUpdate() override;
     bool wantBetterTransport(const QSharedPointer<XMPP::Jingle::Transport> &) const override;
@@ -160,17 +172,20 @@ public:
     void prepare() override;
     void start() override;
     bool accept(const QDomElement &el) override;
+    void remove(Reason::Condition cond = Reason::Success, const QString &comment = QString()) override;
 
     bool isValid() const;
 
     void setDevice(QIODevice *dev, bool closeOnFinish = true);
+    Connection::Ptr connection() const;
 
 protected:
     bool incomingTransportReplace(const QSharedPointer<Transport> &transport) override;
     bool incomingTransportAccept(const QDomElement &transportEl) override;
 
 signals:
-    void deviceRequested(quint64 offset, quint64 size); // if size = 0 then it's reamaining part of the file
+    void connectionReady(); // streaming mode only
+    void deviceRequested(quint64 offset, quint64 size); // if size = 0 then it's reamaining part of the file (non-streaming mode only)
     void progress(quint64 offset);
 
 private:
