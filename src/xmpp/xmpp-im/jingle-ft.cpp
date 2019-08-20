@@ -18,16 +18,15 @@
  */
 
 #include "jingle-ft.h"
+
 #include "xmpp_client.h"
-#include "xmpp_thumbs.h"
 #include "xmpp_hash.h"
+#include "xmpp_thumbs.h"
 #include "xmpp_xmlcommon.h"
 
 namespace XMPP {
 namespace Jingle {
-
 namespace FileTransfer {
-
 const QString NS = QStringLiteral("urn:xmpp:jingle:apps:file-transfer:5");
 const QString HISTOGRAM_NS = QStringLiteral("urn:audio:histogram");
 
@@ -1096,9 +1095,6 @@ void Pad::addOutgoingOffer(const File &file)
     auto app = _manager->startApplication(selfp, "ft", _session->role(), _session->role());
     app->setFile(file);
 }
-
-
-
 } // namespace FileTransfer
 } // namespace Jingle
 } // namespace XMPP

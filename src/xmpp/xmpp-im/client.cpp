@@ -65,38 +65,35 @@
 //!  }
 //!  \endcode
 
-#include <QObject>
-#include <QMap>
-#include <QTimer>
-#include <QPointer>
-#include <QList>
-
-#include "im.h"
-#include "xmpp_tasks.h"
-#include "xmpp_xmlcommon.h"
-#include "s5b.h"
-#include "xmpp_ibb.h"
-#include "xmpp_bitsofbinary.h"
 #include "filetransfer.h"
+#include "httpfileupload.h"
+#include "im.h"
+#include "jingle-ft.h"
+#include "jingle-ibb.h"
+#include "jingle-s5b.h"
+#include "jingle.h"
+#include "protocol.h"
+#include "s5b.h"
+#include "tcpportreserver.h"
+#include "xmpp_bitsofbinary.h"
 #include "xmpp_caps.h"
 #include "xmpp_hash.h"
+#include "xmpp_ibb.h"
 #include "xmpp_serverinfomanager.h"
-#include "protocol.h"
-#include "xmpp_serverinfomanager.h"
-#include "httpfileupload.h"
-#include "jingle.h"
-#include "jingle-ft.h"
-#include "jingle-s5b.h"
-#include "tcpportreserver.h"
-#include "jingle-ibb.h"
+#include "xmpp_tasks.h"
+#include "xmpp_xmlcommon.h"
+
+#include <QList>
+#include <QMap>
+#include <QObject>
+#include <QPointer>
+#include <QTimer>
 
 #ifdef Q_OS_WIN
 #define vsnprintf _vsnprintf
 #endif
 
-namespace XMPP
-{
-
+namespace XMPP {
 //----------------------------------------------------------------------------
 // Client
 //----------------------------------------------------------------------------
@@ -147,7 +144,6 @@ public:
     QList<GroupChat> groupChatList;
     EncryptionHandler *encryptionHandler = nullptr;
 };
-
 
 Client::Client(QObject *par)
 :QObject(par)
@@ -519,7 +515,7 @@ void Client::streamError(int)
         disconnected();
         cleanup();
     //}
-}
+} // namespace XMPP
 
 /*void Client::streamSSLCertificateReady(const QSSLCert &cert)
 {

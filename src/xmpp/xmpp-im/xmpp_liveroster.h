@@ -19,12 +19,11 @@
 #ifndef XMPP_LIVEROSTER_H
 #define XMPP_LIVEROSTER_H
 
-#include <QList>
-
 #include "xmpp_liverosteritem.h"
 
-namespace XMPP
-{
+#include <QList>
+
+namespace XMPP {
     class Jid;
 
     class LiveRoster : public QList<LiveRosterItem>
@@ -37,6 +36,6 @@ namespace XMPP
         LiveRoster::Iterator find(const Jid &, bool compareRes=true);
         LiveRoster::ConstIterator find(const Jid &, bool compareRes=true) const;
     };
-}
+} // namespace XMPP
 
-#endif
+#endif // XMPP_LIVEROSTER_H
