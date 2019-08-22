@@ -23,8 +23,7 @@
 #include <QString>
 
 namespace XMPP {
-    class PLAINMessage
-    {
+    class PLAINMessage {
         public:
             PLAINMessage(const QString& authzid, const QString& authcid, const QByteArray& password);
 

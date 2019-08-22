@@ -23,8 +23,8 @@
 #include <QtCrypto>
 
 namespace XMPP {
-class IceTurnTransport::Private : public QObject
-{
+class IceTurnTransport::Private:
+        public QObject {
     Q_OBJECT
 
 public:

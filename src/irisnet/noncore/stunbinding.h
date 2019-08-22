@@ -26,8 +26,7 @@ class QHostAddress;
 namespace XMPP {
 class StunTransactionPool;
 
-class StunBinding : public QObject
-{
+class StunBinding : public QObject {
     Q_OBJECT
 
 public:

@@ -31,8 +31,7 @@
 namespace XMPP {
     class DiscoItemPrivate;
 
-    class DiscoItem
-    {
+    class DiscoItem {
     public:
         DiscoItem();
         ~DiscoItem();

@@ -34,8 +34,7 @@
 namespace XMPP {
 class NameManager;
 
-class IRISNET_EXPORT NetNames
-{
+class IRISNET_EXPORT NetNames {
 public:
     // free any shared data, shutdown internal dns sessions if necessary.
     static void cleanup();
@@ -85,8 +84,7 @@ record.setAddress(QHostAddress("1.2.3.4"));
 
    \sa NameResolver
 */
-class IRISNET_EXPORT NameRecord
-{
+class IRISNET_EXPORT NameRecord {
 public:
     /**
         \brief The type of DNS record
@@ -306,8 +304,7 @@ private:
 IRISNET_EXPORT QDebug operator<<(QDebug, XMPP::NameRecord::Type);
 IRISNET_EXPORT QDebug operator<<(QDebug, const XMPP::NameRecord &);
 
-class IRISNET_EXPORT ServiceInstance
-{
+class IRISNET_EXPORT ServiceInstance {
 public:
     ServiceInstance();
     ServiceInstance(const QString &instance, const QString &type, const QString &domain, const QMap<QString,QByteArray> &attributes);
@@ -390,8 +387,7 @@ resolver->start("_ssh._tcp.local.", NameRecord::Ptr, NameResolver::LongLived);
 
    \sa NameRecord
 */
-class IRISNET_EXPORT NameResolver : public QObject
-{
+class IRISNET_EXPORT NameResolver : public QObject {
     Q_OBJECT
 public:
     /**
@@ -474,8 +470,7 @@ private:
 
 IRISNET_EXPORT QDebug operator<<(QDebug, XMPP::NameResolver::Error);
 
-class IRISNET_EXPORT WeightedNameRecordList
-{
+class IRISNET_EXPORT WeightedNameRecordList {
     friend QDebug operator<<(QDebug, const WeightedNameRecordList&);
 
 public:
@@ -507,8 +502,7 @@ private:
 
 QDebug operator<<(QDebug, const XMPP::WeightedNameRecordList&);
 
-class IRISNET_EXPORT ServiceBrowser : public QObject
-{
+class IRISNET_EXPORT ServiceBrowser : public QObject {
     Q_OBJECT
 public:
     enum Error
@@ -560,8 +554,7 @@ Flow:
     8) host[] empty -> (9)
 9) Try servername directly
 */
-class IRISNET_EXPORT ServiceResolver : public QObject
-{
+class IRISNET_EXPORT ServiceResolver : public QObject {
     Q_OBJECT
 public:
     struct ProtoSplit
@@ -658,8 +651,7 @@ private:
     friend class NameManager;
 };
 
-class IRISNET_EXPORT ServiceLocalPublisher : public QObject
-{
+class IRISNET_EXPORT ServiceLocalPublisher : public QObject {
     Q_OBJECT
 public:
     enum Error

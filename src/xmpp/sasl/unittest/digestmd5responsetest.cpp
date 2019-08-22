@@ -26,8 +26,7 @@
 
 using namespace XMPP;
 
-class DIGESTMD5ResponseTest : public QObject
-{
+class DIGESTMD5ResponseTest : public QObject {
         Q_OBJECT
 
     private slots:

@@ -50,8 +50,7 @@
 // SocksUDP
 //----------------------------------------------------------------------------
 
-class SocksUDP::Private
-{
+class SocksUDP::Private {
 public:
     QUdpSocket *sd;
     SocksClient *sc;
@@ -398,8 +397,7 @@ static int sp_get_request(QByteArray &from, SPS_CONNREQ *s)
 
 enum { StepVersion, StepAuth, StepRequest };
 
-class SocksClient::Private
-{
+class SocksClient::Private {
 public:
     Private(SocksClient *_q) :
         sock(_q)
@@ -1012,8 +1010,7 @@ SocksUDP *SocksClient::createUDP(const QString &host, int port, const QHostAddre
 //----------------------------------------------------------------------------
 // SocksServer
 //----------------------------------------------------------------------------
-class SocksServer::Private
-{
+class SocksServer::Private {
 public:
     QTcpServer          *serv = nullptr;
     QList<SocksClient*> incomingConns;

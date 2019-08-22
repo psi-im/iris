@@ -29,8 +29,7 @@ namespace XMPP {
     class BytestreamManager;
     class Client;
 
-    class BSConnection : public ByteStream
-    {
+    class BSConnection : public ByteStream {
     public:
         enum Error { ErrRefused = ErrCustom, ErrConnect, ErrProxy, ErrSocket };
         enum State { Idle, Requesting, Connecting, WaitingForAccept, Active };
@@ -45,8 +44,7 @@ namespace XMPP {
         virtual BytestreamManager* manager() const = 0;
     };
 
-    class BytestreamManager : public QObject
-    {
+    class BytestreamManager : public QObject {
         Q_OBJECT
 
     public:

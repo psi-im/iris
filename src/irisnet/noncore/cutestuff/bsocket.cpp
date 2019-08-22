@@ -33,8 +33,7 @@
 #define READBUFSIZE 65536
 
 // CS_NAMESPACE_BEGIN
-class QTcpSocketSignalRelay : public QObject
-{
+class QTcpSocketSignalRelay : public QObject {
     Q_OBJECT
 public:
     QTcpSocketSignalRelay(QTcpSocket *sock, QObject *parent = nullptr)
@@ -89,8 +88,7 @@ public slots:
     }
 };
 
-class HappyEyeballsConnector : public QObject
-{
+class HappyEyeballsConnector : public QObject {
     Q_OBJECT
 public:
     enum State {
@@ -389,8 +387,7 @@ signals:
     void error(QAbstractSocket::SocketError);
 };
 
-class BSocket::Private
-{
+class BSocket::Private {
 public:
     Private()
     {

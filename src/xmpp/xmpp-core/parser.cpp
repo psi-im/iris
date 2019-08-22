@@ -59,8 +59,7 @@ static bool qt_bug_have;
 //----------------------------------------------------------------------------
 // StreamInput
 //----------------------------------------------------------------------------
-class StreamInput : public QXmlInputSource
-{
+class StreamInput : public QXmlInputSource {
 public:
     StreamInput()
     {
@@ -351,8 +350,7 @@ private:
 // ParserHandler
 //----------------------------------------------------------------------------
 namespace XMPP {
-    class ParserHandler : public QXmlDefaultHandler
-    {
+    class ParserHandler : public QXmlDefaultHandler {
     public:
         explicit ParserHandler(StreamInput *_in, QDomDocument *_doc)
             : in(_in)
@@ -548,8 +546,7 @@ namespace XMPP {
 //----------------------------------------------------------------------------
 // Event
 //----------------------------------------------------------------------------
-class Parser::Event::Private
-{
+class Parser::Event::Private {
 public:
     int type;
     QString ns, ln, qn;
@@ -687,8 +684,7 @@ void Parser::Event::setActualString(const QString &str)
 //----------------------------------------------------------------------------
 // Parser
 //----------------------------------------------------------------------------
-class Parser::Private
-{
+class Parser::Private {
 public:
     Private()
     {

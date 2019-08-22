@@ -64,8 +64,7 @@ void db_debugLinesReady(const QStringList &lines)
 
    \sa QJDnsShared QJDnsSharedRequest
 */
-class JDNS_EXPORT QJDnsSharedDebug : public QObject
-{
+class JDNS_EXPORT QJDnsSharedDebug : public QObject {
     Q_OBJECT
 public:
     /**
@@ -197,8 +196,7 @@ pub->publish(QJDns::Unique, rec);
 
    \sa QJDnsShared
 */
-class JDNS_EXPORT QJDnsSharedRequest : public QObject
-{
+class JDNS_EXPORT QJDnsSharedRequest : public QObject {
     Q_OBJECT
 public:
     /**
@@ -404,8 +402,7 @@ dns->addInterface(addr);
 
    \sa QJDnsSharedRequest
 */
-class JDNS_EXPORT QJDnsShared : public QObject
-{
+class JDNS_EXPORT QJDnsShared : public QObject {
     Q_OBJECT
 public:
     /**

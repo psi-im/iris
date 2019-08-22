@@ -31,8 +31,7 @@ class QDate;
 namespace XMPP {
     class VCardPrivate;
 
-    class VCard
-    {
+    class VCard {
     public:
         VCard();
         VCard(const VCard &);

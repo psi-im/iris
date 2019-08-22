@@ -24,8 +24,7 @@
 class QString;
 
 namespace XMPP {
-    class HTMLElement
-    {
+    class HTMLElement {
     public:
         HTMLElement();
         HTMLElement(const QDomElement &body);

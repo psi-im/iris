@@ -29,8 +29,7 @@ namespace Jingle {
 namespace IBB {
 extern const QString NS;
 
-class Transport : public XMPP::Jingle::Transport
-{
+class Transport : public XMPP::Jingle::Transport {
     Q_OBJECT
 public:
     Transport(const TransportManagerPad::Ptr &pad);
@@ -59,8 +58,7 @@ private:
 };
 
 class Manager;
-class Pad : public TransportManagerPad
-{
+class Pad : public TransportManagerPad {
     Q_OBJECT
     // TODO
 public:

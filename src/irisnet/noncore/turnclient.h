@@ -32,8 +32,7 @@ namespace XMPP {
 class StunAllocate;
 class StunTransactionPool;
 
-class TurnClient : public QObject
-{
+class TurnClient : public QObject {
     Q_OBJECT
 
 public:
@@ -80,8 +79,7 @@ public:
     };
 
     // adapted from XMPP::AdvancedConnector
-    class Proxy
-    {
+    class Proxy {
     public:
         enum
         {

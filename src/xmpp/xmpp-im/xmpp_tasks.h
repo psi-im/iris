@@ -36,8 +36,7 @@ namespace XMPP {
     class Roster;
     class Status;
 
-    class JT_Register : public Task
-    {
+    class JT_Register : public Task {
         Q_OBJECT
     public:
         JT_Register(Task *parent);
@@ -68,8 +67,7 @@ namespace XMPP {
         Private *d = nullptr;
     };
 
-    class JT_UnRegister : public Task
-    {
+    class JT_UnRegister : public Task {
         Q_OBJECT
     public:
         JT_UnRegister(Task *parent);
@@ -88,8 +86,7 @@ namespace XMPP {
         Private *d = nullptr;
     };
 
-    class JT_Roster : public Task
-    {
+    class JT_Roster : public Task {
         Q_OBJECT
     public:
         JT_Roster(Task *parent);
@@ -116,8 +113,7 @@ namespace XMPP {
         Private *d = nullptr;
     };
 
-    class JT_PushRoster : public Task
-    {
+    class JT_PushRoster : public Task {
         Q_OBJECT
     public:
         JT_PushRoster(Task *parent);
@@ -133,8 +129,7 @@ namespace XMPP {
         Private *d = nullptr;
     };
 
-    class JT_Presence : public Task
-    {
+    class JT_Presence : public Task {
         Q_OBJECT
     public:
         JT_Presence(Task *parent);
@@ -155,8 +150,7 @@ namespace XMPP {
         Private *d = nullptr;
     };
 
-    class JT_PushPresence : public Task
-    {
+    class JT_PushPresence : public Task {
         Q_OBJECT
     public:
         JT_PushPresence(Task *parent);
@@ -173,16 +167,14 @@ namespace XMPP {
         Private *d = nullptr;
     };
 
-    class JT_Session : public Task
-    {
+    class JT_Session : public Task {
     public:
         JT_Session(Task *parent);
         void onGo();
         bool take(const QDomElement&);
     };
 
-    class JT_Message : public Task
-    {
+    class JT_Message : public Task {
         Q_OBJECT
     public:
         JT_Message(Task *parent, Message &);
@@ -197,8 +189,7 @@ namespace XMPP {
         Private *d = nullptr;
     };
 
-    class JT_PushMessage : public Task
-    {
+    class JT_PushMessage : public Task {
         Q_OBJECT
     public:
         JT_PushMessage(Task *parent, EncryptionHandler *encryptionHandler = nullptr);
@@ -214,8 +205,7 @@ namespace XMPP {
         Private *d = nullptr;
     };
 
-    class JT_VCard : public Task
-    {
+    class JT_VCard : public Task {
         Q_OBJECT
     public:
         JT_VCard(Task *parent);
@@ -238,8 +228,7 @@ namespace XMPP {
         Private *d = nullptr;
     };
 
-    class JT_Search : public Task
-    {
+    class JT_Search : public Task {
         Q_OBJECT
     public:
         JT_Search(Task *parent);
@@ -266,8 +255,7 @@ namespace XMPP {
         Private *d = nullptr;
     };
 
-    class JT_ClientVersion : public Task
-    {
+    class JT_ClientVersion : public Task {
         Q_OBJECT
     public:
         JT_ClientVersion(Task *);
@@ -288,8 +276,7 @@ namespace XMPP {
         QString v_name, v_ver, v_os;
     };
 
-    class JT_EntityTime : public Task
-    {
+    class JT_EntityTime : public Task {
     public:
         JT_EntityTime(Task*);
 
@@ -308,8 +295,7 @@ namespace XMPP {
         int tzo = 0;
     };
 
-    class JT_ServInfo : public Task
-    {
+    class JT_ServInfo : public Task {
         Q_OBJECT
     public:
         JT_ServInfo(Task *);
@@ -318,8 +304,7 @@ namespace XMPP {
         bool take(const QDomElement &);
     };
 
-    class JT_Gateway : public Task
-    {
+    class JT_Gateway : public Task {
         Q_OBJECT
     public:
         JT_Gateway(Task *);
@@ -344,8 +329,7 @@ namespace XMPP {
         QString v_prompt, v_desc;
     };
 
-    class JT_DiscoItems : public Task
-    {
+    class JT_DiscoItems : public Task {
         Q_OBJECT
     public:
         JT_DiscoItems(Task *);
@@ -367,8 +351,7 @@ namespace XMPP {
         Private *d = nullptr;
     };
 
-    class JT_DiscoPublish : public Task
-    {
+    class JT_DiscoPublish : public Task {
         Q_OBJECT
     public:
         JT_DiscoPublish(Task *);
@@ -384,8 +367,7 @@ namespace XMPP {
         Private *d = nullptr;
     };
 
-    class JT_BoBServer : public Task
-    {
+    class JT_BoBServer : public Task {
         Q_OBJECT
 
     public:
@@ -393,8 +375,7 @@ namespace XMPP {
         bool take(const QDomElement &);
     };
 
-    class JT_BitsOfBinary : public Task
-    {
+    class JT_BitsOfBinary : public Task {
         Q_OBJECT
     public:
         JT_BitsOfBinary(Task *);
@@ -411,16 +392,14 @@ namespace XMPP {
         Private *d = nullptr;
     };
 
-    class JT_PongServer : public Task
-    {
+    class JT_PongServer : public Task {
         Q_OBJECT
     public:
         JT_PongServer(Task *);
         bool take(const QDomElement &);
     };
 
-    class JT_MessageCarbons : public Task
-    {
+    class JT_MessageCarbons : public Task {
         Q_OBJECT
 
     public:
@@ -435,8 +414,7 @@ namespace XMPP {
         QDomElement _iq;
     };
 
-    class JT_CaptchaChallenger : public Task
-    {
+    class JT_CaptchaChallenger : public Task {
         Q_OBJECT
     public:
         const static int CaptchaValidTimeout = 120;
@@ -454,8 +432,7 @@ namespace XMPP {
         Private *d = nullptr;
     };
 
-    class JT_CaptchaSender : public Task
-    {
+    class JT_CaptchaSender : public Task {
         Q_OBJECT
     public:
         JT_CaptchaSender(Task *);

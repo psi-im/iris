@@ -29,8 +29,7 @@
 #define NS_XML "http://www.w3.org/XML/1998/namespace"
 
 namespace XMPP {
-    class XmlProtocol : public QObject
-    {
+    class XmlProtocol : public QObject {
     public:
         enum Need {
             NNotify,      // need a data send and/or recv update
@@ -76,8 +75,7 @@ namespace XMPP {
         QString xmlEncoding() const;
         QString elementToString(const QDomElement &e, bool clip=false);
 
-        class TransferItem
-        {
+        class TransferItem {
         public:
             TransferItem();
             TransferItem(const QString &str, bool sent, bool external=false);
@@ -117,8 +115,7 @@ namespace XMPP {
 
     private:
         enum { SendOpen, RecvOpen, Open, Closing };
-        class TrackItem
-        {
+        class TrackItem {
         public:
             enum Type { Raw, Close, Custom };
             int type, id, size;

@@ -24,14 +24,12 @@
 #include <qxml.h>
 
 namespace XMPP {
-    class Parser
-    {
+    class Parser {
     public:
         Parser();
         ~Parser();
 
-        class Event
-        {
+        class Event {
         public:
             enum Type { DocumentOpen, DocumentClose, Element, Error };
             Event();

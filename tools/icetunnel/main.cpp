@@ -208,8 +208,7 @@ static XMPP::Ice176::Candidate line_to_candidate(const QString &in)
     return out;
 }
 
-class IceOffer
-{
+class IceOffer {
 public:
     QString user, pass;
     QList<XMPP::Ice176::Candidate> candidates;
@@ -284,8 +283,7 @@ static IceOffer iceblock_parse(const QStringList &in)
     return out;
 }
 
-class IceBlockReader : public QObject
-{
+class IceBlockReader : public QObject {
     Q_OBJECT
 
 public:
@@ -336,8 +334,7 @@ private slots:
     }
 };
 
-class EnterPrompt : public QObject
-{
+class EnterPrompt : public QObject {
     Q_OBJECT
 
 public:
@@ -412,13 +409,11 @@ private slots:
         return;
 }*/
 
-class App : public QObject
-{
+class App : public QObject {
     Q_OBJECT
 
 public:
-    class Channel
-    {
+    class Channel {
     public:
         QUdpSocket *sock6, *sock4;
         bool ready;

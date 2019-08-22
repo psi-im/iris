@@ -104,8 +104,7 @@ unsigned long crctable[256] =
     0xB40BBE37L, 0xC30C8EA1L, 0x5A05DF1BL, 0x2D02EF8DL
 };
 
-class Crc32
-{
+class Crc32 {
 private:
     quint32 result;
 
@@ -367,8 +366,7 @@ static bool message_integrity_check(const QByteArray &buf, int offset, const QBy
         return false;
 }
 
-class StunMessage::Private : public QSharedData
-{
+class StunMessage::Private : public QSharedData {
 public:
     StunMessage::Class mclass;
     quint16 method;

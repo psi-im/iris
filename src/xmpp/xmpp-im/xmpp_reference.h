@@ -29,8 +29,7 @@ namespace XMPP {
     extern const QString MEDIASHARING_NS;
     extern const QString REFERENCE_NS;
 
-    class MediaSharing
-    {
+    class MediaSharing {
     public:
         Jingle::FileTransfer::File file;
         QStringList sources;

@@ -24,8 +24,7 @@
 
 using namespace XMPP;
 
-class PlainMessageTest : public QObject
-{
+class PlainMessageTest : public QObject {
         Q_OBJECT
 
     private slots:

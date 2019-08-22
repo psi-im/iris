@@ -178,8 +178,7 @@ static QByteArray unescapeDomainPart(const QByteArray &in)
     return out;
 }
 
-class IdManager
-{
+class IdManager {
 private:
     QSet<int> set;
     int at;
@@ -229,8 +228,7 @@ public:
 //----------------------------------------------------------------------------
 // JDnsGlobal
 //----------------------------------------------------------------------------
-class JDnsGlobal : public QObject
-{
+class JDnsGlobal : public QObject {
     Q_OBJECT
 
 public:
@@ -432,8 +430,7 @@ private:
 //----------------------------------------------------------------------------
 // JDnsNameProvider
 //----------------------------------------------------------------------------
-class JDnsNameProvider : public NameProvider
-{
+class JDnsNameProvider : public NameProvider {
     Q_OBJECT
     Q_INTERFACES(XMPP::NameProvider)
 
@@ -445,8 +442,7 @@ public:
     IdManager idman;
     ObjectSession sess;
 
-    class Item
-    {
+    class Item {
     public:
         int id;
         QJDnsSharedRequest *req;
@@ -805,8 +801,7 @@ private slots:
 //----------------------------------------------------------------------------
 // JDnsBrowse
 //----------------------------------------------------------------------------
-class JDnsBrowse : public QObject
-{
+class JDnsBrowse : public QObject {
     Q_OBJECT
 
 public:
@@ -886,8 +881,7 @@ private slots:
 
 // 5 second timeout waiting for both A and AAAA
 // 8 second timeout waiting for at least one record
-class JDnsServiceResolve : public QObject
-{
+class JDnsServiceResolve : public QObject {
     Q_OBJECT
 
 public:
@@ -1117,8 +1111,7 @@ private slots:
 //----------------------------------------------------------------------------
 
 // helper class for JDnsPublishAddresses.  publishes A+PTR or AAAA+PTR pair.
-class JDnsPublishAddress : public QObject
-{
+class JDnsPublishAddress : public QObject {
     Q_OBJECT
 
 public:
@@ -1226,8 +1219,7 @@ private slots:
 //   once the conflict is resolved.  A missing hostname is considered a
 //   temporary problem, and so other publish operations that depend on a
 //   hostname (SRV, etc) should block until a hostname is available.
-class JDnsPublishAddresses : public QObject
-{
+class JDnsPublishAddresses : public QObject {
     Q_OBJECT
 
 public:
@@ -1464,8 +1456,7 @@ private slots:
 //----------------------------------------------------------------------------
 class JDnsPublish;
 
-class JDnsPublishExtra : public QObject
-{
+class JDnsPublishExtra : public QObject {
     Q_OBJECT
 
 public:
@@ -1503,8 +1494,7 @@ private:
 // It's important to note that published() is only emitted once ever, even
 //   if a hostName change causes a republishing.  this way, hostName changes
 //   are completely transparent.
-class JDnsPublish : public QObject
-{
+class JDnsPublish : public QObject {
     Q_OBJECT
 
 public:
@@ -1885,8 +1875,7 @@ void JDnsPublishExtra::update(const QJDns::Record &_rec)
 //----------------------------------------------------------------------------
 // JDnsServiceProvider
 //----------------------------------------------------------------------------
-class BrowseItem
-{
+class BrowseItem {
 public:
     const int id;
     JDnsBrowse * const browse;
@@ -1906,8 +1895,7 @@ public:
     }
 };
 
-class BrowseItemList
-{
+class BrowseItemList {
 private:
     QSet<BrowseItem*> items;
     QHash<int,BrowseItem*> indexById;
@@ -1953,8 +1941,7 @@ public:
     }
 };
 
-class ResolveItem
-{
+class ResolveItem {
 public:
     const int id;
     JDnsServiceResolve * const resolve;
@@ -1974,8 +1961,7 @@ public:
     }
 };
 
-class ResolveItemList
-{
+class ResolveItemList {
 private:
     QSet<ResolveItem*> items;
     QHash<int,ResolveItem*> indexById;
@@ -2021,8 +2007,7 @@ public:
     }
 };
 
-class PublishItem
-{
+class PublishItem {
 public:
     const int id;
     JDnsPublish * const publish;
@@ -2042,8 +2027,7 @@ public:
     }
 };
 
-class PublishItemList
-{
+class PublishItemList {
 public:
     QSet<PublishItem*> items;
 
@@ -2091,8 +2075,7 @@ public:
     }
 };
 
-class PublishExtraItem
-{
+class PublishExtraItem {
 public:
     const int id;
     JDnsPublishExtra * const publish;
@@ -2112,8 +2095,7 @@ public:
     }
 };
 
-class PublishExtraItemList
-{
+class PublishExtraItemList {
 public:
     QSet<PublishExtraItem*> items;
 
@@ -2170,8 +2152,7 @@ public:
     }
 };
 
-class JDnsServiceProvider : public ServiceProvider
-{
+class JDnsServiceProvider : public ServiceProvider {
     Q_OBJECT
 
 public:
@@ -2667,8 +2648,7 @@ private slots:
 //----------------------------------------------------------------------------
 // JDnsProvider
 //----------------------------------------------------------------------------
-class JDnsProvider : public IrisNetProvider
-{
+class JDnsProvider : public IrisNetProvider {
     Q_OBJECT
     Q_INTERFACES(XMPP::IrisNetProvider)
 

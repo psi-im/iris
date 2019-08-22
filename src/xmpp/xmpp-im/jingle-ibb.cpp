@@ -30,8 +30,7 @@ namespace Jingle {
 namespace IBB {
 const QString NS(QStringLiteral("urn:xmpp:jingle:transports:ibb:1"));
 
-class Connection : public XMPP::Jingle::Connection
-{
+class Connection : public XMPP::Jingle::Connection {
     Q_OBJECT
 
 public:

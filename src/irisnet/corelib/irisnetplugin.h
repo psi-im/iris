@@ -31,8 +31,7 @@ class NetGatewayProvider;
 class NetInterfaceProvider;
 class ServiceProvider;
 
-class IRISNET_EXPORT IrisNetProvider : public QObject
-{
+class IRISNET_EXPORT IrisNetProvider : public QObject {
     Q_OBJECT
 
 public:
@@ -44,13 +43,11 @@ public:
     virtual ServiceProvider *createServiceProvider();
 };
 
-class IRISNET_EXPORT NetInterfaceProvider : public QObject
-{
+class IRISNET_EXPORT NetInterfaceProvider : public QObject {
     Q_OBJECT
 
 public:
-    class Info
-    {
+    class Info {
     public:
         QString id, name;
         bool isLoopback;
@@ -71,13 +68,11 @@ signals:
     void updated();
 };
 
-class IRISNET_EXPORT NetGatewayProvider : public QObject
-{
+class IRISNET_EXPORT NetGatewayProvider : public QObject {
     Q_OBJECT
 
 public:
-    class Info
-    {
+    class Info {
     public:
         QString ifaceId;
         QHostAddress gateway;
@@ -97,8 +92,7 @@ signals:
     void updated();
 };
 
-class IRISNET_EXPORT NetAvailabilityProvider : public QObject
-{
+class IRISNET_EXPORT NetAvailabilityProvider : public QObject {
     Q_OBJECT
 
 public:
@@ -116,8 +110,7 @@ signals:
     void updated();
 };
 
-class IRISNET_EXPORT NameProvider : public QObject
-{
+class IRISNET_EXPORT NameProvider : public QObject {
     Q_OBJECT
 
 public:
@@ -145,13 +138,11 @@ signals:
     void resolve_useLocal(int id, const QByteArray &name);
 };
 
-class IRISNET_EXPORT ServiceProvider : public QObject
-{
+class IRISNET_EXPORT ServiceProvider : public QObject {
     Q_OBJECT
 
 public:
-    class ResolveResult
-    {
+    class ResolveResult {
     public:
         QMap<QString,QByteArray> attributes;
         QHostAddress address;

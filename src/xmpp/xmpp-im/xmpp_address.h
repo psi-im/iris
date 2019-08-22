@@ -26,8 +26,7 @@
 class QDomElement;
 
 namespace XMPP {
-    class Address
-    {
+    class Address {
     public:
         typedef enum { Unknown, To, Cc, Bcc, ReplyTo, ReplyRoom, NoReply, OriginalFrom, OriginalTo } Type;
 

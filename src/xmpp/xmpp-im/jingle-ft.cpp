@@ -49,8 +49,7 @@ QDomElement Range::toXml(QDomDocument *doc) const
 //----------------------------------------------------------------------------
 // File
 //----------------------------------------------------------------------------
-class File::Private : public QSharedData
-{
+class File::Private : public QSharedData {
 public:
     QDateTime date;
     QString   mediaType;
@@ -487,8 +486,7 @@ QStringList Manager::availableTransports() const
 //----------------------------------------------------------------------------
 // Application
 //----------------------------------------------------------------------------
-class Application::Private
-{
+class Application::Private {
 public:
     Application     *q = nullptr;
     State           state = State::Created;

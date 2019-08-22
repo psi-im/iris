@@ -30,8 +30,7 @@ namespace XMPP {
     class Jid;
     class Stream;
 
-    class Stanza
-    {
+    class Stanza {
     public:
         enum Kind { Message, Presence, IQ };
 
@@ -40,8 +39,7 @@ namespace XMPP {
         Stanza & operator=(const Stanza &from);
         virtual ~Stanza();
 
-        class Error
-        {
+        class Error {
         public:
             enum ErrorType { Cancel = 1, Continue, Modify, Auth, Wait };
             enum ErrorCond

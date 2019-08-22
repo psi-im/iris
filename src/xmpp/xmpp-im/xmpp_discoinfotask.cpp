@@ -31,8 +31,7 @@
 
 using namespace XMPP;
 
-class DiscoInfoTask::Private
-{
+class DiscoInfoTask::Private {
 public:
     bool allowCache = true;
     Jid jid;

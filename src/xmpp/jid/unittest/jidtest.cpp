@@ -26,8 +26,7 @@
 
 using namespace XMPP;
 
-class JidTest : public QObject
-{
+class JidTest : public QObject {
         Q_OBJECT
 
     private slots:

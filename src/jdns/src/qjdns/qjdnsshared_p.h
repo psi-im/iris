@@ -36,8 +36,7 @@
 #include <QThread>
 #include <QWaitCondition>
 
-class JDnsShutdownAgent : public QObject
-{
+class JDnsShutdownAgent : public QObject {
     Q_OBJECT
 public:
     void start();
@@ -46,8 +45,7 @@ signals:
     void started();
 };
 
-class JDnsShutdownWorker : public QObject
-{
+class JDnsShutdownWorker : public QObject {
     Q_OBJECT
 public:
     QList<QJDnsShared*> list;
@@ -61,8 +59,7 @@ private slots:
     void jdns_shutdownFinished();
 };
 
-class JDnsShutdown : public QThread
-{
+class JDnsShutdown : public QThread {
     Q_OBJECT
 public:
     QMutex m;
@@ -82,8 +79,7 @@ private slots:
     void worker_finished();
 };
 
-class QJDnsSharedDebugPrivate : public QObject
-{
+class QJDnsSharedDebugPrivate : public QObject {
     Q_OBJECT
 public:
     QJDnsSharedDebug *q;
@@ -105,8 +101,7 @@ private slots:
 // QJDns uses integer handle ids, but they are only unique within
 //   the relevant QJDns instance.  Since we want our handles to be
 //   unique across all instances, we'll make an instance/id pair.
-class Handle
-{
+class Handle {
 public:
     QJDns *jdns;
     int id;
@@ -132,12 +127,10 @@ public:
     }
 };
 
-class QJDnsSharedPrivate : public QObject
-{
+class QJDnsSharedPrivate : public QObject {
     Q_OBJECT
 public:
-    class Instance
-    {
+    class Instance {
     public:
         QJDns *jdns;
         QHostAddress addr;
@@ -196,8 +189,7 @@ private slots:
     void jdns_debugLinesReady();
 };
 
-class QJDnsSharedRequestPrivate : public QObject
-{
+class QJDnsSharedRequestPrivate : public QObject {
     Q_OBJECT
 public:
     QJDnsSharedRequest *q;

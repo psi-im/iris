@@ -26,8 +26,7 @@
 namespace XMPP {
     class RandomNumberGenerator;
 
-    class SCRAMSHA1Response
-    {
+    class SCRAMSHA1Response {
         public:
             SCRAMSHA1Response(
                     const QByteArray& server_first_message,

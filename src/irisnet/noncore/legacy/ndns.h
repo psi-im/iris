@@ -26,8 +26,7 @@
 #include <QtNetwork>
 
 // CS_NAMESPACE_BEGIN
-class NDns : public QObject
-{
+class NDns : public QObject {
     Q_OBJECT
 public:
     NDns(QObject *parent=nullptr);

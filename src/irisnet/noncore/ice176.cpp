@@ -110,8 +110,7 @@ static int getAddressScope(const QHostAddress &a)
     return 3;
 }
 
-class Ice176::Private : public QObject
-{
+class Ice176::Private : public QObject {
     Q_OBJECT
 
 public:
@@ -139,8 +138,7 @@ public:
         LFailed
     };
 
-    class CandidatePair
-    {
+    class CandidatePair {
     public:
         IceComponent::CandidateInfo local, remote;
         bool isDefault;
@@ -164,15 +162,13 @@ public:
         }
     };
 
-    class CheckList
-    {
+    class CheckList {
     public:
         QList<CandidatePair> pairs;
         CheckListState state;
     };
 
-    class Component
-    {
+    class Component {
     public:
         int id;
         IceComponent *ic;

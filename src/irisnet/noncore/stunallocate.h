@@ -29,8 +29,7 @@ namespace XMPP {
 class StunMessage;
 class StunTransactionPool;
 
-class StunAllocate : public QObject
-{
+class StunAllocate : public QObject {
     Q_OBJECT
 
 public:
@@ -45,8 +44,7 @@ public:
         ErrorMismatch
     };
 
-    class Channel
-    {
+    class Channel {
     public:
         QHostAddress address;
         int port;

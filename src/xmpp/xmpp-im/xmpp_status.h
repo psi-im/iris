@@ -33,8 +33,7 @@ namespace XMPP {
     class DiscoItem;
     class StatusPrivate;
 
-    class CapsSpec
-    {
+    class CapsSpec {
         public:
             typedef QMap<QString,QCryptographicHash::Algorithm> CryptoMap;
             static const QCryptographicHash::Algorithm invalidAlgo = (QCryptographicHash::Algorithm)255;
@@ -67,8 +66,7 @@ namespace XMPP {
             QStringList ext_;
     };
 
-    class Status
-    {
+    class Status {
     public:
         enum Type { Offline, Online, Away, XA, DND, Invisible, FFC };
 

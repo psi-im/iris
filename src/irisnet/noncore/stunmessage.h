@@ -24,8 +24,7 @@
 #include <QSharedDataPointer>
 
 namespace XMPP {
-class StunMessage
-{
+class StunMessage {
 public:
     enum Class
     {
@@ -52,8 +51,7 @@ public:
         ErrorConvertUnknown = 64
     };
 
-    class Attribute
-    {
+    class Attribute {
     public:
         quint16 type;
         QByteArray value;

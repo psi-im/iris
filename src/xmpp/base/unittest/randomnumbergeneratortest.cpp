@@ -24,13 +24,11 @@
 
 using namespace XMPP;
 
-class RandomNumberGeneratorTest : public QObject
-{
+class RandomNumberGeneratorTest : public QObject {
      Q_OBJECT
 
     private:
-        class DummyRandomNumberGenerator : public RandomNumberGenerator
-        {
+        class DummyRandomNumberGenerator : public RandomNumberGenerator {
             public:
                 DummyRandomNumberGenerator(double value, double maximum) : value_(value), maximum_(maximum) {}
 

@@ -32,8 +32,7 @@ namespace XMPP {
     class Client;
     class Jid;
 
-    class Task : public QObject
-    {
+    class Task : public QObject {
         Q_OBJECT
     public:
         enum { ErrDisc, ErrTimeout };

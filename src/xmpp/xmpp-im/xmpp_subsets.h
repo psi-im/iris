@@ -23,8 +23,7 @@
 #include <QDomDocument>
 
 namespace XMPP {
-    class SubsetsClientManager
-    {
+    class SubsetsClientManager {
     public:
         SubsetsClientManager();
         ~SubsetsClientManager();

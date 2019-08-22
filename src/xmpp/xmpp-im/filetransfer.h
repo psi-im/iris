@@ -39,7 +39,9 @@ namespace XMPP {
             virtual void accept(qlonglong offset=0, qlonglong length=0) = 0;
     };*/
 
-    class FileTransfer : public QObject /*, public AbstractFileTransfer */
+    class FileTransfer:
+        //public AbstractFileTransfer
+        public QObject
     {
         Q_OBJECT
     public:
@@ -99,8 +101,7 @@ namespace XMPP {
         void takeConnection(BSConnection *c);
     };
 
-    class FileTransferManager : public QObject
-    {
+    class FileTransferManager : public QObject {
         Q_OBJECT
     public:
         FileTransferManager(Client *);
@@ -135,8 +136,7 @@ namespace XMPP {
         void unlink(FileTransfer *);
     };
 
-    class JT_FT : public Task
-    {
+    class JT_FT : public Task {
         Q_OBJECT
     public:
         JT_FT(Task *parent);
@@ -168,8 +168,7 @@ namespace XMPP {
         QStringList streamTypes;
         Thumbnail thumbnail;
     };
-    class JT_PushFT : public Task
-    {
+    class JT_PushFT : public Task {
         Q_OBJECT
     public:
         JT_PushFT(Task *parent);

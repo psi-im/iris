@@ -20,8 +20,7 @@
 #define RANDOMNUMBERGENERATOR_H
 
 namespace XMPP {
-    class RandomNumberGenerator
-    {
+    class RandomNumberGenerator {
         public:
             virtual ~RandomNumberGenerator();
 

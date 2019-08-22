@@ -314,8 +314,7 @@ TLSHandler::~TLSHandler()
 //----------------------------------------------------------------------------
 // QCATLSHandler
 //----------------------------------------------------------------------------
-class QCATLSHandler::Private
-{
+class QCATLSHandler::Private {
 public:
     QCA::TLS *tls;
     int state, err;

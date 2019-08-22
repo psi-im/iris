@@ -25,8 +25,7 @@ namespace XMPP {
 class ObjectSessionPrivate;
 class ObjectSessionWatcherPrivate;
 
-class ObjectSession : public QObject
-{
+class ObjectSession : public QObject {
     Q_OBJECT
 
 public:
@@ -68,8 +67,7 @@ private:
     ObjectSessionPrivate *d;
 };
 
-class ObjectSessionWatcher
-{
+class ObjectSessionWatcher {
 public:
     ObjectSessionWatcher(ObjectSession *sess);
     ~ObjectSessionWatcher();

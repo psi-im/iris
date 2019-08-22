@@ -7,8 +7,7 @@
 class ZLibCompressor;
 class ZLibDecompressor;
 
-class CompressionHandler : public QObject
-{
+class CompressionHandler : public QObject {
     Q_OBJECT
 
 public:

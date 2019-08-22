@@ -35,8 +35,7 @@
 class QTimer;
 class QUdpSocket;
 
-class SafeTimer : public QObject
-{
+class SafeTimer : public QObject {
     Q_OBJECT
 public:
     SafeTimer(QObject *parent = 0);
@@ -61,20 +60,17 @@ private:
     QTimer *t;
 };
 
-class QJDns::Private : public QObject
-{
+class QJDns::Private : public QObject {
     Q_OBJECT
 public:
-    class LateError
-    {
+    class LateError {
     public:
         int source_type; // 0 for query, 1 for publish
         int id;
         Error error;
     };
 
-    class LateResponse
-    {
+    class LateResponse {
     public:
         int id;
         QJDns::Response response;

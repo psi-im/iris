@@ -26,8 +26,7 @@
 #include <QString>
 
 namespace XMPP {
-    class StringPrepCache
-    {
+    class StringPrepCache {
     public:
         static bool nameprep(const QString &in, int maxbytes, QString& out);
         static bool nodeprep(const QString &in, int maxbytes, QString& out);
@@ -48,8 +47,7 @@ namespace XMPP {
         StringPrepCache();
     };
 
-    class Jid
-    {
+    class Jid {
     public:
         Jid();
         ~Jid();

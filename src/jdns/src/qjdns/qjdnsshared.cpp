@@ -40,8 +40,7 @@
 
 // for caching system info
 
-class SystemInfoCache
-{
+class SystemInfoCache {
 public:
     QJDns::SystemInfo info;
     QTime time;

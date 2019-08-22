@@ -34,8 +34,7 @@ namespace XMPP {
         typedef QList<HttpHeader> HttpHeaders;
     }
 
-class HttpFileUpload : public QObject
-{
+class HttpFileUpload : public QObject {
     Q_OBJECT
 public:
     enum HostPropFlag {
@@ -118,8 +117,7 @@ private:
 };
 Q_DECLARE_OPERATORS_FOR_FLAGS(HttpFileUpload::HostProps)
 
-class JT_HTTPFileUpload : public Task
-{
+class JT_HTTPFileUpload : public Task {
     Q_OBJECT
 public:
     enum UrlType { GetUrl = 0, PutUrl = 1 };
@@ -141,8 +139,7 @@ private:
     Private *d;
 };
 
-class HttpFileUploadManager : public QObject
-{
+class HttpFileUploadManager : public QObject {
     Q_OBJECT
 public:
     enum {

@@ -24,8 +24,7 @@
 #include <QtCrypto>
 
 namespace XMPP {
-    class SCRAMSHA1Signature
-    {
+    class SCRAMSHA1Signature {
         public:
             SCRAMSHA1Signature(const QByteArray &server_final_message, const QCA::SecureArray &server_signature_should);
 

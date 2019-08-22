@@ -25,8 +25,7 @@
 #include <QString>
 
 namespace XMPP {
-    class SCRAMSHA1Message
-    {
+    class SCRAMSHA1Message {
         public:
             SCRAMSHA1Message(const QString& authzid, const QString& authcid, const QByteArray& cnonce, const RandomNumberGenerator& rand);
 

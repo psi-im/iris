@@ -31,8 +31,7 @@
 #include <QtCore>
 #include <QtNetwork>
 
-class JDNS_EXPORT QJDns : public QObject
-{
+class JDNS_EXPORT QJDns : public QObject {
     Q_OBJECT
 public:
     enum Mode
@@ -69,8 +68,7 @@ public:
         ErrorConflict  // publish only
     };
 
-    class JDNS_EXPORT NameServer
-    {
+    class JDNS_EXPORT NameServer {
     public:
         QHostAddress address;
         int port;
@@ -78,23 +76,20 @@ public:
         NameServer();
     };
 
-    class JDNS_EXPORT DnsHost
-    {
+    class JDNS_EXPORT DnsHost {
     public:
         QByteArray name;
         QHostAddress address;
     };
 
-    class JDNS_EXPORT SystemInfo
-    {
+    class JDNS_EXPORT SystemInfo {
     public:
         QList<NameServer> nameServers;
         QList<QByteArray> domains;
         QList<DnsHost> hosts;
     };
 
-    class JDNS_EXPORT Record
-    {
+    class JDNS_EXPORT Record {
     public:
         QByteArray owner;
         int ttl;
@@ -116,8 +111,7 @@ public:
         bool verify() const;
     };
 
-    class JDNS_EXPORT Response
-    {
+    class JDNS_EXPORT Response {
     public:
         QList<Record> answerRecords;
         QList<Record> authorityRecords;

@@ -55,8 +55,7 @@ myapp.connect(ProcessQuit::instance(), SIGNAL(quit()), SLOT(do_quit()));
    The quit() signal is emitted when a request to terminate is received. The quit() signal is only emitted once,
    future termination requests are ignored.  Call reset() to allow the quit() signal to be emitted again.
 */
-class IRISNET_EXPORT ProcessQuit : public QObject
-{
+class IRISNET_EXPORT ProcessQuit : public QObject {
     Q_OBJECT
 public:
     /**

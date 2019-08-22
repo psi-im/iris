@@ -121,8 +121,7 @@ private:
 };
 
 class Manager;
-class Transport : public XMPP::Jingle::Transport
-{
+class Transport : public XMPP::Jingle::Transport {
     Q_OBJECT
 public:
     enum Mode {
@@ -157,8 +156,7 @@ private:
     QScopedPointer<Private> d;
 };
 
-class Pad : public TransportManagerPad
-{
+class Pad : public TransportManagerPad {
     Q_OBJECT
     // TODO
 public:

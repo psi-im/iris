@@ -36,8 +36,7 @@ namespace XMPP {
     class StreamFeatures;
     class TLSHandler;
 
-    class ClientStream : public Stream
-    {
+    class ClientStream : public Stream {
         Q_OBJECT
     public:
         enum Error {

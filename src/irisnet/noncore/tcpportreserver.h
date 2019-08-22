@@ -26,8 +26,7 @@
 #include <QVariant>
 
 namespace XMPP {
-class TcpPortServer : public QObject
-{
+class TcpPortServer : public QObject {
     Q_OBJECT
 public:
     using Ptr = QSharedPointer<TcpPortServer>;
@@ -68,8 +67,7 @@ class TcpPortScope;
  *
  * Discovers / starts listening on a set of unique tcp ports.
  */
-class TcpPortDiscoverer : public QObject
-{
+class TcpPortDiscoverer : public QObject {
     Q_OBJECT
 public:
 
@@ -109,8 +107,7 @@ class TcpPortReserver;
  * Handles scopes of ports. For example just S5B dedicated ports.
  * There only on scope instance per scope id
  */
-class TcpPortScope: public QObject
-{
+class TcpPortScope: public QObject {
     Q_OBJECT
 public:
     TcpPortScope();
@@ -134,8 +131,7 @@ private:
  * @brief The TcpPortReserver class
  * This class should have the only instance per application
  */
-class TcpPortReserver : public QObject
-{
+class TcpPortReserver : public QObject {
     Q_OBJECT
 public:
     explicit TcpPortReserver(QObject *parent = nullptr);

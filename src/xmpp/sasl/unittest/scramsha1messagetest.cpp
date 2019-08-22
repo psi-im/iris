@@ -26,8 +26,7 @@
 
 using namespace XMPP;
 
-class SCRAMSHA1MessageTest : public QObject
-{
+class SCRAMSHA1MessageTest : public QObject {
         Q_OBJECT
 
     private slots:

@@ -31,8 +31,7 @@
 //#define IRIS_SM_DEBUG
 
 namespace XMPP {
-    class SMState
-    {
+    class SMState {
     public:
         SMState();
         void resetCounters();
@@ -53,8 +52,7 @@ namespace XMPP {
         } resumption_location;
     };
 
-    class StreamManagement : QObject
-    {
+    class StreamManagement : QObject {
     public:
         StreamManagement(QObject *parent = nullptr);
         XMPP::SMState &state() { return state_; }

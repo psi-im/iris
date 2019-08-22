@@ -206,8 +206,7 @@ bool Features::hasJingleFT() const
 // custom Psi actions
 #define FID_ADD "psi:add"
 
-class Features::FeatureName : public QObject
-{
+class Features::FeatureName : public QObject {
     Q_OBJECT
 
 public:

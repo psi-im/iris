@@ -61,8 +61,7 @@ static bool haveHost(const StreamHostList &list, const Jid &j)
     return false;
 }
 
-class S5BManager::Item : public QObject
-{
+class S5BManager::Item : public QObject {
     Q_OBJECT
 
 public:
@@ -170,8 +169,7 @@ QByteArray S5BDatagram::data() const
 //----------------------------------------------------------------------------
 // S5BConnection
 //----------------------------------------------------------------------------
-class S5BConnection::Private
-{
+class S5BConnection::Private {
 public:
     S5BManager *m;
     SocksClient *sc;
@@ -546,8 +544,7 @@ void S5BConnection::sendUDP(const QByteArray &buf)
 //----------------------------------------------------------------------------
 // S5BManager
 //----------------------------------------------------------------------------
-class S5BManager::Entry
-{
+class S5BManager::Entry {
 public:
     Entry() = default;
 
@@ -567,8 +564,7 @@ public:
     int udp_port = 0;
 };
 
-class S5BManager::Private
-{
+class S5BManager::Private {
 public:
     Client *client;
     QList<Entry*> activeList;
@@ -1721,8 +1717,7 @@ void S5BManager::Item::finished()
 //----------------------------------------------------------------------------
 // S5BConnector
 //----------------------------------------------------------------------------
-class S5BConnector::Item : public QObject
-{
+class S5BConnector::Item : public QObject {
     Q_OBJECT
 public:
     SocksClient *client;
@@ -1828,8 +1823,7 @@ private:
     }
 };
 
-class S5BConnector::Private
-{
+class S5BConnector::Private {
 public:
     SocksClient *active;
     SocksUDP *active_udp;
@@ -1955,8 +1949,7 @@ void S5BConnector::man_udpSuccess(const Jid &streamHost)
 //----------------------------------------------------------------------------
 // JT_S5B
 //----------------------------------------------------------------------------
-class JT_S5B::Private
-{
+class JT_S5B::Private {
 public:
     QDomElement iq;
     Jid to;
@@ -2317,8 +2310,7 @@ TcpPortServer *S5BServersProducer::makeServer(QTcpServer *socket)
 //----------------------------------------------------------------------------
 // S5BIncomingConnection
 //----------------------------------------------------------------------------
-class S5BIncomingConnection : public QObject
-{
+class S5BIncomingConnection : public QObject {
     Q_OBJECT
 public:
     SocksClient *client;

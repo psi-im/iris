@@ -45,16 +45,14 @@
 #define NS_HOSTS    "http://barracuda.com/xmppextensions/hosts"
 
 namespace XMPP {
-    class Version
-    {
+    class Version {
     public:
         Version(int maj=0, int min=0);
 
         int major, minor;
     };
 
-    class StreamFeatures
-    {
+    class StreamFeatures {
     public:
         StreamFeatures();
 
@@ -68,8 +66,7 @@ namespace XMPP {
         QStringList hosts;
     };
 
-    class BasicProtocol : public XmlProtocol
-    {
+    class BasicProtocol : public XmlProtocol {
     public:
         // xmpp 1.0 error conditions // rfc6120
         enum SASLCond {
@@ -258,8 +255,7 @@ namespace XMPP {
         void extractStreamError(const QDomElement &e);
     };
 
-    class CoreProtocol : public BasicProtocol
-    {
+    class CoreProtocol : public BasicProtocol {
     public:
         enum {
             NPassword = NCustom,  // need password for old-mode
@@ -307,8 +303,7 @@ namespace XMPP {
 
         StreamManagement sm;
 
-        class DBItem
-        {
+        class DBItem {
         public:
             enum { ResultRequest, ResultGrant, VerifyRequest, VerifyGrant, Validated };
             int type;

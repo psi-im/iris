@@ -37,8 +37,7 @@ QString HASH_NS = QStringLiteral("urn:xmpp:hashes:2");
 //----------------------------------------------------------------------------
 // Url
 //----------------------------------------------------------------------------
-class Url::Private
-{
+class Url::Private {
 public:
     QString url;
     QString desc;
@@ -1020,8 +1019,7 @@ void HTMLElement::filterOutUnwantedRecursive(QDomElement &el, bool strict)
 //----------------------------------------------------------------------------
 // Message
 //----------------------------------------------------------------------------
-class Message::Private : public QSharedData
-{
+class Message::Private : public QSharedData {
 public:
     Jid to, from;
     QString id, type, lang;
@@ -2664,8 +2662,7 @@ bool CapsSpec::operator<(const CapsSpec& s) const
                                                              hashAlgorithm() < s.hashAlgorithm()));
 }
 
-class StatusPrivate : public QSharedData
-{
+class StatusPrivate : public QSharedData {
 public:
     StatusPrivate() = default;
 
@@ -3608,8 +3605,7 @@ const QString& PubSubRetraction::id() const
 // =========================================
 //            CaptchaChallenge
 // =========================================
-class CaptchaChallengePrivate : public QSharedData
-{
+class CaptchaChallengePrivate : public QSharedData {
 public:
     CaptchaChallengePrivate() :
         state(CaptchaChallenge::New) {}

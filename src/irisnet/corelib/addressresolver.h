@@ -24,8 +24,7 @@
 
 namespace XMPP {
 // resolve both AAAA and A for a hostname
-class AddressResolver : public QObject
-{
+class AddressResolver : public QObject {
     Q_OBJECT
 
 public:

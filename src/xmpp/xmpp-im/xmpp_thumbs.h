@@ -26,8 +26,7 @@
 #define XMPP_THUMBS_NS "urn:xmpp:thumbs:1" // TODO make nsdb.cpp/h with static declarations of all ns
 
 namespace XMPP {
-    class Thumbnail
-    {
+    class Thumbnail {
     public:
         inline Thumbnail() : width(0), height(0) {}
         // data - for outgoing it's actual image data. for incoming - cid

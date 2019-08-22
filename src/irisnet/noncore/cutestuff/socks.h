@@ -29,8 +29,7 @@ class QTcpSocket;
 class SocksClient;
 class SocksServer;
 
-class SocksUDP : public QObject
-{
+class SocksUDP : public QObject {
     Q_OBJECT
 public:
     ~SocksUDP();
@@ -52,8 +51,7 @@ private:
     SocksUDP(SocksClient *sc, const QString &host, int port, const QHostAddress &routeAddr, int routePort);
 };
 
-class SocksClient : public ByteStream
-{
+class SocksClient : public ByteStream {
     Q_OBJECT
 public:
     enum Error { ErrConnectionRefused = ErrCustom, ErrHostNotFound, ErrProxyConnect, ErrProxyNeg, ErrProxyAuth };
@@ -128,8 +126,7 @@ private:
     void writeData(const QByteArray &a);
 };
 
-class SocksServer : public QObject
-{
+class SocksServer : public QObject {
     Q_OBJECT
 public:
     SocksServer(QObject *parent=nullptr);

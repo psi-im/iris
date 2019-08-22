@@ -28,8 +28,7 @@ class QAbstractSocket;
 
 // CS_NAMESPACE_BEGIN
 // CS_EXPORT_BEGIN
-class ByteStream : public QIODevice
-{
+class ByteStream : public QIODevice {
     Q_OBJECT
 public:
     enum Error { ErrOk, ErrRead, ErrWrite, ErrCustom = 10 };

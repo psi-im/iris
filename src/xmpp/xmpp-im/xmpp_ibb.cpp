@@ -36,8 +36,7 @@ static const char *IBB_NS = "http://jabber.org/protocol/ibb";
 //----------------------------------------------------------------------------
 // IBBConnection
 //----------------------------------------------------------------------------
-class IBBConnection::Private
-{
+class IBBConnection::Private {
 public:
     Private() = default;
 
@@ -352,8 +351,7 @@ QDomElement IBBData::toXml(QDomDocument *doc) const
 //----------------------------------------------------------------------------
 // IBBManager
 //----------------------------------------------------------------------------
-class IBBManager::Private
-{
+class IBBManager::Private {
 public:
     Private() = default;
 
@@ -494,8 +492,7 @@ void IBBManager::doReject(IBBConnection *c, const QString &id,
 //----------------------------------------------------------------------------
 // JT_IBB
 //----------------------------------------------------------------------------
-class JT_IBB::Private
-{
+class JT_IBB::Private {
 public:
     Private() = default;
 

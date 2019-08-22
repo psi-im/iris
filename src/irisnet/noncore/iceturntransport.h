@@ -28,8 +28,7 @@
 
 namespace XMPP {
 // for the turn transport, only path 0 is used
-class IceTurnTransport : public IceTransport
-{
+class IceTurnTransport : public IceTransport {
     Q_OBJECT
 
 public:

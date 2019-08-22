@@ -32,8 +32,7 @@ class QDomDocument;
 class QDomElement;
 
 namespace XMPP {
-    class XData
-    {
+    class XData {
     public:
         XData();
 
@@ -92,8 +91,7 @@ namespace XMPP {
                 QHash<QString,QString> params;
             };
 
-            class MediaElement : public QList<MediaUri>
-            {
+            class MediaElement : public QList<MediaUri> {
             public:
                 void append(const QString &type, const QString &uri, QHash<QString,QString> params);
                 void setMediaSize(const QSize &size);

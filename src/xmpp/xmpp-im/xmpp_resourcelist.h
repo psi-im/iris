@@ -26,8 +26,7 @@
 class QString;
 
 namespace XMPP {
-    class ResourceList : public QList<Resource>
-    {
+    class ResourceList : public QList<Resource> {
     public:
         ResourceList();
         ~ResourceList();

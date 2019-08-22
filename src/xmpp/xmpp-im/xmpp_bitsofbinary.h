@@ -31,8 +31,7 @@ namespace XMPP {
     class Client;
     class JT_BitsOfBinary;
 
-    class BoBData
-    {
+    class BoBData {
         class Private;
     public:
         BoBData();
@@ -62,8 +61,7 @@ namespace XMPP {
         QSharedDataPointer<Private> d;
     };
 
-    class BoBCache : public QObject
-    {
+    class BoBCache : public QObject {
         Q_OBJECT
 
     public:
@@ -72,8 +70,7 @@ namespace XMPP {
         virtual BoBData get(const QString &) = 0;
     };
 
-    class BoBManager : public QObject
-    {
+    class BoBManager : public QObject {
         Q_OBJECT
 
     public:

@@ -44,8 +44,7 @@ struct Range {
     QDomElement toXml(QDomDocument *doc) const;
 };
 
-class File
-{
+class File {
 public:
     struct Histogram
     {
@@ -95,8 +94,7 @@ private:
     QSharedDataPointer<Private> d;
 };
 
-class Checksum : public ContentBase
-{
+class Checksum : public ContentBase {
     inline Checksum(){}
     Checksum(const QDomElement &file);
     bool isValid() const;
@@ -105,14 +103,12 @@ private:
     File file;
 };
 
-class Received : public ContentBase
-{
+class Received : public ContentBase {
     using ContentBase::ContentBase;
     QDomElement toXml(QDomDocument *doc) const;
 };
 
-class Pad : public ApplicationManagerPad
-{
+class Pad : public ApplicationManagerPad {
     Q_OBJECT
     // TODO
 public:
@@ -129,8 +125,7 @@ private:
     Session *_session;
 };
 
-class Application : public XMPP::Jingle::Application
-{
+class Application : public XMPP::Jingle::Application {
     Q_OBJECT
 public:
     Application(const QSharedPointer<Pad> &pad, const QString &contentName, Origin creator, Origin senders);
@@ -193,8 +188,7 @@ private:
     QScopedPointer<Private> d;
 };
 
-class Manager : public XMPP::Jingle::ApplicationManager
-{
+class Manager : public XMPP::Jingle::ApplicationManager {
     Q_OBJECT
 public:
     Manager(QObject *parent = nullptr);

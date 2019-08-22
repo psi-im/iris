@@ -21,8 +21,7 @@
 
 #include <QObject>
 
-class TimeZone
-{
+class TimeZone {
 public:
     static int offsetFromUtc(); // in minutes
     static QString abbreviation();

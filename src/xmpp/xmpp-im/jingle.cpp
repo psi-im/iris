@@ -63,8 +63,7 @@ static const struct {
 { "transport-replace",  Action::TransportReplace }
 };
 
-class Jingle::Private : public QSharedData
-{
+class Jingle::Private : public QSharedData {
 public:
     Action action;
     QString sid;
@@ -220,7 +219,7 @@ static const QMap<QString,Reason::Condition> reasonConditions = {
     { QStringLiteral("unsupported-transports"),   Reason::UnsupportedTransports },
 };
 
-class Reason::Private :public QSharedData {
+class Reason::Private : public QSharedData {
 public:
     Reason::Condition cond;
     QString text;
@@ -433,8 +432,7 @@ TransportManager::TransportManager(QObject *parent) :
 //----------------------------------------------------------------------------
 // JTPush - Jingle Task
 //----------------------------------------------------------------------------
-class JTPush : public Task
-{
+class JTPush : public Task {
     Q_OBJECT
 
     QList<QString> externalManagers;
@@ -571,8 +569,7 @@ public:
 //----------------------------------------------------------------------------
 // JT - Jingle Task
 //----------------------------------------------------------------------------
-class JT : public Task
-{
+class JT : public Task {
     Q_OBJECT
 
     QDomElement iq_;
@@ -616,8 +613,7 @@ public:
 //----------------------------------------------------------------------------
 // Session
 //----------------------------------------------------------------------------
-class Session::Private
-{
+class Session::Private {
 public:
     Session *q;
     Manager *manager;
@@ -1643,8 +1639,7 @@ QDomDocument *SessionManagerPad::doc() const
 //----------------------------------------------------------------------------
 // Manager
 //----------------------------------------------------------------------------
-class Manager::Private
-{
+class Manager::Private {
 public:
     XMPP::Client *client;
     Manager *manager;

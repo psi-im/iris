@@ -70,8 +70,7 @@ static int check_channelData(const quint8 *data, int size)
     return need;
 }
 
-class StunAllocatePermission : public QObject
-{
+class StunAllocatePermission : public QObject {
     Q_OBJECT
 
 public:
@@ -256,8 +255,7 @@ private slots:
     }
 };
 
-class StunAllocateChannel : public QObject
-{
+class StunAllocateChannel : public QObject {
     Q_OBJECT
 
 public:
@@ -450,8 +448,7 @@ private slots:
     }
 };
 
-class StunAllocate::Private : public QObject
-{
+class StunAllocate::Private : public QObject {
     Q_OBJECT
 
 public:

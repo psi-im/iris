@@ -21,8 +21,7 @@
 #include <QObject>
 #include <QtTest/QtTest>
 
-class MyClassTest : public QObject
-{
+class MyClassTest : public QObject {
      Q_OBJECT
 
     private slots:

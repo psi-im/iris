@@ -29,8 +29,7 @@ namespace XMPP {
     class Message;
     class XData;
 
-    class CaptchaChallenge
-    {
+    class CaptchaChallenge {
     public:
         enum Result {
             Passed,

@@ -37,12 +37,10 @@
 #include <stdlib.h>
 
 namespace XMPP {
-class SimpleSASLContext : public QCA::SASLContext
-{
+class SimpleSASLContext : public QCA::SASLContext {
     Q_OBJECT
 public:
-        class ParamsMutable
-        {
+        class ParamsMutable {
         public:
             /**
                User is held
@@ -426,8 +424,7 @@ ready:
 
 };
 
-class QCASimpleSASL : public QCA::Provider
-{
+class QCASimpleSASL : public QCA::Provider {
 public:
     QCASimpleSASL() {}
     ~QCASimpleSASL() {}

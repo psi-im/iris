@@ -28,8 +28,7 @@ class QString;
 namespace XMPP {
     class Jid;
 
-    class DiscoInfoTask : public Task
-    {
+    class DiscoInfoTask : public Task {
         Q_OBJECT
     public:
         DiscoInfoTask(Task *);

@@ -150,8 +150,7 @@ static XMPP::NameRecord importQDnsSdRecord(const QDnsSd::Record &in)
 }
 
 namespace {
-class QDnsSdDelegate
-{
+class QDnsSdDelegate {
 public:
     virtual ~QDnsSdDelegate()
     {
@@ -182,8 +181,7 @@ public:
     }
 };
 
-class IdManager
-{
+class IdManager {
 private:
     QSet<int> set;
     int at;
@@ -229,8 +227,7 @@ public:
 //----------------------------------------------------------------------------
 // AppleProvider
 //----------------------------------------------------------------------------
-class AppleProvider : public XMPP::IrisNetProvider
-{
+class AppleProvider : public XMPP::IrisNetProvider {
     Q_OBJECT
     Q_INTERFACES(XMPP::IrisNetProvider);
 public:
@@ -325,8 +322,7 @@ private slots:
 //----------------------------------------------------------------------------
 // only use this class for a single browse.  if you want to browse again,
 //   create a new object.
-class AppleBrowse : public QObject, public QDnsSdDelegate
-{
+class AppleBrowse : public QObject, public QDnsSdDelegate {
     Q_OBJECT
 public:
     AppleProvider *global;
@@ -462,8 +458,7 @@ protected:
 //----------------------------------------------------------------------------
 // only use this class for a single lookup.  if you want to lookup again,
 //   create a new object.
-class AppleBrowseLookup : public QObject, public QDnsSdDelegate
-{
+class AppleBrowseLookup : public QObject, public QDnsSdDelegate {
     Q_OBJECT
 public:
     AppleProvider *global;
@@ -612,8 +607,7 @@ private:
 //----------------------------------------------------------------------------
 // AppleNameProvider
 //----------------------------------------------------------------------------
-class AppleNameProvider : public XMPP::NameProvider, public QDnsSdDelegate
-{
+class AppleNameProvider : public XMPP::NameProvider, public QDnsSdDelegate {
     Q_OBJECT
 public:
     AppleProvider *global;
@@ -684,12 +678,10 @@ protected:
 //----------------------------------------------------------------------------
 // AppleServiceProvider
 //----------------------------------------------------------------------------
-class AppleServiceProvider : public XMPP::ServiceProvider, public QDnsSdDelegate
-{
+class AppleServiceProvider : public XMPP::ServiceProvider, public QDnsSdDelegate {
     Q_OBJECT
 public:
-    class Browse
-    {
+    class Browse {
     public:
         AppleServiceProvider *parent;
         int id;
@@ -709,8 +701,7 @@ public:
         }
     };
 
-    class Resolve
-    {
+    class Resolve {
     public:
         AppleServiceProvider *parent;
         int id;

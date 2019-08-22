@@ -48,8 +48,7 @@ static void sortSRVList(QList<Q3Dns::Server> &list)
     }
 }
 
-class SrvResolver::Private
-{
+class SrvResolver::Private {
 public:
     Private(SrvResolver *_q) :
         nndns(_q),

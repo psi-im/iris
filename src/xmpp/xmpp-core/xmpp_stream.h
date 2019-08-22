@@ -29,8 +29,7 @@
 class QDomDocument;
 
 namespace XMPP {
-    class Stream : public QObject
-    {
+    class Stream : public QObject {
         Q_OBJECT
     public:
         enum Error { ErrParse, ErrProtocol, ErrStream, ErrCustom = 10 };

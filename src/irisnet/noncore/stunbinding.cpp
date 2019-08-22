@@ -25,8 +25,7 @@
 #include <QHostAddress>
 
 namespace XMPP {
-class StunBinding::Private : public QObject
-{
+class StunBinding::Private : public QObject {
     Q_OBJECT
 
 public:

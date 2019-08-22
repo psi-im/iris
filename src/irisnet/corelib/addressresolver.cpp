@@ -22,8 +22,7 @@
 #include "objectsession.h"
 
 namespace XMPP {
-class AddressResolver::Private : public QObject
-{
+class AddressResolver::Private : public QObject {
     Q_OBJECT
 
 public:

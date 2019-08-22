@@ -188,8 +188,7 @@ void AdvancedConnector::Proxy::setPollInterval(int secs)
 typedef enum { Idle, Connecting, Connected } Mode;
 typedef enum { Force, Probe, Never } LegacySSL;
 
-class AdvancedConnector::Private
-{
+class AdvancedConnector::Private {
 public:
     ByteStream *bs; //!< Socket to use
 

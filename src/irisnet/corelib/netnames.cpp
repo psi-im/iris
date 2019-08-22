@@ -35,8 +35,7 @@ namespace XMPP {
 //----------------------------------------------------------------------------
 // NameRecord
 //----------------------------------------------------------------------------
-class NameRecord::Private : public QSharedData
-{
+class NameRecord::Private : public QSharedData {
 public:
     QByteArray owner;
     NameRecord::Type type;
@@ -368,8 +367,7 @@ QDebug operator<<(QDebug dbg, const XMPP::NameRecord &record)
 //----------------------------------------------------------------------------
 // ServiceInstance
 //----------------------------------------------------------------------------
-class ServiceInstance::Private : public QSharedData
-{
+class ServiceInstance::Private : public QSharedData {
 public:
     QString instance, type, domain;
     QMap<QString,QByteArray> attribs;
@@ -442,8 +440,7 @@ class NameManager;
 Q_GLOBAL_STATIC(QMutex, nman_mutex)
 static NameManager *g_nman = nullptr;
 
-class NameResolver::Private
-{
+class NameResolver::Private {
 public:
     NameResolver *q;
 
@@ -456,8 +453,7 @@ public:
     }
 };
 
-class ServiceBrowser::Private
-{
+class ServiceBrowser::Private {
 public:
     ServiceBrowser *q;
 
@@ -468,8 +464,7 @@ public:
     }
 };
 
-class ServiceResolver::Private : public QObject
-{
+class ServiceResolver::Private : public QObject {
     Q_OBJECT
 public:
     Private(ServiceResolver *parent)
@@ -674,8 +669,7 @@ QDebug operator<<(QDebug dbg, const XMPP::WeightedNameRecordList &list) {
     return dbg;
 }
 
-class ServiceLocalPublisher::Private
-{
+class ServiceLocalPublisher::Private {
 public:
     ServiceLocalPublisher *q;
 
@@ -686,8 +680,7 @@ public:
     }
 };
 
-class NameManager : public QObject
-{
+class NameManager : public QObject {
     Q_OBJECT
 public:
     NameProvider *p_net, *p_local;

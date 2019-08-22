@@ -29,8 +29,7 @@
 #include <QObject>
 #include <QStringList>
 
-class App : public QObject
-{
+class App : public QObject {
     Q_OBJECT
 public:
     bool opt_debug = false;

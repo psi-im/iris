@@ -9,8 +9,7 @@ arg: with-qjdns-lib=[path],Path to QJDns library files
 //----------------------------------------------------------------------------
 // qc_qjdns
 //----------------------------------------------------------------------------
-class qc_qjdns : public ConfObj
-{
+class qc_qjdns : public ConfObj {
 public:
 	qc_qjdns(Conf *c) : ConfObj(c) {}
 	QString name() const { return "QJDns"; }

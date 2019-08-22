@@ -23,8 +23,7 @@
 #include "bytestream.h"
 
 // CS_NAMESPACE_BEGIN
-class HttpConnect : public ByteStream
-{
+class HttpConnect : public ByteStream {
     Q_OBJECT
 public:
     enum Error { ErrConnectionRefused = ErrCustom, ErrHostNotFound, ErrProxyConnect, ErrProxyNeg, ErrProxyAuth };

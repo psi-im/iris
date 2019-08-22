@@ -37,8 +37,7 @@ extern IrisNetProvider *irisnet_createAppleProvider();
 //----------------------------------------------------------------------------
 // internal
 //----------------------------------------------------------------------------
-class PluginInstance
-{
+class PluginInstance {
 private:
     QPluginLoader *_loader;
     QObject *_instance;
@@ -126,8 +125,7 @@ public:
     }
 };
 
-class PluginManager
-{
+class PluginManager {
 public:
     bool builtin_done;
     QStringList paths;
@@ -233,8 +231,7 @@ public:
     }
 };
 
-class IrisNetGlobal
-{
+class IrisNetGlobal {
 public:
     QMutex m;
     PluginManager pluginManager;

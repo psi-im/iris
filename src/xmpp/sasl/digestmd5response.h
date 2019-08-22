@@ -25,8 +25,7 @@
 namespace XMPP {
     class RandomNumberGenerator;
 
-    class DIGESTMD5Response
-    {
+    class DIGESTMD5Response {
         public:
             DIGESTMD5Response(
                     const QByteArray& challenge,
