@@ -21,6 +21,8 @@
 
 #include "xmpp/base/randomnumbergenerator.h"
 
+#include <cstdlib>
+
 namespace XMPP {
     class RandRandomNumberGenerator : public RandomNumberGenerator
     {
