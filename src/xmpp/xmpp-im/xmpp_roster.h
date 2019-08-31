@@ -19,16 +19,16 @@
 #ifndef XMPP_ROSTER_H
 #define XMPP_ROSTER_H
 
-#include <QList>
-
 #include "xmpp_rosteritem.h"
+
+#include <QList>
 
 class QDomDocument;
 class QDomElement;
 
-namespace XMPP
-{
+namespace XMPP {
     class Jid;
+
     class Roster : public QList<RosterItem>
     {
     public:
@@ -42,6 +42,6 @@ namespace XMPP
         class RosterPrivate;
         RosterPrivate *d = nullptr;
     };
-}
+} // namespace XMPP
 
-#endif
+#endif // XMPP_ROSTER_H

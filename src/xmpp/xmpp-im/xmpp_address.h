@@ -19,14 +19,13 @@
 #ifndef XMPP_ADDRESS_H
 #define XMPP_ADDRESS_H
 
-#include <QString>
-
 #include "xmpp/jid/jid.h"
+
+#include <QString>
 
 class QDomElement;
 
-namespace XMPP
-{
+namespace XMPP {
     class Address
     {
     public:
@@ -60,6 +59,6 @@ namespace XMPP
     };
 
     typedef QList<Address> AddressList;
-}
+} // namespace XMPP
 
-#endif
+#endif // XMPP_ADDRESS_H

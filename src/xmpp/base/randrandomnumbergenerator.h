@@ -35,6 +35,6 @@ namespace XMPP {
                 return RAND_MAX;
             }
     };
-}
+} // namespace XMPP
 
-#endif
+#endif // RANDRANDOMNUMBERGENERATOR_H
