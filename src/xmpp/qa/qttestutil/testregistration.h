@@ -29,7 +29,8 @@ namespace QtTestUtil {
      * use this class directly.
      */
     template<typename TestClass>
-    class TestRegistration {
+    class TestRegistration
+    {
         public:
             TestRegistration() {
                 test_ = new TestClass();

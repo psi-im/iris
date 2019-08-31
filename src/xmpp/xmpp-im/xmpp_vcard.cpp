@@ -85,7 +85,8 @@ static QString foldString(const QString &s)
     return ret;
 }
 
-class VCardPrivate : public QSharedData {
+class VCardPrivate : public QSharedData
+{
 public:
     VCardPrivate();
     ~VCardPrivate();

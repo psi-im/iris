@@ -9,7 +9,8 @@ arg: with-idn-lib=[path],Path to libidn library or framework files
 //----------------------------------------------------------------------------
 // qc_idn
 //----------------------------------------------------------------------------
-class qc_idn : public ConfObj {
+class qc_idn : public ConfObj
+{
 public:
 	qc_idn(Conf *c) : ConfObj(c) {}
 	QString name() const { return "LibIDN"; }

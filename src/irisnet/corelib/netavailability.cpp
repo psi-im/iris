@@ -19,7 +19,8 @@
 #include "netavailability.h"
 
 namespace XMPP {
-class NetAvailability::Private : public QObject {
+class NetAvailability::Private : public QObject
+{
     Q_OBJECT
 
 public:

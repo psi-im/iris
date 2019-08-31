@@ -23,7 +23,8 @@
 #include <QString>
 
 namespace XMPP {
-    class PubSubItem {
+    class PubSubItem
+    {
     public:
         PubSubItem();
         PubSubItem(const QString& id, const QDomElement& payload);

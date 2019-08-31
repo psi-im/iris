@@ -9,7 +9,8 @@ arg: with-zlib-lib=[path],Path to zlib library files
 //----------------------------------------------------------------------------
 // qc_zlib
 //----------------------------------------------------------------------------
-class qc_zlib : public ConfObj {
+class qc_zlib : public ConfObj
+{
 public:
 	qc_zlib(Conf *c) : ConfObj(c) {}
 	QString name() const { return "zlib"; }

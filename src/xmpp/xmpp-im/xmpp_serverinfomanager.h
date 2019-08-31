@@ -34,7 +34,8 @@ class Client;
 class Features;
 class Jid;
 
-class ServerInfoManager : public QObject {
+class ServerInfoManager : public QObject
+{
     Q_OBJECT
 public:
     enum SQOption {

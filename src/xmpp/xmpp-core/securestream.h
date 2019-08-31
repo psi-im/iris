@@ -33,7 +33,8 @@ namespace XMPP {
 
 class CompressionHandler;
 
-class SecureStream : public ByteStream {
+class SecureStream : public ByteStream
+{
     Q_OBJECT
 public:
     enum Error { ErrTLS = ErrCustom, ErrSASL };

@@ -26,7 +26,8 @@
 # include <netinet/in.h>
 #endif
 
-class Command {
+class Command
+{
 public:
     enum Type
     {
@@ -117,7 +118,8 @@ static void printIndentedTxt(const QByteArray &txtRecord)
         printf("   (TXT parsing error)\n");
 }
 
-class App : public QObject {
+class App : public QObject
+{
     Q_OBJECT
 public:
     QList<Command> commands;

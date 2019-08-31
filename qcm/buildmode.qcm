@@ -18,7 +18,8 @@ bool qc_buildmode_debug = false;
 bool qc_buildmode_framework = false;
 bool qc_buildmode_separate_debug_info = false;
 
-class qc_buildmode : public ConfObj {
+class qc_buildmode : public ConfObj
+{
 public:
 	qc_buildmode(Conf *c) : ConfObj(c) {}
 	QString name() const { return "buildmode"; }

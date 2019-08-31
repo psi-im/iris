@@ -128,7 +128,8 @@ bool JT_Session::take(const QDomElement& x)
 //----------------------------------------------------------------------------
 // JT_Register
 //----------------------------------------------------------------------------
-class JT_Register::Private {
+class JT_Register::Private
+{
 public:
     Private() = default;
 
@@ -304,7 +305,8 @@ bool JT_Register::take(const QDomElement &x)
 //----------------------------------------------------------------------------
 // JT_UnRegister
 //----------------------------------------------------------------------------
-class JT_UnRegister::Private {
+class JT_UnRegister::Private
+{
 public:
     Private() = default;
 
@@ -366,7 +368,8 @@ void JT_UnRegister::unregFinished()
 //----------------------------------------------------------------------------
 // JT_Roster
 //----------------------------------------------------------------------------
-class JT_Roster::Private {
+class JT_Roster::Private
+{
 public:
     Private() = default;
 
@@ -953,7 +956,8 @@ bool JT_PushMessage::take(const QDomElement &e)
 //----------------------------------------------------------------------------
 // JT_VCard
 //----------------------------------------------------------------------------
-class JT_VCard::Private {
+class JT_VCard::Private
+{
 public:
     Private() = default;
 
@@ -1059,7 +1063,8 @@ bool JT_VCard::take(const QDomElement &x)
 //----------------------------------------------------------------------------
 // JT_Search
 //----------------------------------------------------------------------------
-class JT_Search::Private {
+class JT_Search::Private
+{
 public:
     Private() = default;
 
@@ -1561,7 +1566,8 @@ bool JT_Gateway::take(const QDomElement &x)
 //----------------------------------------------------------------------------
 // JT_DiscoItems
 //----------------------------------------------------------------------------
-class JT_DiscoItems::Private {
+class JT_DiscoItems::Private
+{
 public:
     Private() { }
 
@@ -1666,7 +1672,8 @@ bool JT_DiscoItems::take(const QDomElement &x)
 //----------------------------------------------------------------------------
 // JT_DiscoPublish
 //----------------------------------------------------------------------------
-class JT_DiscoPublish::Private {
+class JT_DiscoPublish::Private
+{
 public:
     Private() { }
 
@@ -1773,7 +1780,8 @@ bool JT_BoBServer::take(const QDomElement &e)
 //----------------------------------------------------------------------------
 // JT_BitsOfBinary
 //----------------------------------------------------------------------------
-class JT_BitsOfBinary::Private {
+class JT_BitsOfBinary::Private
+{
 public:
     Private() { }
 
@@ -1877,7 +1885,8 @@ bool JT_PongServer::take(const QDomElement &e)
 //---------------------------------------------------------------------------
 // JT_CaptchaChallenger
 //---------------------------------------------------------------------------
-class JT_CaptchaChallenger::Private {
+class JT_CaptchaChallenger::Private
+{
 public:
     Jid j;
     CaptchaChallenge challenge;

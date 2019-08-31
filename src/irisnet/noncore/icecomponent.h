@@ -30,7 +30,8 @@ class QUdpSocket;
 namespace XMPP {
 class UdpPortReserver;
 
-class IceComponent : public QObject {
+class IceComponent : public QObject
+{
     Q_OBJECT
 
 public:
@@ -42,7 +43,8 @@ public:
         RelayedType
     };
 
-    class TransportAddress {
+    class TransportAddress
+    {
     public:
         QHostAddress addr;
         int port;
@@ -72,7 +74,8 @@ public:
         }
     };
 
-    class CandidateInfo {
+    class CandidateInfo
+    {
     public:
         TransportAddress addr;
         CandidateType type;
@@ -85,7 +88,8 @@ public:
         int network;
     };
 
-    class Candidate {
+    class Candidate
+    {
     public:
         // unique across all candidates within this component
         int id;

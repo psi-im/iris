@@ -150,7 +150,8 @@ enum {
     Server
 };
 
-class ClientStream::Private {
+class ClientStream::Private
+{
 public:
     Private() = default;
 

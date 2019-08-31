@@ -192,7 +192,8 @@ static void textedit_setSelection(QTextEdit *te, int startLine, int startCol, in
     te->setTextCursor(cur);
 }
 
-class TestDebug : public XMPP::Debug {
+class TestDebug : public XMPP::Debug
+{
 public:
     void msg(const QString &);
     void outgoingTag(const QString &);
@@ -201,7 +202,8 @@ public:
     void incomingXml(const QDomElement &);
 };
 
-class TestDlg : public QDialog, public Ui::TestUI {
+class TestDlg : public QDialog, public Ui::TestUI
+{
     Q_OBJECT
 public:
     bool active, connected;

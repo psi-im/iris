@@ -24,7 +24,8 @@
 #include <QtDebug>
 
 namespace XMPP {
-    class IncrementingRandomNumberGenerator : public RandomNumberGenerator {
+    class IncrementingRandomNumberGenerator : public RandomNumberGenerator
+    {
         public:
             IncrementingRandomNumberGenerator(int maximumNumber = 10) : maximumNumber_(maximumNumber), currentNumber_(maximumNumber_) {}
 

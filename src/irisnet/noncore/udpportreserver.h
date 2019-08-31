@@ -31,7 +31,8 @@ namespace XMPP {
 //   (interfaces) and ports to reserve.  note that the port must be available
 //   on all addresses in order for it to get reserved.
 // note: you must return all sockets back to this class before destructing
-class UdpPortReserver : public QObject {
+class UdpPortReserver : public QObject
+{
     Q_OBJECT
 
 public:

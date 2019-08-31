@@ -24,7 +24,8 @@
 #include <QString>
 
 namespace XMPP {
-    class Resource {
+    class Resource
+    {
     public:
         Resource(const QString &name="", const Status &s=Status());
 

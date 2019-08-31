@@ -3,7 +3,8 @@
 
 #include <qdom.h>
 
-class TD {
+class TD
+{
 public:
     TD();
     ~TD();

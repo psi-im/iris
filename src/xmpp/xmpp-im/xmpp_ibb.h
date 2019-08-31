@@ -33,7 +33,8 @@ namespace XMPP {
     class Client;
     class IBBManager;
 
-    class IBBData {
+    class IBBData
+    {
     public:
         IBBData() : seq(0) {}
         IBBData(const QString &sid, quint16 seq, const QByteArray &data)
@@ -51,7 +52,8 @@ namespace XMPP {
     };
 
     // this is an IBB connection.  use it much like a qsocket
-    class IBBConnection : public BSConnection {
+    class IBBConnection : public BSConnection
+    {
         Q_OBJECT
     public:
         static const int PacketSize = 4096;
@@ -98,7 +100,8 @@ namespace XMPP {
     };
 
     typedef QList<IBBConnection*> IBBConnectionList;
-    class IBBManager : public BytestreamManager {
+    class IBBManager : public BytestreamManager
+    {
         Q_OBJECT
     public:
         IBBManager(Client *);
@@ -138,7 +141,8 @@ namespace XMPP {
                       Stanza::Error::ErrorCond cond, const QString &);
     };
 
-    class JT_IBB : public Task {
+    class JT_IBB : public Task
+    {
         Q_OBJECT
     public:
         enum { ModeRequest, ModeSendData };

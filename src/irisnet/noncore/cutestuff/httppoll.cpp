@@ -55,7 +55,8 @@ static QString hpk(int n, const QString &s)
         return QCA::Base64().arrayToString( QCA::Hash("sha1").hash( hpk(n - 1, s).toLatin1() ).toByteArray() );
 }
 
-class HttpPoll::Private {
+class HttpPoll::Private
+{
 public:
     Private(HttpPoll *_q) :
         http(_q)
@@ -435,7 +436,8 @@ static bool extractMainHeader(const QString &line, QString *proto, int *code, QS
     return true;
 }
 
-class HttpProxyPost::Private {
+class HttpProxyPost::Private
+{
 public:
     Private(HttpProxyPost *_q) :
         sock(_q),
@@ -744,7 +746,8 @@ void HttpProxyPost::sock_error(int x)
 //----------------------------------------------------------------------------
 // HttpProxyGetStream
 //----------------------------------------------------------------------------
-class HttpProxyGetStream::Private {
+class HttpProxyGetStream::Private
+{
 public:
     Private(HttpProxyGetStream *_q) :
         sock(_q)

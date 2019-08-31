@@ -67,7 +67,8 @@ namespace XMPP {
 }
 
 namespace XMPP {
-    class Client : public QObject {
+    class Client : public QObject
+    {
         Q_OBJECT
 
     public:

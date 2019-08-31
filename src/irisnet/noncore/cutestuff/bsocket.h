@@ -35,7 +35,8 @@ class QString;
 /*!
     Socket with automatic hostname lookups, using SRV, AAAA and A DNS queries.
 */
-class BSocket : public ByteStream {
+class BSocket : public ByteStream
+{
     Q_OBJECT
 public:
     enum Error { ErrConnectionRefused = ErrCustom, ErrHostNotFound };

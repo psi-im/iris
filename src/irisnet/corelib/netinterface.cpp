@@ -175,7 +175,8 @@ NetTrackerThread *NetTrackerThread::self = nullptr;
 //----------------------------------------------------------------------------
 // NetInterface
 //----------------------------------------------------------------------------
-class NetInterfacePrivate : public QObject {
+class NetInterfacePrivate : public QObject
+{
     Q_OBJECT
 public:
     friend class NetInterfaceManagerPrivate;
@@ -247,7 +248,8 @@ QList<QHostAddress> NetInterface::addresses() const
 //----------------------------------------------------------------------------
 // NetInterfaceManager
 //----------------------------------------------------------------------------
-class NetInterfaceManagerPrivate : public QObject {
+class NetInterfaceManagerPrivate : public QObject
+{
     Q_OBJECT
 public:
     NetInterfaceManager *q;

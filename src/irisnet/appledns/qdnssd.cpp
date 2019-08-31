@@ -37,7 +37,8 @@ void releaseAndDeleteLater(QObject *owner, QObject *obj)
     obj->deleteLater();
 }
 
-class SafeTimer : public QObject {
+class SafeTimer : public QObject
+{
     Q_OBJECT
 public:
     SafeTimer(QObject *parent = 0) :
@@ -71,7 +72,8 @@ private:
     QTimer *t;
 };
 
-class SafeSocketNotifier : public QObject {
+class SafeSocketNotifier : public QObject
+{
     Q_OBJECT
 public:
     SafeSocketNotifier(int socket, QSocketNotifier::Type type,
@@ -109,7 +111,8 @@ private:
 //   to maintain a pointer which /can/ be copied.  Also, we'll keep
 //   a flag to indicate whether the allocated DNSServiceRef has been
 //   initialized yet.
-class ServiceRef {
+class ServiceRef
+{
 private:
     DNSServiceRef *_p;
     bool _initialized;
@@ -139,7 +142,8 @@ public:
     }
 };
 
-class RecordRef {
+class RecordRef
+{
 private:
     DNSRecordRef *_p;
 
@@ -160,7 +164,8 @@ public:
     }
 };
 
-class IdManager {
+class IdManager
+{
 private:
     QSet<int> set;
     int at;
@@ -206,13 +211,15 @@ public:
 //----------------------------------------------------------------------------
 // QDnsSd
 //----------------------------------------------------------------------------
-class QDnsSd::Private : public QObject {
+class QDnsSd::Private : public QObject
+{
     Q_OBJECT
 public:
     QDnsSd *q;
     IdManager idManager;
 
-    class SubRecord {
+    class SubRecord
+    {
     public:
         Private *_self;
         int _id;
@@ -232,7 +239,8 @@ public:
         }
     };
 
-    class Request {
+    class Request
+    {
     public:
         enum Type
         {

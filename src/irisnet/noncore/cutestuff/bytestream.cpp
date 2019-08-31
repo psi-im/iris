@@ -55,7 +55,8 @@
 //! Also available are the static convenience functions ByteStream::appendArray()
 //! and ByteStream::takeArray(), which make dealing with byte queues very easy.
 
-class ByteStream::Private {
+class ByteStream::Private
+{
 public:
     Private() {}
 

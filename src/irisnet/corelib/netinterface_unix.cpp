@@ -170,7 +170,8 @@ static QList<XMPP::NetGatewayProvider::Info> get_unix_gateways()
 }
 
 namespace XMPP {
-class UnixGateway : public NetGatewayProvider {
+class UnixGateway : public NetGatewayProvider
+{
     Q_OBJECT
     Q_INTERFACES(XMPP::NetGatewayProvider)
 public:
@@ -207,7 +208,8 @@ public slots:
     }
 };
 
-class UnixNetProvider : public IrisNetProvider {
+class UnixNetProvider : public IrisNetProvider
+{
     Q_OBJECT
     Q_INTERFACES(XMPP::IrisNetProvider)
 public:

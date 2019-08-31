@@ -49,7 +49,8 @@ namespace XMPP {
 #endif
     // CS_IMPORT_END
 
-    class Debug {
+    class Debug
+    {
     public:
         virtual ~Debug();
 
@@ -62,7 +63,8 @@ namespace XMPP {
 
     void setDebug(Debug *);
 
-    class Connector : public QObject {
+    class Connector : public QObject
+    {
         Q_OBJECT
     public:
         Connector(QObject *parent=nullptr);
@@ -96,14 +98,16 @@ namespace XMPP {
         quint16 port;
     };
 
-    class AdvancedConnector : public Connector {
+    class AdvancedConnector : public Connector
+    {
         Q_OBJECT
     public:
         enum Error { ErrConnectionRefused, ErrHostNotFound, ErrProxyConnect, ErrProxyNeg, ErrProxyAuth, ErrStream };
         AdvancedConnector(QObject *parent=nullptr);
         virtual ~AdvancedConnector();
 
-        class Proxy {
+        class Proxy
+        {
         public:
             enum { None, HttpConnect, HttpPoll, Socks };
             Proxy() = default;
@@ -168,7 +172,8 @@ namespace XMPP {
         void cleanup();
     };
 
-    class TLSHandler : public QObject {
+    class TLSHandler : public QObject
+    {
         Q_OBJECT
     public:
         TLSHandler(QObject *parent=nullptr);
@@ -187,7 +192,8 @@ namespace XMPP {
         void readyReadOutgoing(const QByteArray &a, int plainBytes);
     };
 
-    class QCATLSHandler : public TLSHandler {
+    class QCATLSHandler : public TLSHandler
+    {
         Q_OBJECT
     public:
         QCATLSHandler(QCA::TLS *parent);

@@ -25,7 +25,8 @@ class QDomDocument;
 class QDomElement;
 
 namespace XMPP {
-    class HttpAuthRequest {
+    class HttpAuthRequest
+    {
     public:
         HttpAuthRequest(const QString &m, const QString &u, const QString &i);
         HttpAuthRequest(const QString &m = QString(), const QString &u = QString());

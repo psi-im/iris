@@ -91,7 +91,8 @@ void Stanza::Error::reset()
     originalCode = 0;
 }
 
-class Stanza::Error::Private {
+class Stanza::Error::Private
+{
 public:
     struct ErrorTypeEntry
     {
@@ -432,7 +433,8 @@ QString Stanza::Error::toString() const
 //----------------------------------------------------------------------------
 // Stanza
 //----------------------------------------------------------------------------
-class Stanza::Private {
+class Stanza::Private
+{
 public:
     static int stringToKind(const QString &s)
     {

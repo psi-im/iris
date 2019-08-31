@@ -42,7 +42,8 @@ void releaseAndDeleteLater(QObject *owner, QObject *obj)
     obj->deleteLater();
 }
 
-class SafeSocketNotifier : public QObject {
+class SafeSocketNotifier : public QObject
+{
     Q_OBJECT
 public:
     SafeSocketNotifier(int socket, QSocketNotifier::Type type,
@@ -90,7 +91,8 @@ inline bool is_gui_app()
 #endif
 }
 
-class ProcessQuit::Private : public QObject {
+class ProcessQuit::Private : public QObject
+{
     Q_OBJECT
 public:
     ProcessQuit *q;

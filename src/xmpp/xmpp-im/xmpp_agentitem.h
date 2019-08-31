@@ -26,7 +26,8 @@
 #include <QString>
 
 namespace XMPP {
-    class AgentItem {
+    class AgentItem
+    {
     public:
         AgentItem() { }
 

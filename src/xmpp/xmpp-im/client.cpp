@@ -97,7 +97,8 @@ namespace XMPP {
 //----------------------------------------------------------------------------
 // Client
 //----------------------------------------------------------------------------
-class Client::GroupChat {
+class Client::GroupChat
+{
 public:
     enum { Connecting, Connected, Closing };
     GroupChat()  = default;
@@ -107,7 +108,8 @@ public:
     QString password;
 };
 
-class Client::ClientPrivate {
+class Client::ClientPrivate
+{
 public:
     ClientPrivate() {}
 

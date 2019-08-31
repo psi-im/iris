@@ -25,7 +25,8 @@
 #include <QStringList>
 
 namespace XMPP {
-    class Subscription {
+    class Subscription
+    {
     public:
         enum SubType { None, To, From, Both, Remove };
 
@@ -40,7 +41,8 @@ namespace XMPP {
         SubType value;
     };
 
-    class RosterItem {
+    class RosterItem
+    {
     public:
         RosterItem(const Jid &jid="");
         RosterItem(const RosterItem &item);

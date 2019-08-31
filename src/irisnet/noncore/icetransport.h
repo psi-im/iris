@@ -25,7 +25,8 @@
 class QHostAddress;
 
 namespace XMPP {
-class IceTransport : public QObject {
+class IceTransport : public QObject
+{
     Q_OBJECT
 
 public:

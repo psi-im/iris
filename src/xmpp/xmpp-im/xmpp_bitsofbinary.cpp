@@ -27,7 +27,8 @@
 
 using namespace XMPP;
 
-class BoBData::Private : public QSharedData {
+class BoBData::Private : public QSharedData
+{
 public:
     QByteArray data;  // file data itself
     QString type;     // mime type. e.g. image/png

@@ -43,7 +43,8 @@ enum
 // SafeUdpSocket
 //----------------------------------------------------------------------------
 // DOR-safe wrapper for QUdpSocket
-class SafeUdpSocket : public QObject {
+class SafeUdpSocket : public QObject
+{
     Q_OBJECT
 
 private:
@@ -143,11 +144,13 @@ private slots:
 //----------------------------------------------------------------------------
 // IceLocalTransport
 //----------------------------------------------------------------------------
-class IceLocalTransport::Private : public QObject {
+class IceLocalTransport::Private : public QObject
+{
     Q_OBJECT
 
 public:
-    class WriteItem {
+    class WriteItem
+    {
     public:
         enum Type
         {
@@ -161,14 +164,16 @@ public:
         int port;
     };
 
-    class Written {
+    class Written
+    {
     public:
         QHostAddress addr;
         int port;
         int count;
     };
 
-    class Datagram {
+    class Datagram
+    {
     public:
         QHostAddress addr;
         int port;

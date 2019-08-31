@@ -25,7 +25,8 @@
 class QUrl;
 
 // CS_NAMESPACE_BEGIN
-class HttpPoll : public ByteStream {
+class HttpPoll : public ByteStream
+{
     Q_OBJECT
 public:
     enum Error { ErrConnectionRefused = ErrCustom, ErrHostNotFound, ErrProxyConnect, ErrProxyNeg, ErrProxyAuth };
@@ -68,7 +69,8 @@ private:
     const QString & getKey(bool *);
 };
 
-class HttpProxyPost : public QObject {
+class HttpProxyPost : public QObject
+{
     Q_OBJECT
 public:
     enum Error { ErrConnectionRefused, ErrHostNotFound, ErrSocket, ErrProxyConnect, ErrProxyNeg, ErrProxyAuth };
@@ -106,7 +108,8 @@ private:
     void processData(const QByteArray &block);
 };
 
-class HttpProxyGetStream : public QObject {
+class HttpProxyGetStream : public QObject
+{
     Q_OBJECT
 public:
     enum Error { ErrConnectionRefused, ErrHostNotFound, ErrSocket, ErrProxyConnect, ErrProxyNeg, ErrProxyAuth };

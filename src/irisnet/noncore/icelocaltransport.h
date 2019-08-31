@@ -36,7 +36,8 @@ namespace XMPP {
 //   relationship with an associated STUN/TURN server.  if TURN is used, this
 //   class offers two paths (0=direct and 1=relayed), otherwise it offers
 //   just one path (0=direct)
-class IceLocalTransport : public IceTransport {
+class IceLocalTransport : public IceTransport
+{
     Q_OBJECT
 
 public:

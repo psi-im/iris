@@ -23,7 +23,8 @@
 #include <QString>
 
 namespace XMPP {
-    class PubSubRetraction {
+    class PubSubRetraction
+    {
     public:
         PubSubRetraction();
         PubSubRetraction(const QString& id);

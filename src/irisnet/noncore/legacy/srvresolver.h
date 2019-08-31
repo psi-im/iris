@@ -26,9 +26,11 @@
 #include <QtNetwork>
 
 // CS_NAMESPACE_BEGIN
-class Q3Dns {
+class Q3Dns
+{
 public:
-    class Server {
+    class Server
+    {
     public:
         Server(const QString &n = QString(), quint16 p = 0, quint16 w = 0, quint16 po = 0)
         :name(n), priority(p), weight(w), port(po) {}
@@ -40,7 +42,8 @@ public:
     };
 };
 
-class SrvResolver : public QObject {
+class SrvResolver : public QObject
+{
     Q_OBJECT
 public:
     SrvResolver(QObject *parent=nullptr);

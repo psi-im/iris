@@ -44,7 +44,8 @@ static QString makeKey(const QString &sid, const Jid &j1, const Jid &j2)
                                .toHex());
 }
 
-class Connection : public XMPP::Jingle::Connection {
+class Connection : public XMPP::Jingle::Connection
+{
     Q_OBJECT
 
     QList<NetworkDatagram> datagrams;
@@ -124,7 +125,8 @@ private:
     }
 };
 
-class V6LinkLocalSocksConnector : public QObject {
+class V6LinkLocalSocksConnector : public  QObject
+{
     Q_OBJECT
 
     QMap<QString,SocksClient*> clients;
@@ -553,7 +555,8 @@ bool Candidate::operator==(const Candidate &other) const
     return d.data() == other.d.data();
 }
 
-class Transport::Private {
+class Transport::Private
+{
 public:
     enum PendingActions {
         NewCandidate    = 1,
@@ -1488,7 +1491,8 @@ Connection::Ptr Transport::connection() const
 // Manager
 //----------------------------------------------------------------
 
-class Manager::Private {
+class Manager::Private
+{
 public:
     XMPP::Jingle::Manager *jingleManager = nullptr;
 

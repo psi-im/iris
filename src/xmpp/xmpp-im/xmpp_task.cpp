@@ -28,7 +28,8 @@
 
 using namespace XMPP;
 
-class Task::TaskPrivate {
+class Task::TaskPrivate
+{
 public:
     TaskPrivate() = default;
 

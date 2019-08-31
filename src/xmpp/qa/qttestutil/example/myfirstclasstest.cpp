@@ -3,7 +3,8 @@
 #include <QObject>
 #include <QtTest/QtTest>
 
-class MyFirstClassTest : public QObject {
+class MyFirstClassTest : public QObject
+{
      Q_OBJECT
 
     private slots:

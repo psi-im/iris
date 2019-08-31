@@ -48,7 +48,8 @@ namespace XMPP {
     typedef enum { OfflineEvent, DeliveredEvent, DisplayedEvent,
             ComposingEvent, CancelEvent } MsgEvent;
 
-    class Message {
+    class Message
+    {
     public:
         enum CarbonDir : quint8 {
             NoCarbon,

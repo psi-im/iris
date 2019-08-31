@@ -21,7 +21,8 @@
 #include <QNetworkInterface>
 
 namespace XMPP {
-class IrisQtNet : public NetInterfaceProvider {
+class IrisQtNet : public NetInterfaceProvider
+{
     Q_OBJECT
     Q_INTERFACES(XMPP::NetInterfaceProvider)
 public:
@@ -71,7 +72,8 @@ public slots:
     }
 };
 
-class IrisQtNetProvider : public IrisNetProvider {
+class IrisQtNetProvider : public IrisNetProvider
+{
     Q_OBJECT
     Q_INTERFACES(XMPP::IrisNetProvider)
 public:

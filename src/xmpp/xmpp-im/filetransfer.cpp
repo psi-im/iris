@@ -48,7 +48,8 @@ static QDomElement firstChildElement(const QDomElement &e)
 //----------------------------------------------------------------------------
 // FileTransfer
 //----------------------------------------------------------------------------
-class FileTransfer::Private {
+class FileTransfer::Private
+{
 public:
     FileTransferManager *m;
     JT_FT *ft;
@@ -368,7 +369,8 @@ void FileTransfer::doAccept()
 //----------------------------------------------------------------------------
 // FileTransferManager
 //----------------------------------------------------------------------------
-class FileTransferManager::Private {
+class FileTransferManager::Private
+{
 public:
     Client *client;
     QList<FileTransfer*> list, incoming;
@@ -536,7 +538,8 @@ void FileTransferManager::unlink(FileTransfer *ft)
 //----------------------------------------------------------------------------
 // JT_FT
 //----------------------------------------------------------------------------
-class JT_FT::Private {
+class JT_FT::Private
+{
 public:
     QDomElement iq;
     Jid to;

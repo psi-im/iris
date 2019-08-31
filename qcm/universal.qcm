@@ -14,7 +14,8 @@ QString qc_universal_sdk;
 //----------------------------------------------------------------------------
 // qc_universal
 //----------------------------------------------------------------------------
-class qc_universal : public ConfObj {
+class qc_universal : public ConfObj
+{
 public:
 	qc_universal(Conf *c) : ConfObj(c) {}
 	QString name() const { return "Mac universal binary support"; }

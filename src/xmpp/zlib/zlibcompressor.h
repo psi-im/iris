@@ -7,7 +7,8 @@
 
 class QIODevice;
 
-class ZLibCompressor : public QObject {
+class ZLibCompressor : public QObject
+{
     Q_OBJECT
 
 public:

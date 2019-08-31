@@ -45,7 +45,8 @@ static QString prompt(const QString &s)
     return result;
 }
 
-class NetMonitor : public QObject {
+class NetMonitor : public QObject
+{
     Q_OBJECT
 public:
     NetInterfaceManager *man;
@@ -187,7 +188,8 @@ static int str2rtype(const QString &in)
         return -1;
 }
 
-class ResolveName : public QObject {
+class ResolveName : public QObject
+{
     Q_OBJECT
 public:
     ResolveName() = default;
@@ -262,7 +264,8 @@ private slots:
     }
 };
 
-class ResolveAddr : public QObject {
+class ResolveAddr : public QObject
+{
     Q_OBJECT
 public:
     QString name;
@@ -306,7 +309,8 @@ private slots:
     }
 };
 
-class BrowseServices : public QObject {
+class BrowseServices : public QObject
+{
     Q_OBJECT
 public:
     QString type, domain;
@@ -352,7 +356,8 @@ private slots:
     }
 };
 
-class ResolveService : public QObject {
+class ResolveService : public QObject
+{
     Q_OBJECT
 public:
     int mode;
@@ -403,7 +408,8 @@ private slots:
     }
 };
 
-class PublishService : public QObject {
+class PublishService : public QObject
+{
     Q_OBJECT
 public:
     QString instance;
@@ -450,7 +456,8 @@ private slots:
     }
 };
 
-class StunBind : public QObject {
+class StunBind : public QObject
+{
     Q_OBJECT
 public:
     bool debug;
@@ -564,7 +571,8 @@ private:
     }
 };
 
-class TurnClientTest : public QObject {
+class TurnClientTest : public QObject
+{
     Q_OBJECT
 public:
     int mode = 0;

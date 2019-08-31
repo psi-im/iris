@@ -48,7 +48,8 @@ if(iface.isValid())
 
    \sa NetInterfaceManager
 */
-class IRISNET_EXPORT NetInterface : public QObject {
+class IRISNET_EXPORT NetInterface : public QObject
+{
     Q_OBJECT
 public:
     /**
@@ -139,7 +140,8 @@ for(int n = 0; n < id_list.count(); ++n)
 
    \sa NetInterface
 */
-class IRISNET_EXPORT NetInterfaceManager : public QObject {
+class IRISNET_EXPORT NetInterfaceManager : public QObject
+{
     Q_OBJECT
 public:
     /**

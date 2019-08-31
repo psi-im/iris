@@ -29,7 +29,8 @@ class QDomElement;
 namespace XMPP {
     class Jid;
 
-    class Roster : public QList<RosterItem> {
+    class Roster : public QList<RosterItem>
+    {
     public:
         Roster();
         ~Roster();

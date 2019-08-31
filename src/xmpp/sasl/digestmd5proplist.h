@@ -28,7 +28,8 @@ namespace XMPP {
         QByteArray var, val;
     };
 
-    class DIGESTMD5PropList : public QList<DIGESTMD5Prop> {
+    class DIGESTMD5PropList : public QList<DIGESTMD5Prop>
+    {
         public:
             DIGESTMD5PropList();
 

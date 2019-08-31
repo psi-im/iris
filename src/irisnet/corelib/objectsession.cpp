@@ -26,22 +26,26 @@
 #include <stdlib.h>
 
 namespace XMPP {
-class ObjectSessionWatcherPrivate {
+class ObjectSessionWatcherPrivate
+{
 public:
     ObjectSession *sess;
 };
 
-class ObjectSessionPrivate : public QObject {
+class ObjectSessionPrivate : public QObject
+{
     Q_OBJECT
 
 public:
     ObjectSession *q;
 
-    class MethodCall {
+    class MethodCall
+    {
     public:
         QObject *obj;
         QByteArray method;
-        class Argument {
+        class Argument
+        {
         public:
             int type;
             void *data;

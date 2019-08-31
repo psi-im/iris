@@ -26,7 +26,8 @@
 class QString;
 
 namespace XMPP {
-    class Features {
+    class Features
+    {
     public:
         Features();
         Features(const QStringList &);

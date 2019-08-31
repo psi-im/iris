@@ -22,11 +22,13 @@
 #include <stdlib.h>
 
 namespace XMPP {
-class UdpPortReserver::Private : public QObject {
+class UdpPortReserver::Private : public QObject
+{
     Q_OBJECT
 
 public:
-    class Item {
+    class Item
+    {
     public:
         int port; // port to reserve
         bool lent;

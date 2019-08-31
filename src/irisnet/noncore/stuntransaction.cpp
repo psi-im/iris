@@ -88,7 +88,8 @@ static StunMessage parse_stun_message(const QByteArray &packet, int *validationF
     return msg;
 }
 
-class StunTransactionPoolPrivate : public QObject {
+class StunTransactionPoolPrivate : public QObject
+{
     Q_OBJECT
 
 public:
@@ -125,7 +126,8 @@ public:
 //----------------------------------------------------------------------------
 // StunTransaction
 //----------------------------------------------------------------------------
-class StunTransactionPrivate : public QObject {
+class StunTransactionPrivate : public QObject
+{
     Q_OBJECT
 
 public:

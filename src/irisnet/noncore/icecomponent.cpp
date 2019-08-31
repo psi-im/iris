@@ -40,11 +40,13 @@ static int calc_priority(int typePref, int localPref, int componentId)
     return priority;
 }
 
-class IceComponent::Private : public QObject {
+class IceComponent::Private : public QObject
+{
     Q_OBJECT
 
 public:
-    class Config {
+    class Config
+    {
     public:
         QList<Ice176::LocalAddress> localAddrs;
         QList<Ice176::ExternalAddress> extAddrs;
@@ -63,7 +65,8 @@ public:
         QCA::SecureArray stunRelayTcpPass;
     };
 
-    class LocalTransport {
+    class LocalTransport
+    {
     public:
         QUdpSocket *qsock;
         bool borrowedSocket;

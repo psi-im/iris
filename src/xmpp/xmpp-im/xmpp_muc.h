@@ -26,7 +26,8 @@
 #include <QString>
 
 namespace XMPP {
-    class MUCItem {
+    class MUCItem
+    {
     public:
         enum Affiliation { UnknownAffiliation, Outcast, NoAffiliation, Member, Admin, Owner };
         enum Role { UnknownRole, NoRole, Visitor, Participant, Moderator };
@@ -61,7 +62,8 @@ namespace XMPP {
         QString reason_;
     };
 
-    class MUCInvite {
+    class MUCInvite
+    {
     public:
         MUCInvite();
         MUCInvite(const QDomElement&);
@@ -86,7 +88,8 @@ namespace XMPP {
         bool cont_;
     };
 
-    class MUCDecline {
+    class MUCDecline
+    {
     public:
         MUCDecline();
         MUCDecline(const Jid& to, const QString& reason);
@@ -108,7 +111,8 @@ namespace XMPP {
         QString reason_;
     };
 
-    class MUCDestroy {
+    class MUCDestroy
+    {
     public:
         MUCDestroy();
         MUCDestroy(const QDomElement&);

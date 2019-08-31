@@ -6,7 +6,8 @@ arg: enable-tests,Build examples and unittests.
 -----END QCMOD-----
 */
 
-class qc_extra : public ConfObj {
+class qc_extra : public ConfObj
+{
 public:
 	qc_extra(Conf *c) : ConfObj(c) {}
 	QString name() const { return "extra"; }

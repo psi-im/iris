@@ -37,7 +37,8 @@ static QLatin1String xmlns_v0_3_1("urn:xmpp:http:upload:0");
 //----------------------------------------------------------------------------
 // HttpFileUpload
 //----------------------------------------------------------------------------
-class HttpFileUpload::Private {
+class HttpFileUpload::Private
+{
 public:
     HttpFileUpload::State state = State::None;
     XMPP::Client *client = nullptr;
@@ -295,7 +296,8 @@ void HttpFileUpload::done(State state)
 //----------------------------------------------------------------------------
 // JT_HTTPFileUpload
 //----------------------------------------------------------------------------
-class JT_HTTPFileUpload::Private {
+class JT_HTTPFileUpload::Private
+{
 public:
     Jid to;
     QDomElement iq;

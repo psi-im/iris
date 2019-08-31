@@ -30,7 +30,8 @@ class QDomElement;
 namespace XMPP {
     class Stanza;
 
-    class RosterExchangeItem {
+    class RosterExchangeItem
+    {
     public:
         enum Action { Add, Delete, Modify };
 

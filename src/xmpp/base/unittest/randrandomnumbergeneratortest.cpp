@@ -24,7 +24,8 @@
 
 using namespace XMPP;
 
-class RandRandomNumberGeneratorTest : public QObject {
+class RandRandomNumberGeneratorTest : public QObject
+{
         Q_OBJECT
 
     private slots:

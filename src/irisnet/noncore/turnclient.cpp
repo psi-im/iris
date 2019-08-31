@@ -91,7 +91,8 @@ void TurnClient::Proxy::setUserPass(const QString &user, const QString &pass)
 //----------------------------------------------------------------------------
 // TurnClient
 //----------------------------------------------------------------------------
-class TurnClient::Private : public QObject {
+class TurnClient::Private : public QObject
+{
     Q_OBJECT
 
 public:

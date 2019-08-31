@@ -30,7 +30,8 @@ namespace XMPP {
     extern QString HASH_NS;
     class Features;
 
-    class Hash {
+    class Hash
+    {
     public:
 
         enum Type { // XEP-0300 Version 0.5.3 (2018-02-14)

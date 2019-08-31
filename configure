@@ -499,7 +499,8 @@ cat >"$1/modules.cpp" <<EOT
 name: Qt >= 4.2
 -----END QCMOD-----
 */
-class qc_qt42 : public ConfObj {
+class qc_qt42 : public ConfObj
+{
 public:
 	qc_qt42(Conf *c) : ConfObj(c) {}
 	QString name() const { return "Qt >= 4.2"; }
@@ -534,7 +535,8 @@ bool qc_buildmode_debug = false;
 bool qc_buildmode_framework = false;
 bool qc_buildmode_separate_debug_info = false;
 
-class qc_buildmode : public ConfObj {
+class qc_buildmode : public ConfObj
+{
 public:
 	qc_buildmode(Conf *c) : ConfObj(c) {}
 	QString name() const { return "buildmode"; }
@@ -731,7 +733,8 @@ QString qc_universal_sdk;
 //----------------------------------------------------------------------------
 // qc_universal
 //----------------------------------------------------------------------------
-class qc_universal : public ConfObj {
+class qc_universal : public ConfObj
+{
 public:
 	qc_universal(Conf *c) : ConfObj(c) {}
 	QString name() const { return "Mac universal binary support"; }
@@ -775,7 +778,8 @@ arg: with-idn-lib=[path],Path to libidn library or framework files
 //----------------------------------------------------------------------------
 // qc_idn
 //----------------------------------------------------------------------------
-class qc_idn : public ConfObj {
+class qc_idn : public ConfObj
+{
 public:
 	qc_idn(Conf *c) : ConfObj(c) {}
 	QString name() const { return "LibIDN"; }
@@ -932,7 +936,8 @@ static bool qca_try_ext_prf(Conf *conf, bool release, bool debug, QString *prf)
 //----------------------------------------------------------------------------
 // qc_qca
 //----------------------------------------------------------------------------
-class qc_qca : public ConfObj {
+class qc_qca : public ConfObj
+{
 public:
     qc_qca(Conf *c) : ConfObj(c) {}
     QString name() const { return "QCA >= 2.0"; }
@@ -1020,7 +1025,8 @@ arg: with-zlib-lib=[path],Path to zlib library files
 //----------------------------------------------------------------------------
 // qc_zlib
 //----------------------------------------------------------------------------
-class qc_zlib : public ConfObj {
+class qc_zlib : public ConfObj
+{
 public:
 	qc_zlib(Conf *c) : ConfObj(c) {}
 	QString name() const { return "zlib"; }
@@ -1072,7 +1078,8 @@ arg: enable-tests,Build examples and unittests.
 -----END QCMOD-----
 */
 
-class qc_extra : public ConfObj {
+class qc_extra : public ConfObj
+{
 public:
 	qc_extra(Conf *c) : ConfObj(c) {}
 	QString name() const { return "extra"; }
@@ -1157,7 +1164,8 @@ arg: with-qjdns-lib=[path],Path to QJDns library files
 //----------------------------------------------------------------------------
 // qc_qjdns
 //----------------------------------------------------------------------------
-class qc_qjdns : public ConfObj {
+class qc_qjdns : public ConfObj
+{
 public:
 	qc_qjdns(Conf *c) : ConfObj(c) {}
 	QString name() const { return "QJDns"; }
@@ -1266,7 +1274,8 @@ enum VersionMode { VersionMin, VersionExact, VersionMax, VersionAny };
 // ConfObj
 //
 // Subclass ConfObj to create a new configuration module.
-class ConfObj {
+class ConfObj
+{
 public:
 	Conf *conf;
 	bool required;
@@ -1300,7 +1309,8 @@ public:
 //
 // Interact with this class from your ConfObj to perform detection
 // operations and to output configuration parameters.
-class Conf {
+class Conf
+{
 public:
 	bool debug_enabled;
 	QString qmake_path;
@@ -1382,7 +1392,8 @@ preserved.
 # endif
 #endif
 
-class MocTestObject : public QObject {
+class MocTestObject : public QObject
+{
 	Q_OBJECT
 public:
 	MocTestObject() {}
@@ -1763,7 +1774,8 @@ QString ConfObj::resultString() const
 //----------------------------------------------------------------------------
 // qc_internal_pkgconfig
 //----------------------------------------------------------------------------
-class qc_internal_pkgconfig : public ConfObj {
+class qc_internal_pkgconfig : public ConfObj
+{
 public:
 	QString pkgname, desc;
 	VersionMode mode;

@@ -51,7 +51,8 @@ namespace XMPP {
     typedef QList<StreamHost> StreamHostList;
     typedef QList<S5BConnection*> S5BConnectionList;
 
-    class S5BDatagram {
+    class S5BDatagram
+    {
     public:
         S5BDatagram();
         S5BDatagram(int source, int dest, const QByteArray &data);
@@ -66,7 +67,8 @@ namespace XMPP {
         QByteArray _buf;
     };
 
-    class S5BConnection : public BSConnection {
+    class S5BConnection : public BSConnection
+    {
         Q_OBJECT
     public:
         enum Mode { Stream, Datagram };
@@ -140,7 +142,8 @@ namespace XMPP {
         S5BConnection(S5BManager *, QObject *parent=nullptr);
     };
 
-    class S5BManager : public BytestreamManager {
+    class S5BManager : public BytestreamManager
+    {
         Q_OBJECT
     public:
         S5BManager(Client *);
@@ -205,7 +208,8 @@ namespace XMPP {
         void doActivate(const Jid &peer, const QString &sid, const Jid &streamHost);
     };
 
-    class S5BConnector : public QObject {
+    class S5BConnector : public QObject
+    {
         Q_OBJECT
     public:
         S5BConnector(QObject *parent=nullptr);
@@ -234,12 +238,14 @@ namespace XMPP {
         void man_udpSuccess(const Jid &streamHost);
     };
 
-    class S5BServersProducer : public TcpPortScope {
+    class S5BServersProducer : public TcpPortScope
+    {
     protected:
         TcpPortServer* makeServer(QTcpServer *socket); // in fact returns S5BServer
     };
 
-    class S5BServer : public TcpPortServer {
+    class S5BServer : public TcpPortServer
+    {
         Q_OBJECT
 
     public:
@@ -261,7 +267,8 @@ namespace XMPP {
         QScopedPointer<Private> d;
     };
 
-    class JT_S5B : public Task {
+    class JT_S5B : public Task
+    {
         Q_OBJECT
     public:
         JT_S5B(Task *);
@@ -295,7 +302,8 @@ namespace XMPP {
         bool fast;
         bool udp;
     };
-    class JT_PushS5B : public Task {
+    class JT_PushS5B : public Task
+    {
         Q_OBJECT
     public:
         JT_PushS5B(Task *);
@@ -317,7 +325,8 @@ namespace XMPP {
         void incomingActivate(const Jid &from, const QString &sid, const Jid &streamHost);
     };
 
-    class StreamHost {
+    class StreamHost
+    {
     public:
         StreamHost();
 

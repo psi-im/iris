@@ -25,7 +25,8 @@ using namespace XMPP;
 
 static QLatin1String xmlns_ns_rsm("http://jabber.org/protocol/rsm");
 
-class SubsetsClientManager::Private {
+class SubsetsClientManager::Private
+{
 public:
     enum QueryType { None, Count, First, Last, Next, Previous, Index };
     struct {

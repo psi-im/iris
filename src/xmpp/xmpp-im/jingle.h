@@ -109,7 +109,8 @@ typedef std::function<void ()> OutgoingUpdateCB;
 typedef std::tuple<QList<QDomElement>, OutgoingUpdateCB> OutgoingUpdate; // list of elements to b inserted to <jingle> and success callback
 typedef std::tuple<QDomElement, OutgoingUpdateCB> OutgoingTransportInfoUpdate; // transport element and success callback
 
-class ErrorUtil {
+class ErrorUtil
+{
 public:
     enum {
         UnknownError, // unparsed/unknown error
@@ -131,7 +132,8 @@ public:
     static int jingleCondition(const XMPP::Stanza::Error &error);
 };
 
-class Jingle {
+class Jingle
+{
 public:
     Jingle(); // make invalid jingle element
     Jingle(Action action, const QString &sid); // start making outgoing jingle
@@ -217,7 +219,8 @@ public:
     QString disposition; // default "session"
 };
 
-class Security {
+class Security
+{
 
 };
 
@@ -237,7 +240,8 @@ class Security {
  * SessionManagerPad is a base class for all kinds of pads.
  * UI can connect to its signals.
  */
-class SessionManagerPad : public QObject {
+class SessionManagerPad : public QObject
+{
     Q_OBJECT
 public:
     virtual QDomElement takeOutgoingSessionInfoUpdate();
@@ -247,7 +251,8 @@ public:
 };
 
 class TransportManager;
-class TransportManagerPad : public SessionManagerPad {
+class TransportManagerPad : public SessionManagerPad
+{
     Q_OBJECT
 public:
     typedef QSharedPointer<TransportManagerPad> Ptr;
@@ -256,7 +261,8 @@ public:
 };
 
 class ApplicationManager;
-class ApplicationManagerPad : public SessionManagerPad {
+class ApplicationManagerPad : public SessionManagerPad
+{
     Q_OBJECT
 public:
     typedef QSharedPointer<ApplicationManagerPad> Ptr;
@@ -275,7 +281,8 @@ public:
 
 #if QT_VERSION < QT_VERSION_CHECK(5,8,0)
 // stub implementation
-class NetworkDatagram {
+class NetworkDatagram
+{
 public:
     bool _valid = false;
     QByteArray _data;
@@ -295,7 +302,8 @@ public:
 typedef QNetworkDatagram NetworkDatagram;
 #endif
 
-class Connection : public ByteStream {
+class Connection : public ByteStream
+{
     Q_OBJECT
 public:
     using Ptr = QSharedPointer<Connection>; // will be shared between transport and application
@@ -374,7 +382,8 @@ signals:
     void failed();    // transport ailed for whatever reason. aborted for example
 };
 
-class Application : public QObject {
+class Application : public QObject
+{
     Q_OBJECT
 public:
 
@@ -448,7 +457,8 @@ signals:
     void stateChanged(State);
 };
 
-class Session : public QObject {
+class Session : public QObject
+{
     Q_OBJECT
 public:
     // Note incoming session are not registered in Jingle Manager until validated.
@@ -512,7 +522,8 @@ private:
     QScopedPointer<Private> d;
 };
 
-class ApplicationManager : public QObject {
+class ApplicationManager : public QObject
+{
     Q_OBJECT
 public:
     ApplicationManager(QObject *parent = nullptr);
@@ -525,7 +536,8 @@ public:
     virtual void closeAll() = 0;
 };
 
-class TransportManager : public QObject {
+class TransportManager : public QObject
+{
     Q_OBJECT
 public:
 
@@ -546,7 +558,8 @@ signals:
     void abortAllRequested(); // mostly used by transport instances to abort immediately
 };
 
-class Manager : public QObject {
+class Manager : public QObject
+{
     Q_OBJECT
 
 public:

@@ -30,7 +30,8 @@ namespace QtTestUtil {
      * themselves to this registry. All registered tests can then be run at
      * once using runTests().
      */
-    class TestRegistry {
+    class TestRegistry
+    {
         public:
             /**
              * Retrieve the single instance of the registry.

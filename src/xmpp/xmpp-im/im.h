@@ -55,7 +55,8 @@ namespace XMPP {
     typedef QList<AgentItem> AgentList;
     typedef QList<DiscoItem> DiscoList;
 
-    class FormField {
+    class FormField
+    {
     public:
         enum { username, nick, password, name, first, last, email, address, city, state, zip, phone, url, date, misc };
         FormField(const QString &type="", const QString &value="");
@@ -81,7 +82,8 @@ namespace XMPP {
         Private *d = nullptr;
     };
 
-    class Form : public QList<FormField> {
+    class Form : public QList<FormField>
+    {
     public:
         Form(const Jid &j="");
         ~Form();
@@ -101,7 +103,8 @@ namespace XMPP {
         Private *d = nullptr;
     };
 
-    class SearchResult {
+    class SearchResult
+    {
     public:
         SearchResult(const Jid &jid="");
         ~SearchResult();

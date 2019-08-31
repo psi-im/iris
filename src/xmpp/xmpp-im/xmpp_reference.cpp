@@ -26,7 +26,8 @@ using namespace XMPP;
 const QString XMPP::MEDIASHARING_NS(QStringLiteral("urn:xmpp:sims:1"));
 const QString XMPP::REFERENCE_NS(QStringLiteral("urn:xmpp:reference:0"));
 
-class Reference::Private : public QSharedData {
+class Reference::Private : public QSharedData
+{
 public:
     Reference::Type type;
     QString uri;

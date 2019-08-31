@@ -32,7 +32,8 @@ namespace QCA {
 namespace XMPP {
 class UdpPortReserver;
 
-class Ice176 : public QObject {
+class Ice176 : public QObject
+{
     Q_OBJECT
 
 public:
@@ -47,7 +48,8 @@ public:
         Responder
     };
 
-    class LocalAddress {
+    class LocalAddress
+    {
     public:
         QHostAddress addr;
         int network; // -1 = unknown
@@ -60,7 +62,8 @@ public:
         }
     };
 
-    class ExternalAddress {
+    class ExternalAddress
+    {
     public:
         LocalAddress base;
         QHostAddress addr;
@@ -72,7 +75,8 @@ public:
         }
     };
 
-    class Candidate {
+    class Candidate
+    {
     public:
         int component;
         QString foundation;

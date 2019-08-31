@@ -23,7 +23,8 @@
 
 using namespace XMPP;
 
-class XMPP::DiscoItemPrivate : public QSharedData {
+class XMPP::DiscoItemPrivate : public QSharedData
+{
 public:
     DiscoItemPrivate()
     {

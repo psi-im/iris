@@ -24,10 +24,12 @@
 #include <QObject>
 
 // DOR-compliant
-class QDnsSd : public QObject {
+class QDnsSd : public QObject
+{
     Q_OBJECT
 public:
-    class LowLevelError {
+    class LowLevelError
+    {
     public:
         QString func;
         int code;
@@ -44,7 +46,8 @@ public:
         }
     };
 
-    class Record {
+    class Record
+    {
     public:
         bool added; // only used by QueryResult
 
@@ -54,7 +57,8 @@ public:
         quint32 ttl;
     };
 
-    class BrowseEntry {
+    class BrowseEntry
+    {
     public:
         bool added;
         QByteArray serviceName;
@@ -64,7 +68,8 @@ public:
         QByteArray replyDomain;
     };
 
-    class QueryResult {
+    class QueryResult
+    {
     public:
         bool success;
         LowLevelError lowLevelError;
@@ -72,7 +77,8 @@ public:
         QList<Record> records;
     };
 
-    class BrowseResult {
+    class BrowseResult
+    {
     public:
         bool success;
         LowLevelError lowLevelError;
@@ -80,7 +86,8 @@ public:
         QList<BrowseEntry> entries;
     };
 
-    class ResolveResult {
+    class ResolveResult
+    {
     public:
         bool success;
         LowLevelError lowLevelError;
@@ -91,7 +98,8 @@ public:
         QByteArray txtRecord;
     };
 
-    class RegResult {
+    class RegResult
+    {
     public:
         enum Error
         {

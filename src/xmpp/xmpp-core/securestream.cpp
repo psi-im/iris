@@ -39,7 +39,8 @@
 //----------------------------------------------------------------------------
 // LayerTracker
 //----------------------------------------------------------------------------
-class LayerTracker {
+class LayerTracker
+{
 public:
     struct Item
     {
@@ -108,7 +109,8 @@ int LayerTracker::finished(int encoded)
 //----------------------------------------------------------------------------
 // SecureStream
 //----------------------------------------------------------------------------
-class SecureLayer : public QObject {
+class SecureLayer : public QObject
+{
     Q_OBJECT
 public:
     enum { TLS, SASL, TLSH, Compression };
@@ -338,7 +340,8 @@ private slots:
 
 #include "securestream.moc"
 
-class SecureStream::Private {
+class SecureStream::Private
+{
 public:
     ByteStream *bs;
     QList<SecureLayer*> layers;

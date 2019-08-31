@@ -26,7 +26,8 @@
 #include <QPointer>
 
 namespace XMPP {
-class CapsInfo {
+class CapsInfo
+{
 public:
     inline CapsInfo() {}
     inline CapsInfo(const XMPP::DiscoItem &disco, const QDateTime &lastSeen = QDateTime()) :
@@ -43,7 +44,8 @@ private:
     XMPP::DiscoItem _disco;
 };
 
-class CapsRegistry : public QObject {
+class CapsRegistry : public QObject
+{
     Q_OBJECT
 
 public:
@@ -72,7 +74,8 @@ private:
     QHash<QString,CapsInfo> capsInfo_;
 };
 
-class CapsManager : public QObject {
+class CapsManager : public QObject
+{
     Q_OBJECT
 
 public:

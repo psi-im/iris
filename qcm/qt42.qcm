@@ -3,7 +3,8 @@
 name: Qt >= 4.2
 -----END QCMOD-----
 */
-class qc_qt42 : public ConfObj {
+class qc_qt42 : public ConfObj
+{
 public:
 	qc_qt42(Conf *c) : ConfObj(c) {}
 	QString name() const { return "Qt >= 4.2"; }

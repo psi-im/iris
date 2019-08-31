@@ -24,7 +24,8 @@
 #include "xmpp_status.h"
 
 namespace XMPP {
-    class LiveRosterItem : public RosterItem {
+    class LiveRosterItem : public RosterItem
+    {
     public:
         LiveRosterItem(const Jid &j="");
         LiveRosterItem(const RosterItem &);
