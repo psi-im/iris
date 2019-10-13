@@ -28,6 +28,7 @@
 #include <functional>
 
 namespace XMPP { namespace Jingle { namespace FileTransfer {
+
     const QString NS            = QStringLiteral("urn:xmpp:jingle:apps:file-transfer:5");
     const QString AMPLITUDES_NS = QStringLiteral("urn:audio:amplitudes");
 
@@ -268,6 +269,17 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
     QString File::description() const { return d ? d->desc : QString(); }
 
     QList<Hash> File::hashes() const { return d ? d->hashes : QList<Hash>(); }
+    QList<Hash> File::computedHashes() const
+    {
+        QList<Hash> ret;
+        if (!d)
+            return ret;
+        for (auto const &h : d->hashes) {
+            if (h.data().size())
+                ret.append(h);
+        }
+        return ret;
+    }
 
     Hash File::hash(Hash::Type t) const
     {
@@ -560,7 +572,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
             d->transportReplaceOrigin = Origin::None;
             d->transportReplaceState  = State::Finished; // not needed here probably
             d->connection             = d->transport->connection();
-            if (d->streamigMode) {
+            if (!d->streamigMode) {
                 connect(d->connection.data(), &Connection::readyRead, this, [this]() {
                     if (!d->device) {
                         return;
@@ -577,7 +589,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
                 });
             }
             d->setState(State::Active);
-            if (d->streamigMode) {
+            if (!d->streamigMode) {
                 if (d->acceptFile.range().isValid()) {
                     d->bytesLeft = d->acceptFile.range().length;
                     emit deviceRequested(d->acceptFile.range().offset, d->bytesLeft);
@@ -943,6 +955,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
         auto app   = _manager->startApplication(selfp, "ft", _session->role(), _session->role());
         app->setFile(file);
     }
+
 } // namespace FileTransfer
 } // namespace Jingle
 } // namespace XMPP
