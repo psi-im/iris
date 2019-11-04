@@ -998,9 +998,10 @@ namespace XMPP { namespace Jingle { namespace S5B {
             if (localUsedCandidate && localUsedCandidate.state() != Candidate::Discarded) {
                 prio = localUsedCandidate.priority();
             }
-            if (remoteUsedCandidate && prio < remoteUsedCandidate.priority()
-                && remoteUsedCandidate.state() != Candidate::Discarded) {
-                prio = remoteUsedCandidate.priority();
+            for (const auto &c : remoteCandidates) {
+                if (c.state() != Candidate::Discarded && c.state() >= Candidate::Pending && c.priority() > prio) {
+                    prio = c.priority();
+                }
             }
 
             for (auto &c : localCandidates) {
