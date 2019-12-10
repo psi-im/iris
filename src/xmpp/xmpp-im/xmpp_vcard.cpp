@@ -333,6 +333,8 @@ QDomElement VCard::toXml(QDomDocument *doc) const
             QDomElement  w = doc->createElement("EMAIL");
             const Email &e = *it;
 
+            if (e.pref)
+                w.appendChild(emptyTag(doc, "PREF"));
             if (e.home)
                 w.appendChild(emptyTag(doc, "HOME"));
             if (e.work)
@@ -593,13 +595,12 @@ VCard VCard::fromXml(const QDomElement &q)
             m.internet = hasSubTag(i, "INTERNET");
             m.x400     = hasSubTag(i, "X400");
 
-            m.userid = subTagText(i, "USERID");
+            m.pref = hasSubTag(i, "PREF");
 
-            if (m.userid.isEmpty()) // FIXME: Workaround for Psi prior to 0.9
-                if (!i.text().isEmpty())
-                    m.userid = i.text().trimmed();
+            m.userid = subTagText(i, "USERID").trimmed();
+            if (!m.userid.isEmpty())
+                v.d->emailList.append(m);
 
-            v.d->emailList.append(m);
         } else if (tag == "JABBERID")
             v.d->jid = i.text().trimmed();
         else if (tag == "MAILER")
@@ -714,7 +715,7 @@ VCard::Phone::Phone()
     home = work = voice = fax = pager = msg = cell = video = bbs = modem = isdn = pcs = pref = false;
 }
 
-VCard::Email::Email() { home = work = internet = x400 = false; }
+VCard::Email::Email() { home = work = internet = x400 = pref = false; }
 
 VCard::Geo::Geo() {}
 
