@@ -582,11 +582,29 @@ VCard VCard::fromXml(const QDomElement &q)
 
             p.number = subTagText(i, "NUMBER");
 
-            if (p.number.isEmpty()) // FIXME: Workaround for Psi prior to 0.9
-                if (hasSubTag(i, "VOICE"))
-                    p.number = subTagText(i, "VOICE");
+            if (!p.number.isEmpty()) {
+                v.d->phoneList.append(p);
 
-            v.d->phoneList.append(p);
+                auto it = std::find_if(v.d->phoneList.begin(), v.d->phoneList.end(),
+                                       [number = p.number](const Phone &p) { return p.number == number; });
+                if (it == v.d->phoneList.end()) {
+                    v.d->phoneList.append(p);
+                } else {
+                    it->home  = (it->home || p.home);
+                    it->work  = (it->work || p.work);
+                    it->voice = (it->voice || p.voice);
+                    it->fax   = (it->fax || p.fax);
+                    it->pager = (it->pager || p.pager);
+                    it->msg   = (it->msg || p.msg);
+                    it->cell  = (it->cell || p.cell);
+                    it->video = (it->video || p.video);
+                    it->bbs   = (it->bbs || p.bbs);
+                    it->modem = (it->modem || p.modem);
+                    it->isdn  = (it->isdn || p.isdn);
+                    it->pcs   = (it->pcs || p.pcs);
+                    it->pref  = (it->pref || p.pref);
+                }
+            }
         } else if (tag == "EMAIL") {
             Email m;
 
@@ -598,8 +616,19 @@ VCard VCard::fromXml(const QDomElement &q)
             m.pref = hasSubTag(i, "PREF");
 
             m.userid = subTagText(i, "USERID").trimmed();
-            if (!m.userid.isEmpty())
-                v.d->emailList.append(m);
+            if (!m.userid.isEmpty()) {
+                auto it = std::find_if(v.d->emailList.begin(), v.d->emailList.end(),
+                                       [user_id = m.userid](const Email &e) { return e.userid == user_id; });
+                if (it == v.d->emailList.end()) {
+                    v.d->emailList.append(m);
+                } else {
+                    it->home     = (it->home || m.home);
+                    it->work     = (it->work || m.work);
+                    it->internet = (it->internet || m.internet);
+                    it->x400     = (it->x400 || m.x400);
+                    it->pref     = (it->pref || m.pref);
+                }
+            }
 
         } else if (tag == "JABBERID")
             v.d->jid = i.text().trimmed();
