@@ -32,14 +32,20 @@ class Jid;
 class Roster : public QList<RosterItem> {
 public:
     Roster();
+    Roster(const Roster &other);
     ~Roster();
+
+    Roster &operator=(const Roster &other);
 
     Roster::Iterator      find(const Jid &);
     Roster::ConstIterator find(const Jid &) const;
 
+    void    setGroupsDelimiter(const QString &groupsDelimiter);
+    QString groupsDelimiter() const;
+
 private:
-    class RosterPrivate;
-    RosterPrivate *d = nullptr;
+    class Private;
+    Private *d = nullptr;
 };
 } // namespace XMPP
 

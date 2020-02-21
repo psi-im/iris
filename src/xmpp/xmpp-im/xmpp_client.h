@@ -99,7 +99,7 @@ public:
     void                   setNetworkAccessManager(QNetworkAccessManager *qnam);
     QNetworkAccessManager *networkAccessManager() const;
 
-    void rosterRequest();
+    void rosterRequest(bool withGroupsDelimiter = true);
     void sendMessage(Message &);
     void sendSubscription(const Jid &, const QString &, const QString &nick = QString());
     void setPresence(const Status &);
@@ -165,6 +165,7 @@ signals:
     void activated();
     void disconnected();
     // void authFinished(bool, int, const QString &);
+    void rosterGroupsDelimiterRequestFinished(const QString &);
     void rosterRequestFinished(bool, int, const QString &);
     void rosterItemAdded(const RosterItem &);
     void rosterItemUpdated(const RosterItem &);

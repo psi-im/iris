@@ -97,7 +97,12 @@ public:
     void set(const Jid &, const QString &name, const QStringList &groups);
     void remove(const Jid &);
 
+    // XEP-0083
+    void getGroupsDelimiter();
+    void setGroupsDelimiter(const QString &groupsDelimiter);
+
     const Roster &roster() const;
+    QString       groupsDelimiter() const;
 
     QString toString() const;
     bool    fromString(const QString &);
@@ -106,6 +111,8 @@ public:
     bool take(const QDomElement &x);
 
 private:
+    enum Type { Get, Set, Remove, GetDelimiter, SetDelimiter, Unknown = -1 };
+
     int         type;
     QDomElement iq;
     Jid         to;

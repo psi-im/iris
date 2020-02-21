@@ -343,12 +343,13 @@ public:
     Private() = default;
 
     Roster             roster;
+    QString            groupsDelimiter;
     QList<QDomElement> itemList;
 };
 
 JT_Roster::JT_Roster(Task *parent) : Task(parent)
 {
-    type = -1;
+    type = Unknown;
     d    = new Private;
 }
 
@@ -356,7 +357,7 @@ JT_Roster::~JT_Roster() { delete d; }
 
 void JT_Roster::get()
 {
-    type = 0;
+    type = Get;
     // to = client()->host();
     iq                = createIQ(doc(), "get", to.full(), id());
     QDomElement query = doc()->createElementNS("jabber:iq:roster", "query");
@@ -365,7 +366,7 @@ void JT_Roster::get()
 
 void JT_Roster::set(const Jid &jid, const QString &name, const QStringList &groups)
 {
-    type = 1;
+    type = Set;
     // to = client()->host();
     QDomElement item = doc()->createElement("item");
     item.setAttribute("jid", jid.full());
@@ -378,7 +379,7 @@ void JT_Roster::set(const Jid &jid, const QString &name, const QStringList &grou
 
 void JT_Roster::remove(const Jid &jid)
 {
-    type = 1;
+    type = Remove;
     // to = client()->host();
     QDomElement item = doc()->createElement("item");
     item.setAttribute("jid", jid.full());
@@ -386,11 +387,46 @@ void JT_Roster::remove(const Jid &jid)
     d->itemList += item;
 }
 
+void JT_Roster::getGroupsDelimiter()
+{
+    type = GetDelimiter;
+    // to = client()->host();
+    iq = createIQ(doc(), "get", to.full(), id());
+
+    QDomElement roster = doc()->createElement("roster");
+    roster.setAttribute("xmlns", "roster:delimiter");
+
+    QDomElement query = doc()->createElement("query");
+    query.setAttribute("xmlns", "jabber:iq:private");
+    query.appendChild(roster);
+
+    iq.appendChild(query);
+}
+
+void JT_Roster::setGroupsDelimiter(const QString &groupsDelimiter)
+{
+    type = SetDelimiter;
+    // to = client()->host();
+    iq = createIQ(doc(), "set", to.full(), id());
+
+    QDomText text = doc()->createTextNode(groupsDelimiter);
+
+    QDomElement roster = doc()->createElement("roster");
+    roster.setAttribute("xmlns", "roster:delimiter");
+    roster.appendChild(text);
+
+    QDomElement query = doc()->createElement("query");
+    query.setAttribute("xmlns", "jabber:iq:private");
+    query.appendChild(roster);
+
+    iq.appendChild(query);
+}
+
 void JT_Roster::onGo()
 {
-    if (type == 0)
+    if (type == Get)
         send(iq);
-    else if (type == 1) {
+    else if (type == Set || type == Remove) {
         // to = client()->host();
         iq                = createIQ(doc(), "set", to.full(), id());
         QDomElement query = doc()->createElementNS("jabber:iq:roster", "query");
@@ -398,14 +434,20 @@ void JT_Roster::onGo()
         foreach (const QDomElement &it, d->itemList)
             query.appendChild(it);
         send(iq);
+    } else if (type == GetDelimiter) {
+        send(iq);
+    } else if (type == SetDelimiter) {
+        send(iq);
     }
 }
 
 const Roster &JT_Roster::roster() const { return d->roster; }
 
+QString JT_Roster::groupsDelimiter() const { return d->groupsDelimiter; }
+
 QString JT_Roster::toString() const
 {
-    if (type != 1)
+    if (type != Set)
         return "";
 
     QDomElement i = doc()->createElement("request");
@@ -413,7 +455,6 @@ QString JT_Roster::toString() const
     foreach (const QDomElement &it, d->itemList)
         i.appendChild(it);
     return lineEncode(Stream::xmlToString(i));
-    return "";
 }
 
 bool JT_Roster::fromString(const QString &str)
@@ -427,7 +468,7 @@ bool JT_Roster::fromString(const QString &str)
     if (e.tagName() != "request" || e.attribute("type") != "JT_Roster")
         return false;
 
-    type = 1;
+    type = Set;
     d->itemList.clear();
     for (QDomNode n = e.firstChild(); !n.isNull(); n = n.nextSibling()) {
         QDomElement i = n.toElement();
@@ -444,8 +485,7 @@ bool JT_Roster::take(const QDomElement &x)
     if (!iqVerify(x, client()->host(), id()))
         return false;
 
-    // get
-    if (type == 0) {
+    if (type == Get) {
         if (x.attribute("type") == "result") {
             QDomElement q = queryTag(x);
             d->roster     = xmlReadRoster(q, false);
@@ -455,18 +495,27 @@ bool JT_Roster::take(const QDomElement &x)
         }
 
         return true;
-    }
-    // set
-    else if (type == 1) {
+    } else if (type == Set) {
         if (x.attribute("type") == "result")
             setSuccess();
         else
             setError(x);
 
         return true;
-    }
-    // remove
-    else if (type == 2) {
+    } else if (type == Remove) {
+        setSuccess();
+        return true;
+    } else if (type == GetDelimiter) {
+        if (x.attribute("type") == "result") {
+            QDomElement q         = queryTag(x);
+            QDomElement delimiter = q.firstChild().toElement();
+            d->groupsDelimiter    = delimiter.firstChild().toText().data();
+            setSuccess();
+        } else {
+            setError(x);
+        }
+        return true;
+    } else if (type == SetDelimiter) {
         setSuccess();
         return true;
     }

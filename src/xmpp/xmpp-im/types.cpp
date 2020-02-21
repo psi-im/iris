@@ -2677,9 +2677,26 @@ bool RosterItem::fromXml(const QDomElement &item)
 //---------------------------------------------------------------------------
 // Roster
 //---------------------------------------------------------------------------
-Roster::Roster() : QList<RosterItem>() {}
+class Roster::Private {
+public:
+    QString groupsDelimiter;
+};
 
-Roster::~Roster() {}
+Roster::Roster() : QList<RosterItem>(), d(new Roster::Private) {}
+
+Roster::~Roster() { delete d; }
+
+Roster::Roster(const Roster &other) : QList<RosterItem>(other), d(new Roster::Private)
+{
+    d->groupsDelimiter = other.d->groupsDelimiter;
+}
+
+Roster &Roster::operator=(const Roster &other)
+{
+    QList<RosterItem>::operator=(other);
+    d->groupsDelimiter         = other.d->groupsDelimiter;
+    return *this;
+}
 
 Roster::Iterator Roster::find(const Jid &j)
 {
@@ -2700,6 +2717,10 @@ Roster::ConstIterator Roster::find(const Jid &j) const
 
     return end();
 }
+
+void Roster::setGroupsDelimiter(const QString &groupsDelimiter) { d->groupsDelimiter = groupsDelimiter; }
+
+QString Roster::groupsDelimiter() const { return d->groupsDelimiter; }
 
 //---------------------------------------------------------------------------
 // FormField

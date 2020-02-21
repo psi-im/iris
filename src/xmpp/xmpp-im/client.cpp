@@ -93,6 +93,8 @@
 #define vsnprintf _vsnprintf
 #endif
 
+#define GROUPS_DELIMITER_TIMEOUT 10
+
 namespace XMPP {
 //----------------------------------------------------------------------------
 // Client
@@ -883,15 +885,35 @@ void Client::pmMessage(const Message &m)
 
 void Client::prRoster(const Roster &r) { importRoster(r); }
 
-void Client::rosterRequest()
+void Client::rosterRequest(bool withGroupsDelimiter)
 {
     if (!d->active)
         return;
 
     JT_Roster *r = new JT_Roster(rootTask());
-    connect(r, SIGNAL(finished()), SLOT(slotRosterRequestFinished()));
-    r->get();
-    d->roster.flagAllForDelete(); // mod_groups patch
+    if (withGroupsDelimiter) {
+        connect(r, &JT_Roster::finished, this, [this, r]() mutable {
+            if (r->success()) {
+                d->roster.setGroupsDelimiter(r->groupsDelimiter());
+                emit rosterGroupsDelimiterRequestFinished(r->groupsDelimiter());
+            }
+
+            r = new JT_Roster(rootTask());
+            connect(r, SIGNAL(finished()), SLOT(slotRosterRequestFinished()));
+            r->get();
+            d->roster.flagAllForDelete(); // mod_groups patch
+            r->go(true);
+        });
+        r->getGroupsDelimiter();
+        // WORKAROUND: Some bad servers (Facebook for example) don't respond
+        // on groups delimiter request. Wait timeout and go ahead.
+        r->setTimeout(GROUPS_DELIMITER_TIMEOUT);
+    } else {
+        connect(r, SIGNAL(finished()), SLOT(slotRosterRequestFinished()));
+        r->get();
+        d->roster.flagAllForDelete(); // mod_groups patch
+    }
+
     r->go(true);
 }
 
@@ -1249,10 +1271,25 @@ void LiveRosterItem::setFlagForDelete(bool b) { v_flagForDelete = b; }
 //---------------------------------------------------------------------------
 // LiveRoster
 //---------------------------------------------------------------------------
-LiveRoster::LiveRoster() : QList<LiveRosterItem>() {}
+class LiveRoster::Private {
+public:
+    QString groupsDelimiter;
+};
 
-LiveRoster::~LiveRoster() {}
+LiveRoster::LiveRoster() : QList<LiveRosterItem>(), d(new LiveRoster::Private) {}
+LiveRoster::LiveRoster(const LiveRoster &other) : QList<LiveRosterItem>(other), d(new LiveRoster::Private)
+{
+    d->groupsDelimiter = other.d->groupsDelimiter;
+}
 
+LiveRoster::~LiveRoster() { delete d; }
+
+LiveRoster &LiveRoster::operator=(const LiveRoster &other)
+{
+    QList<LiveRosterItem>::operator=(other);
+    d->groupsDelimiter             = other.d->groupsDelimiter;
+    return *this;
+}
 void LiveRoster::flagAllForDelete()
 {
     for (Iterator it = begin(); it != end(); ++it)
@@ -1278,5 +1315,9 @@ LiveRoster::ConstIterator LiveRoster::find(const Jid &j, bool compareRes) const
     }
     return it;
 }
+
+void LiveRoster::setGroupsDelimiter(const QString &groupsDelimiter) { d->groupsDelimiter = groupsDelimiter; }
+
+QString LiveRoster::groupsDelimiter() const { return d->groupsDelimiter; }
 
 }
