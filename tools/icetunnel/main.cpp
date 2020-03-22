@@ -581,6 +581,8 @@ public:
 
         ice->setComponentCount(opt_channels);
         ice->setLocalCandidateTrickle(false);
+        ice->setAggressiveNomination(true);          // TODO
+        ice->setExpectRemoteCandidatesSignal(false); // TODO
 
         if (!stunAddr.isNull()) {
             if (opt_stunType == Basic || opt_stunType == Auto)

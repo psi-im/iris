@@ -422,8 +422,8 @@ private slots:
     {
         ObjectSessionWatcher watch(&sess);
 
-        QList<Datagram> dreads;
-        QList<Datagram> rreads;
+        QList<Datagram> dreads; // direct
+        QList<Datagram> rreads; // relayed
 
         while (sock->hasPendingDatagrams()) {
             QHostAddress from;
@@ -684,6 +684,10 @@ void IceLocalTransport::setStunRelayService(const QHostAddress &addr, int port, 
     d->stunUser      = user;
     d->stunPass      = pass;
 }
+
+bool IceLocalTransport::hasStunBindService() const { return !d->stunBindAddr.isNull(); }
+
+bool IceLocalTransport::hasStunRelayService() const { return !d->stunRelayAddr.isNull(); }
 
 void IceLocalTransport::stunStart() { d->stunStart(); }
 

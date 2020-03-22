@@ -204,6 +204,8 @@ void StunBinding::setPriority(quint32 i)
 
 void StunBinding::setUseCandidate(bool enabled) { d->extUseCandidate = enabled; }
 
+bool StunBinding::useCandidate() const { return d->extUseCandidate; }
+
 void StunBinding::setIceControlling(quint64 i)
 {
     d->use_extIceControlling = true;

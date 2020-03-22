@@ -58,6 +58,9 @@ public:
     void setStunBindService(const QHostAddress &addr, int port);
     void setStunRelayService(const QHostAddress &addr, int port, const QString &user, const QCA::SecureArray &pass);
 
+    bool hasStunBindService() const;
+    bool hasStunRelayService() const;
+
     // obtain relay / reflexive
     void stunStart();
 

@@ -49,6 +49,7 @@ public:
 
     QHostAddress relayedAddress() const;
     int          relayedPort() const;
+    bool         isStarted() const;
 
     TurnClient::Error turnErrorCode() const;
 

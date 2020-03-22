@@ -91,12 +91,14 @@ public:
     IceComponent(int id, QObject *parent = nullptr);
     ~IceComponent();
 
-    int id() const;
+    int  id() const;
+    bool isGatheringComplete() const;
 
     void setClientSoftwareNameAndVersion(const QString &str);
     void setProxy(const TurnClient::Proxy &proxy);
 
-    void setPortReserver(UdpPortReserver *portReserver);
+    void             setPortReserver(UdpPortReserver *portReserver);
+    UdpPortReserver *portReserver() const;
 
     // can be set once, but later changes are ignored
     void setLocalAddresses(const QList<Ice176::LocalAddress> &addrs);
@@ -112,12 +114,17 @@ public:
 
     // these all start out enabled, but can be disabled for diagnostic
     //   purposes
-    void setUseLocal(bool enabled);
+    void setUseLocal(bool enabled); // where to make local host candidates
     void setUseStunBind(bool enabled);
     void setUseStunRelayUdp(bool enabled);
     void setUseStunRelayTcp(bool enabled);
 
-    // if socketList is not null then port reserver must be set
+    /**
+     * @brief update component with local listening sockets
+     * @param socketList
+     * If socketList is not null then port reserver must be set.
+     * If the pool doesn't have enough sockets, the component will allocate its own.
+     */
     void update(QList<QUdpSocket *> *socketList = nullptr);
     void stop();
 
@@ -139,6 +146,9 @@ signals:
     // indicates all the initial HostType candidates have been pushed.
     //   note that it is possible there are no HostType candidates.
     void localFinished();
+
+    // no more candidates will be emitted unless network candidition changes
+    void gatheringComplete();
 
     void stopped();
 
