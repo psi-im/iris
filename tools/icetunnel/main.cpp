@@ -522,6 +522,8 @@ public:
                 }
             }*/
             foreach (const QNetworkInterface &ni, QNetworkInterface::allInterfaces()) {
+                if (!(ni.flags() & QNetworkInterface::IsUp))
+                    continue;
                 QList<QNetworkAddressEntry> entries = ni.addressEntries();
                 foreach (const QNetworkAddressEntry &na, entries) {
                     QHostAddress h = na.ip();

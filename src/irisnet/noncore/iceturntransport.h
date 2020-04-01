@@ -23,12 +23,13 @@
 #include "turnclient.h"
 
 #include <QByteArray>
+#include <QEnableSharedFromThis>
 #include <QHostAddress>
 #include <QObject>
 
 namespace XMPP {
 // for the turn transport, only path 0 is used
-class IceTurnTransport : public IceTransport {
+class IceTurnTransport : public IceTransport, public QEnableSharedFromThis<IceTurnTransport> {
     Q_OBJECT
 
 public:

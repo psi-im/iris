@@ -43,10 +43,8 @@ public:
     class LocalAddress {
     public:
         QHostAddress addr;
-        int          network; // -1 = unknown
-        bool         isVpn;
-
-        LocalAddress() : network(-1), isVpn(false) {}
+        int          network = -1; // -1 = unknown
+        bool         isVpn   = false;
     };
 
     class ExternalAddress {

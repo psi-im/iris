@@ -49,6 +49,7 @@ public:
 
     void start();
     void start(const QHostAddress &addr, int port); // use addr association
+    void cancel();
 
     QHostAddress reflexiveAddress() const;
     int          reflexivePort() const;

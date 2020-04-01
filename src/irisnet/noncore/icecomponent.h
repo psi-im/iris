@@ -54,6 +54,7 @@ public:
         }
 
         inline bool operator!=(const TransportAddress &other) const { return !operator==(other); }
+        inline      operator QString() const { return QString("%1:%2").arg(addr.toString(), QString::number(port)); }
     };
 
     class CandidateInfo {
@@ -67,6 +68,10 @@ public:
         TransportAddress related;
         QString          id;
         int              network;
+
+        static CandidateInfo makeRemotePrflx(int componentId, const QHostAddress &fromAddr, quint16 fromPort,
+                                             quint32 priority);
+        inline bool isSame(const CandidateInfo &o) const { return addr == o.addr && componentId == o.componentId; }
     };
 
     class Candidate {
@@ -82,8 +87,8 @@ public:
         CandidateInfo info;
 
         // note that these may be the same for multiple candidates
-        IceTransport *iceTransport;
-        int           path;
+        QSharedPointer<IceTransport> iceTransport;
+        int                          path;
     };
 
     enum DebugLevel { DL_None, DL_Info, DL_Packet };
@@ -129,7 +134,7 @@ public:
     void stop();
 
     // prflx priority to use when replying from this transport/path
-    int peerReflexivePriority(const IceTransport *iceTransport, int path) const;
+    int peerReflexivePriority(QSharedPointer<IceTransport> iceTransport, int path) const;
 
     void flagPathAsLowOverhead(int id, const QHostAddress &addr, int port);
 

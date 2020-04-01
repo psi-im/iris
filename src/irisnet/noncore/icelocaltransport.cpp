@@ -198,9 +198,9 @@ public:
         turn          = nullptr;
         turnActivated = false;
 
-        if (sock) {
+        if (sock) { // if started
             if (extSock) {
-                sock->release();
+                sock->release(); // detaches the socket but doesn't destroy
                 extSock = nullptr;
             }
 
@@ -240,7 +240,7 @@ public:
         stopping = true;
 
         if (turn)
-            turn->close();
+            turn->close(); // will emit stopped() eventually calling postStop()
         else
             sess.defer(this, "postStop");
     }
