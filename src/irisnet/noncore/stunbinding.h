@@ -36,11 +36,12 @@ public:
     ~StunBinding();
 
     // for ICE-use only
-    void setPriority(quint32 i);
-    void setUseCandidate(bool enabled);
-    bool useCandidate() const;
-    void setIceControlling(quint64 i);
-    void setIceControlled(quint64 i);
+    void    setPriority(quint32 i);
+    quint32 priority() const;
+    void    setUseCandidate(bool enabled);
+    bool    useCandidate() const;
+    void    setIceControlling(quint64 i);
+    void    setIceControlled(quint64 i);
 
     void setShortTermUsername(const QString &username);
     void setShortTermPassword(const QString &password);

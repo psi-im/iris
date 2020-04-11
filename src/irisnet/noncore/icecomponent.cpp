@@ -18,6 +18,7 @@
 
 #include "icecomponent.h"
 
+#include "iceagent.h"
 #include "icelocaltransport.h"
 #include "iceturntransport.h"
 #include "objectsession.h"
@@ -352,6 +353,34 @@ public:
         }
     }
 
+    void addLocalPeerReflexiveCandidate(const IceComponent::TransportAddress &addr,
+                                        const IceComponent::CandidateInfo &base, quint32 priority)
+    {
+        IceComponent::CandidateInfo ci;
+        ci.addr = addr;
+        ci.addr.addr.setScopeId(QString());
+        ci.base        = base.addr;
+        ci.type        = IceComponent::PeerReflexiveType;
+        ci.priority    = priority;
+        ci.foundation  = IceAgent::instance()->foundation(IceComponent::PeerReflexiveType, ci.base.addr);
+        ci.componentId = base.componentId;
+        ci.network     = base.network;
+
+        auto baseCand = std::find_if(localCandidates.begin(), localCandidates.end(),
+                                     [&](auto const &c) { return c.info.id == base.id; });
+        Q_ASSERT(baseCand != localCandidates.end());
+
+        Candidate c;
+        c.id           = getId();
+        c.info         = ci;
+        c.iceTransport = baseCand->iceTransport;
+        c.path         = 0;
+
+        localCandidates += c;
+
+        emit q->candidateAdded(c);
+    }
+
 private:
     // localPref is the priority of the network interface being used for
     //   this candidate.  the value must be between 0-65535 and different
@@ -427,6 +456,7 @@ private:
             ci.base.addr   = lt->sock->localAddress();
             ci.base.port   = lt->sock->localPort();
             ci.network     = lt->network;
+            ci.foundation  = IceAgent::instance()->foundation(ServerReflexiveType, ci.base.addr);
 
             Candidate c;
             c.id           = getId();
@@ -476,8 +506,8 @@ private slots:
             return;
 
         auto checkFinished = [&](const LocalTransport *lt) {
-            return lt->started && (!lt->sock->hasStunBindService() || lt->stun_finished)
-                && (!lt->sock->hasStunRelayService() || lt->turn_finished);
+            return lt->started && (lt->sock->stunBindServiceAddress().isNull() || lt->stun_finished)
+                && (lt->sock->stunRelayServiceAddress().isNull() || lt->turn_finished);
         };
 
         bool allFinished = true;
@@ -526,6 +556,7 @@ private slots:
             ci.priority    = choose_default_priority(ci.type, 65535 - addrAt, lt->isVpn, ci.componentId);
             ci.base        = ci.addr;
             ci.network     = lt->network;
+            ci.foundation  = IceAgent::instance()->foundation(HostType, ci.base.addr);
 
             Candidate c;
             c.id           = getId();
@@ -634,16 +665,14 @@ private slots:
             CandidateInfo ci;
             ci.addr.addr   = lt->sock->serverReflexiveAddress();
             ci.addr.port   = lt->sock->serverReflexivePort();
+            ci.base.addr   = lt->sock->localAddress();
+            ci.base.port   = lt->sock->localPort();
             ci.type        = ServerReflexiveType;
             ci.componentId = id;
             ci.priority    = choose_default_priority(ci.type, 65535 - addrAt, lt->isVpn, ci.componentId);
-            // stun is only used on non-leap sockets, but we don't
-            //   announce non-leap local candidates, so make the
-            //   base the same as the srflx
-            // ci.base.addr = lt->sock->localAddress();
-            // ci.base.port = lt->sock->localPort();
-            ci.base    = ci.addr;
-            ci.network = lt->network;
+            ci.network     = lt->network;
+            ci.foundation  = IceAgent::instance()->foundation(
+                ServerReflexiveType, ci.base.addr, lt->sock->reflexiveAddressSource(), QAbstractSocket::UdpSocket);
 
             Candidate c;
             c.id           = getId();
@@ -663,12 +692,14 @@ private slots:
             CandidateInfo ci;
             ci.addr.addr   = lt->sock->relayedAddress();
             ci.addr.port   = lt->sock->relayedPort();
+            ci.base.addr   = lt->sock->relayedAddress();
+            ci.base.port   = lt->sock->relayedPort();
             ci.type        = RelayedType;
             ci.componentId = id;
             ci.priority    = choose_default_priority(ci.type, 65535 - addrAt, lt->isVpn, ci.componentId);
-            ci.base.addr   = lt->sock->serverReflexiveAddress();
-            ci.base.port   = lt->sock->serverReflexivePort();
             ci.network     = lt->network;
+            ci.foundation  = IceAgent::instance()->foundation(
+                RelayedType, ci.base.addr, lt->sock->stunRelayServiceAddress(), QAbstractSocket::UdpSocket);
 
             Candidate c;
             c.id           = getId();
@@ -725,6 +756,8 @@ private slots:
         ci.priority    = choose_default_priority(ci.type, 65535 - addrAt, false, ci.componentId);
         ci.base        = ci.addr;
         ci.network     = 0; // not relevant
+        ci.foundation  = IceAgent::instance()->foundation(RelayedType, ci.base.addr, config.stunRelayTcpAddr,
+                                                         QAbstractSocket::TcpSocket);
 
         Candidate c;
         c.id           = getId();
@@ -834,6 +867,12 @@ void IceComponent::stop() { d->stop(); }
 int IceComponent::peerReflexivePriority(QSharedPointer<IceTransport> iceTransport, int path) const
 {
     return d->peerReflexivePriority(iceTransport, path);
+}
+
+void IceComponent::addLocalPeerReflexiveCandidate(const IceComponent::TransportAddress &addr,
+                                                  const IceComponent::CandidateInfo &base, quint32 priority)
+{
+    d->addLocalPeerReflexiveCandidate(addr, base, priority);
 }
 
 void IceComponent::flagPathAsLowOverhead(int id, const QHostAddress &addr, int port)

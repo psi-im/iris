@@ -197,6 +197,8 @@ void StunBinding::setPriority(quint32 i)
     d->extPriority     = i;
 }
 
+quint32 StunBinding::priority() const { return d->extPriority; }
+
 void StunBinding::setUseCandidate(bool enabled) { d->extUseCandidate = enabled; }
 
 bool StunBinding::useCandidate() const { return d->extUseCandidate; }

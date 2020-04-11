@@ -19,6 +19,7 @@
 
 #include "ice176.h"
 
+#include "iceagent.h"
 #include "icecomponent.h"
 #include "icelocaltransport.h"
 #include "iceturntransport.h"
@@ -36,29 +37,6 @@
 
 namespace XMPP {
 enum { Direct, Relayed };
-
-static QChar randomPrintableChar()
-{
-    // 0-25 = a-z
-    // 26-51 = A-Z
-    // 52-61 = 0-9
-
-    uchar c = QCA::Random::randomChar() % 62;
-    if (c <= 25)
-        return 'a' + c;
-    else if (c <= 51)
-        return 'A' + (c - 26);
-    else
-        return '0' + (c - 52);
-}
-
-static QString randomCredential(int len)
-{
-    QString out;
-    for (int n = 0; n < len; ++n)
-        out += randomPrintableChar();
-    return out;
-}
 
 static qint64 calc_pair_priority(int a, int b)
 {
@@ -150,6 +128,7 @@ public:
     public:
         QList<QSharedPointer<CandidatePair>> pairs;
         QQueue<QWeakPointer<CandidatePair>>  triggeredPairs;
+        QList<QSharedPointer<CandidatePair>> validPairs;
         CheckListState                       state;
     };
 
@@ -194,7 +173,7 @@ public:
     bool                               useStunRelayUdp              = true;
     bool                               useStunRelayTcp              = true;
     bool                               useTrickle                   = true;
-    bool                               aggressiveNomination         = false; // RFC 8445 compliant de default
+    bool                               aggressiveNomination         = false; // RFC8445 compliant de default
     bool                               localGatheringComplete       = false;
     bool                               remoteGatheringComplete      = false;
     bool                               expectRemoteCandidatesSignal = true;
@@ -281,8 +260,8 @@ public:
 
         state = Starting;
 
-        localUser = randomCredential(4);
-        localPass = randomCredential(22);
+        localUser = IceAgent::randomCredential(4);
+        localPass = IceAgent::randomCredential(22);
 
         QList<QUdpSocket *> socketList;
         if (portReserver)
@@ -374,7 +353,7 @@ public:
             ci.network = c.network;
             ci.id      = c.id;
 
-            // find remote prflx with same addr. we have to replace them instead adding new one. RFC 8445 7.3.1.3
+            // find remote prflx with same addr. we have to replace them instead adding new one. RFC8445 7.3.1.3
             auto it = std::find_if(this->remoteCandidates.begin(), this->remoteCandidates.end(),
                                    [&](const IceComponent::CandidateInfo &rc) {
                                        return ci.addr.addr == rc.addr.addr && ci.addr.port == rc.addr.port
@@ -560,6 +539,11 @@ public:
         QList<QSharedPointer<CandidatePair>> pairs;
         for (const IceComponent::Candidate &cc : localCandidates) {
             const IceComponent::CandidateInfo &lc = cc.info;
+            if (lc.type == IceComponent::PeerReflexiveType) {
+                printf("not pairing local prflx. %s\n", qPrintable(lc.addr));
+                // see RFC8445 7.2.5.3.1.  Discovering Peer-Reflexive Candidates
+                continue;
+            }
 
             for (const IceComponent::CandidateInfo &rc : remoteCandidates) {
                 auto pair = makeCandidatesPair(lc, rc);
@@ -819,6 +803,17 @@ private:
         out.type     = candidateType_to_string(cc.info.type);
     }
 
+    QString generateIdForCandidate()
+    {
+        QString id;
+        do {
+            id = IceAgent::randomCredential(10);
+        } while (std::find_if(localCandidates.begin(), localCandidates.end(),
+                              [&id](auto const &c) { return c.info.id == id; })
+                 != localCandidates.end());
+        return id;
+    }
+
 private slots:
     void postStop()
     {
@@ -829,15 +824,13 @@ private slots:
     void ic_candidateAdded(const XMPP::IceComponent::Candidate &_cc)
     {
         IceComponent::Candidate cc = _cc;
-        cc.info.id                 = randomCredential(10); // FIXME: ensure unique
-        cc.info.foundation         = "0";                  // FIXME
-        // TODO
+
+        cc.info.id = generateIdForCandidate();
+
         localCandidates += cc;
 
-        QList<IceComponent::Candidate> update;
-        update << cc;
-
-        printf("C%d: candidate added: %s;%d\n", cc.info.componentId, qPrintable(cc.info.addr.addr.toString()),
+        printf("C%d: candidate added: %s %s;%d\n", cc.info.componentId,
+               qPrintable(candidateType_to_string(cc.info.type)), qPrintable(cc.info.addr.addr.toString()),
                cc.info.addr.port);
 
         if (!iceTransports.contains(cc.iceTransport)) {
@@ -858,7 +851,7 @@ private slots:
             emit q->localCandidatesReady(list);
         }
         if (state == Started) {
-            doPairing(update, remoteCandidates);
+            doPairing(QList<IceComponent::Candidate>() << cc, remoteCandidates);
         }
     }
 
@@ -1179,6 +1172,14 @@ private slots:
 
     void binding_success()
     {
+        /*
+            RFC8445 7.2.5.2.1.  Non-Symmetric Transport Addresses
+            tells us addr:port of source->dest of request MUST match with dest<-source of the response,
+            and we should mark the pair as failed if doesn't match.
+            But StunTransaction already does this for us in its checkActiveAndFrom.
+            So it will fail with timeout instead if response comes from a wrong address.
+        */
+
         StunBinding *binding = static_cast<StunBinding *>(sender());
 
         auto it = std::find_if(checkList.pairs.begin(), checkList.pairs.end(),
@@ -1186,11 +1187,52 @@ private slots:
         if (it == checkList.pairs.constEnd())
             return;
 
-        auto pair     = *it;
-        pair->isValid = true;
-        pair->state   = CandidatePairState::PSucceeded;
+        auto pair = *it;
+        // pair->isValid = true;
+        pair->state = CandidatePairState::PSucceeded;
 
         printf("check success for %s\n", qPrintable(QString(*pair)));
+
+        // RFC8445 7.2.5.3.1.  Discovering Peer-Reflexive Candidates
+        auto mappedAddr = IceComponent::TransportAddress(binding->reflexiveAddress(), binding->reflexivePort());
+        if (pair->local.addr != mappedAddr) {
+            // so mapped address doesn't match with local candidate sending binding request.
+            // gotta find/create one
+            auto locIt = std::find_if(localCandidates.begin(), localCandidates.end(), [&](const auto &c) {
+                return c.info.base == mappedAddr || c.info.addr == mappedAddr;
+            });
+            if (locIt == localCandidates.end()) {
+                // new peer-reflexive local candidate discovered
+                components[pair->local.componentId].ic->addLocalPeerReflexiveCandidate(mappedAddr, pair->local,
+                                                                                       binding->priority());
+                locIt = std::find_if(localCandidates.begin(), localCandidates.end(),
+                                     [&](const auto &c) { return c.info.addr == mappedAddr; }); // just inserted
+                Q_ASSERT(locIt != localCandidates.end());
+                pair = makeCandidatesPair(locIt->info, pair->remote);
+                // TODO start media flow on valid pair
+            } else {
+                // local candidate found. If it's a part of a pair on checklist, we have to add this pair to valid list,
+                // otherwise we have to create a new pair and add it to valid list
+                it = std::find_if(checkList.pairs.begin(), checkList.pairs.end(), [&](auto const &p) {
+                    return p->local.id == locIt->info.id && p->remote.addr == pair->remote.addr;
+                });
+                if (it == checkList.pairs.constEnd()) {
+                    pair = makeCandidatesPair(locIt->info, pair->remote);
+                } else {
+                    pair = *it;
+                    printf("mapped address belongs to another pair on checklist %s\n", qPrintable(QString(*pair)));
+                    if (pair->isValid) { // already valid as result of previous checks probably
+                        return;
+                    }
+                }
+            }
+        }
+
+        pair->isValid = true;
+        pair->state   = PSucceeded; // what if it was in progress?
+        checkList.validPairs.append(pair);
+
+        // TODO add *locIt and pair.remote to valid list
 
         if (mode == Ice176::Initiator) {
             if (!binding->useCandidate())

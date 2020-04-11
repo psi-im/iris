@@ -102,29 +102,6 @@ namespace XMPP { namespace Jingle { namespace ICE {
         return out;
     }
 
-    static QChar randomPrintableChar()
-    {
-        // 0-25 = a-z
-        // 26-51 = A-Z
-        // 52-61 = 0-9
-
-        uchar c = QCA::Random::randomChar() % 62;
-        if (c <= 25)
-            return 'a' + c;
-        else if (c <= 51)
-            return 'A' + (c - 26);
-        else
-            return '0' + (c - 52);
-    }
-
-    static QString randomCredential(int len)
-    {
-        QString out;
-        for (int n = 0; n < len; ++n)
-            out += randomPrintableChar();
-        return out;
-    }
-
     // resolve external address and stun server
     // TODO: resolve hosts and start ice engine simultaneously
     // FIXME: when/if our ICE engine supports adding these dynamically, we should

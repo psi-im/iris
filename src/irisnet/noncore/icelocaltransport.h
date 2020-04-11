@@ -59,8 +59,8 @@ public:
     void setStunBindService(const QHostAddress &addr, int port);
     void setStunRelayService(const QHostAddress &addr, int port, const QString &user, const QCA::SecureArray &pass);
 
-    bool hasStunBindService() const;
-    bool hasStunRelayService() const;
+    QHostAddress stunBindServiceAddress() const;
+    QHostAddress stunRelayServiceAddress() const;
 
     // obtain relay / reflexive
     void stunStart();
@@ -70,6 +70,7 @@ public:
 
     QHostAddress serverReflexiveAddress() const;
     int          serverReflexivePort() const;
+    QHostAddress reflexiveAddressSource() const; // address of stun/turn server provided the srflx
 
     QHostAddress relayedAddress() const;
     int          relayedPort() const;

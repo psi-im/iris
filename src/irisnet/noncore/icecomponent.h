@@ -59,15 +59,17 @@ public:
 
     class CandidateInfo {
     public:
-        TransportAddress addr;
-        CandidateType    type;
-        int              priority;
-        QString          foundation;
-        int              componentId;
-        TransportAddress base;
-        TransportAddress related;
-        QString          id;
-        int              network;
+        CandidateType type;
+        int           priority;
+        int           componentId;
+        int           network;
+
+        TransportAddress addr;    // address according to candidate type
+        TransportAddress base;    // network interface address
+        TransportAddress related; // not used in agent but usefule for diagnostics
+
+        QString foundation;
+        QString id;
 
         static CandidateInfo makeRemotePrflx(int componentId, const QHostAddress &fromAddr, quint16 fromPort,
                                              quint32 priority);
@@ -135,6 +137,8 @@ public:
 
     // prflx priority to use when replying from this transport/path
     int peerReflexivePriority(QSharedPointer<IceTransport> iceTransport, int path) const;
+
+    void addLocalPeerReflexiveCandidate(const TransportAddress &addr, const CandidateInfo &base, quint32 priority);
 
     void flagPathAsLowOverhead(int id, const QHostAddress &addr, int port);
 
