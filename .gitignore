@@ -17,3 +17,5 @@ object_script.*
 /bin
 /lib
 /plugins
+build-*
+*.pro.user*
