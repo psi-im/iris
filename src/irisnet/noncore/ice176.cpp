@@ -810,7 +810,8 @@ private:
 
         state = Started;
         emit q->started();
-        doPairing(localCandidates, remoteCandidates);
+        if (mode == Responder)
+            doPairing(localCandidates, remoteCandidates);
     }
 
     QString generateIdForCandidate()
@@ -1206,8 +1207,8 @@ private slots:
             if (locIt == localCandidates.end()) {
                 // RFC8445 7.2.5.3.1.  Discovering Peer-Reflexive Candidates
                 // new peer-reflexive local candidate discovered
-                components[pair->local.componentId].ic->addLocalPeerReflexiveCandidate(mappedAddr, pair->local,
-                                                                                       binding->priority());
+                components[findComponent(pair->local.componentId)].ic->addLocalPeerReflexiveCandidate(
+                    mappedAddr, pair->local, binding->priority());
                 locIt = std::find_if(localCandidates.begin(), localCandidates.end(),
                                      [&](const auto &c) { return c.info.addr == mappedAddr; }); // just inserted
                 Q_ASSERT(locIt != localCandidates.end());
