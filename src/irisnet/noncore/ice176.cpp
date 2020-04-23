@@ -1028,33 +1028,14 @@ private slots:
 
                 StunMessage response;
                 response.setClass(StunMessage::SuccessResponse);
-                response.setMethod(0x001);
+                response.setMethod(StunTypes::Binding);
                 response.setId(msg.id());
-
-                quint16       port16 = fromPort;
-                quint32       addr4  = fromAddr.toIPv4Address();
-                QByteArray    val(8, 0);
-                quint8 *      p     = (quint8 *)val.data();
-                const quint8 *magic = response.magic();
-                p[0]                = 0;
-                p[1]                = 0x01;
-                p[2]                = (port16 >> 8) & 0xff;
-                p[2] ^= magic[0];
-                p[3] = port16 & 0xff;
-                p[3] ^= magic[1];
-                p[4] = (addr4 >> 24) & 0xff;
-                p[4] ^= magic[0];
-                p[5] = (addr4 >> 16) & 0xff;
-                p[5] ^= magic[1];
-                p[6] = (addr4 >> 8) & 0xff;
-                p[6] ^= magic[2];
-                p[7] = addr4 & 0xff;
-                p[7] ^= magic[3];
 
                 QList<StunMessage::Attribute> list;
                 StunMessage::Attribute        attr;
-                attr.type  = 0x0020; // XOR-MAPPED-ADDRESS / rfc5389
-                attr.value = val;
+                attr.type = StunTypes::XOR_MAPPED_ADDRESS;
+                attr.value
+                    = StunTypes::createXorPeerAddress(fromAddr, quint16(fromPort), response.magic(), response.id());
                 list += attr;
 
                 response.setAttributes(list);
