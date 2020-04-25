@@ -624,7 +624,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
 
             if (!strList.isEmpty()) {
                 printf("Host addresses:\n");
-                foreach (const QString &s, strList)
+                for (const QString &s : strList)
                     printf("  %s\n", qPrintable(s));
             }
 
