@@ -149,11 +149,11 @@ static bool cert_match_domain(const QString &certname, const QString &acedomain)
         return false;
 
     // don't allow empty parts
-    for (const QString &s: parts_name) {
+    for (const QString &s : parts_name) {
         if (s.isEmpty())
             return false;
     }
-    for (const QString &s: parts_compare) {
+    for (const QString &s : parts_compare) {
         if (s.isEmpty())
             return false;
     }
@@ -220,19 +220,19 @@ static bool matchesHostName(const QCA::Certificate &cert, const QString &host)
     if (!ipaddr.isEmpty()) // ip address
     {
         // check iPAddress
-        for (const QString &s: cert.subjectInfo().values(IPAddress)) {
+        for (const QString &s : cert.subjectInfo().values(IPAddress)) {
             if (cert_match_ipaddress(s, ipaddr))
                 return true;
         }
 
         // check dNSName
-        for (const QString &s: cert.subjectInfo().values(DNS)) {
+        for (const QString &s : cert.subjectInfo().values(DNS)) {
             if (cert_match_ipaddress(s, ipaddr))
                 return true;
         }
 
         // check commonName
-        for (const QString &s: cert.subjectInfo().values(CommonName)) {
+        for (const QString &s : cert.subjectInfo().values(CommonName)) {
             if (cert_match_ipaddress(s, ipaddr))
                 return true;
         }
@@ -257,13 +257,13 @@ static bool matchesHostName(const QCA::Certificate &cert, const QString &host)
             return false;
 
         // check dNSName
-        for (const QString &s: cert.subjectInfo().values(DNS)) {
+        for (const QString &s : cert.subjectInfo().values(DNS)) {
             if (cert_match_domain(s, name))
                 return true;
         }
 
         // check commonName
-        for (const QString &s: cert.subjectInfo().values(CommonName)) {
+        for (const QString &s : cert.subjectInfo().values(CommonName)) {
             if (cert_match_domain(s, name))
                 return true;
         }
@@ -275,9 +275,9 @@ static bool matchesHostName(const QCA::Certificate &cert, const QString &host)
 //----------------------------------------------------------------------------
 // TLSHandler
 //----------------------------------------------------------------------------
-TLSHandler::TLSHandler(QObject *parent) : QObject(parent) {}
+TLSHandler::TLSHandler(QObject *parent) : QObject(parent) { }
 
-TLSHandler::~TLSHandler() {}
+TLSHandler::~TLSHandler() { }
 
 //----------------------------------------------------------------------------
 // QCATLSHandler
@@ -319,7 +319,7 @@ bool QCATLSHandler::certMatchesHostname()
 
     Jid host(d->host);
 
-    for (const QString &idOnXmppAddr: peerCert.primary().subjectInfo().values(QCA::XMPP)) {
+    for (const QString &idOnXmppAddr : peerCert.primary().subjectInfo().values(QCA::XMPP)) {
         if (host.compare(Jid(idOnXmppAddr)))
             return true;
     }

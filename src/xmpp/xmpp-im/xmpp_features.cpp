@@ -29,7 +29,7 @@
 
 using namespace XMPP;
 
-Features::Features() {}
+Features::Features() { }
 
 Features::Features(const QStringList &l) { setList(l); }
 
@@ -43,7 +43,7 @@ Features::Features(const QString &str)
     setList(l);
 }
 
-Features::~Features() {}
+Features::~Features() { }
 
 QStringList Features::list() const { return _list.toList(); }
 
