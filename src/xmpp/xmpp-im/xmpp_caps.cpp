@@ -322,7 +322,7 @@ void CapsManager::updateDisco(const Jid &jid, const DiscoItem &item)
 void CapsManager::capsRegistered(const CapsSpec &cs)
 {
     // Notify affected jids.
-    foreach (const QString &s, capsJids_[cs.flatten()]) {
+    for (const QString &s: capsJids_[cs.flatten()]) {
         // qDebug() << QString("caps.cpp: Notifying %1.").arg(s.replace('%',"%%"));
         emit capsChanged(s);
     }

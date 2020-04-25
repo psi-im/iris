@@ -500,7 +500,7 @@ QByteArray HttpProxyPost::body() const { return d->body; }
 
 QString HttpProxyPost::getHeader(const QString &var) const
 {
-    foreach (const QString &s, d->headerLines) {
+    for (const QString &s: d->headerLines) {
         int n = s.indexOf(": ");
         if (n == -1)
             continue;
@@ -773,7 +773,7 @@ void HttpProxyGetStream::stop() { resetConnection(); }
 
 QString HttpProxyGetStream::getHeader(const QString &var) const
 {
-    foreach (const QString &s, d->headerLines) {
+    for (const QString &s: d->headerLines) {
         int n = s.indexOf(": ");
         if (n == -1)
             continue;

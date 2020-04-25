@@ -127,7 +127,7 @@ namespace XMPP { namespace Jingle { namespace S5B {
 
         void connectToHost(const QHostAddress &proxyHost, int proxyPort, const QString &host, bool udpMode)
         {
-            foreach (const QNetworkInterface &ni, QNetworkInterface::allInterfaces()) {
+            for (const QNetworkInterface &ni: QNetworkInterface::allInterfaces()) {
                 if (!(ni.flags() & (QNetworkInterface::IsUp | QNetworkInterface::IsRunning))) {
                     continue;
                 }
@@ -135,7 +135,7 @@ namespace XMPP { namespace Jingle { namespace S5B {
                     continue;
                 }
                 QList<QNetworkAddressEntry> entries = ni.addressEntries();
-                foreach (const QNetworkAddressEntry &na, entries) {
+                for (const QNetworkAddressEntry &na: entries) {
                     QHostAddress ha = na.ip();
                     if (ha.protocol() == QAbstractSocket::IPv6Protocol &&
 #if QT_VERSION >= QT_VERSION_CHECK(5, 11, 0)

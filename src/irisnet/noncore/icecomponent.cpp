@@ -423,7 +423,7 @@ private:
     {
         for (int n = 0;; ++n) {
             bool found = false;
-            foreach (const Candidate &c, localCandidates) {
+            for (const Candidate &c : localCandidates) {
                 if (c.id == n) {
                     found = true;
                     break;

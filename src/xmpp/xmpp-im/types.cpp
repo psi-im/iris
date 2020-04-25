@@ -500,7 +500,7 @@ QDomElement RosterExchangeItem::toXml(Stanza &s) const
         e.setAttribute("action", "modify");
         break;
     }
-    foreach (QString group, groups_) {
+    for (QString group: groups_) {
         e.appendChild(s.createTextElement("http://jabber.org/protocol/rosterx", "group", group));
     }
     return e;
@@ -888,7 +888,7 @@ void HTMLElement::filterOutUnwantedRecursive(QDomElement &el, bool strict)
                         attrs.append(name);
                     }
                 }
-                foreach (const QString &name, attrs) {
+                for (const QString &name: attrs) {
                     domAttrs.removeNamedItem(name);
                 }
                 filterOutUnwantedRecursive(childEl, strict);
@@ -1180,7 +1180,7 @@ AddressList Message::findAddresses(Address::Type t) const
         return AddressList();
     }
     AddressList matches;
-    foreach (Address a, d->addressList) {
+    for (Address a: d->addressList) {
         if (a.type() == t)
             matches.append(a);
     }
@@ -1355,7 +1355,7 @@ Stanza Message::toStanza(Stream *stream) const
     if (containsHTML()) {
         QDomElement html = s.createElement("http://jabber.org/protocol/xhtml-im", "html");
         s.appendChild(html);
-        foreach (HTMLElement el, d->htmlElements) {
+        for (HTMLElement el: d->htmlElements) {
             html.appendChild(s.doc().importNode(el.body(), true).toElement());
         }
     }
@@ -1381,7 +1381,7 @@ Stanza Message::toStanza(Stream *stream) const
     }
 
     // urls
-    foreach (const Url &uit, d->urlList) {
+    for (const Url &uit: d->urlList) {
         QDomElement x = s.createElement("jabber:x:oob", "x");
         x.appendChild(s.createTextElement("jabber:x:oob", "url", uit.url()));
         if (!uit.desc().isEmpty())
@@ -1400,7 +1400,7 @@ Stanza Message::toStanza(Stream *stream) const
                 x.appendChild(s.createTextElement("jabber:x:event", "id", d->eventId));
         }
 
-        foreach (const MsgEvent &ev, d->eventList) {
+        for (const MsgEvent &ev: d->eventList) {
             switch (ev) {
             case OfflineEvent:
                 x.appendChild(s.createElement("jabber:x:event", "offline"));
@@ -1476,7 +1476,7 @@ Stanza Message::toStanza(Stream *stream) const
     // addresses
     if (!d->addressList.isEmpty()) {
         QDomElement as = s.createElement("http://jabber.org/protocol/address", "addresses");
-        foreach (Address a, d->addressList) {
+        for (Address a: d->addressList) {
             as.appendChild(a.toXml(s));
         }
         s.appendChild(as);
@@ -1485,7 +1485,7 @@ Stanza Message::toStanza(Stream *stream) const
     // roster item exchange
     if (!d->rosterExchangeItems.isEmpty()) {
         QDomElement rx = s.createElement("http://jabber.org/protocol/rosterx", "x");
-        foreach (RosterExchangeItem r, d->rosterExchangeItems) {
+        for (RosterExchangeItem r: d->rosterExchangeItems) {
             rx.appendChild(r.toXml(s));
         }
         s.appendChild(rx);
@@ -1511,7 +1511,7 @@ Stanza Message::toStanza(Stream *stream) const
     // muc
     if (!d->mucInvites.isEmpty()) {
         QDomElement e = s.createElement("http://jabber.org/protocol/muc#user", "x");
-        foreach (MUCInvite i, d->mucInvites) {
+        for (MUCInvite i: d->mucInvites) {
             e.appendChild(i.toXml(s.doc()));
         }
         if (!d->mucPassword.isEmpty()) {
@@ -1540,7 +1540,7 @@ Stanza Message::toStanza(Stream *stream) const
     }
 
     // bits of binary
-    foreach (const BoBData &bd, d->bobDataList) {
+    for (const BoBData &bd: d->bobDataList) {
         s.appendChild(bd.toXml(&s.doc()));
     }
 

@@ -489,7 +489,7 @@ XMPP::NameRecord WeightedNameRecordList::takeNext()
 
     /* Find the new total weight of this priority group */
     int totalWeight = 0;
-    foreach (const XMPP::NameRecord &record, *currentPriorityGroup) {
+    for (const XMPP::NameRecord &record: *currentPriorityGroup) {
         totalWeight += record.weight();
     }
 
@@ -537,8 +537,8 @@ void WeightedNameRecordList::clear()
 void WeightedNameRecordList::append(const XMPP::WeightedNameRecordList &list)
 {
     /* Copy over all records from all groups */
-    foreach (const WeightedNameRecordPriorityGroup &group, list.priorityGroups) {
-        foreach (const NameRecord &record, group) {
+    for (const WeightedNameRecordPriorityGroup &group: list.priorityGroups) {
+        for (const NameRecord &record: group) {
             append(record);
         }
     }
@@ -549,7 +549,7 @@ void WeightedNameRecordList::append(const XMPP::WeightedNameRecordList &list)
 
 void WeightedNameRecordList::append(const QList<XMPP::NameRecord> &list)
 {
-    foreach (const XMPP::NameRecord &record, list) {
+    for (const XMPP::NameRecord &record: list) {
         if (record.type() != XMPP::NameRecord::Srv) {
             continue;
         }
@@ -622,7 +622,7 @@ QDebug operator<<(QDebug dbg, const XMPP::WeightedNameRecordList &list)
 
     dbg.nospace() << "{";
 
-    foreach (int priority, list.priorityGroups.keys()) {
+    for (int priority: list.priorityGroups.keys()) {
         dbg.nospace() << "\t" << priority << "->" << list.priorityGroups.value(priority) << endl;
     }
 
@@ -734,7 +734,7 @@ public:
                 sub_instances_to_remove += it.key();
         }
 
-        foreach (int res_sub_id, sub_instances_to_remove) {
+        for (int res_sub_id: sub_instances_to_remove) {
             res_sub_instances.remove(res_sub_id);
             p_local->resolve_stop(res_sub_id);
         }
@@ -1099,7 +1099,7 @@ void ServiceResolver::clear_resolvers()
 #endif
 
     /* cleanup all resolvers */
-    foreach (XMPP::NameResolver *resolver, d->resolverList) {
+    for (XMPP::NameResolver *resolver: d->resolverList) {
         cleanup_resolver(resolver);
     }
 }

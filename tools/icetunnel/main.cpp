@@ -80,7 +80,7 @@ static QList<QHostAddress> sortAddrs(const QList<QHostAddress> &in)
 {
     QList<QHostAddress> out;
 
-    foreach (const QHostAddress &a, in) {
+    for (const QHostAddress &a : in) {
         int at;
         for (at = 0; at < out.count(); ++at) {
             if (comparePriority(a, out[at]) < 0)
@@ -527,11 +527,11 @@ public:
                     strList += addr.addr.toString();
                 }
             }*/
-            foreach (const QNetworkInterface &ni, QNetworkInterface::allInterfaces()) {
+            for (const QNetworkInterface &ni : QNetworkInterface::allInterfaces()) {
                 if (!(ni.flags() & QNetworkInterface::IsUp))
                     continue;
                 QList<QNetworkAddressEntry> entries = ni.addressEntries();
-                foreach (const QNetworkAddressEntry &na, entries) {
+                for (const QNetworkAddressEntry &na : entries) {
                     QHostAddress h = na.ip();
 
                     if (opt_ipv6_only && h.protocol() != QAbstractSocket::IPv6Protocol)

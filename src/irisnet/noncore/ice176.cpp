@@ -47,12 +47,6 @@ static qint64 calc_pair_priority(int a, int b)
     return priority;
 }
 
-// see if candidates are considered the same for pruning purposes
-static bool compare_candidates(IceComponent::CandidateInfo::Ptr a, IceComponent::CandidateInfo::Ptr b)
-{
-    return a->addr == b->addr && a->componentId == b->componentId;
-}
-
 // scope values: 0 = local, 1 = link-local, 2 = private, 3 = public
 // FIXME: dry (this is in psi avcall also)
 static int getAddressScope(const QHostAddress &a)
@@ -246,7 +240,7 @@ public:
             return;
 
         extAddrs.clear();
-        foreach (const ExternalAddress &ea, addrs) {
+        for (const ExternalAddress &ea : addrs) {
             int at = findLocalAddress(ea.base.addr);
             if (at != -1)
                 extAddrs += ea;
@@ -861,7 +855,7 @@ private slots:
         }
 
         bool iceTransportInUse = false;
-        foreach (const IceComponent::Candidate &lc, localCandidates) {
+        for (const IceComponent::Candidate &lc : localCandidates) {
             if (lc.iceTransport == cc.iceTransport) {
                 iceTransportInUse = true;
                 break;
@@ -940,7 +934,7 @@ private slots:
         components[at].stopped = true;
 
         bool allStopped = true;
-        foreach (const Component &c, components) {
+        for (const Component &c : components) {
             if (!c.stopped) {
                 allStopped = false;
                 break;

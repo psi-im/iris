@@ -615,7 +615,7 @@ void JT_Presence::pres(const Status &s)
         }
 
         // bits of binary
-        foreach (const BoBData &bd, s.bobDataList()) {
+        for (const BoBData &bd: s.bobDataList()) {
             tag.appendChild(bd.toXml(doc()));
         }
     }

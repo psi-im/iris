@@ -124,7 +124,7 @@ public:
 
     bool havePendingCall(QObject *obj, const char *method) const
     {
-        foreach (const MethodCall *call, pendingCalls) {
+        for (const MethodCall *call: pendingCalls) {
             if (call->obj == obj && qstrcmp(call->method.data(), method) == 0)
                 return true;
         }
