@@ -454,9 +454,15 @@ public slots:
     {
         connect(XMPP::ProcessQuit::instance(), SIGNAL(quit()), SLOT(do_quit()));
 
-        connect(&dns, SIGNAL(resultsReady(const QList<XMPP::NameRecord> &)),
-                SLOT(dns_resultsReady(const QList<XMPP::NameRecord> &)));
-        connect(&dns, SIGNAL(error(XMPP::NameResolver::Error)), SLOT(dns_error(XMPP::NameResolver::Error)));
+        connect(&dns, &XMPP::NameResolver::resultsReady, this, [this](const QList<XMPP::NameRecord> &results) {
+            stunAddr = results.first().address();
+            start_ice();
+        });
+        connect(&dns, &XMPP::NameResolver::error, this, [this](XMPP::NameResolver::Error e) {
+            Q_UNUSED(e);
+            printf("Unable to resolve stun host.\n");
+            emit quit();
+        });
 
         if (!opt_stunHost.isEmpty())
             dns.start(opt_stunHost.toLatin1(), XMPP::NameRecord::A);
@@ -635,20 +641,6 @@ private slots:
             ice->stop();
         } else
             emit quit();
-    }
-
-    void dns_resultsReady(const QList<XMPP::NameRecord> &results)
-    {
-        stunAddr = results.first().address();
-
-        start_ice();
-    }
-
-    void dns_error(XMPP::NameResolver::Error e)
-    {
-        Q_UNUSED(e);
-        printf("Unable to resolve stun host.\n");
-        emit quit();
     }
 
     void ice_started()
