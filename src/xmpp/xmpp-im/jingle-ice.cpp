@@ -580,7 +580,8 @@ namespace XMPP { namespace Jingle { namespace ICE {
                 printf("TURN w/ TCP service: %s;%d\n", qPrintable(stunRelayTcpAddr.toString()), stunRelayTcpPort);
 
             QList<QHostAddress> listenAddrs;
-            for (const QNetworkInterface &ni : QNetworkInterface::allInterfaces()) {
+            auto const          interfaces = QNetworkInterface::allInterfaces();
+            for (const QNetworkInterface &ni : interfaces) {
                 QList<QNetworkAddressEntry> entries = ni.addressEntries();
                 for (const QNetworkAddressEntry &na : entries) {
                     QHostAddress h = na.ip();

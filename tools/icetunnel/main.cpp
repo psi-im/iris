@@ -527,7 +527,8 @@ public:
                     strList += addr.addr.toString();
                 }
             }*/
-            for (const QNetworkInterface &ni : QNetworkInterface::allInterfaces()) {
+            auto const interfaces = QNetworkInterface::allInterfaces();
+            for (const QNetworkInterface &ni : interfaces) {
                 if (!(ni.flags() & QNetworkInterface::IsUp))
                     continue;
                 QList<QNetworkAddressEntry> entries = ni.addressEntries();
