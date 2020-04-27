@@ -700,7 +700,7 @@ public:
             });
             nominationTimer->start();
         } else {
-            // all the checks had to be cancelled already. So nothing more
+            cleanupButSelectedPair();
             state = Active;
             emit q->iceFinished(); // nominated won't change anymore
         }
@@ -1056,6 +1056,9 @@ private:
             checkList.validPairs.removeOne(pair);
             pair->isValid = false;
         }
+        if (state == Active) {
+            return; // TODO hadle keep-alive binding properly
+        }
 
         if (state == Started) {
             // oops, already-started ICE reports errors. keep-alive checks?
@@ -1066,10 +1069,12 @@ private:
             }
             return;
         }
-        if (state == Nominating && pair->finalNomination) {
-            printf("Failed to nominate selected pair. set ICE status to failed");
-            stop();
-            emit q->error(ErrorDisconnected);
+        if (state == Nominating) {
+            if (pair->finalNomination) {
+                printf("Failed to nominate selected pair. set ICE status to failed");
+                stop();
+                emit q->error(ErrorDisconnected);
+            }
             return;
         }
 
