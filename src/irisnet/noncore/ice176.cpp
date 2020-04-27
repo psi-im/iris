@@ -102,6 +102,7 @@ public:
         bool                             isValid                 = false; // a pair which is also in valid list
         bool                             isNominated             = false;
         bool                             isTriggeredForNominated = false;
+        bool                             finalNomination         = false;
         CandidatePairState               state                   = CandidatePairState::PFrozen;
 
         qint64  priority = 0;
@@ -118,7 +119,7 @@ public:
         {
             if (isNull())
                 return QLatin1String("null pair");
-            return QString(QLatin1String("%1 %2 -> %3 %4"))
+            return QString(QLatin1String("L:\"%1\" %2 - R:\"%3\" %4"))
                 .arg(candidateType_to_string(local->type), QString(local->addr), candidateType_to_string(remote->type),
                      QString(remote->addr));
         }
@@ -148,8 +149,12 @@ public:
     State                                   state = Stopped;
     QTimer                                  checkTimer;
     TurnClient::Proxy                       proxy;
-    UdpPortReserver *                       portReserver   = nullptr;
-    int                                     componentCount = 0;
+    UdpPortReserver *                       portReserver = nullptr;
+    std::unique_ptr<QTimer>                 nominationTimer;
+    std::unique_ptr<QTimer>                 remoteGatheringCompleteTimer;
+    int                                     agressiveNominationTimeout     = 3000;  // 3s
+    int                                     remoteGatheringCompleteTimeout = 30000; // 30s
+    int                                     componentCount                 = 0;
     QList<Ice176::LocalAddress>             localAddrs;
     QList<Ice176::ExternalAddress>          extAddrs;
     QHostAddress                            stunBindAddr;
@@ -324,9 +329,11 @@ public:
 
     void stop()
     {
-        Q_ASSERT(state == Starting || state == Started);
+        Q_ASSERT(state == Starting || state == Started || state == Nominating || state == Active);
 
         state = Stopping;
+        nominationTimer.reset();
+        remoteGatheringCompleteTimer.reset();
 
         // will trigger candidateRemoved events and result pairs cleanup.
         if (!components.isEmpty()) {
@@ -341,6 +348,7 @@ public:
 
     void addRemoteCandidates(const QList<Candidate> &list)
     {
+        updateRemoteGatheringTimeout();
         QList<IceComponent::CandidateInfo::Ptr> remoteCandidates;
         for (const Candidate &c : list) {
             auto ci       = IceComponent::CandidateInfo::Ptr::create();
@@ -382,6 +390,15 @@ public:
 
         printf("adding %d remote candidates. total=%d\n", remoteCandidates.count(), this->remoteCandidates.count());
         doPairing(localCandidates, remoteCandidates);
+    }
+
+    void setRemoteGatheringComplete()
+    {
+        remoteGatheringComplete = true;
+        remoteGatheringCompleteTimer.reset();
+
+        printf("Got remote gathering complete signal");
+        onRemoteGatheringCompleted();
     }
 
     // returns a pair is pairable or null
@@ -513,15 +530,23 @@ public:
         // pair->pool->setPassword(peerPass.toUtf8());
 
         pair->binding = new StunBinding(pair->pool);
-        connect(pair->binding, SIGNAL(success()), SLOT(binding_success()));
-        connect(pair->binding, &StunBinding::error, this, &Ice176::Private::binding_error);
+        connect(pair->binding, &StunBinding::success, this, [this, wpair = pair.toWeakRef()]() {
+            auto pair = wpair.lock();
+            if (pair)
+                handlePairBindingSuccess(pair);
+        });
+        connect(pair->binding, &StunBinding::error, this, [this, wpair = pair.toWeakRef()](XMPP::StunBinding::Error e) {
+            auto pair = wpair.lock();
+            if (pair)
+                handlePairBindingError(pair, e);
+        });
 
         int prflx_priority = c.ic->peerReflexivePriority(lc.iceTransport, lc.path);
         pair->binding->setPriority(prflx_priority);
 
         if (mode == Ice176::Initiator) {
             pair->binding->setIceControlling(0);
-            if (localFeatures & AggressiveNomination)
+            if (localFeatures & AggressiveNomination || pair->finalNomination)
                 pair->binding->setUseCandidate(true);
         } else
             pair->binding->setIceControlled(0);
@@ -591,51 +616,101 @@ public:
         // FIXME: actually do something
     }
 
-    void tryIceSuccess()
+    void cleanupButSelectedPair()
     {
-        if (!readyToSendMedia || !(state == Nominating || state == Started))
-            return;
-        if (!(localFeatures & AggressiveNomination)) {
-            state = Active;
-            emit q->iceFinished(); // nominated won't change anymore
-            return;
+        Q_ASSERT(!checkList.validPairs.isEmpty());
+        checkList.validPairs.erase(checkList.validPairs.begin() + 1, checkList.validPairs.end());
+        auto  ci = checkList.validPairs.first()->local;
+        auto &t  = localCandidates[findLocalCandidate(ci->addr.addr, ci->addr.port)].iceTransport;
+        // cancel active transactions
+        for (auto &p : checkList.pairs) {
+            if (p->state == PInProgress) {
+                p->binding->cancel();
+                p->state = PFailed;
+            }
         }
-        // Otherwise we are going to cease checks as soon as we have any "host" or "reflexive" local
-        // valid candidate.
+        // stop not used transports
+        for (auto &c : localCandidates) {
+            if (c.iceTransport != t) {
+                c.iceTransport->stop();
+            }
+        }
     }
 
+    bool canHaveMoreRemoteCandidates() const { return remoteGatheringComplete || !(remoteFeatures & Trickle); }
+
+    void tryNominateSelectedPair()
+    {
+        if (mode != Initiator || state != Started || checkList.validPairs.isEmpty())
+            return;
+        Q_ASSERT(!checkList.validPairs.first()->isNominated);
+        if (checkList.validPairs.first()->local->type == IceComponent::RelayedType) {
+            if (!(localGatheringComplete && canHaveMoreRemoteCandidates())) {
+                printf("Wiating for gathering complete on both sides before nomination of relayed pair");
+                return; // maybe we gonna have a non-relayed pair. RFC8445 anyway allows to send data on any valid.
+            }
+
+            // if there is any non-relayed pending pair
+            if (std::any_of(checkList.pairs.begin(), checkList.pairs.end(), [](auto &p) {
+                    return p->state != PSucceeded && p->state != PFailed && p->local->type != IceComponent::RelayedType;
+                })) {
+                printf("There are some non-relayed pairs to check before relayed nomination");
+                return; // either till checked or remote gathering timeout
+            }
+        }
+        state                 = Nominating;
+        auto pair             = checkList.validPairs.first();
+        pair->finalNomination = true;
+        printf("Nominating valid pair: %s", qPrintable(*pair));
+        checkList.triggeredPairs.prepend(pair);
+    }
+
+    // execute when new nominated pair
     void tryComponentSuccess(QSharedPointer<CandidatePair> &pair)
     {
-        // TODO the pair can change with aggressive validation (?)
-        pair->isNominated = true;
-
-        int        at = findComponent(pair->local->componentId);
-        Component &c  = components[at];
+        Component &c        = components[findComponent(pair->local->componentId)];
+        pair->isNominated   = true;
+        c.hasNominatedPairs = true;
         if (c.lowOverhead) {
             printf("component is flagged for low overhead.  setting up for %s\n", qPrintable(*pair));
-            at                          = findLocalCandidate(pair->local->addr.addr, pair->local->addr.port);
-            IceComponent::Candidate &cc = localCandidates[at];
+            auto &cc = localCandidates[findLocalCandidate(pair->local->addr.addr, pair->local->addr.port)];
             c.ic->flagPathAsLowOverhead(cc.id, pair->remote->addr.addr, pair->remote->addr.port);
         }
 
         emit q->componentReady(pair->local->componentId - 1);
 
-        if (!readyToSendMedia && !(localFeatures & NotNominatedData && remoteFeatures & NotNominatedData)) {
-            // if both follow RFC8445 and allow to send data on any valid pair
-            components[findComponent(pair->local->componentId)].hasNominatedPairs = true;
-            if (std::all_of(components.begin(), components.end(), [](auto &c) { return c.hasNominatedPairs; })) {
-                readyToSendMedia = true;
-                emit q->readyToSendMedia();
-            }
+        if (!std::all_of(components.begin(), components.end(), [](auto &c) { return c.hasNominatedPairs; }))
+            return;
+
+        // so all components have nominated pair here
+        if (!readyToSendMedia) {
+            readyToSendMedia = true;
+            emit q->readyToSendMedia();
         }
-        tryIceSuccess();
+
+        if (localFeatures & AggressiveNomination) {
+            // nominated candidate may change. start a timer to cease all checks later
+            nominationTimer.reset(new QTimer(this));
+            nominationTimer->setSingleShot(true);
+            nominationTimer->setInterval(agressiveNominationTimeout);
+            connect(nominationTimer.get(), &QTimer::timeout, this, [this]() {
+                cleanupButSelectedPair();
+                state = Active;
+                emit q->iceFinished();
+            });
+            nominationTimer->start();
+        } else {
+            // all the checks had to be cancelled already. So nothing more
+            state = Active;
+            emit q->iceFinished(); // nominated won't change anymore
+        }
     }
 
     // ice negotiation failed. either initial or on ICE restart
     void tryComponentFailed(int componentId)
     {
         Q_ASSERT(state == Starting);
-        if (!(localGatheringComplete && remoteGatheringComplete)) {
+        if (!(localGatheringComplete && canHaveMoreRemoteCandidates())) {
             return; // if we have something to gather then we still have a chance for success
         }
 
@@ -694,6 +769,39 @@ public:
 
         if (!checkTimer.isActive())
             checkTimer.start();
+    }
+
+    void onRemoteGatheringCompleted()
+    {
+        remoteGatheringComplete = true;
+        if (!localGatheringComplete || state != Started)
+            return;
+
+        if (!checkList.validPairs.isEmpty() && mode == Initiator && !(localFeatures & AggressiveNomination))
+            tryNominateSelectedPair();
+    }
+
+    void updateRemoteGatheringTimeout()
+    {
+        if (remoteFeatures & GatheringComplete || !(remoteFeatures & Trickle)) {
+            remoteGatheringCompleteTimer.reset();
+            printf("Don't use Remote Gatherging Complete timeout");
+            return;
+        } else if (remoteGatheringCompleteTimer) {
+            printf("Remote Gatherging Complete was restarted");
+            remoteGatheringCompleteTimer->start(); // restart
+            return;
+        }
+        remoteGatheringCompleteTimer.reset(new QTimer(this));
+        remoteGatheringCompleteTimer->setSingleShot(true);
+        remoteGatheringCompleteTimer->setInterval(remoteGatheringCompleteTimeout);
+        connect(remoteGatheringCompleteTimer.get(), &QTimer::timeout, this, [this]() {
+            remoteGatheringCompleteTimer.release()->deleteLater();
+            printf("Timeout waiting for Gathering Complete signal");
+            onRemoteGatheringCompleted();
+        });
+        printf("Start Remote Gatherging Complete timer");
+        remoteGatheringCompleteTimer->start();
     }
 
 private:
@@ -827,6 +935,145 @@ private:
                               [&id](auto const &c) { return c.info->id == id; })
                  != localCandidates.end());
         return id;
+    }
+
+    void handlePairBindingSuccess(CandidatePair::Ptr pair)
+    {
+        /*
+            RFC8445 7.2.5.2.1.  Non-Symmetric Transport Addresses
+            tells us addr:port of source->dest of request MUST match with dest<-source of the response,
+            and we should mark the pair as failed if doesn't match.
+            But StunTransaction already does this for us in its checkActiveAndFrom.
+            So it will fail with timeout instead if response comes from a wrong address.
+        */
+
+        StunBinding *binding = pair->binding;
+        // pair->isValid = true;
+        pair->state                  = CandidatePairState::PSucceeded;
+        bool isTriggeredForNominated = pair->isTriggeredForNominated;
+        bool finalNomination         = pair->finalNomination;
+
+        printf("check success for %s\n", qPrintable(QString(*pair)));
+
+        // RFC8445 7.2.5.3.1.  Discovering Peer-Reflexive Candidates
+        auto mappedAddr = IceComponent::TransportAddress(binding->reflexiveAddress(), binding->reflexivePort());
+        if (pair->local->addr != mappedAddr) { // skip "If the valid pair equals the pair that generated the check"
+
+            // so mapped address doesn't match with local candidate sending binding request.
+            // gotta find/create one
+            auto locIt = std::find_if(localCandidates.begin(), localCandidates.end(), [&](const auto &c) {
+                return c.info->base == mappedAddr || c.info->addr == mappedAddr;
+            });
+            if (locIt == localCandidates.end()) {
+                // RFC8445 7.2.5.3.1.  Discovering Peer-Reflexive Candidates
+                // new peer-reflexive local candidate discovered
+                components[findComponent(pair->local->componentId)].ic->addLocalPeerReflexiveCandidate(
+                    mappedAddr, pair->local, binding->priority());
+                locIt = std::find_if(localCandidates.begin(), localCandidates.end(),
+                                     [&](const auto &c) { return c.info->addr == mappedAddr; }); // just inserted
+                Q_ASSERT(locIt != localCandidates.end());
+                // local candidate wasn't found, so it wasn't on the checklist  RFC8445 7.2.5.3.1.3
+                pair = makeCandidatesPair(locIt->info, pair->remote);
+            } else {
+                // local candidate found. If it's a part of a pair on checklist, we have to add this pair to valid list,
+                // otherwise we have to create a new pair and add it to valid list
+                auto it = std::find_if(checkList.pairs.begin(), checkList.pairs.end(), [&](auto const &p) {
+                    return p->local->id == locIt->info->id && p->remote->addr == pair->remote->addr;
+                });
+                if (it == checkList.pairs.constEnd()) {
+                    pair = makeCandidatesPair(locIt->info, pair->remote);
+                } else {
+                    pair = *it;
+                    printf("mapped address belongs to another pair on checklist %s\n", qPrintable(QString(*pair)));
+                    if (pair->isValid) { // already valid as result of previous checks probably
+                        return;
+                    }
+                }
+            }
+        }
+
+        if (!pair) {
+            qWarning("binding success but failed to build a pair with mapped address %s!", qPrintable(mappedAddr));
+            return;
+        }
+
+        pair->isValid                 = true;
+        pair->state                   = PSucceeded; // what if it was in progress?
+        pair->isTriggeredForNominated = isTriggeredForNominated;
+        pair->finalNomination         = finalNomination;
+
+        auto insIt = std::upper_bound(
+            checkList.validPairs.begin(), checkList.validPairs.end(), pair, [](auto &item, auto &toins) {
+                if (toins->isNominated ^ item->isNominated)
+                    return item->isNominated;
+                return item->priority == toins->priority
+                    ? item->local->componentId < toins->local->componentId
+                    : item->priority >= toins->priority; // inverted since we need high priority first
+            });
+        checkList.validPairs.insert(insIt, pair); // nominated and highest priority first
+
+        if (!readyToSendMedia && localFeatures & NotNominatedData && remoteFeatures & NotNominatedData) {
+            // if both follow RFC8445 and allow to send data on any valid pair
+            components[findComponent(pair->local->componentId)].hasValidPairs = true;
+            if (std::all_of(components.begin(), components.end(), [](auto &c) { return c.hasValidPairs; })) {
+                readyToSendMedia = true;
+                emit q->readyToSendMedia();
+            }
+        }
+
+        if (mode == Ice176::Initiator) {
+            if (!binding->useCandidate()) {
+                if (!(localFeatures & AggressiveNomination))
+                    tryNominateSelectedPair();
+                return;
+            }
+        } else {
+            if (!pair->isTriggeredForNominated)
+                return;
+        }
+
+        // check if component already has nominated pair
+        auto it = std::find_if(checkList.pairs.begin(), checkList.pairs.end(), [&](auto const &p) {
+            return p->local->componentId == pair->local->componentId && p->isNominated;
+        });
+
+        if (it != checkList.pairs.end()) {
+            printf("component %d already active, not signalling\n", pair->local->componentId);
+            return;
+        }
+        tryComponentSuccess(pair);
+    }
+
+    void handlePairBindingError(CandidatePair::Ptr pair, XMPP::StunBinding::Error)
+    {
+        Q_ASSERT(state != Stopped);
+        if (state == Stopping)
+            return; // we don't care about late errors
+
+        printf("check failed for %s\n", qPrintable(*pair));
+        pair->state = CandidatePairState::PFailed;
+        if (pair->isValid) { // RFC8445 7.2.5.3.4.  Updating the Nominated Flag /  about failure
+            checkList.validPairs.removeOne(pair);
+            pair->isValid = false;
+        }
+
+        if (state == Started) {
+            // oops, already-started ICE reports errors. keep-alive checks?
+            if (pair->isNominated) {
+                printf("check failed on nominated candidate. set ICE status to failed");
+                stop();
+                emit q->error(ErrorDisconnected);
+            }
+            return;
+        }
+        if (state == Nominating && pair->finalNomination) {
+            printf("Failed to nominate selected pair. set ICE status to failed");
+            stop();
+            emit q->error(ErrorDisconnected);
+            return;
+        }
+
+        tryComponentFailed(pair->local->componentId);
     }
 
 private slots:
@@ -1152,148 +1399,10 @@ private slots:
 
         int path = lc.path;
 
-        printf("connectivity check from %s:%d to %s:%d %s\n", qPrintable(pair.local->addr.addr.toString()),
-               pair.local->addr.port, qPrintable(pair.remote->addr.addr.toString()), pair.remote->addr.port,
-               pair.isNominated ? (mode == Initiator ? "(nominating)" : "(triggered check for nominated)") : "");
+        printf("connectivity check for pair %s%s\n", qPrintable(pair),
+               (mode == Initiator ? (pair.binding->useCandidate() ? " (nominating)" : "")
+                                  : (pair.isTriggeredForNominated ? " (triggered check for nominated)" : "")));
         lc.iceTransport->writeDatagram(path, packet, pair.remote->addr.addr, pair.remote->addr.port);
-    }
-
-    void binding_success()
-    {
-        /*
-            RFC8445 7.2.5.2.1.  Non-Symmetric Transport Addresses
-            tells us addr:port of source->dest of request MUST match with dest<-source of the response,
-            and we should mark the pair as failed if doesn't match.
-            But StunTransaction already does this for us in its checkActiveAndFrom.
-            So it will fail with timeout instead if response comes from a wrong address.
-        */
-
-        StunBinding *binding = static_cast<StunBinding *>(sender());
-
-        auto it = std::find_if(checkList.pairs.begin(), checkList.pairs.end(),
-                               [&](auto const &p) { return p->binding == binding; });
-        if (it == checkList.pairs.constEnd())
-            return;
-
-        auto pair = *it;
-        // pair->isValid = true;
-        pair->state = CandidatePairState::PSucceeded;
-
-        printf("check success for %s\n", qPrintable(QString(*pair)));
-
-        // RFC8445 7.2.5.3.1.  Discovering Peer-Reflexive Candidates
-        auto mappedAddr = IceComponent::TransportAddress(binding->reflexiveAddress(), binding->reflexivePort());
-        if (pair->local->addr != mappedAddr) { // skip "If the valid pair equals the pair that generated the check"
-
-            // so mapped address doesn't match with local candidate sending binding request.
-            // gotta find/create one
-            auto locIt = std::find_if(localCandidates.begin(), localCandidates.end(), [&](const auto &c) {
-                return c.info->base == mappedAddr || c.info->addr == mappedAddr;
-            });
-            if (locIt == localCandidates.end()) {
-                // RFC8445 7.2.5.3.1.  Discovering Peer-Reflexive Candidates
-                // new peer-reflexive local candidate discovered
-                components[findComponent(pair->local->componentId)].ic->addLocalPeerReflexiveCandidate(
-                    mappedAddr, pair->local, binding->priority());
-                locIt = std::find_if(localCandidates.begin(), localCandidates.end(),
-                                     [&](const auto &c) { return c.info->addr == mappedAddr; }); // just inserted
-                Q_ASSERT(locIt != localCandidates.end());
-                // local candidate wasn't found, so it wasn't on the checklist  RFC8445 7.2.5.3.1.3
-                pair = makeCandidatesPair(locIt->info, pair->remote);
-                // TODO start media flow on valid pair
-            } else {
-                // local candidate found. If it's a part of a pair on checklist, we have to add this pair to valid list,
-                // otherwise we have to create a new pair and add it to valid list
-                it = std::find_if(checkList.pairs.begin(), checkList.pairs.end(), [&](auto const &p) {
-                    return p->local->id == locIt->info->id && p->remote->addr == pair->remote->addr;
-                });
-                if (it == checkList.pairs.constEnd()) {
-                    pair = makeCandidatesPair(locIt->info, pair->remote);
-                } else {
-                    pair = *it;
-                    printf("mapped address belongs to another pair on checklist %s\n", qPrintable(QString(*pair)));
-                    if (pair->isValid) { // already valid as result of previous checks probably
-                        return;
-                    }
-                }
-            }
-        }
-
-        if (!pair) {
-            qWarning("binding success but failed to build a pair with mapped address %s!", qPrintable(mappedAddr));
-            return;
-        }
-
-        pair->isValid = true;
-        pair->state   = PSucceeded; // what if it was in progress?
-        auto insIt    = std::upper_bound(
-            checkList.validPairs.begin(), checkList.validPairs.end(), pair, [](auto &item, auto &toins) {
-                if (toins->isNominated ^ item->isNominated)
-                    return item->isNominated;
-                return item->priority == toins->priority
-                    ? item->local->componentId < toins->local->componentId
-                    : item->priority >= toins->priority; // inverted since we need high priority first
-            });
-        checkList.validPairs.insert(insIt, pair); // nominated and highest priority first
-
-        if (!readyToSendMedia && localFeatures & NotNominatedData && remoteFeatures & NotNominatedData) {
-            // if both follow RFC8445 and allow to send data on any valid pair
-            components[findComponent(pair->local->componentId)].hasValidPairs = true;
-            if (std::all_of(components.begin(), components.end(), [](auto &c) { return c.hasValidPairs; })) {
-                readyToSendMedia = true;
-                emit q->readyToSendMedia();
-            }
-        }
-
-        if (mode == Ice176::Initiator) {
-            if (!binding->useCandidate())
-                return;
-        } else {
-            if (!pair->isTriggeredForNominated)
-                return;
-        }
-
-        // check if component already has nominated pair
-        it = std::find_if(checkList.pairs.begin(), checkList.pairs.end(), [&](auto const &p) {
-            return p->local->componentId == pair->local->componentId && p->isNominated;
-        });
-
-        if (it != checkList.pairs.end()) {
-            printf("component %d already active, not signalling\n", pair->local->componentId);
-            return;
-        }
-        tryComponentSuccess(pair);
-    }
-
-    void binding_error(XMPP::StunBinding::Error)
-    {
-        Q_ASSERT(state != Stopped);
-        if (state == Stopping)
-            return; // we don't care about late errors
-
-        StunBinding *binding = static_cast<StunBinding *>(sender());
-
-        auto it = std::find_if(checkList.pairs.begin(), checkList.pairs.end(),
-                               [&](auto const &p) { return p->binding == binding; });
-        if (it == checkList.pairs.constEnd())
-            return;
-
-        printf("check failed\n");
-
-        CandidatePair &pair = **it;
-        pair.state          = CandidatePairState::PFailed;
-
-        if (state == Started) {
-            // oops already started ICE reports errors. keep-alive checks?
-            if (pair.isNominated) {
-                printf("check failed on nominated candidate. set ICE status to failed");
-                stop();
-                emit q->error(ErrorDisconnected);
-            }
-            return;
-        }
-
-        tryComponentFailed(pair.local->componentId);
     }
 };
 
@@ -1357,7 +1466,11 @@ void Ice176::setComponentCount(int count)
 
 void Ice176::setLocalFeatures(const Features &features) { d->localFeatures = features; }
 
-void Ice176::setRemoteFeatures(const Features &features) { d->remoteFeatures = features; }
+void Ice176::setRemoteFeatures(const Features &features)
+{
+    d->remoteFeatures = features;
+    d->updateRemoteGatheringTimeout();
+}
 
 void Ice176::start(Mode mode)
 {
@@ -1377,7 +1490,7 @@ void Ice176::setPeerPassword(const QString &pass) { d->peerPass = pass; }
 
 void Ice176::addRemoteCandidates(const QList<Candidate> &list) { d->addRemoteCandidates(list); }
 
-void Ice176::setRemoteGatheringComplete() { d->remoteGatheringComplete = true; }
+void Ice176::setRemoteGatheringComplete() { d->setRemoteGatheringComplete(); }
 
 bool Ice176::hasPendingDatagrams(int componentIndex) const { return !d->in[componentIndex].isEmpty(); }
 
