@@ -128,6 +128,7 @@ public:
     void addRemoteCandidates(const QList<Candidate> &list);
     void setRemoteGatheringComplete();
 
+    bool       canSendMedia() const;
     bool       hasPendingDatagrams(int componentIndex) const;
     QByteArray readDatagram(int componentIndex);
     void       writeDatagram(int componentIndex, const QByteArray &datagram);

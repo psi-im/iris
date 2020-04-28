@@ -1534,6 +1534,8 @@ void Ice176::addRemoteCandidates(const QList<Candidate> &list) { d->addRemoteCan
 
 void Ice176::setRemoteGatheringComplete() { d->setRemoteGatheringComplete(); }
 
+bool Ice176::canSendMedia() const { return d->readyToSendMedia; }
+
 bool Ice176::hasPendingDatagrams(int componentIndex) const { return !d->in[componentIndex].isEmpty(); }
 
 QByteArray Ice176::readDatagram(int componentIndex) { return d->in[componentIndex].takeFirst(); }
