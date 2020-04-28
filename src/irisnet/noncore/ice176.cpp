@@ -98,12 +98,16 @@ public:
         using Ptr = QSharedPointer<CandidatePair>;
 
         IceComponent::CandidateInfo::Ptr local, remote;
-        bool                             isDefault               = false; // not used in xmpp
-        bool                             isValid                 = false; // a pair which is also in valid list
-        bool                             isNominated             = false;
-        bool                             isTriggeredForNominated = false;
-        bool                             finalNomination         = false;
-        CandidatePairState               state                   = CandidatePairState::PFrozen;
+        bool                             isDefault   = false; // not used in xmpp
+        bool                             isValid     = false; // a pair which is also in valid list
+        bool                             isNominated = false;
+
+        // states for last or comming checks
+        bool isTriggered             = false; // last scheduled check was a triggered check
+        bool isTriggeredForNominated = false;
+        bool finalNomination         = false;
+
+        CandidatePairState state = CandidatePairState::PFrozen;
 
         qint64  priority = 0;
         QString foundation; // rfc8445 6.1.2.6 (combination of foundations)
@@ -135,13 +139,14 @@ public:
 
     class Component {
     public:
-        int           id                = 0;
-        IceComponent *ic                = nullptr;
-        bool          localFinished     = false;
-        bool          hasValidPairs     = false;
-        bool          hasNominatedPairs = false;
-        bool          stopped           = false;
-        bool          lowOverhead       = false;
+        int                     id              = 0;
+        IceComponent *          ic              = nullptr;
+        std::unique_ptr<QTimer> nominationTimer = std::unique_ptr<QTimer>();
+        bool                    localFinished   = false;
+        bool                    hasValidPairs   = false;
+        bool                    finalSelected   = false;
+        bool                    stopped         = false;
+        bool                    lowOverhead     = false;
     };
 
     Ice176 *                                q;
@@ -150,7 +155,6 @@ public:
     QTimer                                  checkTimer;
     TurnClient::Proxy                       proxy;
     UdpPortReserver *                       portReserver = nullptr;
-    std::unique_ptr<QTimer>                 nominationTimer;
     std::unique_ptr<QTimer>                 remoteGatheringCompleteTimer;
     int                                     agressiveNominationTimeout     = 3000;  // 3s
     int                                     remoteGatheringCompleteTimeout = 30000; // 30s
@@ -169,7 +173,7 @@ public:
     QCA::SecureArray                        stunRelayTcpPass;
     QString                                 localUser, localPass;
     QString                                 peerUser, peerPass;
-    QList<Component>                        components;
+    std::vector<Component>                  components;
     QList<IceComponent::Candidate>          localCandidates;
     QList<IceComponent::CandidateInfo::Ptr> remoteCandidates;
     QSet<QWeakPointer<IceTransport>>        iceTransports;
@@ -279,10 +283,12 @@ public:
             // list size = componentCount * number of interfaces
             socketList = portReserver->borrowSockets(componentCount, this);
 
+        components.reserve(componentCount);
         for (int n = 0; n < componentCount; ++n) {
-            Component c;
-            c.id = n + 1;
-            c.ic = new IceComponent(c.id, this);
+            components.emplace_back();
+            Component &c = components.back();
+            c.id         = n + 1;
+            c.ic         = new IceComponent(c.id, this);
             c.ic->setDebugLevel(IceComponent::DL_Info);
             connect(c.ic, SIGNAL(candidateAdded(XMPP::IceComponent::Candidate)),
                     SLOT(ic_candidateAdded(XMPP::IceComponent::Candidate)));
@@ -314,8 +320,6 @@ public:
             // create an inbound queue for this component
             in += QList<QByteArray>();
 
-            components += c;
-
             c.ic->update(&socketList);
         }
 
@@ -332,13 +336,14 @@ public:
         Q_ASSERT(state == Starting || state == Started || state == Nominating || state == Active);
 
         state = Stopping;
-        nominationTimer.reset();
         remoteGatheringCompleteTimer.reset();
 
         // will trigger candidateRemoved events and result pairs cleanup.
-        if (!components.isEmpty()) {
-            for (int n = 0; n < components.count(); ++n)
-                components[n].ic->stop();
+        if (!components.empty()) {
+            for (auto &c : components) {
+                c.nominationTimer.reset();
+                c.ic->stop();
+            }
 
         } else {
             // TODO: hmm, is it possible to have no components?
@@ -450,8 +455,7 @@ public:
         // pruning
         for (int n = 0; n < checkList.pairs.count(); ++n) {
             auto &pair = checkList.pairs[n];
-            printf("%d, %s -> %s\n", pair->local->componentId, qPrintable(pair->local->addr),
-                   qPrintable(pair->remote->addr));
+            printf("%d, %s\n", pair->local->componentId, qPrintable(*pair));
 
             for (int i = n - 1; i >= 0; --i) {
                 // RFC8445 says to use base only for reflexive. but base is set properly for host and relayed too.
@@ -467,22 +471,25 @@ public:
         }
 
         // max pairs is 100 * number of components
-        int max_pairs = 100 * components.count();
+        int max_pairs = 100 * components.size();
         while (checkList.pairs.count() > max_pairs)
             checkList.pairs.removeLast();
 
         printf("%d after pruning\n", checkList.pairs.count());
+        for (auto &p : checkList.pairs) {
+            printf("%d, %s\n", p->local->componentId, qPrintable(*p));
+        }
     }
 
     QSharedPointer<CandidatePair> selectNextPairToCheck()
     {
         // rfc8445 6.1.4.2.  Performing Connectivity Checks
-
         QSharedPointer<CandidatePair> pair;
         while (!checkList.triggeredPairs.empty() && !(pair = checkList.triggeredPairs.dequeue().lock()))
             ;
 
         if (pair) {
+            pair->isTriggered = true;
             // according to rfc - check just this one
             printf("next check from triggered list: %s\n", qPrintable(*pair));
             return pair;
@@ -496,10 +503,12 @@ public:
         if (it != checkList.pairs.end()) { // found waiting
             // the list was sorted already by priority and componentId. So first one is Ok
             printf("next check for already waiting: %s\n", qPrintable(**it));
+            (*it)->isTriggered = false;
             return *it;
         }
 
         if (pair) { // now it's frozen highest-priority pair
+            pair->isTriggered = false;
             printf("next check for a frozen pair: %s\n", qPrintable(*pair));
         }
 
@@ -521,7 +530,7 @@ public:
 
         auto &lc = localCandidates[at];
 
-        Component &c = components[findComponent(lc.info->componentId)];
+        Component &c = *findComponent(lc.info->componentId);
 
         pair->pool = new StunTransactionPool(StunTransaction::Udp, this);
         connect(pair->pool, SIGNAL(outgoingMessage(QByteArray, QHostAddress, int)),
@@ -616,22 +625,37 @@ public:
         // FIXME: actually do something
     }
 
-    void cleanupButSelectedPair()
+    void cleanupButSelectedPair(int componentId)
     {
-        Q_ASSERT(!checkList.validPairs.isEmpty());
-        checkList.validPairs.erase(checkList.validPairs.begin() + 1, checkList.validPairs.end());
-        auto  ci = checkList.validPairs.first()->local;
-        auto &t  = localCandidates[findLocalCandidate(ci->addr.addr, ci->addr.port)].iceTransport;
+        CandidatePair::Ptr selected;
+
+        auto it = std::remove_if(checkList.validPairs.begin(), checkList.validPairs.end(),
+                                 [&, keep = true](auto &pair) mutable {
+                                     if (pair->local->componentId == componentId) {
+                                         if (keep) {
+                                             selected = pair;
+                                             keep     = false;
+                                             return false;
+                                         }
+                                         return true;
+                                     }
+                                     return false;
+                                 });
+        checkList.validPairs.erase(it, checkList.validPairs.end());
+        Q_ASSERT(selected.get() != nullptr);
+
+        auto &sa = selected->local->addr;
+        auto &t  = localCandidates[findLocalCandidate(sa.addr, sa.port)].iceTransport;
         // cancel active transactions
         for (auto &p : checkList.pairs) {
-            if (p->state == PInProgress) {
+            if (p->local->componentId == componentId && p->state == PInProgress) {
                 p->binding->cancel();
                 p->state = PFailed;
             }
         }
         // stop not used transports
         for (auto &c : localCandidates) {
-            if (c.iceTransport != t) {
+            if (c.info->componentId == componentId && c.iceTransport != t) {
                 c.iceTransport->stop();
             }
         }
@@ -661,16 +685,27 @@ public:
         state                 = Nominating;
         auto pair             = checkList.validPairs.first();
         pair->finalNomination = true;
-        printf("Nominating valid pair: %s", qPrintable(*pair));
+        printf("Nominating valid pair: %s\n", qPrintable(*pair));
         checkList.triggeredPairs.prepend(pair);
+    }
+
+    void tryIceFinished()
+    {
+        if (!std::all_of(components.begin(), components.end(), [](auto &c) { return c.finalSelected; }))
+            return;
+        if (!readyToSendMedia) {
+            readyToSendMedia = true;
+            emit q->readyToSendMedia();
+        }
+        state = Active;
+        emit q->iceFinished();
     }
 
     // execute when new nominated pair
     void tryComponentSuccess(QSharedPointer<CandidatePair> &pair)
     {
-        Component &c        = components[findComponent(pair->local->componentId)];
-        pair->isNominated   = true;
-        c.hasNominatedPairs = true;
+        Component &c      = *findComponent(pair->local->componentId);
+        pair->isNominated = true;
         if (c.lowOverhead) {
             printf("component is flagged for low overhead.  setting up for %s\n", qPrintable(*pair));
             auto &cc = localCandidates[findLocalCandidate(pair->local->addr.addr, pair->local->addr.port)];
@@ -679,30 +714,30 @@ public:
 
         emit q->componentReady(pair->local->componentId - 1);
 
-        if (!std::all_of(components.begin(), components.end(), [](auto &c) { return c.hasNominatedPairs; }))
-            return;
-
-        // so all components have nominated pair here
-        if (!readyToSendMedia) {
-            readyToSendMedia = true;
-            emit q->readyToSendMedia();
-        }
-
-        if (localFeatures & AggressiveNomination) {
+        bool agrNom = (mode == Initiator ? localFeatures : remoteFeatures) & AggressiveNomination;
+        if (agrNom) {
+            if (c.nominationTimer)
+                return;
             // nominated candidate may change. start a timer to cease all checks later
-            nominationTimer.reset(new QTimer(this));
-            nominationTimer->setSingleShot(true);
-            nominationTimer->setInterval(agressiveNominationTimeout);
-            connect(nominationTimer.get(), &QTimer::timeout, this, [this]() {
-                cleanupButSelectedPair();
-                state = Active;
-                emit q->iceFinished();
+            auto timer = new QTimer();
+            c.nominationTimer.reset(timer);
+            timer->setSingleShot(true);
+            timer->setInterval(agressiveNominationTimeout);
+            connect(timer, &QTimer::timeout, this, [this, componentId = pair->local->componentId]() {
+                if (state != Started && state != Nominating)
+                    return; // likely user stopped or it's alreday active
+                auto &finalSelected = findComponent(componentId)->finalSelected;
+                if (finalSelected)
+                    return;
+                cleanupButSelectedPair(componentId);
+                finalSelected = true;
+                tryIceFinished();
             });
-            nominationTimer->start();
+            timer->start();
         } else {
-            cleanupButSelectedPair();
-            state = Active;
-            emit q->iceFinished(); // nominated won't change anymore
+            cleanupButSelectedPair(pair->local->componentId);
+            c.finalSelected = true;
+            tryIceFinished();
         }
     }
 
@@ -747,6 +782,11 @@ public:
             }
             pair->isNominated = false;
             if (pair->state == CandidatePairState::PInProgress) {
+                if (pair->isTriggered) {
+                    printf("Current in-progress check is already triggered. Don't cancel it while have to according to "
+                           "RFC8445\n");
+                    return;
+                }
                 pair->binding->cancel();
             }
             if (pair->state == PFailed) {
@@ -785,10 +825,10 @@ public:
     {
         if (remoteFeatures & GatheringComplete || !(remoteFeatures & Trickle)) {
             remoteGatheringCompleteTimer.reset();
-            printf("Don't use Remote Gatherging Complete timeout");
+            printf("Don't use Remote Gatherging Complete timeout\n");
             return;
         } else if (remoteGatheringCompleteTimer) {
-            printf("Remote Gatherging Complete was restarted");
+            printf("Remote Gatherging Complete was restarted\n");
             remoteGatheringCompleteTimer->start(); // restart
             return;
         }
@@ -797,40 +837,31 @@ public:
         remoteGatheringCompleteTimer->setInterval(remoteGatheringCompleteTimeout);
         connect(remoteGatheringCompleteTimer.get(), &QTimer::timeout, this, [this]() {
             remoteGatheringCompleteTimer.release()->deleteLater();
-            printf("Timeout waiting for Gathering Complete signal");
+            printf("Timeout waiting for Gathering Complete signal\n");
             onRemoteGatheringCompleted();
         });
-        printf("Start Remote Gatherging Complete timer");
+        printf("Start Remote Gatherging Complete timer\n");
         remoteGatheringCompleteTimer->start();
     }
 
 private:
-    int findComponent(const IceComponent *ic) const
+    inline decltype(components)::iterator findComponent(const IceComponent *ic)
     {
-        for (int n = 0; n < components.count(); ++n) {
-            if (components[n].ic == ic)
-                return n;
-        }
-
-        return -1;
+        return std::find_if(components.begin(), components.end(), [&](auto &c) { return c.ic == ic; });
     }
 
-    int findComponent(int id) const
+    inline decltype(components)::iterator findComponent(int id)
     {
-        for (int n = 0; n < components.count(); ++n) {
-            if (components[n].id == id)
-                return n;
-        }
-
-        return -1;
+        return std::find_if(components.begin(), components.end(), [&](auto &c) { return c.id == id; });
     }
 
-    int findLocalCandidate(const IceTransport *iceTransport, int path, bool withSrvRflx = true) const
+    int findLocalCandidate(const IceTransport *iceTransport, int path, bool hostAndRelayOnly = false) const
     {
         for (int n = 0; n < localCandidates.count(); ++n) {
             const IceComponent::Candidate &cc = localCandidates[n];
             if (cc.iceTransport == iceTransport && cc.path == path
-                && (withSrvRflx || cc.info->type != IceComponent::ServerReflexiveType))
+                && (!hostAndRelayOnly || cc.info->type == IceComponent::RelayedType
+                    || cc.info->type == IceComponent::HostType))
                 return n;
         }
 
@@ -967,8 +998,8 @@ private:
             if (locIt == localCandidates.end()) {
                 // RFC8445 7.2.5.3.1.  Discovering Peer-Reflexive Candidates
                 // new peer-reflexive local candidate discovered
-                components[findComponent(pair->local->componentId)].ic->addLocalPeerReflexiveCandidate(
-                    mappedAddr, pair->local, binding->priority());
+                findComponent(pair->local->componentId)
+                    ->ic->addLocalPeerReflexiveCandidate(mappedAddr, pair->local, binding->priority());
                 locIt = std::find_if(localCandidates.begin(), localCandidates.end(),
                                      [&](const auto &c) { return c.info->addr == mappedAddr; }); // just inserted
                 Q_ASSERT(locIt != localCandidates.end());
@@ -1002,6 +1033,12 @@ private:
         pair->isTriggeredForNominated = isTriggeredForNominated;
         pair->finalNomination         = finalNomination;
 
+        // mark all with same foundation as Waiting to prioritize them
+        for (auto &p : checkList.pairs)
+            if (p->state == PFrozen && p->foundation == pair->foundation)
+                p->state = PWaiting;
+
+        // find position to insert in sorted list of valid pairs
         auto insIt = std::upper_bound(
             checkList.validPairs.begin(), checkList.validPairs.end(), pair, [](auto &item, auto &toins) {
                 if (toins->isNominated ^ item->isNominated)
@@ -1014,7 +1051,7 @@ private:
 
         if (!readyToSendMedia && localFeatures & NotNominatedData && remoteFeatures & NotNominatedData) {
             // if both follow RFC8445 and allow to send data on any valid pair
-            components[findComponent(pair->local->componentId)].hasValidPairs = true;
+            findComponent(pair->local->componentId)->hasValidPairs = true;
             if (std::all_of(components.begin(), components.end(), [](auto &c) { return c.hasValidPairs; })) {
                 readyToSendMedia = true;
                 emit q->readyToSendMedia();
@@ -1176,11 +1213,11 @@ private slots:
     void ic_localFinished()
     {
         IceComponent *ic = static_cast<IceComponent *>(sender());
-        int           at = findComponent(ic);
-        Q_ASSERT(at != -1);
-        Q_ASSERT(!components[at].localFinished);
+        auto          it = findComponent(ic);
+        Q_ASSERT(it != components.end());
+        Q_ASSERT(!it->localFinished);
 
-        components[at].localFinished = true;
+        it->localFinished = true;
 
         for (const Component &c : components) {
             if (!c.localFinished) {
@@ -1216,10 +1253,10 @@ private slots:
     void ic_stopped()
     {
         IceComponent *ic = static_cast<IceComponent *>(sender());
-        int           at = findComponent(ic);
-        Q_ASSERT(at != -1);
+        auto          it = findComponent(ic);
+        Q_ASSERT(it != components.end());
 
-        components[at].stopped = true;
+        it->stopped = true;
 
         bool allStopped = true;
         for (const Component &c : components) {
@@ -1236,18 +1273,18 @@ private slots:
     void ic_debugLine(const QString &line)
     {
         IceComponent *ic = static_cast<IceComponent *>(sender());
-        int           at = findComponent(ic);
-        Q_ASSERT(at != -1);
+        auto          it = findComponent(ic);
+        Q_ASSERT(it != components.end());
 
         // FIXME: components are always sorted?
-        printf("C%d: %s\n", at + 1, qPrintable(line));
+        printf("C%d: %s\n", it->id, qPrintable(line));
     }
 
     // path is either direct or relayed
     void it_readyRead(int path)
     {
         IceTransport *it = static_cast<IceTransport *>(sender());
-        int           at = findLocalCandidate(it, path, false); // without server-reflexive
+        int           at = findLocalCandidate(it, path, true); // just host or relay
         Q_ASSERT(at != -1);
 
         IceComponent::Candidate &locCand = localCandidates[at];
