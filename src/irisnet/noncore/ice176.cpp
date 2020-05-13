@@ -195,6 +195,7 @@ public:
     QList<QList<QByteArray>>                in;
     Features                                remoteFeatures;
     Features                                localFeatures;
+    bool                                    allowIpExposure            = true;
     bool                                    useLocal                   = true;
     bool                                    useStunBind                = true;
     bool                                    useStunRelayUdp            = true;
@@ -309,8 +310,8 @@ public:
             if (!stunRelayTcpAddr.isNull())
                 c.ic->setStunRelayTcpService(stunRelayTcpAddr, stunRelayTcpPort, stunRelayTcpUser, stunRelayTcpPass);
 
-            c.ic->setUseLocal(useLocal);
-            c.ic->setUseStunBind(useStunBind);
+            c.ic->setUseLocal(useLocal && allowIpExposure);
+            c.ic->setUseStunBind(useStunBind && allowIpExposure);
             c.ic->setUseStunRelayUdp(useStunRelayUdp);
             c.ic->setUseStunRelayTcp(useStunRelayTcp);
 
@@ -466,7 +467,7 @@ public:
             auto &pair = checkList.pairs[n];
 #ifdef ICE_DEBUG
             if (pair->logNew)
-                iceDebug("%d, %s", pair->local->componentId, qPrintable(*pair));
+                iceDebug("C%d, %s", pair->local->componentId, qPrintable(*pair));
 #endif
 
             for (int i = n - 1; i >= 0; --i) {
@@ -740,6 +741,50 @@ public:
 
     bool canHaveMoreRemoteCandidates() const { return remoteGatheringComplete || !(remoteFeatures & Trickle); }
 
+    void optimizeCheckList(int componentId)
+    {
+        bool hasHost  = false;
+        bool hasPrflx = false;
+        bool hasSrflx = false;
+        bool hasRelay = false;
+
+        for (auto &p : checkList.validPairs) {
+            if (p->local->componentId != componentId)
+                continue;
+            switch (p->local->type) {
+            case IceComponent::HostType:
+                hasHost = true;
+                break;
+            case IceComponent::PeerReflexiveType:
+                hasPrflx = true;
+                break;
+            case IceComponent::ServerReflexiveType:
+                hasSrflx = true;
+                break;
+            case IceComponent::RelayedType:
+                hasRelay = true;
+                break;
+            }
+        }
+        // TODO figureout if those are highest priority too
+
+        bool stopRelay = hasRelay || hasSrflx || hasPrflx || hasHost;
+        bool stopSrflx = hasPrflx || hasHost; // || hasSrflx but who knows about the priority
+        bool stopPrflx = hasHost;
+        // we don't stop other hosts since they are quite cheap and maybe highest priority is on the way
+
+        for (auto &p : checkList.pairs) {
+            bool toStop = p->local->componentId == componentId && (p->state == PFrozen || p->state == PWaiting)
+                && ((stopRelay && p->local->type == IceComponent::RelayedType)
+                    || (stopSrflx && p->local->type == IceComponent::ServerReflexiveType)
+                    || (stopPrflx && p->local->type == IceComponent::PeerReflexiveType));
+            if (toStop) {
+                iceDebug("Disable checks for %s since we already have better valid pairs", qPrintable(*p));
+                p->state = PFailed;
+            }
+        }
+    }
+
     void tryNominateSelectedPair(int componentId)
     {
         auto &c = *findComponent(componentId);
@@ -824,7 +869,7 @@ public:
     // ice negotiation failed. either initial or on ICE restart
     void tryComponentFailed(int componentId)
     {
-        Q_ASSERT(state == Starting);
+        Q_ASSERT(state == Starting || state == Started);
         if (!(localGatheringComplete && canHaveMoreRemoteCandidates())) {
             return; // if we have something to gather then we still have a chance for success
         }
@@ -909,7 +954,8 @@ public:
     {
         if (remoteFeatures & GatheringComplete || !(remoteFeatures & Trickle)) {
             remoteGatheringCompleteTimer.reset();
-            iceDebug("Don't use Remote Gatherging Complete timeout");
+            iceDebug("Don't use Remote Gatherging Complete timeout: %s",
+                     (remoteFeatures & GatheringComplete) ? "remote will notify" : "non-trickle mode");
             return;
         } else if (remoteGatheringCompleteTimer) {
             iceDebug("Remote Gatherging Complete was restarted");
@@ -1177,6 +1223,8 @@ private:
             checkList.validPairs.insert(insIt, pair); // nominated and highest priority first
             iceDebug("C%d: insert to valid list %s", component.id, qPrintable(*pair));
         }
+
+        optimizeCheckList(component.id);
 
         if (signalCompNominated || signalCompValidPairs) {
             tryReadyToSendMedia();
@@ -1583,6 +1631,8 @@ void Ice176::setStunRelayTcpService(const QHostAddress &addr, int port, const QS
     d->stunRelayTcpUser = user;
     d->stunRelayTcpPass = pass;
 }
+
+void Ice176::setAllowIpExposure(bool enabled) { d->allowIpExposure = enabled; }
 
 void Ice176::setUseLocal(bool enabled) { d->useLocal = enabled; }
 
