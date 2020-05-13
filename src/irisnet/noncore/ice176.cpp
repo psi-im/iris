@@ -405,14 +405,13 @@ public:
 
     // returns a pair is pairable or null
     QSharedPointer<CandidatePair> makeCandidatesPair(IceComponent::CandidateInfo::Ptr lc,
-                                                     IceComponent::CandidateInfo::Ptr rc,
-                                                     bool                             allowProtoMismatch = false)
+                                                     IceComponent::CandidateInfo::Ptr rc)
     {
         if (lc->componentId != rc->componentId)
             return {};
 
         // don't pair ipv4 with ipv6.  FIXME: is this right?
-        if (!allowProtoMismatch && lc->addr.addr.protocol() != rc->addr.addr.protocol()) {
+        if (lc->addr.addr.protocol() != rc->addr.addr.protocol()) {
             iceDebug("Skip building pair: %s - %s (protocol mismatch)", qPrintable(lc->addr), qPrintable(rc->addr));
             return {};
         }
@@ -1115,7 +1114,7 @@ private:
                 Q_ASSERT(locIt != localCandidates.end());
                 // local candidate wasn't found, so it wasn't on the checklist  RFC8445 7.2.5.3.1.3
                 // allow v4/v6 proto mismatch in case NAT does magic
-                pair = makeCandidatesPair(locIt->info, pair->remote, true);
+                pair = makeCandidatesPair(locIt->info, pair->remote);
             } else {
                 // local candidate found. If it's a part of a pair on checklist, we have to add this pair to valid list,
                 // otherwise we have to create a new pair and add it to valid list
@@ -1125,7 +1124,7 @@ private:
                 });
                 if (it == checkList.pairs.constEnd()) {
                     // allow v4/v6 proto mismatch in case NAT does magic
-                    pair = makeCandidatesPair(locIt->info, pair->remote, true);
+                    pair = makeCandidatesPair(locIt->info, pair->remote);
                 } else {
                     pair = *it;
                     iceDebug("mapped address belongs to another pair on checklist %s", qPrintable(QString(*pair)));
