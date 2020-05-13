@@ -334,6 +334,7 @@ public:
 
         state = Stopping;
         remoteGatheringCompleteTimer.reset();
+        checkTimer.stop();
 
         // will trigger candidateRemoved events and result pairs cleanup.
         if (!components.empty()) {
@@ -350,6 +351,7 @@ public:
 
     void addRemoteCandidates(const QList<Candidate> &list)
     {
+        Q_ASSERT(state == Started || state == Starting);
         updateRemoteGatheringTimeout();
         QList<IceComponent::CandidateInfo::Ptr> remoteCandidates;
         for (const Candidate &c : list) {
