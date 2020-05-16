@@ -117,8 +117,9 @@ public:
     void setLocalFeatures(const Features &features);
     void setRemoteFeatures(const Features &features);
 
-    void start(Mode mode);
+    void start(Mode mode); // init everything and prepare candidates
     void stop();
+    void startChecks(); // actually start doing checks when connection is accepted
 
     QString localUfrag() const;
     QString localPassword() const;
