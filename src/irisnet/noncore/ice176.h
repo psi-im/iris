@@ -119,6 +119,7 @@ public:
 
     void start(Mode mode); // init everything and prepare candidates
     void stop();
+    bool isStopped() const;
     void startChecks(); // actually start doing checks when connection is accepted
 
     QString localUfrag() const;
