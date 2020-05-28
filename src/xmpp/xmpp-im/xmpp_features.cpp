@@ -209,6 +209,9 @@ bool Features::hasCaps() const { return test(QStringList() << QLatin1String(NS_C
 #define NS_CAPS_OPTIMIZE "http://jabber.org/protocol/caps#optimize"
 bool Features::hasCapsOptimize() const { return test(QStringList() << QLatin1String(NS_CAPS_OPTIMIZE)); }
 
+#define NS_DIRECT_MUC_INVITE "jabber:x:conference"
+bool Features::hasDirectMucInvite() const { return test(QStringList() << QLatin1String(NS_DIRECT_MUC_INVITE)); }
+
 // custom Psi actions
 #define FID_ADD "psi:add"
 
