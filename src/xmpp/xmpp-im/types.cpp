@@ -1563,7 +1563,7 @@ Stanza Message::toStanza(Stream *stream) const
     }
 
     // Avoiding Carbons
-    if (isDisabledCarbons() || wasEncrypted()) {
+    if (isDisabledCarbons()) {
         QDomElement e = s.createElement("urn:xmpp:carbons:2", "private");
         s.appendChild(e);
     }
