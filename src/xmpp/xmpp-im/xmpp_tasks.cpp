@@ -838,13 +838,11 @@ void JT_Message::onGo()
     Stanza      s = m.toStanza(&(client()->stream()));
     QDomElement e = s.element(); // oldStyleNS(s.element());
 
-    bool wasEncrypted      = false;
-    auto encryptionHandler = client()->encryptionHandler();
-    if (encryptionHandler && encryptionHandler->encryptMessageElement(e)) {
-        if (!e.firstChildElement("encrypted").isNull()) {
-            wasEncrypted = true;
-        }
+    if (auto encryptionHandler = client()->encryptionHandler()) {
+        Q_UNUSED(encryptionHandler->encryptMessageElement(e));
     }
+
+    const bool wasEncrypted = !e.firstChildElement("encrypted").isNull();
     m.setWasEncrypted(wasEncrypted);
 
     // if the element is null, then the encryption is happening asynchronously
@@ -877,11 +875,13 @@ bool JT_PushMessage::take(const QDomElement &e)
 
     QDomElement e1 = e;
 
-    bool wasEncrypted
-        = d->m_encryptionHandler != nullptr && d->m_encryptionHandler->decryptMessageElement(e1) && !e1.isNull();
-    if (wasEncrypted && e1.isNull()) {
-        // The message was processed, but has to be discarded for some reason
-        return true;
+    if (d->m_encryptionHandler) {
+        if (d->m_encryptionHandler->decryptMessageElement(e1)) {
+            if (e1.isNull()) {
+                // The message was processed, but has to be discarded for some reason
+                return true;
+            }
+        }
     }
 
     QDomElement        forward;
@@ -932,9 +932,7 @@ bool JT_PushMessage::take(const QDomElement &e)
         m.setCarbonDirection(cd);
     }
 
-    if (!e1.firstChildElement("encrypted").isNull()) {
-        wasEncrypted = true;
-    }
+    const bool wasEncrypted = !e1.firstChildElement("encrypted").isNull();
     m.setWasEncrypted(wasEncrypted);
 
     emit message(m);
