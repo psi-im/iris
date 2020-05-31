@@ -838,8 +838,13 @@ void JT_Message::onGo()
     Stanza      s = m.toStanza(&(client()->stream()));
     QDomElement e = s.element(); // oldStyleNS(s.element());
 
+    bool wasEncrypted      = false;
     auto encryptionHandler = client()->encryptionHandler();
-    bool wasEncrypted      = encryptionHandler && encryptionHandler->encryptMessageElement(e);
+    if (encryptionHandler && encryptionHandler->encryptMessageElement(e)) {
+        if (!e.firstChildElement("encrypted").isNull()) {
+            wasEncrypted = true;
+        }
+    }
     m.setWasEncrypted(wasEncrypted);
 
     // if the element is null, then the encryption is happening asynchronously
@@ -925,6 +930,10 @@ bool JT_PushMessage::take(const QDomElement &e)
     if (!forward.isNull()) {
         m.setForwardedFrom(fromJid);
         m.setCarbonDirection(cd);
+    }
+
+    if (!e1.firstChildElement("encrypted").isNull()) {
+        wasEncrypted = true;
     }
     m.setWasEncrypted(wasEncrypted);
 
