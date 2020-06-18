@@ -189,8 +189,8 @@ QByteArray HttpPoll::makePacket(const QString &ident, const QString &key, const 
 
     QByteArray a;
     a.resize(len + block.size());
-    memcpy(a.data(), cs.data(), len);
-    memcpy(a.data() + len, block.data(), block.size());
+    memcpy(a.data(), cs.data(), size_t(len));
+    memcpy(a.data() + len, block.data(), size_t(block.size()));
     return a;
 }
 
@@ -198,7 +198,7 @@ int HttpPoll::pollInterval() const { return d->polltime; }
 
 void HttpPoll::setPollInterval(int seconds) { d->polltime = seconds; }
 
-bool HttpPoll::isOpen() const { return (d->state == 2 ? true : false); }
+bool HttpPoll::isOpen() const { return d->state == 2; }
 
 void HttpPoll::close()
 {
@@ -376,10 +376,10 @@ static QString extractLine(QByteArray *buf, bool *found)
         if (buf->at(n) == '\r' && buf->at(n + 1) == '\n') {
             QByteArray cstr;
             cstr.resize(n);
-            memcpy(cstr.data(), buf->data(), n);
+            memcpy(cstr.data(), buf->data(), size_t(n));
             n += 2; // hack off CR/LF
 
-            memmove(buf->data(), buf->data() + n, buf->size() - n);
+            memmove(buf->data(), buf->data() + n, size_t(buf->size() - n));
             buf->resize(buf->size() - n);
             QString s = QString::fromUtf8(cstr);
 
@@ -467,7 +467,7 @@ void HttpProxyPost::setAuth(const QString &user, const QString &pass)
     d->pass = pass;
 }
 
-bool HttpProxyPost::isActive() const { return (d->sock.state() == BSocket::Idle ? false : true); }
+bool HttpProxyPost::isActive() const { return !(d->sock.state() == BSocket::Idle); }
 
 void HttpProxyPost::post(const QString &proxyHost, int proxyPort, const QUrl &url, const QByteArray &data, bool asProxy)
 {
@@ -487,9 +487,9 @@ void HttpProxyPost::post(const QString &proxyHost, int proxyPort, const QUrl &ur
 #endif
     if (d->sock.state() != QAbstractSocket::ConnectingState) { // in case of http/1.1 it may be connected
         if (d->lastAddress.isNull()) {
-            d->sock.connectToHost(proxyHost, proxyPort);
+            d->sock.connectToHost(proxyHost, quintptr(proxyPort));
         } else {
-            d->sock.connectToHost(d->lastAddress, proxyPort);
+            d->sock.connectToHost(d->lastAddress, quintptr(proxyPort));
         }
     }
 }
@@ -748,7 +748,7 @@ void HttpProxyGetStream::setAuth(const QString &user, const QString &pass)
     d->pass = pass;
 }
 
-bool HttpProxyGetStream::isActive() const { return (d->sock.state() == BSocket::Idle ? false : true); }
+bool HttpProxyGetStream::isActive() const { return !(d->sock.state() == BSocket::Idle); }
 
 void HttpProxyGetStream::get(const QString &proxyHost, int proxyPort, const QString &url, bool ssl, bool asProxy)
 {
@@ -766,7 +766,7 @@ void HttpProxyGetStream::get(const QString &proxyHost, int proxyPort, const QStr
     else
         fprintf(stderr, ", auth {%s,%s}\n", d->user.latin1(), d->pass.latin1());
 #endif
-    d->sock.connectToHost(proxyHost, proxyPort);
+    d->sock.connectToHost(proxyHost, quintptr(proxyPort));
 }
 
 void HttpProxyGetStream::stop() { resetConnection(); }

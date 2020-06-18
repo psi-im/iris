@@ -160,7 +160,7 @@ void HttpConnect::connectToHost(const QString &proxyHost, int proxyPort, const Q
     else
         fprintf(stderr, ", auth {%s,%s}\n", qPrintable(d->user), qPrintable(d->pass));
 #endif
-    d->sock.connectToHost(d->host, d->port);
+    d->sock.connectToHost(d->host, quintptr(d->port));
 }
 
 void HttpConnect::close()
@@ -327,7 +327,7 @@ void HttpConnect::sock_readyRead()
 void HttpConnect::sock_bytesWritten(qint64 x)
 {
     if (d->toWrite > 0) {
-        int size = x;
+        int size = int(x);
         if (d->toWrite < x)
             size = d->toWrite;
         d->toWrite -= size;

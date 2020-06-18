@@ -47,10 +47,7 @@ public:
 
         bool operator==(const TransportAddress &other) const
         {
-            if (addr == other.addr && port == other.port)
-                return true;
-            else
-                return false;
+            return addr == other.addr && port == other.port;
         }
 
         inline bool operator!=(const TransportAddress &other) const { return !operator==(other); }

@@ -407,7 +407,7 @@ void readBoolEntry(const QDomElement &e, const QString &name, bool *v)
     QDomElement tag = e.firstChildElement(name);
     if (tag.isNull())
         return;
-    *v = (tagContent(tag) == "true") ? true : false;
+    *v = tagContent(tag) == "true";
 }
 
 void readSizeEntry(const QDomElement &e, const QString &name, QSize *v)
@@ -473,7 +473,7 @@ void readBoolAttribute(QDomElement e, const QString &name, bool *v)
 {
     if (e.hasAttribute(name)) {
         QString s = e.attribute(name);
-        *v        = (s == "true") ? true : false;
+        *v        = s == "true";
     }
 }
 

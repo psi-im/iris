@@ -55,7 +55,7 @@ SCRAMSHA1Response::SCRAMSHA1Response(const QByteArray &server_first_message, con
 
         QCA::Hash shaHash("sha1");
         shaHash.update("", 0);
-        dkLen = shaHash.final().size();
+        dkLen = quintptr(shaHash.final().size());
 
         QCA::PBKDF2 hi("sha1");
 
@@ -74,7 +74,7 @@ SCRAMSHA1Response::SCRAMSHA1Response(const QByteArray &server_first_message, con
             password = pass_out.toUtf8();
             salted_password_
                 = hi.makeKey(QCA::SecureArray(password), QCA::InitializationVector(QCA::Base64().stringToArray(salt)),
-                             dkLen, icount.toULong());
+                             dkLen, uint(icount.toULong()));
         }
 
         // ClientKey       := HMAC(SaltedPassword, "Client Key")

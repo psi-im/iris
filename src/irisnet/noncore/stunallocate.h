@@ -44,10 +44,7 @@ public:
 
         inline bool operator==(const Channel &other)
         {
-            if (address == other.address && port == other.port)
-                return true;
-            else
-                return false;
+            return address == other.address && port == other.port;
         }
 
         inline bool operator!=(const Channel &other) { return !operator==(other); }

@@ -179,10 +179,7 @@ BytestreamManager *IBBConnection::manager() const { return d->m; }
 
 bool IBBConnection::isOpen() const
 {
-    if (d->state == Active)
-        return true;
-    else
-        return false;
+    return d->state == Active;
 }
 
 qint64 IBBConnection::writeData(const char *data, qint64 maxSize)
@@ -192,7 +189,7 @@ qint64 IBBConnection::writeData(const char *data, qint64 maxSize)
         return 0;
     }
 
-    ByteStream::appendWrite(QByteArray::fromRawData(data, maxSize));
+    ByteStream::appendWrite(QByteArray::fromRawData(data, int(maxSize)));
     trySend();
     return maxSize;
 }
@@ -311,7 +308,7 @@ void IBBConnection::trySend()
 IBBData &IBBData::fromXml(const QDomElement &e)
 {
     sid  = e.attribute("sid");
-    seq  = e.attribute("seq").toInt();
+    seq  = quint16(e.attribute("seq").toInt());
     data = QByteArray::fromBase64(e.text().toUtf8());
     return *this;
 }

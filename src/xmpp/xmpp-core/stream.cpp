@@ -345,9 +345,9 @@ void ClientStream::accept()
     processNext();
 }
 
-bool ClientStream::isActive() const { return (d->state != Idle) ? true : false; }
+bool ClientStream::isActive() const { return d->state != Idle; }
 
-bool ClientStream::isAuthenticated() const { return (d->state == Active) ? true : false; }
+bool ClientStream::isAuthenticated() const { return d->state == Active; }
 
 void ClientStream::setUsername(const QString &s)
 {
@@ -545,7 +545,7 @@ void ClientStream::cr_connected()
     // d->client.startServerOut(d->server);
 
     d->client.startClientOut(d->jid, d->oldOnly, d->conn->useSSL(), d->doAuth, d->doCompress);
-    d->client.setAllowTLS(d->tlsHandler ? true : false);
+    d->client.setAllowTLS(d->tlsHandler != nullptr);
     d->client.setAllowBind(d->doBinding);
     d->client.setAllowPlain(d->allowPlain == AllowPlain || (d->allowPlain == AllowPlainOverTLS && d->conn->useSSL()));
     d->client.setLang(d->lang);
@@ -622,9 +622,9 @@ void ClientStream::ss_readyRead()
 void ClientStream::ss_bytesWritten(qint64 bytes)
 {
     if (d->mode == Client)
-        d->client.outgoingDataWritten(bytes);
+        d->client.outgoingDataWritten(int(bytes));
     else
-        d->srv.outgoingDataWritten(bytes);
+        d->srv.outgoingDataWritten(int(bytes));
 
     if (d->notify & CoreProtocol::NSend) {
 #ifdef XMPP_DEBUG

@@ -86,7 +86,7 @@ public:
             return QByteArray();
 
         QByteArray buf;
-        buf.resize(sock->pendingDatagramSize());
+        buf.resize(int(sock->pendingDatagramSize()));
         sock->readDatagram(buf.data(), buf.size(), address, port);
         return buf;
     }
@@ -556,7 +556,7 @@ private slots:
         //                      .arg(toAddress.toString())
         //                      .arg(toPort));
 
-        sock->writeDatagram(packet, toAddress, toPort);
+        sock->writeDatagram(packet, toAddress, quintptr(toPort));
     }
 
     void pool_needAuthParams()
@@ -655,7 +655,7 @@ private slots:
         WriteItem wi;
         wi.type = WriteItem::Turn;
         pendingWrites += wi;
-        sock->writeDatagram(buf, stunRelayAddr, stunRelayPort);
+        sock->writeDatagram(buf, stunRelayAddr, quintptr(stunRelayPort));
     }
 
     void turn_debugLine(const QString &line) { emit q->debugLine(line); }
@@ -761,7 +761,7 @@ void IceLocalTransport::writeDatagram(int path, const QByteArray &buf, const QHo
         wi.addr = addr;
         wi.port = port;
         d->pendingWrites += wi;
-        d->sock->writeDatagram(buf, addr, port);
+        d->sock->writeDatagram(buf, addr, quintptr(port));
     } else if (path == Relayed) {
         if (d->turn && d->turnActivated)
             d->turn->write(buf, addr, port);

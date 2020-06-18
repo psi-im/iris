@@ -1,6 +1,7 @@
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Release")
 endif()
+get_directory_property(IS_SUBPROJECT PARENT_DIRECTORY)
 
 project(iris)
 cmake_minimum_required(VERSION 3.1.0)
@@ -135,3 +136,6 @@ add_definitions(-DIRISNET_STATIC)
 
 add_subdirectory(src/irisnet)
 add_subdirectory(src/xmpp)
+if(NOT IS_SUBPROJECT)
+include(cmake/modules/fix-codestyle.cmake)
+endif()

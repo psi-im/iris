@@ -179,10 +179,7 @@ ObjectSessionWatcher::~ObjectSessionWatcher()
 
 bool ObjectSessionWatcher::isValid() const
 {
-    if (d->sess)
-        return true;
-    else
-        return false;
+    return d->sess != nullptr;
 }
 
 ObjectSession::ObjectSession(QObject *parent) : QObject(parent) { d = new ObjectSessionPrivate(this); }

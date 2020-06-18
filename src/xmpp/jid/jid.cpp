@@ -53,7 +53,7 @@ bool StringPrepCache::nameprep(const QString &in, int maxbytes, QString &out)
 
     QByteArray cs = in.toUtf8();
     cs.resize(maxbytes);
-    if (stringprep(cs.data(), maxbytes, (Stringprep_profile_flags)0, stringprep_nameprep) != 0) {
+    if (stringprep(cs.data(), size_t(maxbytes), (Stringprep_profile_flags)0, stringprep_nameprep) != 0) {
         that->nameprep_table.insert(in, QString());
         return false;
     }
@@ -84,7 +84,7 @@ bool StringPrepCache::nodeprep(const QString &in, int maxbytes, QString &out)
 
     QByteArray cs = in.toUtf8();
     cs.resize(maxbytes);
-    if (stringprep(cs.data(), maxbytes, (Stringprep_profile_flags)0, stringprep_xmpp_nodeprep) != 0) {
+    if (stringprep(cs.data(), size_t(maxbytes), (Stringprep_profile_flags)0, stringprep_xmpp_nodeprep) != 0) {
         that->nodeprep_table.insert(in, QString());
         return false;
     }
@@ -115,7 +115,7 @@ bool StringPrepCache::resourceprep(const QString &in, int maxbytes, QString &out
 
     QByteArray cs = in.toUtf8();
     cs.resize(maxbytes);
-    if (stringprep(cs.data(), maxbytes, (Stringprep_profile_flags)0, stringprep_xmpp_resourceprep) != 0) {
+    if (stringprep(cs.data(), size_t(maxbytes), (Stringprep_profile_flags)0, stringprep_xmpp_resourceprep) != 0) {
         that->resourceprep_table.insert(in, QString());
         return false;
     }
@@ -146,7 +146,7 @@ bool StringPrepCache::saslprep(const QString &in, int maxbytes, QString &out)
 
     QByteArray cs = in.toUtf8();
     cs.resize(maxbytes);
-    if (stringprep(cs.data(), maxbytes, (Stringprep_profile_flags)0, stringprep_saslprep) != 0) {
+    if (stringprep(cs.data(), size_t(maxbytes), (Stringprep_profile_flags)0, stringprep_saslprep) != 0) {
         that->saslprep_table.insert(in, QString());
         return false;
     }
@@ -364,8 +364,6 @@ bool Jid::compare(const Jid &a, bool compareRes) const
     if (!valid || !a.valid)
         return false;
 
-    if (compareRes ? (f != a.f) : (b != a.b))
-        return false;
+    return !(compareRes ? (f != a.f) : (b != a.b));
 
-    return true;
 }

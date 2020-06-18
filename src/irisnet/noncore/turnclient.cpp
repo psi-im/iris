@@ -216,7 +216,7 @@ public:
             bs         = s;
             connect(s, SIGNAL(connected()), SLOT(bs_connected()));
             connect(s, SIGNAL(error(int)), SLOT(bs_error(int)));
-            s->connectToHost(serverAddr.toString(), serverPort);
+            s->connectToHost(serverAddr.toString(), quint16(serverPort));
         }
 
         connect(bs, SIGNAL(connectionClosed()), SLOT(bs_connectionClosed()));

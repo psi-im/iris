@@ -546,7 +546,7 @@ void SecureStream::bs_readyRead()
 void SecureStream::bs_bytesWritten(qint64 bytes)
 {
     for (SecureLayer *s : d->layers) {
-        bytes = s->finished(bytes);
+        bytes = s->finished(int(bytes));
     }
 
     if (bytes > 0) {

@@ -66,8 +66,8 @@ static int getAddressScope(const QHostAddress &a)
             return 1;
     } else if (a.protocol() == QAbstractSocket::IPv4Protocol) {
         quint32 v4 = a.toIPv4Address();
-        quint8  a0 = v4 >> 24;
-        quint8  a1 = (v4 >> 16) & 0xff;
+        quint8  a0 = quint8(v4 >> 24);
+        quint8  a1 = quint8((v4 >> 16) & 0xff);
         if (a0 == 127)
             return 0;
         else if (a0 == 169 && a1 == 254)
@@ -283,7 +283,7 @@ public:
             // list size = componentCount * number of interfaces
             socketList = portReserver->borrowSockets(componentCount, this);
 
-        components.reserve(componentCount);
+        components.reserve(ulong(componentCount));
         for (int n = 0; n < componentCount; ++n) {
             components.emplace_back();
             Component &c = components.back();
@@ -603,7 +603,7 @@ public:
         });
 
         int prflx_priority = c.ic->peerReflexivePriority(lc.iceTransport, lc.path);
-        pair->binding->setPriority(prflx_priority);
+        pair->binding->setPriority(quint32(prflx_priority));
 
         if (mode == Ice176::Initiator) {
             pair->binding->setIceControlling(0);
@@ -842,7 +842,7 @@ public:
         Component &c = *findComponent(componentId);
         if (c.nominationTimer)
             return;
-        bool agrNom = (mode == Initiator ? localFeatures : remoteFeatures) & AggressiveNomination;
+        bool agrNom = bool((mode == Initiator ? localFeatures : remoteFeatures) & AggressiveNomination);
         if (!agrNom && mode == Responder)
             return; // responder will wait for nominated pairs till very end
 
@@ -874,7 +874,7 @@ public:
 
         CandidatePair::Ptr pair        = (it == checkList.pairs.end()) ? CandidatePair::Ptr() : *it;
         Component &        component   = *findComponent(locCand.info->componentId);
-        int                minPriority = component.highestPair ? component.highestPair->priority : 0;
+        int                minPriority = int(component.highestPair ? component.highestPair->priority : 0);
         if (pair) {
             if (pair->priority < minPriority) {
                 iceDebug(
@@ -1137,7 +1137,8 @@ private:
 
         if (pair->isNominated) {
             component.hasNominatedPairs = true;
-            bool agrNom                 = (mode == Initiator ? localFeatures : remoteFeatures) & AggressiveNomination;
+            bool agrNom                 = bool((mode == Initiator ? localFeatures : remoteFeatures) &
+                                                            AggressiveNomination);
             if (!agrNom) {
                 setSelectedPair(component.id);
             } else
@@ -1494,7 +1495,7 @@ private slots:
                     quint32 priority;
                     StunTypes::parsePriority(msg.attribute(StunTypes::PRIORITY), &priority);
                     auto remCand = IceComponent::CandidateInfo::makeRemotePrflx(locCand.info->componentId, fromAddr,
-                                                                                fromPort, priority);
+                                                                                quintptr(fromPort), priority);
                     remoteCandidates += remCand;
                     doTriggeredCheck(locCand, remCand, nominated);
                 } else {
@@ -1669,10 +1670,7 @@ bool Ice176::isIPv6LinkLocalAddress(const QHostAddress &addr)
     quint16    hi    = addr6[0];
     hi <<= 8;
     hi += addr6[1];
-    if ((hi & 0xffc0) == 0xfe80)
-        return true;
-    else
-        return false;
+    return (hi & 0xffc0) == 0xfe80;
 }
 
 void Ice176::changeThread(QThread *thread)

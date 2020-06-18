@@ -663,7 +663,7 @@ void BSocket::qs_readyRead() { emit readyRead(); }
 
 void BSocket::qs_bytesWritten(qint64 x64)
 {
-    int x = x64;
+    int x = int(x64);
 #ifdef BS_DEBUG_EXTRA
     BSDEBUG << "BytesWritten [" << x << "]";
 #endif

@@ -49,7 +49,7 @@ static QStringList read_proc_as_lines(const char *procfile)
     while (!feof(f)) {
         // max read on a proc is 4K
         QByteArray block(4096, 0);
-        int        ret = fread(block.data(), 1, block.size(), f);
+        int        ret = int(fread(block.data(), 1, size_t(block.size()), f));
         if (ret <= 0)
             break;
         block.resize(ret);

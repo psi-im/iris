@@ -320,12 +320,12 @@ void S5BConnection::writeDatagram(const S5BDatagram &i)
 {
     QByteArray buf;
     buf.resize(i.data().size() + 4);
-    ushort     ssp  = htons(i.sourcePort());
-    ushort     sdp  = htons(i.destPort());
+    ushort     ssp  = htons(uint16_t(i.sourcePort()));
+    ushort     sdp  = htons(uint16_t(i.destPort()));
     QByteArray data = i.data();
     memcpy(buf.data(), &ssp, 2);
     memcpy(buf.data() + 2, &sdp, 2);
-    memcpy(buf.data() + 4, data.data(), data.size());
+    memcpy(buf.data() + 4, data.data(), size_t(data.size()));
     sendUDP(buf);
 }
 
@@ -476,7 +476,7 @@ void S5BConnection::handleUDP(const QByteArray &buf)
     int        dest   = ntohs(sdp);
     QByteArray data;
     data.resize(buf.size() - 4);
-    memcpy(data.data(), buf.data() + 4, data.size());
+    memcpy(data.data(), buf.data() + 4, size_t(data.size()));
     d->dglist.append(new S5BDatagram(source, dest, data));
 
     datagramReady();
@@ -719,9 +719,7 @@ S5BManager::Entry *S5BManager::findEntryBySID(const Jid &peer, const QString &si
 
 bool S5BManager::srv_ownsHash(const QString &key) const
 {
-    if (findEntryByHash(key))
-        return true;
-    return false;
+    return findEntryByHash(key) != nullptr;
 }
 
 void S5BManager::srv_incomingReady(SocksClient *sc, const QString &key)
@@ -904,7 +902,7 @@ void S5BManager::entryContinue(Entry *e)
         e->i->startTarget(e->sid, d->client->jid(), e->c->d->peer, req.dstaddr, req.hosts, req.id, req.fast, req.udp);
     } else {
         e->i->startRequester(e->sid, d->client->jid(), e->c->d->peer, true,
-                             e->c->d->mode == S5BConnection::Datagram ? true : false);
+                             e->c->d->mode == S5BConnection::Datagram);
         e->c->requesting(); // signal
     }
 }
@@ -974,10 +972,8 @@ bool S5BManager::targetShouldOfferProxy(Entry *e)
     }
 
     // ensure we don't offer the same proxy as the requester
-    if (haveHost(hosts, e->c->d->proxy))
-        return false;
+    return !haveHost(hosts, e->c->d->proxy);
 
-    return true;
 }
 
 //----------------------------------------------------------------------------
@@ -2061,7 +2057,7 @@ bool JT_PushS5B::take(const QDomElement &e)
     r.dstaddr = q.attribute("dstaddr"); // special case for muc as in xep-0065rc3
     r.hosts   = hosts;
     r.fast    = fast;
-    r.udp     = q.attribute("mode") == "udp" ? true : false;
+    r.udp     = q.attribute("mode") == "udp";
 
     emit incoming(r);
     return true;

@@ -739,7 +739,7 @@ void Client::ppPresence(const Jid &j, const Status &s)
         GroupChat &i = *it;
 
         if (i.j.compare(j, false)) {
-            bool us = (i.j.resource() == j.resource() || j.resource().isEmpty()) ? true : false;
+            bool us = i.j.resource() == j.resource() || j.resource().isEmpty();
 
             debug(QString("for groupchat i=[%1] pres=[%2], [us=%3].\n").arg(i.j.full()).arg(j.full()).arg(us));
             switch (i.status) {
@@ -805,7 +805,7 @@ void Client::ppPresence(const Jid &j, const Status &s)
 void Client::updateSelfPresence(const Jid &j, const Status &s)
 {
     ResourceList::Iterator rit   = d->resourceList.find(j.resource());
-    bool                   found = (rit == d->resourceList.end()) ? false : true;
+    bool                   found = !(rit == d->resourceList.end());
 
     // unavailable?  remove the resource
     if (!s.isAvailable()) {
@@ -836,7 +836,7 @@ void Client::updateSelfPresence(const Jid &j, const Status &s)
 void Client::updatePresence(LiveRosterItem *i, const Jid &j, const Status &s)
 {
     ResourceList::Iterator rit   = i->resourceList().find(j.resource());
-    bool                   found = (rit == i->resourceList().end()) ? false : true;
+    bool                   found = !(rit == i->resourceList().end());
 
     // unavailable?  remove the resource
     if (!s.isAvailable()) {
@@ -1272,9 +1272,7 @@ ResourceList::ConstIterator LiveRosterItem::priority() const { return v_resource
 
 bool LiveRosterItem::isAvailable() const
 {
-    if (v_resourceList.count() > 0)
-        return true;
-    return false;
+    return v_resourceList.count() > 0;
 }
 
 const Status &LiveRosterItem::lastUnavailableStatus() const { return v_lastUnavailableStatus; }

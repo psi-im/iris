@@ -48,8 +48,8 @@ namespace XMPP { namespace Jingle { namespace ICE {
                 return 1;
         } else if (a.protocol() == QAbstractSocket::IPv4Protocol) {
             quint32 v4 = a.toIPv4Address();
-            quint8  a0 = v4 >> 24;
-            quint8  a1 = (v4 >> 16) & 0xff;
+            quint8  a0 = quint8(v4 >> 24);
+            quint8  a1 = quint8((v4 >> 16) & 0xff);
             if (a0 == 127)
                 return 0;
             else if (a0 == 169 && a1 == 254)
