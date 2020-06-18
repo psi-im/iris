@@ -313,7 +313,7 @@ namespace StunTypes {
             return false;
 
         unsigned char c = static_cast<unsigned char>(val[0]);
-        *reserve = (c & 0x80) != 0;
+        *reserve        = (c & 0x80) != 0;
 
         return true;
     }

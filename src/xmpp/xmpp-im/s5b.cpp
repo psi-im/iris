@@ -717,10 +717,7 @@ S5BManager::Entry *S5BManager::findEntryBySID(const Jid &peer, const QString &si
     return nullptr;
 }
 
-bool S5BManager::srv_ownsHash(const QString &key) const
-{
-    return findEntryByHash(key) != nullptr;
-}
+bool S5BManager::srv_ownsHash(const QString &key) const { return findEntryByHash(key) != nullptr; }
 
 void S5BManager::srv_incomingReady(SocksClient *sc, const QString &key)
 {
@@ -901,8 +898,7 @@ void S5BManager::entryContinue(Entry *e)
         const S5BRequest &req = e->c->d->req;
         e->i->startTarget(e->sid, d->client->jid(), e->c->d->peer, req.dstaddr, req.hosts, req.id, req.fast, req.udp);
     } else {
-        e->i->startRequester(e->sid, d->client->jid(), e->c->d->peer, true,
-                             e->c->d->mode == S5BConnection::Datagram);
+        e->i->startRequester(e->sid, d->client->jid(), e->c->d->peer, true, e->c->d->mode == S5BConnection::Datagram);
         e->c->requesting(); // signal
     }
 }
@@ -973,7 +969,6 @@ bool S5BManager::targetShouldOfferProxy(Entry *e)
 
     // ensure we don't offer the same proxy as the requester
     return !haveHost(hosts, e->c->d->proxy);
-
 }
 
 //----------------------------------------------------------------------------

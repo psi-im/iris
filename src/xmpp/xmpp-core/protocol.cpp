@@ -871,7 +871,7 @@ bool CoreProtocol::isValidStanza(const QDomElement &e) const
     QString      s    = e.tagName();
     Stanza::Kind kind = Stanza::kind(s);
     return e.namespaceURI() == (server ? NS_SERVER : NS_CLIENT)
-           && (kind == Stanza::Message || kind == Stanza::Presence || kind == Stanza::IQ);
+        && (kind == Stanza::Message || kind == Stanza::Presence || kind == Stanza::IQ);
 }
 
 bool CoreProtocol::streamManagementHandleStanza(const QDomElement &e)

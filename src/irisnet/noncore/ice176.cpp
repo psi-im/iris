@@ -1137,8 +1137,7 @@ private:
 
         if (pair->isNominated) {
             component.hasNominatedPairs = true;
-            bool agrNom                 = bool((mode == Initiator ? localFeatures : remoteFeatures) &
-                                                            AggressiveNomination);
+            bool agrNom = bool((mode == Initiator ? localFeatures : remoteFeatures) & AggressiveNomination);
             if (!agrNom) {
                 setSelectedPair(component.id);
             } else

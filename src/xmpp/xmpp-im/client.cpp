@@ -1270,10 +1270,7 @@ const ResourceList &LiveRosterItem::resourceList() const { return v_resourceList
 
 ResourceList::ConstIterator LiveRosterItem::priority() const { return v_resourceList.priority(); }
 
-bool LiveRosterItem::isAvailable() const
-{
-    return v_resourceList.count() > 0;
-}
+bool LiveRosterItem::isAvailable() const { return v_resourceList.count() > 0; }
 
 const Status &LiveRosterItem::lastUnavailableStatus() const { return v_lastUnavailableStatus; }
 

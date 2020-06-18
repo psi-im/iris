@@ -113,7 +113,6 @@ public:
             return false;
 
         return qstrcmp(_instance->metaObject()->className(), other->_instance->metaObject()->className()) == 0;
-
     }
 };
 

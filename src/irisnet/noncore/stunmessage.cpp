@@ -80,7 +80,7 @@ public:
     void update(const QByteArray &in)
     {
         for (int n = 0; n < in.size(); ++n)
-            result = quint32((result >> 8) ^ (crctable[(result & 0xff) ^ (quint8) in[n]]));
+            result = quint32((result >> 8) ^ (crctable[(result & 0xff) ^ (quint8)in[n]]));
     }
 
     quint32 final() { return result ^= 0xffffffff; }
@@ -646,7 +646,7 @@ StunMessage::Class StunMessage::extractClass(const QByteArray &in)
 bool StunMessage::containsStun(const quint8 *data, int size)
 {
     // check_and_get_length does a full packet check so it works even on a stream
-    return check_and_get_length(QByteArray::fromRawData((const char *) data, size)) != -1;
+    return check_and_get_length(QByteArray::fromRawData((const char *)data, size)) != -1;
 }
 
 QByteArray StunMessage::readStun(const quint8 *data, int size)

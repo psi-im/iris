@@ -42,10 +42,7 @@ public:
 
         Channel(const QHostAddress &_address, int _port) : address(_address), port(_port) { }
 
-        inline bool operator==(const Channel &other)
-        {
-            return address == other.address && port == other.port;
-        }
+        inline bool operator==(const Channel &other) { return address == other.address && port == other.port; }
 
         inline bool operator!=(const Channel &other) { return !operator==(other); }
     };

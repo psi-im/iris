@@ -85,8 +85,7 @@ void SocksUDP::change(const QString &host, int port)
     d->port = port;
 }
 
-void SocksUDP::write(const QByteArray &data) { d->sd->writeDatagram(data, d->routeAddr,
-                                                                    quint16(d->routePort)); }
+void SocksUDP::write(const QByteArray &data) { d->sd->writeDatagram(data, d->routeAddr, quint16(d->routePort)); }
 
 void SocksUDP::sd_activated()
 {
@@ -250,7 +249,7 @@ static int sps_get_authUsername(QByteArray &from, SPSS_AUTHUSERNAME *s)
         return 0;
     QByteArray a = ByteStream::takeArray(from, 2);
     s->version   = static_cast<unsigned char>(a[0]);
-    s->success   = (char) a[1] == 0;
+    s->success   = (char)a[1] == 0;
     return 1;
 }
 

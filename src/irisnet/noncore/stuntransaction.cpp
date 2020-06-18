@@ -332,7 +332,6 @@ private:
             return false;
 
         return !(!to_addr.isNull() && (to_addr != from_addr || to_port != from_port));
-
     }
 
     void processIncoming(const StunMessage &msg, bool authed)

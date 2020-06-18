@@ -177,10 +177,7 @@ QString IBBConnection::sid() const { return d->sid; }
 
 BytestreamManager *IBBConnection::manager() const { return d->m; }
 
-bool IBBConnection::isOpen() const
-{
-    return d->state == Active;
-}
+bool IBBConnection::isOpen() const { return d->state == Active; }
 
 qint64 IBBConnection::writeData(const char *data, qint64 maxSize)
 {

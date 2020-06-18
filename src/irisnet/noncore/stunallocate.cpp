@@ -1250,10 +1250,7 @@ QByteArray StunAllocate::decode(const StunMessage &encoded, QHostAddress *addr, 
 
 QString StunAllocate::errorString() const { return d->errorString; }
 
-bool StunAllocate::containsChannelData(const quint8 *data, int size)
-{
-    return check_channelData(data, size) != -1;
-}
+bool StunAllocate::containsChannelData(const quint8 *data, int size) { return check_channelData(data, size) != -1; }
 
 QByteArray StunAllocate::readChannelData(const quint8 *data, int size)
 {

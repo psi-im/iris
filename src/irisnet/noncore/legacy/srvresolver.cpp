@@ -159,13 +159,13 @@ void SrvResolver::stop()
 bool SrvResolver::isBusy() const
 {
 #ifndef NO_NDNS
- if (d->nndns_busy || d->ndns.isBusy())
+    if (d->nndns_busy || d->ndns.isBusy())
 #else
- if (d->nndns_busy)
- #endif
-    return true;
- else
-    return false;
+    if (d->nndns_busy)
+#endif
+        return true;
+    else
+        return false;
 }
 
 QList<Q3Dns::Server> SrvResolver::servers() const { return d->servers; }
@@ -199,8 +199,7 @@ void SrvResolver::nndns_resultsReady(const QList<XMPP::NameRecord> &results)
         QList<Q3Dns::Server> list;
         for (int n = 0; n < results.count(); ++n) {
             list += Q3Dns::Server(QString::fromLatin1(results[n].name()), quint16(results[n].priority()),
-                                  quint16(results[n].weight()),
-                                  quint16(results[n].port()));
+                                  quint16(results[n].weight()), quint16(results[n].port()));
         }
 
         d->nndns_busy = false;
