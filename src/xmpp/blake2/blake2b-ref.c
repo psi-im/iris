@@ -16,14 +16,9 @@
 #include "blake2-impl.h"
 #include "blake2.h"
 
-#include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-
-/* Padded structs result in a compile-time error */
-_Static_assert(sizeof(blake2s_param) == BLAKE2S_OUTBYTES, "sizeof(blake2s_param) != BLAKE2S_OUTBYTES");
-_Static_assert(sizeof(blake2b_param) == BLAKE2B_OUTBYTES, "sizeof(blake2b_param) != BLAKE2B_OUTBYTES");
 
 static const uint64_t blake2b_IV[8]
     = { 0x6a09e667f3bcc908ULL, 0xbb67ae8584caa73bULL, 0x3c6ef372fe94f82bULL, 0xa54ff53a5f1d36f1ULL,
