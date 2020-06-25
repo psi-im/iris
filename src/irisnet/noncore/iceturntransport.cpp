@@ -182,7 +182,7 @@ bool IceTurnTransport::hasPendingDatagrams(int path) const
     return d->turn.packetsToRead() > 0;
 }
 
-QByteArray IceTurnTransport::readDatagram(int path, QHostAddress *addr, int *port)
+QByteArray IceTurnTransport::readDatagram(int path, QHostAddress *addr, quint16 *port)
 {
     Q_ASSERT(path == 0);
     Q_UNUSED(path)

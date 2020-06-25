@@ -223,7 +223,7 @@ static bool cert_match_ipaddress(const QString &certname, const QByteArray &ipad
         return false;
 
     // not the same?
-    return !(addr != ipaddress);
+    return addr == ipaddress;
 }
 
 static bool matchesHostName(const QCA::Certificate &cert, const QString &host)

@@ -467,7 +467,7 @@ void HttpProxyPost::setAuth(const QString &user, const QString &pass)
     d->pass = pass;
 }
 
-bool HttpProxyPost::isActive() const { return !(d->sock.state() == BSocket::Idle); }
+bool HttpProxyPost::isActive() const { return d->sock.state() != BSocket::Idle; }
 
 void HttpProxyPost::post(const QString &proxyHost, int proxyPort, const QUrl &url, const QByteArray &data, bool asProxy)
 {

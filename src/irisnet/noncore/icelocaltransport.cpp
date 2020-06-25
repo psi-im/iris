@@ -146,7 +146,7 @@ public:
     class Datagram {
     public:
         QHostAddress addr;
-        int          port;
+        quint16      port;
         QByteArray   buf;
     };
 
@@ -542,7 +542,7 @@ private slots:
         }
     }
 
-    void pool_outgoingMessage(const QByteArray &packet, const QHostAddress &toAddress, int toPort)
+    void pool_outgoingMessage(const QByteArray &packet, const QHostAddress &toAddress, quint16 toPort)
     {
         // warning: read StunTransactionPool docs before modifying
         //   this function
@@ -556,7 +556,7 @@ private slots:
         //                      .arg(toAddress.toString())
         //                      .arg(toPort));
 
-        sock->writeDatagram(packet, toAddress, quintptr(toPort));
+        sock->writeDatagram(packet, toAddress, toPort);
     }
 
     void pool_needAuthParams()
@@ -734,7 +734,7 @@ bool IceLocalTransport::hasPendingDatagrams(int path) const
     }
 }
 
-QByteArray IceLocalTransport::readDatagram(int path, QHostAddress *addr, int *port)
+QByteArray IceLocalTransport::readDatagram(int path, QHostAddress *addr, quint16 *port)
 {
     QList<Private::Datagram> *in = nullptr;
     if (path == Direct)

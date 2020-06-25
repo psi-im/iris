@@ -92,7 +92,7 @@ qint64 ByteStream::writeData(const char *data, qint64 maxSize)
 qint64 ByteStream::readData(char *data, qint64 maxSize)
 {
     maxSize = maxSize > d->readBuf.size() ? d->readBuf.size() : maxSize;
-    memcpy(data, d->readBuf.constData(), size_t(maxSize));
+    Q_ASSERT(memcpy(data, d->readBuf.constData(), size_t(maxSize)));
     d->readBuf.remove(0, int(maxSize));
     return maxSize;
 }

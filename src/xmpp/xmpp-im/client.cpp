@@ -805,7 +805,7 @@ void Client::ppPresence(const Jid &j, const Status &s)
 void Client::updateSelfPresence(const Jid &j, const Status &s)
 {
     ResourceList::Iterator rit   = d->resourceList.find(j.resource());
-    bool                   found = !(rit == d->resourceList.end());
+    bool                   found = rit != d->resourceList.end();
 
     // unavailable?  remove the resource
     if (!s.isAvailable()) {
@@ -836,7 +836,7 @@ void Client::updateSelfPresence(const Jid &j, const Status &s)
 void Client::updatePresence(LiveRosterItem *i, const Jid &j, const Status &s)
 {
     ResourceList::Iterator rit   = i->resourceList().find(j.resource());
-    bool                   found = !(rit == i->resourceList().end());
+    bool                   found = rit != i->resourceList().end();
 
     // unavailable?  remove the resource
     if (!s.isAvailable()) {

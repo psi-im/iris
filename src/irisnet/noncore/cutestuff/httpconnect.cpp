@@ -93,7 +93,7 @@ public:
 
     BSocket sock;
     QString host;
-    int     port;
+    quint16 port;
     QString user, pass;
     QString real_host;
     int     real_port;
@@ -144,7 +144,7 @@ void HttpConnect::setAuth(const QString &user, const QString &pass)
     d->pass = pass;
 }
 
-void HttpConnect::connectToHost(const QString &proxyHost, int proxyPort, const QString &host, int port)
+void HttpConnect::connectToHost(const QString &proxyHost, quint16 proxyPort, const QString &host, int port)
 {
     resetConnection(true);
 
@@ -160,7 +160,7 @@ void HttpConnect::connectToHost(const QString &proxyHost, int proxyPort, const Q
     else
         fprintf(stderr, ", auth {%s,%s}\n", qPrintable(d->user), qPrintable(d->pass));
 #endif
-    d->sock.connectToHost(d->host, quintptr(d->port));
+    d->sock.connectToHost(d->host, d->port);
 }
 
 void HttpConnect::close()

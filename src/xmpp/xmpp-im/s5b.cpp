@@ -2229,7 +2229,7 @@ S5BServer::~S5BServer()
     // basically to make QScopedPointer happy
 }
 
-void S5BServer::writeUDP(const QHostAddress &addr, int port, const QByteArray &data)
+void S5BServer::writeUDP(const QHostAddress &addr, quint16 port, const QByteArray &data)
 {
     d->serv.writeUDP(addr, port, data);
 }

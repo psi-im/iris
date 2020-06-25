@@ -143,27 +143,27 @@ void FileTransfer::sendFile(const Jid &to, const QString &fname, qlonglong size,
 
 int FileTransfer::dataSizeNeeded() const
 {
-    int pending = int(d->c->bytesToWrite());
+    quint64 pending = d->c->bytesToWrite();
     if (pending >= SENDBUFSIZE)
         return 0;
     qlonglong left = d->length - (d->sent + pending);
     int       size = SENDBUFSIZE - pending;
-    if ((qlonglong)size > left)
-        size = (int)left;
+    if (qlonglong(size) > left)
+        size = int(left);
     return size;
 }
 
 void FileTransfer::writeFileData(const QByteArray &a)
 {
-    int       pending = int(d->c->bytesToWrite());
+    quint64   pending = d->c->bytesToWrite();
     qlonglong left    = d->length - (d->sent + pending);
     if (left == 0)
         return;
 
     QByteArray block;
-    if ((qlonglong)a.size() > left) {
+    if (qlonglong(a.size()) > left) {
         block = a;
-        block.resize((uint)left);
+        block.resize(uint(left));
     } else
         block = a;
     d->c->write(block);

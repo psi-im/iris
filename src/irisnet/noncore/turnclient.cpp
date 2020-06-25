@@ -120,7 +120,7 @@ public:
     class Packet {
     public:
         QHostAddress addr;
-        int          port;
+        quint16      port;
         QByteArray   data;
 
         // for outbound
@@ -943,7 +943,7 @@ int TurnClient::packetsToRead() const { return d->in.count(); }
 
 int TurnClient::packetsToWrite() const { return d->outPending.count() + d->outPendingWrite; }
 
-QByteArray TurnClient::read(QHostAddress *addr, int *port)
+QByteArray TurnClient::read(QHostAddress *addr, quint16 *port)
 {
     if (!d->in.isEmpty()) {
         Private::Packet p = d->in.takeFirst();

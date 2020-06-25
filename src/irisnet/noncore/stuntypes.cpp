@@ -323,7 +323,7 @@ namespace StunTypes {
         if (val.size() != 4)
             return false;
 
-        *proto = quintptr(val[0]);
+        *proto = quint8(val[0]);
         return true;
     }
 

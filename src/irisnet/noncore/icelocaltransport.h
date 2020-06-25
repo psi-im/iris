@@ -78,7 +78,7 @@ public:
     // reimplemented
     void       stop() override;
     bool       hasPendingDatagrams(int path) const override;
-    QByteArray readDatagram(int path, QHostAddress *addr, int *port) override;
+    QByteArray readDatagram(int path, QHostAddress *addr, quint16 *port) override;
     void       writeDatagram(int path, const QByteArray &buf, const QHostAddress &addr, int port) override;
     void       addChannelPeer(const QHostAddress &addr, int port) override;
     void       setDebugLevel(DebugLevel level) override;

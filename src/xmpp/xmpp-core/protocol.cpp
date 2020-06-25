@@ -839,7 +839,7 @@ void CoreProtocol::handleStreamOpen(const Parser::Event &pe)
         }
     } else {
         if (!dialback) {
-            old = !(version.major >= 1 && !oldOnly);
+            old = version.major < 1 || oldOnly;
         }
     }
 }
@@ -885,7 +885,7 @@ bool CoreProtocol::streamManagementHandleStanza(const QDomElement &e)
         event = ESend;
         return true;
     } else if (s == "a") {
-        quint32 last_id = quint32(e.attribute("h").toULong());
+        quint32 last_id = e.attribute("h").toUInt();
 #ifdef IRIS_SM_DEBUG
         qDebug() << "Stream Management: [<--] Received ack response from server with h =" << last_id;
 #endif
@@ -1726,7 +1726,7 @@ bool CoreProtocol::normalStep(const QDomElement &e)
                 step  = Done;
                 return true;
             } else if (e.localName() == "resumed") {
-                sm.resume(quint32(e.attribute("h").toULong()));
+                sm.resume(e.attribute("h").toUInt());
                 while (true) {
                     QDomElement st = sm.getUnacknowledgedStanza();
                     if (st.isNull())

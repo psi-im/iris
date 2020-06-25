@@ -80,7 +80,7 @@ public:
     void update(const QByteArray &in)
     {
         for (int n = 0; n < in.size(); ++n)
-            result = quint32((result >> 8) ^ (crctable[(result & 0xff) ^ (quint8)in[n]]));
+            result = (result >> 8) ^ (crctable[(result & 0xff) ^ (quint8)in[n]]);
     }
 
     quint32 final() { return result ^= 0xffffffff; }

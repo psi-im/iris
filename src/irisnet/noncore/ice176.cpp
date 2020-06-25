@@ -602,8 +602,8 @@ public:
                 handlePairBindingError(pair, e);
         });
 
-        int prflx_priority = c.ic->peerReflexivePriority(lc.iceTransport, lc.path);
-        pair->binding->setPriority(quint32(prflx_priority));
+        quint32 prflx_priority = c.ic->peerReflexivePriority(lc.iceTransport, lc.path);
+        pair->binding->setPriority(prflx_priority);
 
         if (mode == Ice176::Initiator) {
             pair->binding->setIceControlling(0);
@@ -874,7 +874,7 @@ public:
 
         CandidatePair::Ptr pair        = (it == checkList.pairs.end()) ? CandidatePair::Ptr() : *it;
         Component &        component   = *findComponent(locCand.info->componentId);
-        int                minPriority = int(component.highestPair ? component.highestPair->priority : 0);
+        qint64             minPriority = component.highestPair ? component.highestPair->priority : 0;
         if (pair) {
             if (pair->priority < minPriority) {
                 iceDebug(
@@ -1434,7 +1434,7 @@ private slots:
 
         while (sock->hasPendingDatagrams(path)) {
             QHostAddress fromAddr;
-            int          fromPort;
+            quint16      fromPort;
             QByteArray   buf = sock->readDatagram(path, &fromAddr, &fromPort);
 
             // iceDebug("port %d: received packet (%d bytes)", lt->sock->localPort(), buf.size());
@@ -1468,8 +1468,7 @@ private slots:
                 QList<StunMessage::Attribute> list;
                 StunMessage::Attribute        attr;
                 attr.type = StunTypes::XOR_MAPPED_ADDRESS;
-                attr.value
-                    = StunTypes::createXorPeerAddress(fromAddr, quint16(fromPort), response.magic(), response.id());
+                attr.value = StunTypes::createXorPeerAddress(fromAddr, fromPort, response.magic(), response.id());
                 list += attr;
 
                 response.setAttributes(list);
@@ -1494,7 +1493,7 @@ private slots:
                     quint32 priority;
                     StunTypes::parsePriority(msg.attribute(StunTypes::PRIORITY), &priority);
                     auto remCand = IceComponent::CandidateInfo::makeRemotePrflx(locCand.info->componentId, fromAddr,
-                                                                                quintptr(fromPort), priority);
+                                                                                fromPort, priority);
                     remoteCandidates += remCand;
                     doTriggeredCheck(locCand, remCand, nominated);
                 } else {

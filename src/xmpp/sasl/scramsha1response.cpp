@@ -55,7 +55,7 @@ SCRAMSHA1Response::SCRAMSHA1Response(const QByteArray &server_first_message, con
 
         QCA::Hash shaHash("sha1");
         shaHash.update("", 0);
-        dkLen = quintptr(shaHash.final().size());
+        dkLen = quint8(shaHash.final().size());
 
         QCA::PBKDF2 hi("sha1");
 
