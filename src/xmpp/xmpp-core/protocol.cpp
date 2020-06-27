@@ -1706,14 +1706,14 @@ bool CoreProtocol::normalStep(const QDomElement &e)
                             if (port_off != -1) { // looks valid
                                 sm_host = location.midRef(1, port_off - 1);
                                 if (location.length() > port_off + 2 && location.at(port_off + 1) == ':')
-                                    sm_port = location.mid(port_off + 2).toUInt();
+                                    sm_port = location.midRef(port_off + 2).toUInt();
                             }
                         }
                         if (port_off == 0) {
                             port_off = location.indexOf(':');
                             if (port_off != -1) {
                                 sm_host = location.leftRef(port_off);
-                                sm_port = location.mid(port_off + 1).toUInt();
+                                sm_port = location.midRef(port_off + 1).toUInt();
                             } else {
                                 sm_host = location.midRef(0);
                             }

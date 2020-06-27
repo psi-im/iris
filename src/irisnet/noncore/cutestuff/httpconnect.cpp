@@ -80,7 +80,7 @@ static bool extractMainHeader(const QString &line, QString *proto, int *code, QS
     if (n2 == -1)
         return false;
     if (code)
-        *code = line.mid(n, n2 - n).toInt();
+        *code = line.midRef(n, n2 - n).toInt();
     n = n2 + 1;
     if (msg)
         *msg = line.mid(n);
@@ -215,7 +215,7 @@ void HttpConnect::sock_connectionClosed()
 {
     if (d->active) {
         resetConnection();
-        connectionClosed();
+        emit connectionClosed();
     } else {
         setError(ErrProxyNeg);
     }
@@ -225,7 +225,7 @@ void HttpConnect::sock_delayedCloseFinished()
 {
     if (d->active) {
         resetConnection();
-        delayedCloseFinished();
+        emit delayedCloseFinished();
     }
 }
 
@@ -280,12 +280,12 @@ void HttpConnect::sock_readyRead()
 #endif
                     d->active = true;
                     setOpenMode(QIODevice::ReadWrite);
-                    connected();
+                    emit connected();
 
                     if (!d->recvBuf.isEmpty()) {
                         appendRead(d->recvBuf);
                         d->recvBuf.resize(0);
-                        readyRead();
+                        emit readyRead();
                         return;
                     }
                 } else {
@@ -319,7 +319,7 @@ void HttpConnect::sock_readyRead()
         }
     } else {
         appendRead(block);
-        readyRead();
+        emit readyRead();
         return;
     }
 }
@@ -335,7 +335,7 @@ void HttpConnect::sock_bytesWritten(qint64 x)
     }
 
     if (d->active && x > 0)
-        bytesWritten(x);
+        emit bytesWritten(x);
 }
 
 void HttpConnect::sock_error(int x)

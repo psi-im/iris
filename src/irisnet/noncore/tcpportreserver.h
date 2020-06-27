@@ -144,7 +144,7 @@ public:
     void          registerScope(const QString &id, TcpPortScope *scope);
     TcpPortScope *unregisterScope(const QString &id);
 signals:
-    void newDiscoverer(TcpPortDiscoverer *discoverer);
+    void newDiscoverer(XMPP::TcpPortDiscoverer *discoverer);
 
 public slots:
 };

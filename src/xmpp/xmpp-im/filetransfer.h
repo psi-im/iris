@@ -121,7 +121,7 @@ signals:
     void incomingReady();
 
 private slots:
-    void pft_incoming(const FTRequest &req);
+    void pft_incoming(const XMPP::FTRequest &req);
 
 private:
     class Private;
@@ -182,7 +182,7 @@ public:
     bool take(const QDomElement &);
 
 signals:
-    void incoming(const FTRequest &req);
+    void incoming(const XMPP::FTRequest &req);
 };
 } // namespace XMPP
 

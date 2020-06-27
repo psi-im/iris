@@ -93,7 +93,7 @@ void SocksUDP::sd_activated()
         QByteArray datagram;
         datagram.resize(int(d->sd->pendingDatagramSize()));
         d->sd->readDatagram(datagram.data(), datagram.size());
-        packetReady(datagram);
+        emit packetReady(datagram);
     }
 }
 
@@ -565,7 +565,7 @@ void SocksClient::sock_delayedCloseFinished()
 {
     if (isOpen()) {
         resetConnection();
-        delayedCloseFinished();
+        emit delayedCloseFinished();
     }
 }
 
@@ -711,7 +711,7 @@ void SocksClient::processOutgoing(const QByteArray &block)
             if (!d->recvBuf.isEmpty()) {
                 appendRead(d->recvBuf);
                 d->recvBuf.resize(0);
-                readyRead();
+                emit readyRead();
             }
         }
     }
@@ -743,7 +743,7 @@ void SocksClient::sock_bytesWritten(qint64 x)
         d->pending = 0;
     }
     if (bytes > 0)
-        bytesWritten(bytes);
+        emit bytesWritten(bytes);
 }
 
 void SocksClient::sock_error(int x)
@@ -823,7 +823,7 @@ void SocksClient::continueIncoming()
             return;
         } else if (r == 1) {
             d->waiting = true;
-            incomingAuth(s.user, s.pass);
+            emit incomingAuth(s.user, s.pass);
         }
     } else if (d->step == StepRequest) {
         SPS_CONNREQ s;
@@ -841,9 +841,9 @@ void SocksClient::continueIncoming()
                     d->rhost = s.addr.toString();
                 d->rport = s.port;
                 QIODevice::open(QIODevice::ReadWrite);
-                incomingConnectRequest(d->rhost, d->rport);
+                emit incomingConnectRequest(d->rhost, d->rport);
             } else if (s.cmd == REQ_UDPASSOCIATE) {
-                incomingUDPAssociateRequest();
+                emit incomingUDPAssociateRequest();
             } else {
                 requestDeny();
                 return;
@@ -917,7 +917,7 @@ void SocksClient::grantConnect()
     if (!d->recvBuf.isEmpty()) {
         appendRead(d->recvBuf);
         d->recvBuf.resize(0);
-        readyRead();
+        emit readyRead();
     }
 }
 
@@ -1043,7 +1043,7 @@ void SocksServer::newConnection()
     SocksClient *c = new SocksClient(d->serv->nextPendingConnection(), this);
     connect(c, SIGNAL(error(int)), this, SLOT(connectionError()));
     d->incomingConns.append(c);
-    incomingReady();
+    emit incomingReady();
 }
 
 void SocksServer::connectionError()
@@ -1062,7 +1062,7 @@ void SocksServer::sd_activated()
         auto         sz = d->sd->readDatagram(datagram.data(), datagram.size(), &sender, &senderPort);
         if (sz >= 0) {
             datagram.truncate(int(sz));
-            incomingUDP(sender.toString(), senderPort, d->sd->peerAddress(), d->sd->peerPort(), datagram);
+            emit incomingUDP(sender.toString(), senderPort, d->sd->peerAddress(), d->sd->peerPort(), datagram);
         }
     }
 }

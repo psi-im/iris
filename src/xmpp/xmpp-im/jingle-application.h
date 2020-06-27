@@ -137,7 +137,7 @@ namespace XMPP { namespace Jingle {
     signals:
         void updated(); // signal for session it has to send updates to remote. so it will follow with
                         // takeOutgoingUpdate() eventually
-        void stateChanged(State);
+        void stateChanged(XMPP::Jingle::State);
 
     protected:
         State _state = State::Created;

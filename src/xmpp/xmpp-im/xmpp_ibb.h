@@ -105,15 +105,15 @@ public:
     IBBConnection *takeIncoming();
 
 public slots:
-    void takeIncomingData(const Jid &from, const QString &id, const IBBData &data, Stanza::Kind);
+    void takeIncomingData(const XMPP::Jid &from, const QString &id, const XMPP::IBBData &data, XMPP::Stanza::Kind);
 
 protected:
     const char *sidPrefix() const;
 
 private slots:
-    void ibb_incomingRequest(const Jid &from, const QString &id, const QString &sid, int blockSize,
+    void ibb_incomingRequest(const XMPP::Jid &from, const QString &id, const QString &sid, int blockSize,
                              const QString &stanza);
-    void ibb_closeRequest(const Jid &from, const QString &id, const QString &sid);
+    void ibb_closeRequest(const XMPP::Jid &from, const QString &id, const QString &sid);
 
 private:
     class Private;
@@ -148,9 +148,10 @@ public:
     int bytesWritten() const;
 
 signals:
-    void incomingRequest(const Jid &from, const QString &id, const QString &sid, int blockSize, const QString &stanza);
-    void incomingData(const Jid &from, const QString &id, const IBBData &data, Stanza::Kind);
-    void closeRequest(const Jid &from, const QString &id, const QString &sid);
+    void incomingRequest(const XMPP::Jid &from, const QString &id, const QString &sid, int blockSize,
+                         const QString &stanza);
+    void incomingData(const XMPP::Jid &from, const QString &id, const XMPP::IBBData &data, XMPP::Stanza::Kind);
+    void closeRequest(const XMPP::Jid &from, const QString &id, const QString &sid);
 
 private:
     class Private;

@@ -480,9 +480,9 @@ void AdvancedConnector::bs_error(int x)
     }
 }
 
-void AdvancedConnector::http_syncStarted() { httpSyncStarted(); }
+void AdvancedConnector::http_syncStarted() { emit httpSyncStarted(); }
 
-void AdvancedConnector::http_syncFinished() { httpSyncFinished(); }
+void AdvancedConnector::http_syncFinished() { emit httpSyncFinished(); }
 
 void AdvancedConnector::t_timeout()
 {

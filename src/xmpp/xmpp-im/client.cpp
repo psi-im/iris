@@ -457,7 +457,7 @@ void Client::close(bool)
         d->stream->close();
         d->stream = nullptr;
     }
-    disconnected();
+    emit disconnected();
     cleanup(); // TODO wait till stream writes all data to the socket
 }
 
@@ -489,7 +489,7 @@ void Client::streamError(int)
     // error(e);
 
     // if(!e.isWarning()) {
-    disconnected();
+    emit disconnected();
     cleanup();
     //}
 } // namespace XMPP
@@ -741,7 +741,7 @@ void Client::ppPresence(const Jid &j, const Status &s)
         if (i.j.compare(j, false)) {
             bool us = i.j.resource() == j.resource() || j.resource().isEmpty();
 
-            debug(QString("for groupchat i=[%1] pres=[%2], [us=%3].\n").arg(i.j.full()).arg(j.full()).arg(us));
+            debug(QString("for groupchat i=[%1] pres=[%2], [us=%3].\n").arg(i.j.full(), j.full()).arg(us));
             switch (i.status) {
             case GroupChat::Connecting:
                 if (us && s.hasError()) {
@@ -842,7 +842,7 @@ void Client::updatePresence(LiveRosterItem *i, const Jid &j, const Status &s)
     if (!s.isAvailable()) {
         if (found) {
             (*rit).setStatus(s);
-            debug(QString("Client: Removing resource from [%1]: name=[%2]\n").arg(i->jid().full()).arg(j.resource()));
+            debug(QString("Client: Removing resource from [%1]: name=[%2]\n").arg(i->jid().full(), j.resource()));
             emit resourceUnavailable(j, *rit);
             i->resourceList().erase(rit);
             i->setLastUnavailableStatus(s);
@@ -862,11 +862,11 @@ void Client::updatePresence(LiveRosterItem *i, const Jid &j, const Status &s)
         if (!found) {
             r = Resource(j.resource(), s);
             i->resourceList() += r;
-            debug(QString("Client: Adding resource to [%1]: name=[%2]\n").arg(i->jid().full()).arg(j.resource()));
+            debug(QString("Client: Adding resource to [%1]: name=[%2]\n").arg(i->jid().full(), j.resource()));
         } else {
             (*rit).setStatus(s);
             r = *rit;
-            debug(QString("Client: Updating resource to [%1]: name=[%2]\n").arg(i->jid().full()).arg(j.resource()));
+            debug(QString("Client: Updating resource to [%1]: name=[%2]\n").arg(i->jid().full(), j.resource()));
         }
 
         emit resourceAvailable(j, r);
@@ -894,10 +894,10 @@ void Client::pmMessage(const Message &m)
                 continue;
 
             if (i.status == GroupChat::Connected)
-                messageReceived(m);
+                emit messageReceived(m);
         }
     } else
-        messageReceived(m);
+        emit messageReceived(m);
 }
 
 void Client::prRoster(const Roster &r) { importRoster(r); }

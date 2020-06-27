@@ -66,13 +66,13 @@ QDateTime stamp2TS(const QString &ts)
     if (ts.length() != 17)
         return QDateTime();
 
-    int year  = ts.mid(0, 4).toInt();
-    int month = ts.mid(4, 2).toInt();
-    int day   = ts.mid(6, 2).toInt();
+    int year  = ts.midRef(0, 4).toInt();
+    int month = ts.midRef(4, 2).toInt();
+    int day   = ts.midRef(6, 2).toInt();
 
-    int hour = ts.mid(9, 2).toInt();
-    int min  = ts.mid(12, 2).toInt();
-    int sec  = ts.mid(15, 2).toInt();
+    int hour = ts.midRef(9, 2).toInt();
+    int min  = ts.midRef(12, 2).toInt();
+    int sec  = ts.midRef(15, 2).toInt();
 
     QDate xd;
     xd.setDate(year, month, day);

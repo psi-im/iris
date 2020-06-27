@@ -346,7 +346,7 @@ namespace Jingle {
 
         void detachSession(Session *s); // disconnect the session from manager
     signals:
-        void incomingSession(Session *);
+        void incomingSession(XMPP::Jingle::Session *);
 
     private:
         friend class JTPush;

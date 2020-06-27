@@ -207,14 +207,14 @@ void SrvResolver::nndns_resultsReady(const QList<XMPP::NameRecord> &results)
 
         if (list.isEmpty()) {
             stop();
-            resultsReady();
+            emit resultsReady();
             return;
         }
         sortSRVList(list);
         d->servers = list;
 
         if (d->srvonly)
-            resultsReady();
+            emit resultsReady();
         else {
             // kick it off
             d->aaaa = true;
@@ -238,7 +238,7 @@ void SrvResolver::nndns_resultsReady(const QList<XMPP::NameRecord> &results)
 
             d->resultAddress = list.first();
             d->resultPort    = quint16(port);
-            resultsReady();
+            emit resultsReady();
         } else {
             if (!d->aaaa)
                 d->servers.removeFirst();
@@ -247,7 +247,7 @@ void SrvResolver::nndns_resultsReady(const QList<XMPP::NameRecord> &results)
             // failed?  bail if last one
             if (d->servers.isEmpty()) {
                 stop();
-                resultsReady();
+                emit resultsReady();
                 return;
             }
 
@@ -269,12 +269,12 @@ void SrvResolver::ndns_done()
     if (!r.isNull()) {
         d->resultAddress = d->ndns.result();
         d->resultPort    = quint16(port);
-        resultsReady();
+        emit resultsReady();
     } else {
         // failed?  bail if last one
         if (d->servers.isEmpty()) {
             stop();
-            resultsReady();
+            emit resultsReady();
             return;
         }
 
@@ -287,7 +287,7 @@ void SrvResolver::ndns_done()
 void SrvResolver::t_timeout()
 {
     stop();
-    resultsReady();
+    emit resultsReady();
 }
 
 // CS_NAMESPACE_END

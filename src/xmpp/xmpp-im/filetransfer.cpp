@@ -235,7 +235,7 @@ void FileTransfer::ft_finished()
             connect(d->c, SIGNAL(error(int)), SLOT(stream_error(int)));
 
             d->c->connectToJid(d->peer, d->id);
-            accepted();
+            emit accepted();
         } else {
             emit error(Err400);
             reset();
@@ -262,7 +262,7 @@ void FileTransfer::takeConnection(BSConnection *c)
     S5BConnection *s5b = dynamic_cast<S5BConnection *>(c);
     if (s5b && d->proxy.isValid())
         s5b->setProxy(d->proxy);
-    accepted();
+    emit accepted();
     QTimer::singleShot(0, this, SLOT(doAccept()));
 }
 
@@ -289,7 +289,7 @@ void FileTransfer::stream_readyRead()
     d->sent += a.size();
     //    if(d->sent == d->length) // we close it in stream_connectionClosed. at least for ibb
     //        reset();             // in other words we wait for another party to close the connection
-    readyRead(a);
+    emit readyRead(a);
 }
 
 void FileTransfer::stream_bytesWritten(qint64 x)
@@ -304,11 +304,11 @@ void FileTransfer::stream_error(int x)
 {
     reset();
     if (x == BSConnection::ErrRefused || x == BSConnection::ErrConnect)
-        error(ErrConnect);
+        emit error(ErrConnect);
     else if (x == BSConnection::ErrProxy)
-        error(ErrProxy);
+        emit error(ErrProxy);
     else
-        error(ErrStream);
+        emit error(ErrStream);
 }
 
 void FileTransfer::man_waitForAccept(const FTRequest &req, const QString &streamType)
@@ -421,7 +421,7 @@ void FileTransferManager::pft_incoming(const FTRequest &req)
     FileTransfer *ft = new FileTransfer(this);
     ft->man_waitForAccept(req, streamType);
     d->incoming.append(ft);
-    incomingReady();
+    emit incomingReady();
 }
 
 BytestreamManager *FileTransferManager::streamManager(const QString &ns) const

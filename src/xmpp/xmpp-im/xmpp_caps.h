@@ -100,11 +100,11 @@ signals:
     /**
      * This signal is emitted when the feature list of a given JID have changed.
      */
-    void capsChanged(const Jid &jid);
+    void capsChanged(const XMPP::Jid &jid);
 
 protected slots:
     void discoFinished();
-    void capsRegistered(const CapsSpec &);
+    void capsRegistered(const XMPP::CapsSpec &);
 
 private:
     Client *                      client_;
