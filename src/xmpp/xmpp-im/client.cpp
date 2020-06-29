@@ -1088,9 +1088,19 @@ CapsSpec Client::caps() const { return d->caps; }
 
 CapsSpec Client::serverCaps() const { return d->serverCaps; }
 
-void Client::setOSName(const QString &name) { d->osName = name; }
+void Client::setOSName(const QString &name)
+{
+    if (d->osName != name)
+        d->caps.resetVersion();
+    d->osName = name;
+}
 
-void Client::setOSVersion(const QString &version) { d->osVersion = version; }
+void Client::setOSVersion(const QString &version)
+{
+    if (d->osVersion != version)
+        d->caps.resetVersion();
+    d->osVersion = version;
+}
 
 void Client::setTimeZone(const QString &name, int offset)
 {
@@ -1099,9 +1109,19 @@ void Client::setTimeZone(const QString &name, int offset)
     d->useTzoffset = true;
 }
 
-void Client::setClientName(const QString &s) { d->clientName = s; }
+void Client::setClientName(const QString &s)
+{
+    if (d->clientName != s)
+        d->caps.resetVersion();
+    d->clientName = s;
+}
 
-void Client::setClientVersion(const QString &s) { d->clientVersion = s; }
+void Client::setClientVersion(const QString &s)
+{
+    if (d->clientVersion != s)
+        d->caps.resetVersion();
+    d->clientVersion = s;
+}
 
 void Client::setCaps(const CapsSpec &s) { d->caps = s; }
 
