@@ -504,43 +504,6 @@ void Client::streamCloseFinished()
     closeFinished();
 }*/
 
-static QDomElement oldStyleNS(const QDomElement &e)
-{
-    // find closest parent with a namespace
-    QDomNode par = e.parentNode();
-    while (!par.isNull() && par.namespaceURI().isNull())
-        par = par.parentNode();
-    bool noShowNS = false;
-    if (!par.isNull() && par.namespaceURI() == e.namespaceURI())
-        noShowNS = true;
-
-    QDomElement i;
-    int         x;
-    // if(noShowNS)
-    i = e.ownerDocument().createElement(e.tagName());
-    // else
-    //    i = e.ownerDocument().createElementNS(e.namespaceURI(), e.tagName());
-
-    // copy attributes
-    QDomNamedNodeMap al = e.attributes();
-    for (x = 0; x < al.count(); ++x)
-        i.setAttributeNode(al.item(x).cloneNode().toAttr());
-
-    if (!noShowNS)
-        i.setAttribute("xmlns", e.namespaceURI());
-
-    // copy children
-    QDomNodeList nl = e.childNodes();
-    for (x = 0; x < nl.count(); ++x) {
-        QDomNode n = nl.item(x);
-        if (n.isElement())
-            i.appendChild(oldStyleNS(n.toElement()));
-        else
-            i.appendChild(n.cloneNode());
-    }
-    return i;
-}
-
 void Client::streamReadyRead()
 {
     // fprintf(stderr, "\tClientStream::streamReadyRead\n");
