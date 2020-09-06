@@ -22,6 +22,7 @@
 #include <QTimer>
 #include <QUdpSocket>
 #include <QtCrypto>
+#include <iris/dtls.h>
 #include <iris/ice176.h>
 #include <iris/netinterface.h>
 #include <iris/netnames.h>
@@ -414,7 +415,8 @@ public:
     XMPP::NameResolver                dns;
     QHostAddress                      stunAddr;
     XMPP::UdpPortReserver             portReserver;
-    XMPP::Ice176 *                    ice = nullptr;
+    XMPP::Ice176 *                    ice  = nullptr;
+    XMPP::Dtls *                      dtls = nullptr;
     QList<XMPP::Ice176::Candidate>    localCandidates;
     QList<XMPP::Ice176::LocalAddress> localAddrs;
     QList<Channel>                    channels;
@@ -488,7 +490,7 @@ public:
 
         connect(ice, SIGNAL(readyRead(int)), SLOT(ice_readyRead(int)));
         connect(ice, SIGNAL(datagramsWritten(int, int)), SLOT(ice_datagramsWritten(int, int)));
-        connect(ice, &XMPP::Ice176::readyToSendMedia, this, []() { printf("ICE ready to send media.\n"); });
+        connect(ice, &XMPP::Ice176::readyToSendMedia, this, &App::ice_readToSendMedia);
         connect(ice, &XMPP::Ice176::iceFinished, this,
                 []() { printf("ICE negotiation has finished and media stream is active now!\n"); });
 
@@ -789,6 +791,17 @@ private slots:
 
         // do nothing
     }
+
+    void ice_readToSendMedia()
+    {
+        if (QCA::isSupported("dtls")) {
+            dtls = new XMPP::Dtls(this);
+            dtls->generateCertificate();
+            auto h = dtls->fingerprint();
+            printf("%s:%s\n", qPrintable(h.stringType()), h.data().toHex(':').data());
+        }
+        printf("ICE ready to send media.\n");
+    }
 };
 
 void usage()
@@ -829,6 +842,7 @@ int main(int argc, char **argv)
     bool                 ipv6_only      = false;
     bool                 relay_udp_only = false;
     bool                 relay_tcp_only = false;
+    bool                 enable_dtls    = true;
 
     for (int n = 0; n < args.count(); ++n) {
         QString s = args[n];
@@ -881,6 +895,8 @@ int main(int argc, char **argv)
             relay_udp_only = true;
         else if (var == "relay-tcp-only")
             relay_tcp_only = true;
+        else if (var == "dtls")
+            enable_dtls = true;
         else
             known = false;
 
