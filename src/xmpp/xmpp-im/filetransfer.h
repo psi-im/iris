@@ -48,7 +48,7 @@ namespace XMPP
 		inline FTThumbnail() : width(0), height(0) {}
 		// data - for outgoing it's actual image data. for incoming - cid
 		inline FTThumbnail(const QByteArray &data,
-						   const QString &mimeType = QString::null,
+						   const QString &mimeType = QString(),
 						   quint32 width = 0, quint32 height = 0) :
 			data(data), mimeType(mimeType),
 			width(width), height(height) { }

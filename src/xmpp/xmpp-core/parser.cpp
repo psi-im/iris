@@ -610,7 +610,7 @@ QString Parser::Event::nsprefix(const QString &s) const
 			return (*it2);
 		++it2;
 	}
-	return QString::null;
+	return QString();
 }
 
 QString Parser::Event::namespaceURI() const
