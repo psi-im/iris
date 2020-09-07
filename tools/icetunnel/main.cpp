@@ -623,6 +623,18 @@ public:
             ice->start(XMPP::Ice176::Initiator);
         else
             ice->start(XMPP::Ice176::Responder);
+
+        if (QCA::isSupported("dtls")) {
+            start_dtls();
+        }
+    }
+
+    void start_dtls()
+    {
+        dtls = new XMPP::Dtls(this);
+        dtls->generateCertificate();
+        auto h = dtls->fingerprint();
+        printf("%s:%s\n", qPrintable(h.stringType()), h.data().toHex(':').data());
     }
 
 signals:
@@ -792,16 +804,7 @@ private slots:
         // do nothing
     }
 
-    void ice_readToSendMedia()
-    {
-        if (QCA::isSupported("dtls")) {
-            dtls = new XMPP::Dtls(this);
-            dtls->generateCertificate();
-            auto h = dtls->fingerprint();
-            printf("%s:%s\n", qPrintable(h.stringType()), h.data().toHex(':').data());
-        }
-        printf("ICE ready to send media.\n");
-    }
+    void ice_readToSendMedia() { printf("ICE ready to send media.\n"); }
 };
 
 void usage()

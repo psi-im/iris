@@ -41,6 +41,7 @@ set( CMAKE_MODULE_PATH
 option( USE_QJDNS "Use qjdns/jdns library. Disabled by default for Qt5" OFF )
 option( SEPARATE_QJDNS "Build qjdns with iris library" OFF )
 option( BUNDLED_QCA "Adds: DTLS, Blake2b and other useful for XMPP crypto-stuff" OFF)
+option( BUILD_IRIS_TOOLS "Build tools and examples" OFF)
 
 set(CMAKE_CXX_STANDARD 14)
 
