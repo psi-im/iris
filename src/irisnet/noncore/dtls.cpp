@@ -93,7 +93,7 @@ Dtls::Dtls(QObject *parent) : QObject(parent), d(new Private(this))
     }
 }
 
-bool Dtls::generateCertificate(const QString &localJid)
+void Dtls::generateCertificate(const QString &localJid)
 {
     QCA::CertificateOptions opts;
 
@@ -183,3 +183,5 @@ void Dtls::writeIncomingDatagram(const QByteArray &data)
 }
 
 } // namespace XMPP
+
+#include "dtls.moc"

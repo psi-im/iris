@@ -18,7 +18,7 @@ public:
     explicit Dtls(QObject *parent = nullptr);
 
     // jid is used as subjectAltName XmppAddr identifier
-    bool generateCertificate(const QString &localJid = QString());
+    void generateCertificate(const QString &localJid = QString());
     void setCertificate(const QCA::Certificate &cert, const QCA::PrivateKey &pkey);
     Hash fingerprint();
     void setRemoteFingerprint(const Hash &fingerprint);

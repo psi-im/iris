@@ -415,8 +415,8 @@ public:
     XMPP::NameResolver                dns;
     QHostAddress                      stunAddr;
     XMPP::UdpPortReserver             portReserver;
-    XMPP::Ice176 *                    ice  = nullptr;
-    XMPP::Dtls *                      dtls = nullptr;
+    XMPP::Ice176 *                    ice = nullptr;
+    QList<XMPP::Dtls *>               dtls;
     QList<XMPP::Ice176::Candidate>    localCandidates;
     QList<XMPP::Ice176::LocalAddress> localAddrs;
     QList<Channel>                    channels;
@@ -464,7 +464,7 @@ public slots:
         connect(&dns, &XMPP::NameResolver::error, this, [this](XMPP::NameResolver::Error e) {
             Q_UNUSED(e);
             printf("Unable to resolve stun host.\n");
-            emit quit();
+            Q_EMIT quit();
         });
 
         if (!opt_stunHost.isEmpty())
@@ -629,18 +629,38 @@ public:
         }
     }
 
-    void start_dtls()
-    {
-        dtls = new XMPP::Dtls(this);
-        dtls->generateCertificate();
-        auto h = dtls->fingerprint();
-        printf("%s:%s\n", qPrintable(h.stringType()), h.data().toHex(':').data());
-    }
-
-signals:
+Q_SIGNALS:
     void quit();
 
 private:
+    void proxyNet2App(int componentIndex, const QByteArray &buf)
+    {
+        if (channels[componentIndex].sock6)
+            channels[componentIndex].sock6->writeDatagram(buf, QHostAddress::LocalHostIPv6,
+                                                          opt_localBase + componentIndex);
+        if (channels[componentIndex].sock4)
+            channels[componentIndex].sock4->writeDatagram(buf, QHostAddress::LocalHost, opt_localBase + componentIndex);
+    }
+
+    void start_dtls()
+    {
+        dtls.reserve(opt_channels);
+        for (int componentIndex = 0; componentIndex < opt_channels; componentIndex++) {
+            dtls[componentIndex] = new XMPP::Dtls(this);
+            dtls[componentIndex]->generateCertificate();
+            auto h = dtls[componentIndex]->fingerprint();
+            printf("fingerprint[%d]:%s:%s\n", componentIndex, qPrintable(h.stringType()), h.data().toHex(':').data());
+            connect(dtls[componentIndex], &XMPP::Dtls::readyRead, this,
+                    [this, dtls = dtls[componentIndex], componentIndex]() {
+                        proxyNet2App(componentIndex, dtls->readDatagram());
+                    });
+            connect(dtls[componentIndex], &XMPP::Dtls::readyReadOutgoing, this,
+                    [this, dtls = dtls[componentIndex], componentIndex]() {
+                        ice->writeDatagram(componentIndex, dtls->readOutgoingDatagram());
+                    });
+        }
+    }
+
     QUdpSocket *setupSocket(const QHostAddress &addr, int port)
     {
         QUdpSocket *sock = new QUdpSocket(this);
@@ -654,7 +674,7 @@ private:
         return sock;
     }
 
-private slots:
+private Q_SLOTS:
     void do_quit()
     {
         // a good idea
@@ -709,12 +729,11 @@ private slots:
     {
         while (ice->hasPendingDatagrams(componentIndex)) {
             QByteArray buf = ice->readDatagram(componentIndex);
-            if (channels[componentIndex].sock6)
-                channels[componentIndex].sock6->writeDatagram(buf, QHostAddress::LocalHostIPv6,
-                                                              opt_localBase + componentIndex);
-            if (channels[componentIndex].sock4)
-                channels[componentIndex].sock4->writeDatagram(buf, QHostAddress::LocalHost,
-                                                              opt_localBase + componentIndex);
+            if (componentIndex < dtls.size()) {
+                dtls[componentIndex]->writeIncomingDatagram(buf);
+            } else {
+                proxyNet2App(componentIndex, buf);
+            }
         }
     }
 
@@ -792,8 +811,13 @@ private slots:
             // note: we don't care who sent it
             sock->readDatagram(buf.data(), buf.size());
 
-            if (channels[at].ready)
-                ice->writeDatagram(at, buf);
+            if (channels[at].ready) {
+                if (at < dtls.size()) {
+                    dtls[at]->writeDatagram(buf);
+                } else {
+                    ice->writeDatagram(at, buf);
+                }
+            }
         }
     }
 
