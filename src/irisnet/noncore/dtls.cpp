@@ -44,7 +44,8 @@ public:
         DTLS_DEBUG("tls handshaken");
         auto peerIdentity = tls->peerIdentityResult();
         if (peerIdentity == QCA::TLS::Valid || peerIdentity == QCA::TLS::InvalidCertificate) {
-            auto &cert = tls->peerCertificateChain().first();
+            const auto  chain = tls->peerCertificateChain();
+            const auto &cert  = chain.first();
             if (computeFingerprint(cert, remoteFingerprint.type()) == remoteFingerprint) {
                 DTLS_DEBUG("valid");
                 tls->continueAfterStep();

@@ -117,12 +117,6 @@ if(BUNDLED_QCA)
             INSTALL_COMMAND ""
             )
     endif()
-    add_library(Qca STATIC IMPORTED)
-    set_target_properties(Qca PROPERTIES IMPORTED_LOCATION ${Qca_CORE_LIB})
-    set_target_properties(Qca
-        PROPERTIES IMPORTED_LINK_INTERFACE_LIBRARIES
-        ${Qca_OSSL_LIB} OpenSSL::SSL OpenSSL::Crypto
-        )
 else()
     message(WARNING "Disabling BUNDLED_QCA option makes impossible to use DTLS and PsiMedia")
     message(STATUS "QCA: using system")
