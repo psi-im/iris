@@ -102,142 +102,42 @@ namespace XMPP { namespace Jingle { namespace ICE {
         return out;
     }
 
-    // resolve external address and stun server
-    // TODO: resolve hosts and start ice engine simultaneously
-    // FIXME: when/if our ICE engine supports adding these dynamically, we should
-    //   not have the lookups block on each other
     class Resolver : public QObject {
         Q_OBJECT
+        using QObject::QObject;
 
-    private:
-        XMPP::NameResolver dnsA;
-        XMPP::NameResolver dnsB;
-        XMPP::NameResolver dnsC;
-        XMPP::NameResolver dnsD;
-        QString            extHost;
-        QString            stunBindHost, stunRelayUdpHost, stunRelayTcpHost;
-        bool               extDone;
-        bool               stunBindDone;
-        bool               stunRelayUdpDone;
-        bool               stunRelayTcpDone;
+        int                   counter;
+        std::function<void()> callback;
+
+        void onOneFinished()
+        {
+            if (--counter) {
+                callback();
+                deleteLater();
+            }
+        }
 
     public:
-        QHostAddress extAddr;
-        QHostAddress stunBindAddr, stunRelayUdpAddr, stunRelayTcpAddr;
+        using ResolveList = std::list<std::pair<QString, std::reference_wrapper<QHostAddress>>>;
 
-        Resolver(QObject *parent = nullptr) : QObject(parent), dnsA(parent), dnsB(parent), dnsC(parent), dnsD(parent)
+        static void resolve(QObject *parent, ResolveList list, std::function<void()> &&callback)
         {
-            connect(&dnsA, SIGNAL(resultsReady(const QList<XMPP::NameRecord> &)),
-                    SLOT(dns_resultsReady(const QList<XMPP::NameRecord> &)));
-            connect(&dnsA, SIGNAL(error(XMPP::NameResolver::Error)), SLOT(dns_error(XMPP::NameResolver::Error)));
+            auto resolver      = new Resolver(parent);
+            resolver->counter  = list.size();
+            resolver->callback = callback;
+            for (auto &item : list) {
+                auto *dns = new NameResolver(parent);
 
-            connect(&dnsB, SIGNAL(resultsReady(const QList<XMPP::NameRecord> &)),
-                    SLOT(dns_resultsReady(const QList<XMPP::NameRecord> &)));
-            connect(&dnsB, SIGNAL(error(XMPP::NameResolver::Error)), SLOT(dns_error(XMPP::NameResolver::Error)));
+                connect(dns, &NameResolver::resultsReady, resolver,
+                        [result = item.second, resolver](const QList<XMPP::NameRecord> &records) {
+                            result.get() = records.first().address();
+                            resolver->onOneFinished();
+                        });
+                connect(dns, &NameResolver::error, resolver,
+                        [resolver](XMPP::NameResolver::Error) { resolver->onOneFinished(); });
 
-            connect(&dnsC, SIGNAL(resultsReady(const QList<XMPP::NameRecord> &)),
-                    SLOT(dns_resultsReady(const QList<XMPP::NameRecord> &)));
-            connect(&dnsC, SIGNAL(error(XMPP::NameResolver::Error)), SLOT(dns_error(XMPP::NameResolver::Error)));
-
-            connect(&dnsD, SIGNAL(resultsReady(const QList<XMPP::NameRecord> &)),
-                    SLOT(dns_resultsReady(const QList<XMPP::NameRecord> &)));
-            connect(&dnsD, SIGNAL(error(XMPP::NameResolver::Error)), SLOT(dns_error(XMPP::NameResolver::Error)));
-        }
-
-        void start(const QString &_extHost, const QString &_stunBindHost, const QString &_stunRelayUdpHost,
-                   const QString &_stunRelayTcpHost)
-        {
-            extHost          = _extHost;
-            stunBindHost     = _stunBindHost;
-            stunRelayUdpHost = _stunRelayUdpHost;
-            stunRelayTcpHost = _stunRelayTcpHost;
-
-            if (!extHost.isEmpty()) {
-                extDone = false;
-                dnsA.start(extHost.toLatin1());
-            } else
-                extDone = true;
-
-            if (!stunBindHost.isEmpty()) {
-                stunBindDone = false;
-                dnsB.start(stunBindHost.toLatin1());
-            } else
-                stunBindDone = true;
-
-            if (!stunRelayUdpHost.isEmpty()) {
-                stunRelayUdpDone = false;
-                dnsC.start(stunRelayUdpHost.toLatin1());
-            } else
-                stunRelayUdpDone = true;
-
-            if (!stunRelayTcpHost.isEmpty()) {
-                stunRelayTcpDone = false;
-                dnsD.start(stunRelayTcpHost.toLatin1());
-            } else
-                stunRelayTcpDone = true;
-
-            if (extDone && stunBindDone && stunRelayUdpDone && stunRelayTcpDone)
-                QMetaObject::invokeMethod(this, "finished", Qt::QueuedConnection);
-        }
-
-    signals:
-        void finished();
-
-    private slots:
-        void dns_resultsReady(const QList<XMPP::NameRecord> &results)
-        {
-            XMPP::NameResolver *dns = static_cast<XMPP::NameResolver *>(sender());
-
-            // FIXME: support more than one address?
-            QHostAddress addr = results.first().address();
-
-            if (dns == &dnsA) {
-                extAddr = addr;
-                extDone = true;
-                tryFinish();
-            } else if (dns == &dnsB) {
-                stunBindAddr = addr;
-                stunBindDone = true;
-                tryFinish();
-            } else if (dns == &dnsC) {
-                stunRelayUdpAddr = addr;
-                stunRelayUdpDone = true;
-                tryFinish();
-            } else // dnsD
-            {
-                stunRelayTcpAddr = addr;
-                stunRelayTcpDone = true;
-                tryFinish();
+                dns->start(item.first.toLatin1());
             }
-        }
-
-        void dns_error(XMPP::NameResolver::Error e)
-        {
-            Q_UNUSED(e)
-
-            XMPP::NameResolver *dns = static_cast<XMPP::NameResolver *>(sender());
-
-            if (dns == &dnsA) {
-                extDone = true;
-                tryFinish();
-            } else if (dns == &dnsB) {
-                stunBindDone = true;
-                tryFinish();
-            } else if (dns == &dnsC) {
-                stunRelayUdpDone = true;
-                tryFinish();
-            } else // dnsD
-            {
-                stunRelayTcpDone = true;
-                tryFinish();
-            }
-        }
-
-    private:
-        void tryFinish()
-        {
-            if (extDone && stunBindDone && stunRelayUdpDone && stunRelayTcpDone)
-                emit finished();
         }
     };
 
@@ -757,20 +657,17 @@ namespace XMPP { namespace Jingle { namespace ICE {
         // auto scope = _pad.staticCast<Pad>()->discoScope();
         // d->disco   = scope->disco(); // FIXME store and handle signale. delete when not needed
 
-        auto manager  = dynamic_cast<Manager *>(_pad->manager())->d.data();
-        auto resolver = new Resolver();
-        connect(resolver, &Resolver::finished, this, [this, resolver]() {
-            d->extAddr          = resolver->extAddr;
-            d->stunBindAddr     = resolver->stunBindAddr;
-            d->stunRelayUdpAddr = resolver->stunRelayUdpAddr;
-            d->stunRelayTcpAddr = resolver->stunRelayTcpAddr;
+        auto manager = dynamic_cast<Manager *>(_pad->manager())->d.data();
 
-            printf("resolver finished\n");
-            resolver->deleteLater();
-            d->startIce();
-        });
-        d->resolver.start(manager->extHost, manager->stunBindHost, manager->stunRelayUdpHost,
-                          manager->stunRelayTcpHost);
+        Resolver::resolve(this,
+                          { { manager->extHost, std::ref(d->extAddr) },
+                            { manager->stunBindHost, std::ref(d->stunBindAddr) },
+                            { manager->stunRelayUdpHost, std::ref(d->stunRelayUdpAddr) },
+                            { manager->stunRelayTcpHost, std::ref(d->stunRelayTcpAddr) } },
+                          [this]() {
+                              printf("resolver finished\n");
+                              d->startIce();
+                          });
 
         // connect(d->disco, &TcpPortDiscoverer::portAvailable, this, [this]() { d->onLocalServerDiscovered(); });
         // d->onLocalServerDiscovered();
