@@ -53,6 +53,9 @@ set(SOURCES
     noncore/dtls.cpp
 
     noncore/cutestuff/bsocket.cpp
+
+    noncore/sctp/SctpAssociation.cpp
+    noncore/sctp/DepUsrSCTP.cpp
 )
 
 if(UNIX)
@@ -107,6 +110,12 @@ set(HEADERS
 
     noncore/legacy/ndns.h
     noncore/legacy/srvresolver.h
+
+    noncore/sctp/SctpAssociation.hpp
+    noncore/sctp/DepUsrSCTP.hpp
+    noncore/sctp/RTC/DataConsumer.hpp
+    noncore/sctp/RTC/DataProducer.hpp
+    noncore/sctp/RTC/SctpParameters.hpp
 )
 
 add_library(irisnet STATIC ${SOURCES} ${HEADERS} )
@@ -129,3 +138,9 @@ endif()
 target_link_libraries(irisnet ${qca_LIB})
 target_link_libraries(irisnet ${USRSCTP_LIBRARY})
 target_link_libraries(irisnet ${QJDns_LIBRARY} ${EXTRA_LDFLAGS})
+
+# usrsctp requires pthread
+if(NOT WIN32)
+    find_package(Threads)
+    target_link_libraries(irisnet Threads::Threads)
+endif()
