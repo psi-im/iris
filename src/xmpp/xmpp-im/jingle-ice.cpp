@@ -20,6 +20,7 @@
 #include "jingle-ice.h"
 
 #include "ice176.h"
+#include "irisnet/noncore/sctp/DepUsrSCTP.hpp"
 #include "jingle-session.h"
 #include "netnames.h"
 #include "udpportreserver.h"
@@ -815,15 +816,16 @@ namespace XMPP { namespace Jingle { namespace ICE {
 
     bool Transport::isValid() const { return d != nullptr; }
 
-    TransportFeatures Transport::features() const
-    {
-        return TransportFeatures(TransportFeature::HardToConnect) | TransportFeature::Reliable | TransportFeature::Fast;
-    }
+    TransportFeatures Transport::features() const { return _pad->manager()->features(); }
 
     int Transport::maxSupportedChannels() const { return -1; };
 
-    Connection::Ptr Transport::addChannel() const
+    Connection::Ptr Transport::addChannel(TransportFeatures features) const
     {
+        // features define type of channel. reliable channels infer sctp
+        // if time-oriented - likely rtp
+        // if message-oriented and not time-oriented - likely sctp
+
         if (_state >= State::ApprovedToSend) {
             qWarning("Adding channel after negotiation start is not yet supported");
             return Connection::Ptr();
@@ -849,17 +851,25 @@ namespace XMPP { namespace Jingle { namespace ICE {
 
     Manager::~Manager()
     {
-        if (d->jingleManager)
+        if (d->jingleManager) {
+            DepUsrSCTP::ClassDestroy();
             d->jingleManager->unregisterTransport(NS);
+        }
     }
 
     TransportFeatures Manager::features() const
     {
-        return TransportFeatures(TransportFeature::Reliable) | TransportFeature::NotReliable
-            | TransportFeature::RealTime;
+        return TransportFeature::HighProbableConnect | TransportFeature::Reliable | TransportFeature::Unreliable
+            | TransportFeature::MessageOriented | TransportFeature::DataOriented | TransportFeature::TimeOriented;
     }
 
-    void Manager::setJingleManager(XMPP::Jingle::Manager *jm) { d->jingleManager = jm; }
+    void Manager::setJingleManager(XMPP::Jingle::Manager *jm)
+    {
+        d->jingleManager = jm;
+        if (jm) {
+            DepUsrSCTP::ClassInit();
+        }
+    }
 
     QSharedPointer<XMPP::Jingle::Transport> Manager::newTransport(const TransportManagerPad::Ptr &pad, Origin creator)
     {
