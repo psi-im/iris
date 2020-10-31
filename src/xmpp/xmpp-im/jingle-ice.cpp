@@ -280,8 +280,9 @@ namespace XMPP { namespace Jingle { namespace ICE {
         QList<NetworkDatagram> datagrams;
         void *                 client;
         int                    channelIndex;
+        TransportFeatures      features;
 
-        Connection(int channelIndex) : channelIndex(channelIndex)
+        Connection(int channelIndex, TransportFeatures features) : channelIndex(channelIndex), features(features)
         {
             /*connect(client, &SocksClient::readyRead, this, &Connection::readyRead);
             connect(client, &SocksClient::bytesWritten, this, &Connection::bytesWritten);
@@ -820,16 +821,20 @@ namespace XMPP { namespace Jingle { namespace ICE {
 
     int Transport::maxSupportedChannels() const { return -1; };
 
+    // adding ice components (for rtp, rtcp, datachannel etc)
+    // but those are rather abstract channels and it's up to ice manager in TransportPad to decide
     Connection::Ptr Transport::addChannel(TransportFeatures features) const
     {
         // features define type of channel. reliable channels infer sctp
         // if time-oriented - likely rtp
-        // if message-oriented and not time-oriented - likely sctp
+        // if data-oriented - likely sctp
 
         if (_state >= State::ApprovedToSend) {
             qWarning("Adding channel after negotiation start is not yet supported");
             return Connection::Ptr();
         }
+
+        // find a gap in the list of channel indexes or just take last one
         int  channelIdx = 0;
         auto it         = d->channels.constBegin();
         while (it != d->channels.constEnd()) {
@@ -838,7 +843,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
             channelIdx++;
             ++it;
         }
-        auto conn = QSharedPointer<Connection>::create(channelIdx);
+        auto conn = QSharedPointer<Connection>::create(channelIdx, features);
         d->channels.insert(it, channelIdx, conn);
 
         return conn.staticCast<XMPP::Jingle::Connection>();
@@ -964,6 +969,18 @@ namespace XMPP { namespace Jingle { namespace ICE {
     Session *Pad::session() const { return _session; }
 
     TransportManager *Pad::manager() const { return _manager; }
+
+    void Pad::populateOutgoing(Action action, QDomElement &jingle)
+    {
+        if (action == Action::SessionInitiate || action == Action::SessionAccept) {
+            for (auto app : session()->contentList()) {
+                auto transport = app->transport();
+                if (transport && transport.dynamicCast<Transport>()) {
+                    // do grouping stuff
+                }
+            }
+        }
+    }
 
 } // namespace Ice
 } // namespace Jingle

@@ -159,6 +159,7 @@ namespace Jingle { namespace ICE {
         QString           ns() const override;
         Session *         session() const override;
         TransportManager *manager() const override;
+        void              populateOutgoing(Action action, QDomElement &el) override;
 
         inline TcpPortScope *discoScope() const { return _discoScope; }
 

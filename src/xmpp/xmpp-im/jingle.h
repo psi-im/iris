@@ -136,7 +136,7 @@ namespace Jingle {
     For example all of them can enable p2p crypto mode (<security/> should work here)
     */
     enum class TransportFeature {
-        HighProbableConnect = 0x01, // e.g ICE
+        HighProbableConnect = 0x01, // e.g ICE. ICE will have priority over others thanks to Fast|MessageOriented
         AlwaysConnect       = 0x02, // e.g. IBB. basically it's always connected
 
         // exclusive
@@ -299,6 +299,7 @@ namespace Jingle {
         virtual QDomElement takeOutgoingSessionInfoUpdate();
         virtual QString     ns() const      = 0;
         virtual Session *   session() const = 0;
+        virtual void        populateOutgoing(Action action, QDomElement &el);
         QDomDocument *      doc() const;
     };
 
