@@ -132,7 +132,7 @@ if (BUNDLED_QCA)
     add_dependencies(irisnet QcaProject)
 endif()
 target_link_libraries(irisnet ${qca_LIB})
-target_link_libraries(irisnet ${USRSCTP_LIBRARY})
+target_link_libraries(irisnet SctpLab::UsrSCTP)
 target_link_libraries(irisnet ${QJDns_LIBRARY} ${EXTRA_LDFLAGS})
 
 # usrsctp requires pthread
