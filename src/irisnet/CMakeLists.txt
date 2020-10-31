@@ -67,9 +67,9 @@ if(NOT USE_QJDNS)
 else()
     list(APPEND SOURCES corelib/netnames_jdns.cpp)
 endif()
-if (Qt5Network_VERSION VERSION_LESS 5.15.0)
+#if (Qt5Network_VERSION VERSION_LESS 5.15.0)
     list(APPEND SOURCES corelib/netinterface_qtnet.cpp)
-endif()
+#endif()
 
 set(HEADERS
     corelib/irisnetexport.h
@@ -128,9 +128,9 @@ if(NOT USE_QJDNS)
     set(QJDns_LIBRARY "")
 endif()
 
-if (Qt5Network_VERSION VERSION_LESS 5.15.0)
+#if (Qt5Network_VERSION VERSION_LESS 5.15.0)
     target_compile_definitions(irisnet PRIVATE HAVE_QTNET)
-endif()
+#endif()
 target_link_libraries(irisnet Qt5::Core Qt5::Network Qt5::Xml)
 if (BUNDLED_QCA)
     add_dependencies(irisnet QcaProject)
