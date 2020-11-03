@@ -17,10 +17,11 @@
  *
  */
 
+#include "irisnet/noncore/sctp/DepUsrSCTP.hpp" //Do not move to avoid warnings with MinGW
+
 #include "jingle-ice.h"
 
 #include "ice176.h"
-#include "irisnet/noncore/sctp/DepUsrSCTP.hpp"
 #include "jingle-session.h"
 #include "netnames.h"
 #include "udpportreserver.h"
