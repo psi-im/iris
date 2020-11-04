@@ -186,7 +186,8 @@ namespace Jingle { namespace S5B {
                                                              Origin                          creator) override;
         TransportManagerPad *                   pad(Session *session) override;
 
-        void closeAll() override;
+        void        closeAll() override;
+        QStringList discoFeatures() const override;
 
         QString generateSid(const Jid &remote);
         void    registerSid(const Jid &remote, const QString &sid);

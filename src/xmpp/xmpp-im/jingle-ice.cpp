@@ -113,7 +113,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
 
         void onOneFinished()
         {
-            if (--counter) {
+            if (!--counter) {
                 callback();
                 deleteLater();
             }
@@ -476,11 +476,11 @@ namespace XMPP { namespace Jingle { namespace ICE {
             stunRelayUdpPort = manager->stunRelayUdpPort;
             stunRelayTcpPort = manager->stunRelayTcpPort;
             if (!stunBindAddr.isNull() && stunBindPort > 0)
-                printf("STUN service: %s;%d\n", qPrintable(stunBindAddr.toString()), stunBindPort);
+                qDebug("STUN service: %s;%d", qPrintable(stunBindAddr.toString()), stunBindPort);
             if (!stunRelayUdpAddr.isNull() && stunRelayUdpPort > 0 && !manager->stunRelayUdpUser.isEmpty())
-                printf("TURN w/ UDP service: %s;%d\n", qPrintable(stunRelayUdpAddr.toString()), stunRelayUdpPort);
+                qDebug("TURN w/ UDP service: %s;%d", qPrintable(stunRelayUdpAddr.toString()), stunRelayUdpPort);
             if (!stunRelayTcpAddr.isNull() && stunRelayTcpPort > 0 && !manager->stunRelayTcpUser.isEmpty())
-                printf("TURN w/ TCP service: %s;%d\n", qPrintable(stunRelayTcpAddr.toString()), stunRelayTcpPort);
+                qDebug("TURN w/ TCP service: %s;%d", qPrintable(stunRelayTcpAddr.toString()), stunRelayTcpPort);
 
             QList<QHostAddress> listenAddrs;
             auto const          interfaces = QNetworkInterface::allInterfaces();
@@ -885,6 +885,8 @@ namespace XMPP { namespace Jingle { namespace ICE {
     TransportManagerPad *Manager::pad(Session *session) { return new Pad(this, session); }
 
     void Manager::closeAll() { emit abortAllRequested(); }
+
+    QStringList Manager::discoFeatures() const { return { NS }; }
 
     void Manager::setBasePort(int port) { d->basePort = port; }
 

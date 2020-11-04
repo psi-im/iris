@@ -342,6 +342,8 @@ namespace Jingle {
                                           const QString &ns); // allocates new pad on transport manager
         QStringList          availableTransports(const TransportFeatures &features = TransportFeatures()) const;
 
+        QStringList discoFeatures() const;
+
         /**
          * @brief isAllowedParty checks if the remote jid allowed to initiate a session
          * @param jid - remote jid

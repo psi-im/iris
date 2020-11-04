@@ -83,7 +83,8 @@ namespace Jingle { namespace IBB {
                                                              Origin                          creator) override;
         TransportManagerPad *                   pad(Session *session) override;
 
-        void closeAll() override;
+        void        closeAll() override;
+        QStringList discoFeatures() const override;
 
         Connection::Ptr makeConnection(const Jid &peer, const QString &sid, size_t blockSize);
         bool            handleIncoming(IBBConnection *c);

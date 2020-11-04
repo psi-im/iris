@@ -1702,6 +1702,8 @@ namespace XMPP { namespace Jingle { namespace S5B {
 
     void Manager::closeAll() { emit abortAllRequested(); }
 
+    QStringList Manager::discoFeatures() const { return { NS }; }
+
     void Manager::addKeyMapping(const QString &key, Transport *transport) { d->key2transport.insert(key, transport); }
 
     void Manager::removeKeyMapping(const QString &key) { d->key2transport.remove(key); }

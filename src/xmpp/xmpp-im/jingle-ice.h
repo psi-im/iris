@@ -184,6 +184,8 @@ namespace Jingle { namespace ICE {
 
         void closeAll() override;
 
+        QStringList discoFeatures() const override;
+
         /**
          * @brief userProxy returns custom (set by user) SOCKS proxy JID
          * @return

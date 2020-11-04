@@ -408,6 +408,8 @@ namespace XMPP { namespace Jingle { namespace IBB {
 
     void Manager::closeAll() { emit abortAllRequested(); }
 
+    QStringList Manager::discoFeatures() const { return { NS }; }
+
     XMPP::Jingle::Connection::Ptr Manager::makeConnection(const Jid &peer, const QString &sid, size_t blockSize)
     {
         if (!sid.isEmpty() && d->connections.contains(qMakePair(peer, sid))) {

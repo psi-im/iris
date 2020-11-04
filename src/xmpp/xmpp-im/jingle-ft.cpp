@@ -401,6 +401,8 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
 
     void Manager::closeAll() { }
 
+    QStringList Manager::discoFeatures() const { return { NS }; }
+
     Client *Manager::client()
     {
         if (jingleManager) {
@@ -411,7 +413,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
 
     QStringList Manager::availableTransports() const
     {
-        return jingleManager->availableTransports(TransportFeature::Reliable);
+        return jingleManager->availableTransports(TransportFeature::Reliable | TransportFeature::DataOriented);
     }
 
     //----------------------------------------------------------------------------
@@ -643,10 +645,11 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
 
     void Application::initTransport()
     {
-        connect(_transport.data(), &Transport::connected, this, [this]() {
+        d->connection = _transport->addChannel(TransportFeature::Reliable | TransportFeature::DataOriented);
+        connect(d->connection.data(), &Connection::connected, this, [this]() {
             d->lastReason = Reason();
             d->lastError.reset();
-            d->connection = _transport->addChannel(TransportFeature::Reliable | TransportFeature::DataOriented);
+
             if (!d->streamingMode) {
                 connect(d->connection.data(), &Connection::readyRead, this, [this]() {
                     if (!d->device) {
