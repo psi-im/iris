@@ -21,6 +21,7 @@
 
 #include "jingle-ice.h"
 
+#include "dtls.h"
 #include "ice176.h"
 #include "jingle-session.h"
 #include "netnames.h"
@@ -28,6 +29,7 @@
 #include "xmpp/jid/jid.h"
 #include "xmpp_client.h"
 #include "xmpp_serverinfomanager.h"
+#include "xmpp_xmlcommon.h"
 
 #include <QElapsedTimer>
 #include <QNetworkInterface>
@@ -35,6 +37,7 @@
 
 namespace XMPP { namespace Jingle { namespace ICE {
     const QString NS(QStringLiteral("urn:xmpp:jingle:transports:ice:0"));
+    const QString NS_DTLS(QStringLiteral("urn:xmpp:jingle:apps:dtls:0"));
 
     // TODO: reject offers that don't contain at least one of audio or video
     // TODO: support candidate negotiations over the JingleRtpChannel thread
@@ -103,6 +106,37 @@ namespace XMPP { namespace Jingle { namespace ICE {
 
         return out;
     }
+
+    static std::array<const char *, 4> fpRoles { { "active", "passive", "actpass", "holdconn" } };
+    struct FingerPrint {
+        enum Setup { Active, Passive, ActPass, HoldConn };
+
+        Hash  hash;
+        Setup setup = Setup(-1);
+
+        FingerPrint(const QDomElement &el)
+        {
+            auto ht = el.attribute(QLatin1String("hash"));
+            hash    = QStringRef(&ht);
+            hash.setData(QByteArray::fromHex(el.text().toLatin1()));
+            auto setupIt = std::find(fpRoles.begin(), fpRoles.end(),
+                                     el.attribute(QLatin1String("setup")).toLatin1().constData());
+            setup        = Setup(setupIt == fpRoles.end() ? -1 : std::distance(fpRoles.begin(), setupIt));
+        }
+        FingerPrint(const Hash &hash, Setup setup) : hash(hash), setup(setup) { }
+
+        inline bool isValid() const
+        {
+            return hash.isValid() && !hash.data().isEmpty() && setup >= Active && setup <= HoldConn;
+        }
+        QDomElement toXml(QDomDocument *doc) const
+        {
+            auto fingerprint = XMLHelper::textTagNS(doc, NS_DTLS, QLatin1String("fingerprint"), hash.data().toHex(':'));
+            fingerprint.setAttribute(QLatin1String("hash"), hash.stringType());
+            fingerprint.setAttribute(QLatin1String("setup"), QLatin1String(fpRoles[setup]));
+            return fingerprint;
+        }
+    };
 
     class Resolver : public QObject {
         Q_OBJECT
@@ -275,6 +309,35 @@ namespace XMPP { namespace Jingle { namespace ICE {
         return c;
     }
 
+    static QDomElement candidateToElement(QDomDocument *doc, const XMPP::Ice176::Candidate &c)
+    {
+        QDomElement e = doc->createElement("candidate");
+        e.setAttribute("component", QString::number(c.component));
+        e.setAttribute("foundation", c.foundation);
+        e.setAttribute("generation", QString::number(c.generation));
+        if (!c.id.isEmpty())
+            e.setAttribute("id", c.id);
+        e.setAttribute("ip", c.ip.toString());
+        if (c.network != -1)
+            e.setAttribute("network", QString::number(c.network));
+        else // weird?
+            e.setAttribute("network", QString::number(0));
+        e.setAttribute("port", QString::number(c.port));
+        e.setAttribute("priority", QString::number(c.priority));
+        e.setAttribute("protocol", c.protocol);
+        if (!c.rel_addr.isNull())
+            e.setAttribute("rel-addr", c.rel_addr.toString());
+        if (c.rel_port != -1)
+            e.setAttribute("rel-port", QString::number(c.rel_port));
+        // TODO: remove this?
+        // if(!c.rem_addr.isNull())
+        //    e.setAttribute("rem-addr", c.rem_addr.toString());
+        // if(c.rem_port != -1)
+        //    e.setAttribute("rem-port", QString::number(c.rem_port));
+        e.setAttribute("type", c.type);
+        return e;
+    }
+
     class Connection : public XMPP::Jingle::Connection {
         Q_OBJECT
     public:
@@ -337,7 +400,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
         bool                           offerSent                       = false;
         bool                           waitingAck                      = true;
         bool                           aborted                         = false;
-        bool                           proxyDiscoveryInProgress        = false; // if we have valid proxy requests
+        bool                           initialOfferReady               = false;
         bool                           remoteReportedGatheringComplete = false;
         bool                           iceStarted                      = false;
         quint16                        pendingActions                  = 0;
@@ -356,7 +419,8 @@ namespace XMPP { namespace Jingle { namespace ICE {
         TcpPortDiscoverer *disco        = nullptr;
         UdpPortReserver *  portReserver = nullptr;
         Resolver           resolver;
-        XMPP::Ice176 *     ice = nullptr;
+        XMPP::Ice176 *     ice  = nullptr;
+        XMPP::Dtls *       dtls = nullptr;
 
         QHostAddress extAddr;
         QHostAddress stunBindAddr, stunRelayUdpAddr, stunRelayTcpAddr;
@@ -545,16 +609,20 @@ namespace XMPP { namespace Jingle { namespace ICE {
                 iceStarted = true;
             });
             q->connect(ice, &XMPP::Ice176::error, [this](XMPP::Ice176::Error err) {
-                q->_lastReason = Reason(Reason::Condition::FailedTransport, "ICE failed");
+                q->_lastReason = Reason(Reason::Condition::FailedTransport, QString("ICE failed: %1").arg(err));
                 q->setState(State::Finished);
                 emit q->failed();
             });
             q->connect(ice, &XMPP::Ice176::localCandidatesReady,
                        [this](const QList<XMPP::Ice176::Candidate> &candidates) {
-                           localCandidates = candidates;
-                           if (q->_state >= State::ApprovedToSend)
+                           localCandidates += candidates;
+                           if (q->_state >= State::Unacked)
                                emit q->updated();
                        });
+            q->connect(ice, &XMPP::Ice176::localGatheringComplete, [this]() {
+                initialOfferReady = true;
+                emit q->updated();
+            });
             QObject::connect(
                 ice, &XMPP::Ice176::componentReady, q,
                 [this](int componentIdx) {
@@ -714,106 +782,48 @@ namespace XMPP { namespace Jingle { namespace ICE {
     {
         qDebug("taking outgoing update");
         OutgoingTransportInfoUpdate upd;
-        if (!isValid()) {
+        if (!isValid() || _state < State::ApprovedToSend || (_state == State::ApprovedToSend && !d->initialOfferReady)
+            || (_state > State::ApprovedToSend && d->localCandidates.isEmpty())) {
             return upd;
         }
 
-        auto makeUpdate = [&](QDomElement tel, std::function<void()> cb = std::function<void()>()) {
-            d->waitingAck = true;
-            return OutgoingTransportInfoUpdate { tel, [this, cb, trptr = QPointer<Transport>(d->q)](bool success) {
-                                                    if (!success || !trptr)
-                                                        return;
-                                                    d->waitingAck = false;
-                                                    if (cb)
-                                                        cb();
-                                                } };
-        };
-
-        auto doc = _pad.staticCast<Pad>()->session()->manager()->client()->doc();
-
+        auto        doc = _pad.staticCast<Pad>()->session()->manager()->client()->doc();
         QDomElement tel = doc->createElementNS(NS, "transport");
-        // tel.setAttribute(QStringLiteral("sid"), d->sid);
-
-        // check where we make initial offer
-        bool noPending = (d->localCandidates.isEmpty() && !d->proxyDiscoveryInProgress
-                          && !(d->disco && d->disco->inProgressPortTypes()));
-        bool initial   = _state == State::ApprovedToSend && !d->offerSent
-            && ((!d->pendingActions && noPending) || d->pendingActions & Private::NewCandidate);
-
-        if (initial) {
-            d->offerSent = true;
+        tel.setAttribute(QLatin1String("pwd"), d->ice->localPassword());
+        tel.setAttribute(QLatin1String("ufrag"), d->ice->localUfrag());
+        if (d->dtls) {
+            tel.appendChild(
+                FingerPrint(d->dtls->fingerprint(),
+                            _pad->session()->role() == Origin::Initiator ? FingerPrint::ActPass : FingerPrint::Active)
+                    .toXml(doc));
         }
 
-        if (d->pendingActions & Private::NewCandidate) {
-            d->pendingActions &= ~Private::NewCandidate;
-            QList<XMPP::Ice176::Candidate> candidatesToSend;
-            for (auto &c : d->localCandidates) {
-                //                if (c.state() != Candidate::New) {
-                //                    continue;
-                //                }
-                //                if (c.type() == Candidate::Proxy) {
-                //                    useProxy = true;
-                //                }
-                //                qDebug("sending local candidate: cid=%s", qPrintable(c.cid()));
-                //                tel.appendChild(c.toXml(doc));
-                //                candidatesToSend.append(c);
-                //                c.setState(Candidate::Unacked);
-            }
-            if (!candidatesToSend.isEmpty()) {
-                upd = makeUpdate(tel, [this, candidatesToSend, initial]() mutable {
-                    if (initial) {
-                        _state = _creator == _pad->session()->role() ? State::Pending : State::Accepted;
-                    }
-                    // d->checkAndFinishNegotiation();
-                });
-            } else {
-                qWarning("Got NewCandidate pending action but no candidate to send");
-            }
-        } else if (d->pendingActions & Private::RemoteCandidate) {
-            d->pendingActions &= ~Private::RemoteCandidate;
-            // we should have the only remote candidate in Pending state.
-            // all other has to be discarded by priority check
-            for (auto &c : d->remoteCandidates) {
-                //                if (c.state() != Candidate::Pending) {
-                //                    continue;
-                //                }
-                //                qDebug("sending candidate-used: cid=%s", qPrintable(c.cid()));
-                auto el = tel.appendChild(doc->createElement(QStringLiteral("remote-candidate"))).toElement();
-                // el.setAttribute(QStringLiteral("cid"), c.cid());
-                // c.setState(Candidate::Unacked);
+        for (auto const &cand : d->localCandidates) {
+            tel.appendChild(candidateToElement(doc, cand));
+        }
 
-                upd = makeUpdate(tel, [this, c]() mutable {
-                    //                    if (c.state() == Candidate::Unacked) {
-                    //                        c.setState(Candidate::Accepted);
-                    //                        qDebug("ack: sending candidate-used: cid=%s", qPrintable(c.cid()));
-                    //                        d->remoteUsedCandidate = c;
-                    //                    }
-                    // d->checkAndFinishNegotiation();
-                });
-                break;
-            }
-            if (std::get<0>(upd).isNull()) {
-                qWarning("Got CandidateUsed pending action but no pending candidates");
-            }
-        } else if (d->pendingActions & Private::GatheringComplete) {
+        if (d->pendingActions & Private::GatheringComplete) {
+            tel.appendChild(doc->createElement(QLatin1String("gathering-complete")));
             d->pendingActions &= ~Private::GatheringComplete;
-            qDebug("sending gathering-complete");
-            // we are here because all remote are already in Discardd state
-            tel.appendChild(doc->createElement(QStringLiteral("gathering-complete")));
-            upd = makeUpdate(tel, [this]() mutable {
-                // d->localReportedGatheringComplete = true;
-                // d->checkAndFinishNegotiation();
-            });
-        } else {
-            qDebug("sending empty transport-info");
-            upd = makeUpdate(tel, [this, initial]() mutable {
-                if (initial) {
-                    _state = _creator == _pad->session()->role() ? State::Pending : State::Accepted;
-                }
-            });
         }
 
-        return upd; // TODO
+        if (d->pendingActions & Private::RemoteCandidate) {
+            for (auto const &c : d->ice->selectedCandidates()) {
+                auto rc = doc->createElement(QLatin1String("remote-candidate"));
+                rc.setAttribute(QLatin1String("component"), c.componentId);
+                rc.setAttribute(QLatin1String("ip"), c.ip.toString());
+                rc.setAttribute(QLatin1String("port"), c.port);
+                tel.appendChild(rc);
+            }
+            d->pendingActions &= ~Private::RemoteCandidate;
+        }
+
+        d->waitingAck = true;
+        return OutgoingTransportInfoUpdate { tel, [this, trptr = QPointer<Transport>(d->q)](bool success) {
+                                                if (!success || !trptr)
+                                                    return;
+                                                d->waitingAck = false;
+                                            } };
     }
 
     bool Transport::isValid() const { return d != nullptr; }
@@ -886,7 +896,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
 
     void Manager::closeAll() { emit abortAllRequested(); }
 
-    QStringList Manager::discoFeatures() const { return { NS }; }
+    QStringList Manager::discoFeatures() const { return { NS, NS_DTLS }; }
 
     void Manager::setBasePort(int port) { d->basePort = port; }
 
@@ -929,7 +939,8 @@ namespace XMPP { namespace Jingle { namespace ICE {
         d->stunProxy = tproxy;
     }
 
-    // void Manager::addKeyMapping(const QString &key, Transport *transport) { d->key2transport.insert(key, transport);
+    // void Manager::addKeyMapping(const QString &key, Transport *transport) { d->key2transport.insert(key,
+    // transport);
     // }
 
     // void Manager::removeKeyMapping(const QString &key) { d->key2transport.remove(key); }
@@ -937,8 +948,9 @@ namespace XMPP { namespace Jingle { namespace ICE {
     //    QString Manager::generateSid(const Jid &remote)
     //    {
     //        auto servers =
-    //        d->jingleManager->client()->tcpPortReserver()->scope(QString::fromLatin1("s5b"))->allServers(); QString
-    //        sid; QPair<Jid, QString> key; QString             key1; QString             key2; auto servChecker =
+    //        d->jingleManager->client()->tcpPortReserver()->scope(QString::fromLatin1("s5b"))->allServers();
+    //        QString sid; QPair<Jid, QString> key; QString             key1; QString             key2; auto
+    //        servChecker =
     //        [&](const TcpPortServer::Ptr &s) {
     //            return s.staticCast<S5BServer>()->hasKey(key1) || s.staticCast<S5BServer>()->hasKey(key2);
     //        };

@@ -1688,6 +1688,22 @@ void Ice176::changeThread(QThread *thread)
     moveToThread(thread);
 }
 
+bool Ice176::isLocalGatheringComplete() const { return d->localGatheringComplete; }
+
+bool Ice176::isActive() const { return d->state == Private::Active; }
+
+QList<Ice176::SelectedCandidate> Ice176::selectedCandidates() const
+{
+    QList<Ice176::SelectedCandidate> ret;
+    for (auto const &c : d->components) {
+        if (c.selectedPair) {
+            const auto &local = c.selectedPair->local;
+            ret.append({ local->addr.addr, local->addr.port, local->componentId });
+        }
+    }
+    return ret;
+}
+
 } // namespace XMPP
 
 #include "ice176.moc"
