@@ -1655,7 +1655,11 @@ namespace XMPP { namespace Jingle { namespace S5B {
         return d->connection;
     }
 
-    std::vector<XMPP::Jingle::Connection::Ptr> Transport::channels() const { return { { d->connection } }; }
+    std::vector<XMPP::Jingle::Connection::Ptr> Transport::channels() const
+    {
+        // return {}; // good to test transport failure
+        return { { d->connection } };
+    }
 
     //----------------------------------------------------------------
     // Manager

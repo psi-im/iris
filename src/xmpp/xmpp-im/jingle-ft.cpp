@@ -455,9 +455,10 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
                 if (connection) {
                     connection->close();
                 }
-                q->disconnect(q->transport().data(), &Transport::updated, q, nullptr);
+                if (q->transport())
+                    q->disconnect(q->transport().data(), &Transport::updated, q, nullptr);
             }
-            if (s >= State::Finishing) {
+            if (s >= State::Finishing && q->transport()) {
                 q->disconnect(q->transport().data(), &Transport::failed, q, nullptr);
                 q->disconnect(q->transport().data(), &Transport::connected, q, nullptr);
                 // we can still try to send transport updates
@@ -645,7 +646,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
 
     void Application::initTransport()
     {
-        if (_creator == _pad->session()->role()) {
+        if (_transport->creator() == _pad->session()->role()) {
             d->connection = _transport->addChannel(TransportFeature::Reliable | TransportFeature::DataOriented);
         } else {
             auto const &channels = _transport->channels();
@@ -785,8 +786,10 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
             return;
 
         _terminationReason = Reason(cond, comment);
-        _transport->disconnect(this);
-        _transport.reset();
+        if (_transport) {
+            _transport->disconnect(this);
+            _transport.reset();
+        }
 
         if (_creator == _pad->session()->role() && _state <= State::ApprovedToSend) {
             // local content, not yet sent to remote

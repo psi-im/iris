@@ -74,6 +74,8 @@ namespace XMPP { namespace Jingle {
         inline QString                    contentName() const { return _contentName; }
         inline QSharedPointer<Transport>  transport() const { return _transport; }
         inline TransportSelector *        transportSelector() const { return _transportSelector.data(); }
+        bool                              isRemote() const;
+        inline bool                       isLocal() const { return !isRemote(); }
 
         virtual SetDescError setRemoteOffer(const QDomElement &description)  = 0;
         virtual SetDescError setRemoteAnswer(const QDomElement &description) = 0;
