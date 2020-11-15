@@ -22,6 +22,8 @@
 
 #include "jingle-transport.h"
 
+class QTimer;
+
 namespace XMPP { namespace Jingle {
 
     class ApplicationManager;
@@ -172,6 +174,8 @@ namespace XMPP { namespace Jingle {
 
         // evaluated update to be sent
         Update _update;
+
+        QTimer *transportInitTimer = nullptr;
     };
 
     inline bool operator<(const Application::Update &a, const Application::Update &b)

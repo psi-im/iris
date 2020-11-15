@@ -679,6 +679,7 @@ public:
 
     void flagComponentAsLowOverhead(int componentIndex)
     {
+        Q_ASSERT(size_t(componentIndex) < components.size());
         // FIXME: ok to assume in order?
         Component &c  = components[componentIndex];
         c.lowOverhead = true;

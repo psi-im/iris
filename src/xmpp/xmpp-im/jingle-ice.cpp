@@ -107,6 +107,24 @@ namespace XMPP { namespace Jingle { namespace ICE {
         return out;
     }
 
+    struct SctpKeeper {
+        using Ptr = std::shared_ptr<SctpKeeper>;
+
+        static std::weak_ptr<SctpKeeper> instance;
+        SctpKeeper() { DepUsrSCTP::ClassInit(); }
+        ~SctpKeeper() { DepUsrSCTP::ClassDestroy(); }
+        static Ptr use()
+        {
+            auto i = instance.lock();
+            if (!i) {
+                i        = std::make_shared<SctpKeeper>();
+                instance = i;
+            }
+            return i;
+        }
+    };
+    std::weak_ptr<SctpKeeper> SctpKeeper::instance;
+
     static std::array<const char *, 4> fpRoles { { "active", "passive", "actpass", "holdconn" } };
     struct FingerPrint {
         enum Setup { Active, Passive, ActPass, HoldConn };
@@ -198,7 +216,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
             printf("IceStopper done\n");
         }
 
-        void start(XMPP::UdpPortReserver *_portReserver, const QList<XMPP::Ice176 *> iceList)
+        void start(XMPP::UdpPortReserver *_portReserver, const QList<Ice176 *> iceList)
         {
             if (_portReserver) {
                 portReserver = _portReserver;
@@ -206,12 +224,12 @@ namespace XMPP { namespace Jingle { namespace ICE {
             }
             left = iceList;
 
-            for (XMPP::Ice176 *ice : left) {
+            for (Ice176 *ice : left) {
                 ice->setParent(this);
 
                 // TODO: error() also?
-                connect(ice, SIGNAL(stopped()), SLOT(ice_stopped()));
-                connect(ice, SIGNAL(error(XMPP::Ice176::Error)), SLOT(ice_error(XMPP::Ice176::Error)));
+                connect(ice, &Ice176::stopped, this, &IceStopper::ice_stopped);
+                connect(ice, &Ice176::error, this, &IceStopper::ice_error);
                 ice->stop();
             }
 
@@ -260,6 +278,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
         QString stunRelayTcpPass;
 
         XMPP::TurnClient::Proxy stunProxy;
+        SctpKeeper::Ptr         sctpInstance;
 
         // FIMME it's reuiqred to split transports by direction otherwise we gonna hit conflicts.
         // jid,transport-sid -> transport mapping
@@ -383,7 +402,11 @@ namespace XMPP { namespace Jingle { namespace ICE {
     private:
         friend class Transport;
 
-        void onConnected(Ice176 *ice) { emit connected(); }
+        void onConnected(Ice176 *ice)
+        {
+            qDebug("ice channel connected!");
+            emit connected();
+        }
 
         void enqueueIncomingUDP(const QByteArray &data)
         {
@@ -439,7 +462,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
 
         void flushRemoteCandidates()
         {
-            if (q->_state < State::ApprovedToSend || q->_state == State::Finished)
+            if (!ice || q->_state < State::ApprovedToSend || q->_state == State::Finished)
                 return;
             ice->setPeerUfrag(remoteUfrag);
             ice->setPeerPassword(remotePassword);
@@ -469,7 +492,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
                 remoteCandidates.append(ic); // TODO check for collisions!
                 candidatesAdded++;
             }
-            if (candidatesAdded) {
+            if (candidatesAdded && ice) {
                 QTimer::singleShot(0, q, [this]() { flushRemoteCandidates(); });
                 return true;
             }
@@ -595,7 +618,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
                     printf("  %s\n", qPrintable(s));
             }
 
-            ice = new XMPP::Ice176(q);
+            ice = new Ice176(q);
 
             iceStarted = false;
             //            iceA_status.channelsReady.resize(2);
@@ -603,8 +626,14 @@ namespace XMPP { namespace Jingle { namespace ICE {
             //            iceA_status.channelsReady[1] = false;
 
             q->connect(ice, &XMPP::Ice176::started, [this]() {
+                QSet<int> lowOverhead;
                 for (auto &c : channels) {
-                    ice->flagComponentAsLowOverhead((c->hints() & Connection::AvoidRelays) ? 0 : 1);
+                    if (!(c->hints() & Connection::AvoidRelays)) {
+                        lowOverhead.insert(c->channelIndex);
+                    }
+                }
+                for (auto componentIndex : lowOverhead) {
+                    ice->flagComponentAsLowOverhead(componentIndex);
                 }
                 iceStarted = true;
             });
@@ -615,21 +644,19 @@ namespace XMPP { namespace Jingle { namespace ICE {
             });
             q->connect(ice, &XMPP::Ice176::localCandidatesReady,
                        [this](const QList<XMPP::Ice176::Candidate> &candidates) {
+                           pendingActions |= NewCandidate;
                            localCandidates += candidates;
-                           if (q->_state >= State::Unacked)
-                               emit q->updated();
+                           emit q->updated();
                        });
             q->connect(ice, &XMPP::Ice176::localGatheringComplete, [this]() {
-                initialOfferReady = true;
+                pendingActions |= GatheringComplete;
                 emit q->updated();
             });
             QObject::connect(
-                ice, &XMPP::Ice176::componentReady, q,
-                [this](int componentIdx) {
+                ice, &XMPP::Ice176::readyToSendMedia, q,
+                [this]() {
                     for (auto &c : channels) {
-                        if (c->channelIndex == componentIdx) {
-                            c->onConnected(ice);
-                        }
+                        c->onConnected(ice);
                     }
                 },
                 Qt::QueuedConnection); // signal is not DOR-SS
@@ -706,10 +733,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
         });
     }
 
-    Transport::~Transport()
-    {
-        if (d) { }
-    }
+    Transport::~Transport() { qDebug("jingle-ice: destroyed"); }
 
     void Transport::prepare()
     {
@@ -780,13 +804,12 @@ namespace XMPP { namespace Jingle { namespace ICE {
 
     OutgoingTransportInfoUpdate Transport::takeOutgoingUpdate()
     {
-        qDebug("taking outgoing update");
         OutgoingTransportInfoUpdate upd;
-        if (!isValid() || _state < State::ApprovedToSend || (_state == State::ApprovedToSend && !d->initialOfferReady)
-            || (_state > State::ApprovedToSend && d->localCandidates.isEmpty())) {
+        if (!hasUpdates() || _state < State::ApprovedToSend || (isRemote() && _state == State::Pending)) {
             return upd;
         }
 
+        qDebug("jingle-ice: taking outgoing update");
         auto        doc = _pad.staticCast<Pad>()->session()->manager()->client()->doc();
         QDomElement tel = doc->createElementNS(NS, "transport");
         tel.setAttribute(QLatin1String("pwd"), d->ice->localPassword());
@@ -840,7 +863,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
         // if time-oriented - likely rtp
         // if data-oriented - likely sctp
 
-        if (_state >= State::ApprovedToSend) {
+        if (!((isLocal() && _state == State::Created) || (isRemote() && _state == State::Pending))) {
             qWarning("Adding channel after negotiation start is not yet supported");
             return Connection::Ptr();
         }
@@ -860,15 +883,27 @@ namespace XMPP { namespace Jingle { namespace ICE {
         return conn.staticCast<XMPP::Jingle::Connection>();
     }
 
+    std::vector<XMPP::Jingle::Connection::Ptr> Transport::channels() const
+    {
+        std::vector<Connection::Ptr> ret;
+        ret.reserve(d->channels.size());
+        for (auto const &v : d->channels) {
+            ret.push_back(v);
+        }
+        return ret;
+    }
+
     //----------------------------------------------------------------
     // Manager
     //----------------------------------------------------------------
-    Manager::Manager(QObject *parent) : TransportManager(parent), d(new Private) { }
+    Manager::Manager(QObject *parent) : TransportManager(parent), d(new Private)
+    {
+        d->sctpInstance = SctpKeeper::use();
+    }
 
     Manager::~Manager()
     {
         if (d->jingleManager) {
-            DepUsrSCTP::ClassDestroy();
             d->jingleManager->unregisterTransport(NS);
         }
     }
@@ -879,13 +914,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
             | TransportFeature::MessageOriented | TransportFeature::DataOriented | TransportFeature::TimeOriented;
     }
 
-    void Manager::setJingleManager(XMPP::Jingle::Manager *jm)
-    {
-        d->jingleManager = jm;
-        if (jm) {
-            DepUsrSCTP::ClassInit();
-        }
-    }
+    void Manager::setJingleManager(XMPP::Jingle::Manager *jm) { d->jingleManager = jm; }
 
     QSharedPointer<XMPP::Jingle::Transport> Manager::newTransport(const TransportManagerPad::Ptr &pad, Origin creator)
     {
@@ -938,37 +967,6 @@ namespace XMPP { namespace Jingle { namespace ICE {
 
         d->stunProxy = tproxy;
     }
-
-    // void Manager::addKeyMapping(const QString &key, Transport *transport) { d->key2transport.insert(key,
-    // transport);
-    // }
-
-    // void Manager::removeKeyMapping(const QString &key) { d->key2transport.remove(key); }
-
-    //    QString Manager::generateSid(const Jid &remote)
-    //    {
-    //        auto servers =
-    //        d->jingleManager->client()->tcpPortReserver()->scope(QString::fromLatin1("s5b"))->allServers();
-    //        QString sid; QPair<Jid, QString> key; QString             key1; QString             key2; auto
-    //        servChecker =
-    //        [&](const TcpPortServer::Ptr &s) {
-    //            return s.staticCast<S5BServer>()->hasKey(key1) || s.staticCast<S5BServer>()->hasKey(key2);
-    //        };
-
-    //        do {
-    //            sid  = QString("s5b_%1").arg(qrand() & 0xffff, 4, 16, QChar('0'));
-    //            key  = qMakePair(remote, sid);
-    //            key1 = makeKey(sid, remote, d->jingleManager->client()->jid());
-    //            key2 = makeKey(sid, d->jingleManager->client()->jid(), remote);
-    //        } while (d->sids.contains(key) || std::find_if(servers.begin(), servers.end(), servChecker) !=
-    //        servers.end()); return sid;
-    //    }
-
-    // void Manager::registerSid(const Jid &remote, const QString &sid) { d->sids.insert(qMakePair(remote, sid)); }
-
-    // Jid Manager::userProxy() const { return d->proxy; }
-
-    // void Manager::setUserProxy(const Jid &jid) { d->proxy = jid; }
 
     //----------------------------------------------------------------
     // Pad

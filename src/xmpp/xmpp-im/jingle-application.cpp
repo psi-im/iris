@@ -22,6 +22,8 @@
 #include "xmpp_client.h"
 #include "xmpp_task.h"
 
+#include <QTimer>
+
 namespace XMPP { namespace Jingle {
     //----------------------------------------------------------------------------
     // Application
@@ -276,14 +278,24 @@ namespace XMPP { namespace Jingle {
         }
 
         _transport = transport;
-        connect(transport.data(), &Transport::updated, this, &Application::updated);
-        connect(transport.data(), &Transport::failed, this, [this]() { selectNextTransport(); });
 
-        initTransport();
+        if (!transportInitTimer) {
+            transportInitTimer = new QTimer(this);
+            transportInitTimer->setSingleShot(true);
+            transportInitTimer->setInterval(0);
+            connect(transportInitTimer, &QTimer::timeout, this, [this]() {
+                connect(_transport.data(), &Transport::updated, this, &Application::updated);
+                connect(_transport.data(), &Transport::failed, this, [this]() { selectNextTransport(); });
 
-        if (_state >= State::Unacked) {
-            _transport->prepare();
+                initTransport();
+
+                if (_state >= State::ApprovedToSend) {
+                    _transport->prepare();
+                }
+            });
         }
+        transportInitTimer->start();
+
         return true;
     }
 

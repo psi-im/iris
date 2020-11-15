@@ -141,9 +141,11 @@ namespace Jingle { namespace S5B {
         bool                        isValid() const override;
         TransportFeatures           features() const override;
 
-        QString         sid() const;
-        QString         directAddr() const;
-        Connection::Ptr addChannel(TransportFeatures features = TransportFeatures()) const override;
+        QString sid() const;
+        QString directAddr() const;
+
+        Connection::Ptr              addChannel(TransportFeatures features = TransportFeatures()) const override;
+        std::vector<Connection::Ptr> channels() const override;
 
     private:
         friend class Manager;

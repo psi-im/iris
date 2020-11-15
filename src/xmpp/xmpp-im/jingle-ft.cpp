@@ -554,7 +554,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
             new NSTransportsList(pad->session(), static_cast<Manager *>(pad->manager())->availableTransports()));
     }
 
-    Application::~Application() { }
+    Application::~Application() { qDebug("jingle-ft: destroyed"); }
 
     void Application::setState(State state) { d->setState(state); }
 
@@ -645,7 +645,20 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
 
     void Application::initTransport()
     {
-        d->connection = _transport->addChannel(TransportFeature::Reliable | TransportFeature::DataOriented);
+        if (_creator == _pad->session()->role()) {
+            d->connection = _transport->addChannel(TransportFeature::Reliable | TransportFeature::DataOriented);
+        } else {
+            auto const &channels = _transport->channels();
+            if (channels.size()) {
+                d->connection = channels[0];
+            }
+        }
+        if (!d->connection) {
+            _transport->stop();
+            qWarning("No channel on %s transport", qPrintable(_transport->pad()->ns()));
+            selectNextTransport();
+            return;
+        }
         connect(d->connection.data(), &Connection::connected, this, [this]() {
             d->lastReason = Reason();
             d->lastError.reset();

@@ -140,7 +140,8 @@ namespace Jingle { namespace ICE {
         TransportFeatures           features() const override;
         int                         maxSupportedChannels() const override;
 
-        Connection::Ptr addChannel(TransportFeatures features = TransportFeatures()) const override;
+        Connection::Ptr              addChannel(TransportFeatures features = TransportFeatures()) const override;
+        std::vector<Connection::Ptr> channels() const override;
 
     private:
         friend class Manager;
