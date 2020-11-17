@@ -5,6 +5,9 @@ endif()
 if(CMAKE_BUILD_TYPE STREQUAL "Debug" AND WIN32)
     set(D "d")
 endif()
+if(CMAKE_BUILD_TYPE STREQUAL "Debug" AND APPLE)
+    set(D "_debug")
+endif()
 
 get_directory_property(IS_SUBPROJECT PARENT_DIRECTORY)
 
