@@ -100,8 +100,13 @@ namespace Jingle {
     */
     enum class State { Created, ApprovedToSend, Unacked, Pending, Accepted, Connecting, Active, Finishing, Finished };
 
-    enum class Action {
-        NoAction, // non-standard, just a default
+    enum class Action { // ordered by priority. first sent first
+        NoAction,       // non-standard, just a default
+        TransportAccept,
+        TransportInfo,
+        TransportReject,
+        TransportReplace,
+        SessionInfo,
         ContentAccept,
         ContentAdd,
         ContentModify,
@@ -110,13 +115,8 @@ namespace Jingle {
         DescriptionInfo,
         SecurityInfo,
         SessionAccept,
-        SessionInfo,
         SessionInitiate,
-        SessionTerminate,
-        TransportAccept,
-        TransportInfo,
-        TransportReject,
-        TransportReplace
+        SessionTerminate
     };
 
     inline uint qHash(const XMPP::Jingle::Action &o, uint seed = 0) { return ::qHash(int(o), seed); }
