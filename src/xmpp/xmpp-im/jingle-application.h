@@ -147,7 +147,7 @@ namespace XMPP { namespace Jingle {
         /**
          * @brief wraps transport update so transport can be safely-deleted before callback is triggered
          */
-        OutgoingTransportInfoUpdate wrapOutgoingTransportUpdate();
+        OutgoingTransportInfoUpdate wrapOutgoingTransportUpdate(bool ensureTransportElement = false);
 
         /**
          * @brief initTransport in general connects any necessary for the application transport signals

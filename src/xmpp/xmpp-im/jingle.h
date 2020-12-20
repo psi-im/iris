@@ -157,13 +157,14 @@ namespace Jingle {
     Q_DECLARE_FLAGS(TransportFeatures, TransportFeature)
     Q_DECLARE_OPERATORS_FOR_FLAGS(TransportFeatures)
 
-    typedef QPair<QString, Origin>      ContentKey;
-    typedef std::function<void(Task *)> OutgoingUpdateCB;
+    using ContentKey       = QPair<QString, Origin>;
+    using OutgoingUpdateCB = std::function<void(Task *)>;
 
     // list of elements to b inserted to <jingle> and success callback
-    typedef std::tuple<QList<QDomElement>, OutgoingUpdateCB> OutgoingUpdate;
-    typedef std::tuple<QDomElement, OutgoingUpdateCB>
-        OutgoingTransportInfoUpdate; // transport element and success callback
+    using OutgoingUpdate = std::tuple<QList<QDomElement>, OutgoingUpdateCB>;
+
+    // transport element and success callback
+    using OutgoingTransportInfoUpdate = std::tuple<QDomElement, OutgoingUpdateCB>;
 
     class ErrorUtil {
     public:
