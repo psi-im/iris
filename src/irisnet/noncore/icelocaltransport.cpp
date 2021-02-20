@@ -294,6 +294,7 @@ public:
         connect(stunBinding, &StunBinding::error, this, [&](XMPP::StunBinding::Error) {
             delete stunBinding;
             stunBinding = nullptr;
+            emit q->error(IceLocalTransport::ErrorStun);
         });
         stunBinding->start(stunBindAddr, stunBindPort);
     }
@@ -645,6 +646,7 @@ private slots:
         if (wasActivated)
             return;
 
+        emit q->error(IceLocalTransport::ErrorTurn);
         // don't report any error
         // if(stunType == IceLocalTransport::Relay || (stunType == IceLocalTransport::Auto && !stunBinding))
         //    emit q->addressesChanged();
@@ -715,6 +717,10 @@ QHostAddress IceLocalTransport::reflexiveAddressSource() const { return d->refAd
 QHostAddress IceLocalTransport::relayedAddress() const { return d->relAddr; }
 
 int IceLocalTransport::relayedPort() const { return d->relPort; }
+
+bool IceLocalTransport::isStunAlive() const { return d->stunBinding != nullptr; }
+
+bool IceLocalTransport::isTurnAlive() const { return d->turn != nullptr; }
 
 void IceLocalTransport::addChannelPeer(const QHostAddress &addr, int port)
 {

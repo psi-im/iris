@@ -41,7 +41,7 @@ class IceLocalTransport : public IceTransport, public QEnableSharedFromThis<IceL
     Q_OBJECT
 
 public:
-    enum Error { ErrorBind = ErrorCustom };
+    enum Error { ErrorBind = ErrorCustom, ErrorStun, ErrorTurn };
 
     IceLocalTransport(QObject *parent = nullptr);
     ~IceLocalTransport();
@@ -74,6 +74,9 @@ public:
 
     QHostAddress relayedAddress() const;
     int          relayedPort() const;
+
+    bool isStunAlive() const;
+    bool isTurnAlive() const;
 
     // reimplemented
     void       stop() override;

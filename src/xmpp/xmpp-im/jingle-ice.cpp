@@ -687,7 +687,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
             //            iceA_status.channelsReady[0] = false;
             //            iceA_status.channelsReady[1] = false;
 
-            q->connect(ice, &XMPP::Ice176::started, [this]() {
+            q->connect(ice, &XMPP::Ice176::started, q, [this]() {
                 QSet<int> lowOverhead;
                 for (auto &c : channels) {
                     if (!(c->hints() & Connection::AvoidRelays)) {
@@ -699,18 +699,18 @@ namespace XMPP { namespace Jingle { namespace ICE {
                 }
                 iceStarted = true;
             });
-            q->connect(ice, &XMPP::Ice176::error, [this](XMPP::Ice176::Error err) {
+            q->connect(ice, &XMPP::Ice176::error, q, [this](XMPP::Ice176::Error err) {
                 q->_lastReason = Reason(Reason::Condition::FailedTransport, QString("ICE failed: %1").arg(err));
                 q->setState(State::Finished);
                 emit q->failed();
             });
-            q->connect(ice, &XMPP::Ice176::localCandidatesReady,
+            q->connect(ice, &XMPP::Ice176::localCandidatesReady, q,
                        [this](const QList<XMPP::Ice176::Candidate> &candidates) {
                            pendingActions |= NewCandidate;
                            pendingLocalCandidates += candidates;
                            emit q->updated();
                        });
-            q->connect(ice, &XMPP::Ice176::localGatheringComplete, [this]() {
+            q->connect(ice, &XMPP::Ice176::localGatheringComplete, q, [this]() {
                 pendingActions |= GatheringComplete;
                 emit q->updated();
             });
