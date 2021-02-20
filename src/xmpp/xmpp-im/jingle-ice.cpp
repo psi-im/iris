@@ -38,6 +38,8 @@
 #include <QNetworkInterface>
 #include <QTimer>
 
+template <class T> constexpr std::add_const_t<T> &as_const(T &t) noexcept { return t; }
+
 namespace XMPP { namespace Jingle { namespace ICE {
     const QString NS(QStringLiteral("urn:xmpp:jingle:transports:ice:0"));
     const QString NS_DTLS(QStringLiteral("urn:xmpp:jingle:apps:dtls:0"));
@@ -448,16 +450,15 @@ namespace XMPP { namespace Jingle { namespace ICE {
     public:
         enum PendingActions { NewCandidate = 1, RemoteCandidate = 2, GatheringComplete = 4 };
 
-        Transport *                    q                               = nullptr;
-        bool                           offerSent                       = false;
-        bool                           waitingAck                      = true;
-        bool                           aborted                         = false;
-        bool                           initialOfferReady               = false;
-        bool                           remoteReportedGatheringComplete = false;
-        bool                           iceStarted                      = false;
-        quint16                        pendingActions                  = 0;
-        int                            proxiesInDiscoCount             = 0;
-        int                            components                      = 0;
+        Transport *                    q                   = nullptr;
+        bool                           offerSent           = false;
+        bool                           waitingAck          = true;
+        bool                           aborted             = false;
+        bool                           initialOfferReady   = false;
+        bool                           iceStarted          = false;
+        quint16                        pendingActions      = 0;
+        int                            proxiesInDiscoCount = 0;
+        int                            components          = 0;
         QList<XMPP::Ice176::Candidate> pendingLocalCandidates; // cid to candidate mapping
         QList<XMPP::Ice176::Candidate> remoteCandidates;
         QString                        remoteUfrag;
@@ -495,6 +496,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
         {
             if (!ice || q->_state < State::ApprovedToSend || q->_state == State::Finished)
                 return;
+            qDebug("flushing remote candidates");
             ice->setPeerUfrag(remoteUfrag);
             ice->setPeerPassword(remotePassword);
             if (remoteCandidates.isEmpty())
@@ -567,32 +569,14 @@ namespace XMPP { namespace Jingle { namespace ICE {
             if (!el.isNull()) {
                 bool     ok, ok2;
                 auto     component = el.attribute(QLatin1String("component")).toUInt(&ok);
-                auto     ip        = QHostAddress(el.attribute(QLatin1String("ip")));
+                auto     ipStr     = el.attribute(QLatin1String("ip"));
+                auto     ip        = QHostAddress(ipStr);
                 uint16_t port      = el.attribute(QLatin1String("port")).toUShort(&ok2);
 
-                if (!(ok && ok2 && !ip.isNull()))
+                if (!(ok && ok2 && !ip.isNull() && component <= 256))
                     throw std::runtime_error("failed to parse remote-candidate");
-                /*
-                                auto cUsed = pendingLocalCandidates.value(el.attribute(QStringLiteral("cid")));
-                                if (!cUsed) {
-                                    throw std::runtime_error("failed to find incoming candidate-used candidate");
-                                }
-                                if (cUsed.state() == Candidate::Pending) {
-                                    cUsed.setState(Candidate::Accepted);
-                                    localUsedCandidate = cUsed;
-                                    updateMinimalPriorityOnConnected();
-                                    QTimer::singleShot(0, q, [this]() { checkAndFinishNegotiation(); });
-                                } else {
-                                    // we already rejected the candidate and either remote side already knows about it
-                   or will soon
-                                    // it's possible for example if we were able to connect to higher priority
-                   candidate, so
-                                    // we have o pretend like remote couldn't select anything better but finished
-                   already, in other
-                                    // words like if it sent candidate-error.
-                                    localUsedCandidate           = Candidate();
-                                }
-                                */
+
+                qDebug("recv remote-candidate notification: c%u %s:%hu", component, qPrintable(ipStr), port);
                 return true;
             }
             return false;
@@ -601,17 +585,9 @@ namespace XMPP { namespace Jingle { namespace ICE {
         bool handleIncomingGatheringComplete(const QDomElement &transportEl)
         {
             auto el = transportEl.firstChildElement(QStringLiteral("gathering-complete"));
-            if (!el.isNull()) {
-                remoteReportedGatheringComplete = true;
-                /*
-                for (auto &c : pendingLocalCandidates) {
-                    if (c.state() == Candidate::Pending) {
-                        c.setState(Candidate::Discarded);
-                    }
-                }
-                */
-                qDebug("recv gathering-complete: all local pending candidates were discarded");
-                // QTimer::singleShot(0, q, [this]() { checkAndFinishNegotiation(); });
+            if (!el.isNull() && ice) {
+                qDebug("recv gathering-complete");
+                ice->setRemoteGatheringComplete();
                 return true;
             }
             return false;
@@ -634,8 +610,12 @@ namespace XMPP { namespace Jingle { namespace ICE {
             QList<QHostAddress> listenAddrs;
             auto const          interfaces = QNetworkInterface::allInterfaces();
             for (const QNetworkInterface &ni : interfaces) {
+                if ((ni.flags() & (QNetworkInterface::IsRunning | QNetworkInterface::IsUp))
+                        != (QNetworkInterface::IsRunning | QNetworkInterface::IsUp)
+                    || ni.flags() & QNetworkInterface::IsLoopBack)
+                    continue;
                 QList<QNetworkAddressEntry> entries = ni.addressEntries();
-                for (const QNetworkAddressEntry &na : entries) {
+                for (const QNetworkAddressEntry &na : as_const(entries)) {
                     QHostAddress h = na.ip();
 
                     // skip localhost
@@ -661,7 +641,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
             QList<XMPP::Ice176::LocalAddress> localAddrs;
 
             QStringList strList;
-            for (const QHostAddress &h : listenAddrs) {
+            for (const QHostAddress &h : as_const(listenAddrs)) {
                 XMPP::Ice176::LocalAddress addr;
                 addr.addr = h;
                 localAddrs += addr;
@@ -708,6 +688,10 @@ namespace XMPP { namespace Jingle { namespace ICE {
                        [this](const QList<XMPP::Ice176::Candidate> &candidates) {
                            pendingActions |= NewCandidate;
                            pendingLocalCandidates += candidates;
+                           qDebug("discovered %d local candidates", candidates.size());
+                           for (auto const &c : candidates) {
+                               qDebug(" - %s:%d", qPrintable(c.ip.toString()), c.port);
+                           }
                            emit q->updated();
                        });
             q->connect(ice, &XMPP::Ice176::localGatheringComplete, q, [this]() {
@@ -717,6 +701,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
             QObject::connect(
                 ice, &XMPP::Ice176::readyToSendMedia, q,
                 [this]() {
+                    qDebug("Ready to send media!");
                     for (auto &c : channels) {
                         c->onConnected(ice);
                     }
@@ -756,7 +741,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
                 eaddr.base = addr;
                 eaddr.addr = extAddr;
                 extAddrs += eaddr;*/
-                for (const XMPP::Ice176::LocalAddress &la : localAddrs) {
+                for (const XMPP::Ice176::LocalAddress &la : as_const(localAddrs)) {
                     XMPP::Ice176::ExternalAddress ea;
                     ea.base = la;
                     ea.addr = extAddr;
@@ -883,7 +868,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
                     .toXml(doc));
         }
 
-        for (auto const &cand : d->pendingLocalCandidates) {
+        for (auto const &cand : as_const(d->pendingLocalCandidates)) {
             tel.appendChild(candidateToElement(doc, cand));
         }
         d->pendingLocalCandidates.clear();

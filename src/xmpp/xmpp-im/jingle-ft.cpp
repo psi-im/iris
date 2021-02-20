@@ -722,6 +722,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
 
     OutgoingUpdate Application::takeOutgoingUpdate()
     {
+        qDebug("jingle-ft: take outgoing update");
         if (_update.action == Action::NoAction) {
             return OutgoingUpdate();
         }

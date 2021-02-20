@@ -109,7 +109,7 @@ namespace XMPP { namespace Jingle {
             }
 
             if (_transport->hasUpdates()) {
-                if (_transport->state() == State::Connecting)
+                if (_transport->state() >= State::ApprovedToSend && _transport->state() < State::Finished)
                     _update = { Action::TransportInfo, Reason() };
             } else if (_transport->state() == State::Finished) {
                 _update = { _transportSelector->hasMoreTransports() ? Action::TransportReplace : Action::ContentRemove,
