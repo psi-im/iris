@@ -822,6 +822,8 @@ namespace XMPP { namespace Jingle { namespace ICE {
     {
         qDebug("Starting connecting");
         setState(State::Connecting);
+        d->flushRemoteCandidates();
+        d->ice->startChecks();
     }
 
     bool Transport::update(const QDomElement &transportEl)
