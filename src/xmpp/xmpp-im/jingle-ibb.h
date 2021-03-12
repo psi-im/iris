@@ -38,17 +38,18 @@ namespace Jingle { namespace IBB {
         void                        start() override;
         bool                        update(const QDomElement &transportEl) override;
         bool                        hasUpdates() const override;
-        OutgoingTransportInfoUpdate takeOutgoingUpdate() override;
+        OutgoingTransportInfoUpdate takeOutgoingUpdate(bool ensureTransportElement = false) override;
         bool                        isValid() const override;
         TransportFeatures           features() const override;
-        int                         maxSupportedChannels() const override;
+        int                         maxSupportedChannelsPerComponent(TransportFeatures features) const override;
 
-        Connection::Ptr addChannel() const override;
+        Connection::Ptr        addChannel(TransportFeatures features, int component = 0) const override;
+        QList<Connection::Ptr> channels() const override;
 
     private:
         friend class Manager;
 
-        class Private;
+        struct Private;
         QScopedPointer<Private> d;
     };
 
@@ -83,13 +84,14 @@ namespace Jingle { namespace IBB {
                                                              Origin                          creator) override;
         TransportManagerPad *                   pad(Session *session) override;
 
-        void closeAll() override;
+        void        closeAll() override;
+        QStringList discoFeatures() const override;
 
         Connection::Ptr makeConnection(const Jid &peer, const QString &sid, size_t blockSize);
         bool            handleIncoming(IBBConnection *c);
 
     private:
-        class Private;
+        struct Private;
         QScopedPointer<Private> d;
     };
 } // namespace IBB

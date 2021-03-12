@@ -19,3 +19,4 @@ object_script.*
 /plugins
 build-*
 *.pro.user*
+3rdparty/qca

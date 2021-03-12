@@ -47,6 +47,8 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
     static const QString SIZE_TAG       = QStringLiteral("size");
     static const QString RANGE_TAG      = QStringLiteral("range");
     static const QString THUMBNAIL_TAG  = QStringLiteral("thumbnail");
+    static const QString CHECKSUM_TAG   = QStringLiteral("checksum");
+    static const QString RECEIVED_TAG   = QStringLiteral("received");
 
     QDomElement Range::toXml(QDomDocument *doc) const
     {
@@ -399,6 +401,8 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
 
     void Manager::closeAll() { }
 
+    QStringList Manager::discoFeatures() const { return { NS }; }
+
     Client *Manager::client()
     {
         if (jingleManager) {
@@ -409,7 +413,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
 
     QStringList Manager::availableTransports() const
     {
-        return jingleManager->availableTransports(TransportFeature::Reliable);
+        return jingleManager->availableTransports(TransportFeature::Reliable | TransportFeature::DataOriented);
     }
 
     //----------------------------------------------------------------------------
@@ -451,9 +455,10 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
                 if (connection) {
                     connection->close();
                 }
-                q->disconnect(q->transport().data(), &Transport::updated, q, nullptr);
+                if (q->transport())
+                    q->disconnect(q->transport().data(), &Transport::updated, q, nullptr);
             }
-            if (s >= State::Finishing) {
+            if (s >= State::Finishing && q->transport()) {
                 q->disconnect(q->transport().data(), &Transport::failed, q, nullptr);
                 q->disconnect(q->transport().data(), &Transport::connected, q, nullptr);
                 // we can still try to send transport updates
@@ -550,7 +555,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
             new NSTransportsList(pad->session(), static_cast<Manager *>(pad->manager())->availableTransports()));
     }
 
-    Application::~Application() { }
+    Application::~Application() { qDebug("jingle-ft: destroyed"); }
 
     void Application::setState(State state) { d->setState(state); }
 
@@ -639,12 +644,26 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
 
     bool Application::isTransportReplaceEnabled() const { return _state < State::Active; }
 
-    void Application::initTransport()
+    void Application::prepareTransport()
     {
-        connect(_transport.data(), &Transport::connected, this, [this]() {
+        if (_transport->creator() == _pad->session()->role()) {
+            d->connection = _transport->addChannel(TransportFeature::Reliable | TransportFeature::DataOriented);
+        } else {
+            auto const &channels = _transport->channels();
+            if (channels.size()) {
+                d->connection = channels[0];
+            }
+        }
+        if (!d->connection) {
+            _transport->stop();
+            qWarning("No channel on %s transport", qPrintable(_transport->pad()->ns()));
+            selectNextTransport();
+            return;
+        }
+        connect(d->connection.data(), &Connection::connected, this, [this]() {
             d->lastReason = Reason();
             d->lastError.reset();
-            d->connection = _transport->addChannel();
+
             if (!d->streamingMode) {
                 connect(d->connection.data(), &Connection::readyRead, this, [this]() {
                     if (!d->device) {
@@ -677,6 +696,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
                 emit connectionReady();
             }
         });
+        _transport->prepare();
     }
 
     void Application::setStreamingMode(bool mode)
@@ -748,7 +768,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
         }
         if (_transport) {
             d->setState(State::ApprovedToSend);
-            _transport->prepare();
+            prepareTransport();
         }
     }
 
@@ -767,8 +787,10 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
             return;
 
         _terminationReason = Reason(cond, comment);
-        _transport->disconnect(this);
-        _transport.reset();
+        if (_transport) {
+            _transport->disconnect(this);
+            _transport.reset();
+        }
 
         if (_creator == _pad->session()->role() && _state <= State::ApprovedToSend) {
             // local content, not yet sent to remote
@@ -810,6 +832,18 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
 
     Connection::Ptr Application::connection() const { return d->connection.staticCast<XMPP::Jingle::Connection>(); }
 
+    void Application::incomingChecksum(const QList<Hash> &hashes)
+    {
+        // TODO
+        qDebug("got checksum: %s", qPrintable(hashes.value(0).toString()));
+    }
+
+    void Application::incomingReceived()
+    {
+        // TODO
+        qDebug("got received");
+    }
+
     Pad::Pad(Manager *manager, Session *session) : _manager(manager), _session(session) { }
 
     QDomElement Pad::takeOutgoingSessionInfoUpdate()
@@ -835,6 +869,26 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
 #endif
         } while (_session->content(name, _session->role()));
         return name;
+    }
+
+    bool Pad::incomingSessionInfo(const QDomElement &el)
+    {
+        if (el.tagName() == CHECKSUM_TAG) {
+            Checksum checksum(el);
+            auto     app = session()->content(checksum.name, checksum.creator);
+            if (app) {
+                static_cast<Application *>(app)->incomingChecksum(checksum.file.hashes());
+            }
+            return true;
+        } else if (el.tagName() == RECEIVED_TAG) {
+            Received received(el);
+            auto     app = session()->content(received.name, received.creator);
+            if (app) {
+                static_cast<Application *>(app)->incomingReceived();
+            }
+            return true;
+        }
+        return false;
     }
 
     void Pad::addOutgoingOffer(const File &file)

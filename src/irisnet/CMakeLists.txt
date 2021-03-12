@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.1.0)
+cmake_minimum_required(VERSION 3.2.0)
 get_filename_component(ABS_PARENT_DIR "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
 include_directories(
     ${CMAKE_CURRENT_BINARY_DIR}
@@ -7,6 +7,7 @@ include_directories(
     noncore/cutestuff
     noncore/legacy
     ${QCA_INCLUDES}
+    ${sctpLab_INCLUDES}
 )
 
 set( CMAKE_MODULE_PATH
@@ -37,6 +38,7 @@ set(SOURCES
     corelib/netinterface.cpp
     corelib/netnames.cpp
     corelib/objectsession.cpp
+    corelib/netinterface_qtnet.cpp
 
     noncore/iceagent.cpp
     noncore/ice176.cpp
@@ -50,8 +52,13 @@ set(SOURCES
     noncore/turnclient.cpp
     noncore/udpportreserver.cpp
     noncore/tcpportreserver.cpp
+    noncore/dtls.cpp
 
     noncore/cutestuff/bsocket.cpp
+
+    noncore/sctp/SctpAssociation.cpp
+    noncore/sctp/DepUsrSCTP.cpp
+    noncore/sctp/Logger.hpp
 )
 
 if(UNIX)
@@ -62,9 +69,6 @@ if(NOT USE_QJDNS)
     list(APPEND SOURCES corelib/netinterface_qtname.cpp)
 else()
     list(APPEND SOURCES corelib/netnames_jdns.cpp)
-endif()
-if (Qt5Network_VERSION VERSION_LESS 5.15.0)
-    list(APPEND SOURCES corelib/netinterface_qtnet.cpp)
 endif()
 
 set(HEADERS
@@ -96,6 +100,7 @@ set(HEADERS
     noncore/turnclient.h
     noncore/udpportreserver.h
     noncore/tcpportreserver.h
+    noncore/dtls.h
 
     noncore/cutestuff/bsocket.h
     noncore/cutestuff/bytestream.h
@@ -105,21 +110,35 @@ set(HEADERS
 
     noncore/legacy/ndns.h
     noncore/legacy/srvresolver.h
+
+    noncore/sctp/SctpAssociation.hpp
+    noncore/sctp/DepUsrSCTP.hpp
+    noncore/sctp/RTC/DataConsumer.hpp
+    noncore/sctp/RTC/DataProducer.hpp
+    noncore/sctp/RTC/SctpParameters.hpp
 )
 
 add_library(irisnet STATIC ${SOURCES} ${HEADERS} )
 
 if(WIN32 AND (SEPARATE_QJDNS OR (NOT USE_QJDNS)))
-    set(EXTRA_LDFLAGS ws2_32)
+    set(EXTRA_LDFLAGS ws2_32 iphlpapi)
 endif()
 
 if(NOT USE_QJDNS)
     set(QJDns_LIBRARY "")
 endif()
 
-if (Qt5Network_VERSION VERSION_LESS 5.15.0)
-    target_compile_definitions(irisnet PRIVATE HAVE_QTNET)
+target_compile_definitions(irisnet PRIVATE HAVE_QTNET)
+target_link_libraries(irisnet Qt5::Core Qt5::Network Qt5::Xml)
+if (BUNDLED_QCA)
+    add_dependencies(irisnet QcaProject)
 endif()
-
+target_link_libraries(irisnet ${qca_LIB})
+target_link_libraries(irisnet ${sctpLab_LIBRARY})
 target_link_libraries(irisnet ${QJDns_LIBRARY} ${EXTRA_LDFLAGS})
-target_link_libraries(irisnet Qt5::Core Qt5::Network Qt5::Xml ${qca_LIB})
+
+# usrsctp requires pthread
+if(NOT WIN32)
+    find_package(Threads)
+    target_link_libraries(irisnet Threads::Threads)
+endif()

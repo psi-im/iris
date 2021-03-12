@@ -137,13 +137,16 @@ namespace Jingle { namespace S5B {
         void                        start() override;
         bool                        update(const QDomElement &transportEl) override;
         bool                        hasUpdates() const override;
-        OutgoingTransportInfoUpdate takeOutgoingUpdate() override;
+        OutgoingTransportInfoUpdate takeOutgoingUpdate(bool ensureTransportElement) override;
         bool                        isValid() const override;
         TransportFeatures           features() const override;
 
-        QString         sid() const;
-        QString         directAddr() const;
-        Connection::Ptr addChannel() const override;
+        QString sid() const;
+        QString directAddr() const;
+
+        int                    maxSupportedChannelsPerComponent(TransportFeatures features) const override;
+        Connection::Ptr        addChannel(TransportFeatures features, int component = 0) const override;
+        QList<Connection::Ptr> channels() const override;
 
     private:
         friend class Manager;
@@ -186,7 +189,8 @@ namespace Jingle { namespace S5B {
                                                              Origin                          creator) override;
         TransportManagerPad *                   pad(Session *session) override;
 
-        void closeAll() override;
+        void        closeAll() override;
+        QStringList discoFeatures() const override;
 
         QString generateSid(const Jid &remote);
         void    registerSid(const Jid &remote, const QString &sid);

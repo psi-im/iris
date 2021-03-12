@@ -135,12 +135,14 @@ namespace Jingle { namespace ICE {
         void                        start() override;
         bool                        update(const QDomElement &transportEl) override;
         bool                        hasUpdates() const override;
-        OutgoingTransportInfoUpdate takeOutgoingUpdate() override;
+        OutgoingTransportInfoUpdate takeOutgoingUpdate(bool ensureTransportElement) override;
         bool                        isValid() const override;
         TransportFeatures           features() const override;
-        int                         maxSupportedChannels() const override;
+        int                         maxSupportedChannelsPerComponent(TransportFeatures features) const override;
 
-        Connection::Ptr addChannel() const override;
+        int                    addComponent() override;
+        Connection::Ptr        addChannel(TransportFeatures features, int component = 0) const override;
+        QList<Connection::Ptr> channels() const override;
 
     private:
         friend class Manager;
@@ -159,6 +161,7 @@ namespace Jingle { namespace ICE {
         QString           ns() const override;
         Session *         session() const override;
         TransportManager *manager() const override;
+        void              onLocalAccepted() override;
 
         inline TcpPortScope *discoScope() const { return _discoScope; }
 
@@ -166,6 +169,7 @@ namespace Jingle { namespace ICE {
         Manager *     _manager;
         Session *     _session;
         TcpPortScope *_discoScope;
+        bool          _allowGrouping = false;
     };
 
     class Manager : public TransportManager {
@@ -181,6 +185,8 @@ namespace Jingle { namespace ICE {
         TransportManagerPad *                   pad(Session *session) override;
 
         void closeAll() override;
+
+        QStringList discoFeatures() const override;
 
         /**
          * @brief userProxy returns custom (set by user) SOCKS proxy JID

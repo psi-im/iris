@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.1.0)
+cmake_minimum_required(VERSION 3.2.0)
 if(POLICY CMP0074)
     cmake_policy(SET CMP0074 NEW)
     message(STATUS "CMP0074 policy set to NEW")
@@ -16,7 +16,6 @@ include_directories(
     ${ABS_PARENT_DIR}/irisnet/corelib
     xmpp-core
     xmpp-im
-    ${IDN_INCLUDE_DIRS}
     ${ZLIB_INCLUDE_DIRS}
     ${QCA_INCLUDES}
     )
@@ -187,9 +186,11 @@ set_property(TARGET iris PROPERTY C_STANDARD 11)
 if(B2_FOUND)
     message(STATUS "Building with system blake2 library")
     target_compile_definitions(iris PUBLIC IRIS_SYSTEM_BLAKE2)
-    target_link_libraries(iris ${B2_LIBRARY})
+    target_link_libraries(iris PRIVATE ${B2_LIBRARY})
 else()
-    message(STATUS "Building with slow blake2 reference implementation")
+    if (NOT BUNDLED_QCA)
+        message(STATUS "No system blake2 and bundled QCA is disabled. Expect slow hashing.")
+    endif()
     target_sources(iris PRIVATE
             blake2/blake2b-ref.c
             blake2/blake2s-ref.c
@@ -203,7 +204,15 @@ if( SEPARATE_QJDNS AND WIN32)
     set(EXTRA_LDFLAGS ws2_32)
 endif()
 
-target_link_libraries(iris ${IDN_LIBRARY} ${ZLIB_LIBRARY} ${EXTRA_LDFLAGS})
-target_link_libraries(iris irisnet Qt5::Core Qt5::Gui Qt5::Network Qt5::Xml ${qca_LIB})
+target_link_libraries(iris PRIVATE ${EXTRA_LDFLAGS} stringprep irisnet)
+target_link_libraries(iris PUBLIC ${ZLIB_LIBRARY} Qt5::Core Qt5::Gui Qt5::Network Qt5::Xml)
+target_link_libraries(iris PUBLIC ${qca_LIB})
+if (BUNDLED_QCA)
+    add_dependencies(iris QcaProject)
+    include_directories(${Qca_INCLUDE_DIR})
+    target_include_directories(iris INTERFACE ${Qca_INCLUDE_DIR})
+    target_link_libraries(iris PUBLIC OpenSSL::SSL)
+endif()
+
 target_compile_definitions(iris INTERFACE IRISNET_STATIC)
 target_include_directories(iris INTERFACE ${ABS_ROOT_DIR}/include ${ABS_ROOT_DIR}/include/iris ${ABS_PARENT_DIR})

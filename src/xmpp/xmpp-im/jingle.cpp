@@ -514,6 +514,15 @@ namespace XMPP { namespace Jingle {
     //----------------------------------------------------------------------------
     QDomElement SessionManagerPad::takeOutgoingSessionInfoUpdate() { return QDomElement(); }
 
+    void SessionManagerPad::populateOutgoing(Action action, QDomElement &el)
+    {
+        Q_UNUSED(action);
+        Q_UNUSED(el);
+    }
+
+    void SessionManagerPad::onLocalAccepted() { }
+    void SessionManagerPad::onSend() { }
+
     QDomDocument *SessionManagerPad::doc() const { return session()->manager()->client()->doc(); }
 
     //----------------------------------------------------------------------------
@@ -654,11 +663,24 @@ namespace XMPP { namespace Jingle {
 
     QStringList Manager::availableTransports(const TransportFeatures &features) const
     {
-        QStringList ret;
+        QMap<int, QString> ret;
         for (auto it = d->transportManagers.cbegin(); it != d->transportManagers.cend(); ++it) {
             if (((*it)->features() & features) == features) {
-                ret.append(it.key());
+                ret.insert((*it)->features(), it.key());
             }
+        }
+        // sorting by features is totally unreliable, so we have TransportSelector to do better job
+        return ret.values();
+    }
+
+    QStringList Manager::discoFeatures() const
+    {
+        QStringList ret;
+        for (auto const &mgr : d->applicationManagers) {
+            ret += mgr->discoFeatures();
+        }
+        for (auto const &mgr : d->transportManagers) {
+            ret += mgr->discoFeatures();
         }
         return ret;
     }

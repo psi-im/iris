@@ -29,6 +29,8 @@
 #include <QRandomGenerator>
 #endif
 
+template <class T> constexpr std::add_const_t<T> &as_const(T &t) noexcept { return t; }
+
 namespace XMPP { namespace Jingle { namespace IBB {
     const QString NS(QStringLiteral("urn:xmpp:jingle:transports:ibb:1"));
 
@@ -97,9 +99,6 @@ namespace XMPP { namespace Jingle { namespace IBB {
             state = State::Finished;
         }
 
-    signals:
-        void connected();
-
     protected:
         qint64 writeData(const char *data, qint64 maxSize) { return connection->write(data, maxSize); }
 
@@ -135,7 +134,6 @@ namespace XMPP { namespace Jingle { namespace IBB {
     struct Transport::Private {
         Transport *                               q = nullptr;
         QMap<QString, QSharedPointer<Connection>> connections;
-        QList<QSharedPointer<Connection>>         readyConnections;
         size_t                                    defaultBlockSize = 4096;
         bool                                      started          = false;
 
@@ -172,14 +170,6 @@ namespace XMPP { namespace Jingle { namespace IBB {
             QObject::connect(ibbConn.data(), &Connection::connectionClosed, q, [this]() {
                 Connection *c = static_cast<Connection *>(q->sender());
                 connections.remove(c->sid);
-                QMutableListIterator<QSharedPointer<Connection>> it(readyConnections);
-                while (it.hasNext()) {
-                    auto &p = it.next();
-                    if (p.data() == c) {
-                        it.remove();
-                        break;
-                    }
-                }
             });
 
             return ibbConn;
@@ -202,6 +192,7 @@ namespace XMPP { namespace Jingle { namespace IBB {
     Transport::~Transport()
     {
         // we have to mark all of them as finished just in case they are captured somewhere else
+        qDebug("jingle-ibb: destroy");
         if (d) {
             for (auto &c : d->connections) {
                 c->close();
@@ -212,13 +203,8 @@ namespace XMPP { namespace Jingle { namespace IBB {
     void Transport::prepare()
     {
         setState(State::ApprovedToSend);
-        if (_creator == _pad->session()->role()) { // outgoing
-            auto c   = d->newStream(QString(), d->defaultBlockSize, _pad->session()->role());
+        for (auto &c : d->connections) {
             c->state = State::ApprovedToSend;
-        } else {
-            for (auto &c : d->connections) {
-                c->state = State::ApprovedToSend;
-            }
         }
         emit updated();
     }
@@ -268,6 +254,10 @@ namespace XMPP { namespace Jingle { namespace IBB {
             }
         } else {
             if ((*it)->creator != _pad->session()->role() || (*it)->state != State::Pending) {
+                if ((*it)->state >= State::Accepted && (*it)->state <= State::Active) {
+                    qWarning("Ignoring IBB transport in state: %d", int((*it)->state));
+                    return true;
+                }
                 qWarning("Unexpected IBB answer");
                 return false; // out of order or something like this
             }
@@ -298,26 +288,36 @@ namespace XMPP { namespace Jingle { namespace IBB {
         return false;
     }
 
-    OutgoingTransportInfoUpdate Transport::takeOutgoingUpdate()
+    OutgoingTransportInfoUpdate Transport::takeOutgoingUpdate(bool ensureTransportElement)
     {
         OutgoingTransportInfoUpdate upd;
         if (!isValid()) {
             return upd;
         }
 
-        QSharedPointer<Connection> connection;
-        for (auto &c : d->connections) {
-            if (c->state == State::ApprovedToSend) {
-                connection = c;
-                break;
+        auto doc = _pad->session()->manager()->client()->doc();
+        auto it  = std::find_if(d->connections.begin(), d->connections.end(),
+                               [](auto &c) { return c->state == State::ApprovedToSend; });
+
+        if (it == d->connections.end()) {
+            if (ensureTransportElement) {
+                // a really dirty workaround here which ignore the fact IBB may have more then one transport for
+                // a single content
+                it = std::find_if(d->connections.begin(), d->connections.end(),
+                                  [](auto &c) { return c->state > State::ApprovedToSend; });
+                if (it == d->connections.end()) {
+                    return upd;
+                }
+                QDomElement tel = doc->createElementNS(NS, "transport");
+                tel.setAttribute(QStringLiteral("sid"), it.value()->sid);
+                tel.setAttribute(QString::fromLatin1("block-size"), qulonglong(it.value()->_blockSize));
+                std::get<0>(upd) = tel;
             }
+            return upd;
         }
 
-        if (!connection)
-            return upd;
-
+        auto connection   = it.value();
         connection->state = State::Unacked;
-        auto doc          = _pad->session()->manager()->client()->doc();
 
         QDomElement tel = doc->createElementNS(NS, "transport");
         tel.setAttribute(QStringLiteral("sid"), connection->sid);
@@ -351,15 +351,27 @@ namespace XMPP { namespace Jingle { namespace IBB {
 
     TransportFeatures Transport::features() const
     {
-        return TransportFeatures(TransportFeature::AlwaysConnect) | TransportFeature::Reliable | TransportFeature::Slow;
+        return TransportFeature::AlwaysConnect | TransportFeature::Reliable | TransportFeature::StreamOriented
+            | TransportFeature::DataOriented;
     }
 
-    int Transport::maxSupportedChannels() const { return -1; }
+    int Transport::maxSupportedChannelsPerComponent(TransportFeatures) const { return -1; }
 
-    Connection::Ptr Transport::addChannel() const
+    Connection::Ptr Transport::addChannel(TransportFeatures features, int) const
     {
-        return d->readyConnections.isEmpty() ? Connection::Ptr()
-                                             : d->readyConnections.takeFirst().staticCast<XMPP::Jingle::Connection>();
+        if (features & TransportFeature::LiveOriented)
+            return {};
+        return d->newStream(QString(), d->defaultBlockSize, _pad->session()->role());
+    }
+
+    QList<XMPP::Jingle::Connection::Ptr> Transport::channels() const
+    {
+        QList<Connection::Ptr> ret;
+        ret.reserve(d->connections.size());
+        for (auto const &v : as_const(d->connections)) {
+            ret.append(v);
+        }
+        return ret;
     }
 
     Pad::Pad(Manager *manager, Session *session)
@@ -394,7 +406,7 @@ namespace XMPP { namespace Jingle { namespace IBB {
 
     TransportFeatures Manager::features() const
     {
-        return TransportFeatures(TransportFeature::AlwaysConnect) | TransportFeature::Reliable | TransportFeature::Slow;
+        return TransportFeature::AlwaysConnect | TransportFeature::Reliable | TransportFeature::DataOriented;
     }
 
     void Manager::setJingleManager(XMPP::Jingle::Manager *jm) { d->jingleManager = jm; }
@@ -407,6 +419,8 @@ namespace XMPP { namespace Jingle { namespace IBB {
     TransportManagerPad *Manager::pad(Session *session) { return new Pad(this, session); }
 
     void Manager::closeAll() { emit abortAllRequested(); }
+
+    QStringList Manager::discoFeatures() const { return { NS }; }
 
     XMPP::Jingle::Connection::Ptr Manager::makeConnection(const Jid &peer, const QString &sid, size_t blockSize)
     {

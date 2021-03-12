@@ -22,6 +22,8 @@
 
 #include "jingle-transport.h"
 
+class QTimer;
+
 namespace XMPP { namespace Jingle {
 
     class ApplicationManager;
@@ -40,6 +42,8 @@ namespace XMPP { namespace Jingle {
          * As result it will be sent as <content name="file1" ... >
          */
         virtual QString generateContentName(Origin senders) = 0;
+
+        virtual bool incomingSessionInfo(const QDomElement &el);
     };
 
     // Represents a session for single application. for example a single file in a file transfer session.
@@ -59,6 +63,12 @@ namespace XMPP { namespace Jingle {
             IncompatibleParameters // this one is for <reason>
         };
 
+        enum ApplicationFlag {
+            InitialApplication = 0x1, // the app came with session-initiate
+            UserFlag           = 0x100
+        };
+        Q_DECLARE_FLAGS(ApplicationFlags, ApplicationFlag)
+
         virtual void setState(State state) = 0; // likely just remember the state and not generate any signals
         virtual XMPP::Stanza::Error lastError() const  = 0;
         virtual Reason              lastReason() const = 0;
@@ -70,6 +80,16 @@ namespace XMPP { namespace Jingle {
         inline QString                    contentName() const { return _contentName; }
         inline QSharedPointer<Transport>  transport() const { return _transport; }
         inline TransportSelector *        transportSelector() const { return _transportSelector.data(); }
+        bool                              isRemote() const;
+        inline bool                       isLocal() const { return !isRemote(); }
+        inline ApplicationFlags           flags() const { return _flags; }
+        inline void                       markInitialApplication(bool state)
+        {
+            if (state)
+                _flags |= InitialApplication;
+            else
+                _flags &= ~InitialApplication;
+        }
 
         virtual SetDescError setRemoteOffer(const QDomElement &description)  = 0;
         virtual SetDescError setRemoteAnswer(const QDomElement &description) = 0;
@@ -122,17 +142,18 @@ namespace XMPP { namespace Jingle {
         virtual void remove(Reason::Condition cond = Reason::Success, const QString &comment = QString()) = 0;
 
         virtual void incomingRemove(const Reason &r) = 0;
+        void         incomingTransportAccept(const QDomElement &el);
 
     protected:
         /**
          * @brief wraps transport update so transport can be safely-deleted before callback is triggered
          */
-        OutgoingTransportInfoUpdate wrapOutgoingTransportUpdate();
+        OutgoingTransportInfoUpdate wrapOutgoingTransportUpdate(bool ensureTransportElement = false);
 
         /**
          * @brief initTransport in general connects any necessary for the application transport signals
          */
-        virtual void initTransport() = 0;
+        virtual void prepareTransport() = 0;
 
     signals:
         void updated(); // signal for session it has to send updates to remote. so it will follow with
@@ -140,9 +161,15 @@ namespace XMPP { namespace Jingle {
         void stateChanged(XMPP::Jingle::State);
 
     protected:
-        State _state = State::Created;
+        State            _state = State::Created;
+        ApplicationFlags _flags;
 
-        enum class PendingTransportReplace { None, NeedAck, InProgress };
+        enum class PendingTransportReplace {
+            None,      // not in the replace mode
+            Planned,   // didn't send a replacement yet. working on it.
+            NeedAck,   // we sent replacement. waiting for iq ack
+            InProgress // not yet accepted but acknowledged
+        };
 
         // has to be set when whatever way remote knows about the current transport
         // bool _remoteKnowsOfTheTransport = false;
@@ -170,6 +197,8 @@ namespace XMPP { namespace Jingle {
 
         // evaluated update to be sent
         Update _update;
+
+        QTimer *transportInitTimer = nullptr;
     };
 
     inline bool operator<(const Application::Update &a, const Application::Update &b)
@@ -191,6 +220,8 @@ namespace XMPP { namespace Jingle {
         // this method is supposed to gracefully close all related sessions as a preparation for plugin unload for
         // example
         virtual void closeAll() = 0;
+
+        virtual QStringList discoFeatures() const = 0;
     };
 
 }}

@@ -89,12 +89,12 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
     };
 
     class Checksum : public ContentBase {
+    public:
         inline Checksum() { }
         Checksum(const QDomElement &file);
         bool        isValid() const;
         QDomElement toXml(QDomDocument *doc) const;
 
-    private:
         File file;
     };
 
@@ -113,6 +113,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
         Session *           session() const override;
         ApplicationManager *manager() const override;
         QString             generateContentName(Origin senders) override;
+        bool                incomingSessionInfo(const QDomElement &el) override;
 
         void addOutgoingOffer(const File &file);
 
@@ -164,9 +165,12 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
         void            setDevice(QIODevice *dev, bool closeOnFinish = true);
         Connection::Ptr connection() const;
 
+        void incomingChecksum(const QList<Hash> &hashes);
+        void incomingReceived();
+
     protected:
         void incomingRemove(const Reason &r) override;
-        void initTransport() override;
+        void prepareTransport() override;
 
     private:
         void prepareThumbnail(File &file);
@@ -188,12 +192,15 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
     public:
         Manager(QObject *parent = nullptr);
         ~Manager();
-        void         setJingleManager(XMPP::Jingle::Manager *jm);
+        void         setJingleManager(XMPP::Jingle::Manager *jm) override;
         Application *startApplication(const ApplicationManagerPad::Ptr &pad, const QString &contentName, Origin creator,
-                                      Origin senders);
-        ApplicationManagerPad *pad(Session *session); // pad factory
-        void                   closeAll();
-        Client *               client();
+                                      Origin senders) override;
+        ApplicationManagerPad *pad(Session *session) override; // pad factory
+        void                   closeAll() override;
+
+        QStringList discoFeatures() const override;
+
+        Client *client();
 
         QStringList availableTransports() const;
 

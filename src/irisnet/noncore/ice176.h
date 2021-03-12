@@ -74,6 +74,12 @@ public:
         QString      type;
     };
 
+    struct SelectedCandidate {
+        QHostAddress ip;
+        int          port        = -1;
+        int          componentId = -1;
+    };
+
     Ice176(QObject *parent = nullptr);
     ~Ice176();
 
@@ -91,7 +97,7 @@ public:
     // one per local address.  you must set local addresses first.
     void setExternalAddresses(const QList<ExternalAddress> &addrs);
 
-    void setStunBindService(const QHostAddress &addr, int port);
+    void setStunBindService(const QHostAddress &addr, int port); // REVIEW if we need both v4 and v6?
     void setStunRelayUdpService(const QHostAddress &addr, int port, const QString &user, const QCA::SecureArray &pass);
     void setStunRelayTcpService(const QHostAddress &addr, int port, const QString &user, const QCA::SecureArray &pass);
 
@@ -148,6 +154,11 @@ public:
     static bool isIPv6LinkLocalAddress(const QHostAddress &addr);
 
     void changeThread(QThread *thread);
+
+    bool isLocalGatheringComplete() const;
+    bool isActive() const;
+
+    QList<SelectedCandidate> selectedCandidates() const;
 
 signals:
     // indicates that the ice engine is started and is ready to receive

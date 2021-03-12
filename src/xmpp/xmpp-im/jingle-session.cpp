@@ -21,12 +21,22 @@
 
 #include "jingle-application.h"
 #include "xmpp/jid/jid.h"
+#include "xmpp_caps.h"
 #include "xmpp_client.h"
 #include "xmpp_task.h"
 #include "xmpp_xmlcommon.h"
 
 #include <QPointer>
 #include <QTimer>
+
+template <class T> constexpr std::add_const_t<T> &as_const(T &t) noexcept { return t; }
+
+#if QT_VERSION < QT_VERSION_CHECK(5, 7, 0)
+// this adds const to non-const objects (like std::as_const)
+template <typename T> Q_DECL_CONSTEXPR typename std::add_const<T>::type &qAsConst(T &t) noexcept { return t; }
+// prevent rvalue arguments:
+template <typename T> void qAsConst(const T &&) = delete;
+#endif
 
 namespace XMPP { namespace Jingle {
     //----------------------------------------------------------------------------
@@ -83,8 +93,10 @@ namespace XMPP { namespace Jingle {
         QMap<QString, QWeakPointer<TransportManagerPad>>   transportPads;
         QMap<ContentKey, Application *>                    contentList;
         QSet<Application *>                                signalingContent;
-        QList<Application *>
-            initialIncomingUnacceptedContent; // not yet acccepted applications from initial incoming request
+        QHash<QString, QStringList>                        groups;
+
+        // not yet acccepted applications from initial incoming request
+        QList<Application *> initialIncomingUnacceptedContent;
 
         // session level updates. session-info for example or some rejected apps
         QHash<Action, OutgoingUpdate> outgoingUpdates;
@@ -93,7 +105,9 @@ namespace XMPP { namespace Jingle {
         Jid     origFrom;   // "from" attr of IQ.
         Jid     otherParty; // either "from" or initiator/responder. it's where to send all requests.
         Jid     localParty; // that one will be set as initiator/responder if provided
-        bool    waitingAck = false;
+        bool    waitingAck      = false;
+        bool    needNotifyGroup = false; // whenever grouping info changes
+        bool    groupingAllowed = false;
 
         void setSessionFinished()
         {
@@ -113,6 +127,45 @@ namespace XMPP { namespace Jingle {
             q->deleteLater();
         }
 
+        QList<QDomElement> genGroupingXML()
+        {
+            QList<QDomElement> ret;
+            if (!groupingAllowed)
+                return ret;
+
+            QDomDocument &doc = *manager->client()->doc();
+
+            QHashIterator<QString, QStringList> it(groups);
+            while (it.hasNext()) {
+                it.next();
+                auto g = doc.createElementNS(QLatin1String("urn:xmpp:jingle:apps:grouping:0"), QLatin1String("group"));
+                g.setAttribute(QLatin1String("semantics"), it.key());
+                for (auto const &name : it.value()) {
+                    auto c = doc.createElement(QLatin1String("content"));
+                    c.setAttribute(QLatin1String("name"), name);
+                    g.appendChild(c);
+                }
+                ret.append(g);
+            }
+            return ret;
+        }
+
+        template <void (SessionManagerPad::*func)()> void notifyPads()
+        {
+            for (auto &weakPad : transportPads) {
+                auto pad = weakPad.lock();
+                if (pad) {
+                    (pad.data()->*func)(); // just calls pad's method
+                }
+            }
+            for (auto &weakPad : applicationPads) {
+                auto pad = weakPad.lock();
+                if (pad) {
+                    (pad.data()->*func)();
+                }
+            }
+        }
+
         void sendJingle(Action action, QList<QDomElement> update,
                         std::function<void(JT *)> callback = std::function<void(JT *)>())
         {
@@ -128,6 +181,13 @@ namespace XMPP { namespace Jingle {
 
             for (const QDomElement &e : update) {
                 xml.appendChild(e);
+            }
+            if (needNotifyGroup
+                && (action == Action::SessionInitiate || action == Action::SessionAccept || action == Action::ContentAdd
+                    || action == Action::ContentAccept)) {
+                for (auto const &g : genGroupingXML())
+                    xml.appendChild(g);
+                needNotifyGroup = false;
             }
 
             auto jt = new JT(manager->client()->rootTask());
@@ -159,10 +219,11 @@ namespace XMPP { namespace Jingle {
 
         void doStep()
         {
-            if (waitingAck) { // we will return here when ack is received. Session::Unacked is possible also only with
-                              // waitingAck
+            if (waitingAck || state == State::Finished) {
+                // in waitingAck we will return here later
                 return;
             }
+
             if (terminateReason.condition() && state != State::Finished) {
                 if (state != State::Created || role == Origin::Responder) {
                     sendJingle(Action::SessionTerminate,
@@ -171,8 +232,35 @@ namespace XMPP { namespace Jingle {
                 setSessionFinished();
                 return;
             }
-            if (state == State::Created || state == State::Finished) {
-                return; // we will start doing something when initiate() is called
+
+            if (state == State::Created && role == Origin::Responder) {
+                // we could fail very early if something went wrong with transports init for example
+                Reason reason;
+                bool   all = true;
+                for (auto const &c : qAsConst(contentList)) {
+                    if (c->state() < State::Finishing) {
+                        all = false;
+                        break;
+                    }
+
+                    if (c->state() == State::Finishing) {
+                        auto upd = c->evaluateOutgoingUpdate();
+                        if (upd.action == Action::ContentRemove && upd.reason.condition()) {
+                            reason = upd.reason;
+                        }
+                    }
+                }
+                if (all) {
+                    terminateReason = reason;
+                    sendJingle(Action::SessionTerminate,
+                               QList<QDomElement>() << terminateReason.toXml(manager->client()->doc()));
+                    setSessionFinished();
+                    return;
+                }
+            }
+
+            if (state == State::Created) {
+                return; // should wait for user approval of send/accept
             }
 
             if (outgoingUpdates.size()) {
@@ -186,94 +274,8 @@ namespace XMPP { namespace Jingle {
                 return;
             }
 
-            typedef std::tuple<QPointer<Application>, OutgoingUpdateCB> AckHndl; // will be used from callback on iq ack
-            if (state == State::ApprovedToSend) { // we are going to send session-initiate/accept (already accepted
-                                                  // by the user but not sent yet)
-                /*
-                 * For session-initiate everything is prety much straightforward, just any content with
-                 * Action::ContentAdd update type has to be added. But with session-accept things are more complicated
-                 *   1. Local client could add its content. So we have to check content origin too.
-                 *   2. Remote client could add more content before local session-accept. Then we have two options
-                 *         a) send content-accept and skip this content in session-accept later
-                 *         b) don't send content-accept and accept everything with session-accept
-                 *      We prefer option (b) in our implementation.
-                 */
-                if (role == Origin::Responder) {
-                    for (const auto &c : initialIncomingUnacceptedContent) {
-                        auto out = c->evaluateOutgoingUpdate();
-                        if (out.action == Action::ContentReject) {
-                            lastError
-                                = XMPP::Stanza::Error(XMPP::Stanza::Error::Cancel, XMPP::Stanza::Error::BadRequest);
-                            setSessionFinished();
-                            return;
-                        }
-                        if (out.action != Action::ContentAccept) {
-                            return; // keep waiting.
-                        }
-                    }
-                } else {
-                    for (const auto &c : contentList) {
-                        auto out = c->evaluateOutgoingUpdate();
-                        if (out.action == Action::ContentRemove) {
-                            lastError
-                                = XMPP::Stanza::Error(XMPP::Stanza::Error::Cancel, XMPP::Stanza::Error::BadRequest);
-                            setSessionFinished();
-                            return;
-                        }
-                        if (out.action != Action::ContentAdd) {
-                            return; // keep waiting.
-                        }
-                    }
-                }
-                Action actionToSend = Action::SessionAccept;
-                State  finalState   = State::Active;
-                // so all contents is ready for session-initiate. let's do it
-                if (role == Origin::Initiator) {
-                    sid          = manager->registerSession(q);
-                    actionToSend = Action::SessionInitiate;
-                    finalState   = State::Pending;
-                }
-
-                QList<QDomElement> contents;
-                QList<AckHndl>     acceptApps;
-                for (const auto &app : contentList) {
-                    QList<QDomElement> xml;
-                    OutgoingUpdateCB   callback;
-                    std::tie(xml, callback) = app->takeOutgoingUpdate();
-                    contents += xml;
-                    // p->setState(State::Unacked);
-                    if (callback) {
-                        acceptApps.append(AckHndl { app, callback });
-                    }
-                }
-                state = State::Unacked;
-                sendJingle(actionToSend, contents, [this, acceptApps, finalState](JT *jt) {
-                    if (!jt->success())
-                        return;
-                    state = finalState;
-                    for (const auto &h : acceptApps) {
-                        auto app      = std::get<0>(h);
-                        auto callback = std::get<1>(h);
-                        if (app) {
-                            callback(jt);
-                            if (role == Origin::Responder) {
-                                app->start();
-                            }
-                        }
-                    }
-                    if (finalState == State::Active) {
-                        emit q->activated();
-                    }
-                    planStep();
-                });
-
-                return;
-            }
-
-            // So session is either in State::Pending or State::Active here.
-            // State::Connecting status is skipped for session.
             QList<QDomElement> updateXml;
-            for (auto mp : applicationPads) {
+            for (auto &mp : applicationPads) {
                 auto        p  = mp.toStrongRef();
                 QDomElement el = p->takeOutgoingSessionInfoUpdate();
                 if (!el.isNull()) {
@@ -287,19 +289,33 @@ namespace XMPP { namespace Jingle {
                 }
             }
 
-            QMultiMap<Application::Update, Application *> updates;
+            typedef std::tuple<QPointer<Application>, OutgoingUpdateCB> AckHndl; // will be used from callback on iq ack
+            if (state == State::ApprovedToSend) { // we are going to send session-initiate/accept (already accepted
+                                                  // by the user but not sent yet)
+                if (trySendSessionAcceptOrInitiate()) {
+                    return; // accepted / initiated or finished with a failure
+                }
+            }
 
-            for (auto app : signalingContent) {
+            QMultiMap<Application::Update, Application *> updates;
+            for (auto app : qAsConst(signalingContent)) {
                 auto updateType = app->evaluateOutgoingUpdate();
                 if (updateType.action != Action::NoAction) {
+                    if (state == State::ApprovedToSend && app->flags() & Application::InitialApplication) {
+                        // We need pass here everthing not checked in trySendSessionAcceptOrInitiate
+                        if ((role == Origin::Initiator && updateType.action == Action::ContentAdd)
+                            || (role == Origin::Responder && updateType.action == Action::ContentAccept)) {
+                            continue; // skip in favor of trySendSessionAcceptOrInitiate
+                        }
+                    }
                     updates.insert(updateType, app);
                 }
             }
 
             QList<AckHndl> acceptApps;
             if (updates.size()) {
-                auto upd  = updates.begin().key(); // NOTE maybe some actions have more priority than others
-                auto apps = updates.values(upd);
+                auto       upd  = updates.begin().key(); // NOTE maybe some actions have more priority than others
+                auto const apps = updates.values(upd);
                 for (auto app : apps) {
                     QList<QDomElement> xml;
                     OutgoingUpdateCB   callback;
@@ -320,6 +336,92 @@ namespace XMPP { namespace Jingle {
                     planStep();
                 });
             }
+        }
+
+        bool trySendSessionAcceptOrInitiate()
+        {
+            /*
+             * For session-initiate everything is pretty much straightforward, just any content with
+             * Action::ContentAdd update type has to be added. But with session-accept things are more complicated
+             *   1. Local client could add its content. So we have to check content origin too.
+             *   2. Remote client could add more content before local session-accept. Then we have two options
+             *         a) send content-accept and skip this content in session-accept later
+             *         b) don't send content-accept and accept everything with session-accept
+             *      We prefer option (b) in our implementation.
+             */
+            typedef std::tuple<QPointer<Application>, OutgoingUpdateCB> AckHndl;
+            if (role == Origin::Responder) {
+                for (const auto &c : qAsConst(initialIncomingUnacceptedContent)) {
+                    auto out = c->evaluateOutgoingUpdate();
+                    if (out.action == Action::ContentReject) {
+                        lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::Cancel, XMPP::Stanza::Error::BadRequest);
+                        setSessionFinished();
+                        return true;
+                    }
+                    if (out.action != Action::ContentAccept) {
+                        return false; // keep waiting.
+                    }
+                }
+            } else {
+                for (const auto &c : qAsConst(contentList)) {
+                    auto out = c->evaluateOutgoingUpdate();
+                    if (out.action == Action::ContentRemove) {
+                        lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::Cancel, XMPP::Stanza::Error::BadRequest);
+                        setSessionFinished();
+                        return true;
+                    }
+                    if (out.action != Action::ContentAdd) {
+                        return false; // keep waiting.
+                    }
+                }
+            }
+            Action actionToSend = Action::SessionAccept;
+            State  finalState   = State::Active;
+            // so all contents is ready for session-initiate. let's do it
+            if (role == Origin::Initiator) {
+                sid          = manager->registerSession(q);
+                actionToSend = Action::SessionInitiate;
+                finalState   = State::Pending;
+            }
+
+            notifyPads<&SessionManagerPad::onSend>();
+
+            QList<QDomElement> contents;
+            QList<AckHndl>     acceptApps;
+            for (const auto &app : qAsConst(contentList)) {
+                QList<QDomElement> xml;
+                OutgoingUpdateCB   callback;
+                std::tie(xml, callback) = app->takeOutgoingUpdate();
+                contents += xml;
+                // p->setState(State::Unacked);
+                if (callback) {
+                    acceptApps.append(AckHndl { app, callback });
+                }
+            }
+
+            state = State::Unacked;
+            initialIncomingUnacceptedContent.clear();
+            sendJingle(actionToSend, contents, [this, acceptApps, finalState](JT *jt) {
+                if (!jt->success())
+                    return;
+                state = finalState;
+                for (const auto &h : acceptApps) {
+                    auto app      = std::get<0>(h);
+                    auto callback = std::get<1>(h);
+                    if (app) {
+                        callback(jt);
+                        if (role == Origin::Responder) {
+                            app->start();
+                        }
+                    }
+                }
+                if (finalState == State::Active) {
+                    emit q->activated();
+                }
+                planStep();
+            });
+
+            return true;
         }
 
         Reason reason(const QDomElement &jingleEl)
@@ -437,7 +539,7 @@ namespace XMPP { namespace Jingle {
                     return ParseContentListResult(Unparsed, cond, QList<Application *>(), QList<QDomElement>());
                 }
 
-                auto contentName = app->contentName();
+                auto contentName = ce.attribute(QLatin1String("name"));
                 auto it          = addSet.find(contentName);
                 if (err != Private::AddContentError::Ok) {
                     // can't continue as well
@@ -573,7 +675,7 @@ namespace XMPP { namespace Jingle {
                 QTimer::singleShot(0, q, [this, rejectSet]() mutable {
                     auto               cond = rejectSet.first().second;
                     QList<QDomElement> rejects;
-                    for (auto const &i : rejectSet) {
+                    for (auto const &i : qAsConst(rejectSet)) {
                         rejects.append(i.first);
                     }
                     rejects += Reason(cond).toXml(manager->client()->doc());
@@ -620,7 +722,7 @@ namespace XMPP { namespace Jingle {
 
             if (apps.size()) {
                 Origin remoteRole = negateOrigin(role);
-                for (auto app : apps) {
+                for (auto app : qAsConst(apps)) {
                     addAndInitContent(remoteRole, app); // TODO check conflicts
                 }
                 QTimer::singleShot(0, q, [this]() { emit q->newContentReceived(); });
@@ -684,7 +786,7 @@ namespace XMPP { namespace Jingle {
 
             state = State::Connecting;
             if (apps.size()) {
-                for (auto app : apps) {
+                for (auto app : qAsConst(apps)) {
                     app->start();
                 }
             }
@@ -706,7 +808,7 @@ namespace XMPP { namespace Jingle {
             }
 
             if (apps.size() && state >= State::Active) {
-                for (auto app : apps) {
+                for (auto app : qAsConst(apps)) {
                     app->start(); // start accepted app. connection establishing and data transfer are inside
                 }
             }
@@ -813,22 +915,38 @@ namespace XMPP { namespace Jingle {
 
                 Application *app = contentList.value(ContentKey { cb.name, cb.creator });
                 if (!app || !app->transport() || app->transport()->creator() != role
-                    || app->transport()->state() != State::Pending) {
+                    || app->transport()->state() != State::Pending || transportNS != app->transport()->pad()->ns()) {
                     // ignore out of order
+                    qInfo("ignore out of order transport-accept");
                     continue;
                 }
                 updates.append(qMakePair(app, transportEl));
             }
 
             for (auto &u : updates) {
-                if (u.first->transport()->update(u.second) && u.first->state() >= State::Connecting) {
-                    u.first->transport()->start();
-                }
+                u.first->incomingTransportAccept(u.second);
                 // if update fails transport should trigger replace procedure
             }
 
             planStep();
             return true;
+        }
+
+        bool handleIncomingSessionInfo(const QDomElement &jingleEl)
+        {
+            bool hasElements = false;
+            for (QDomElement child = jingleEl.firstChildElement(); !child.isNull();
+                 child             = child.nextSiblingElement()) {
+                hasElements = true;
+                auto pad    = q->applicationPad(child.namespaceURI());
+                if (pad) {
+                    return pad->incomingSessionInfo(jingleEl); // should return true if supported
+                }
+            }
+            if (!hasElements && state >= State::ApprovedToSend) {
+                return true;
+            }
+            return false;
         }
 
         bool handleIncomingTransportInfo(const QDomElement &jingleEl)
@@ -865,13 +983,19 @@ namespace XMPP { namespace Jingle {
 
     Session::Session(Manager *manager, const Jid &peer, Origin role) : d(new Private)
     {
-        d->q          = this;
-        d->role       = role;
-        d->manager    = manager;
-        d->otherParty = peer;
+        d->q               = this;
+        d->role            = role;
+        d->manager         = manager;
+        d->otherParty      = peer;
+        d->groupingAllowed = checkPeerCaps(QLatin1String("urn:ietf:rfc:5888"));
         d->stepTimer.setSingleShot(true);
         d->stepTimer.setInterval(0);
         connect(&d->stepTimer, &QTimer::timeout, this, [this]() { d->doStep(); });
+        connect(manager->client(), &Client::disconnected, this, [this]() {
+            d->waitingAck      = false;
+            d->terminateReason = Reason(Reason::ConnectivityError, QLatin1String("local side disconnected"));
+            d->setSessionFinished();
+        });
     }
 
     Session::~Session()
@@ -901,6 +1025,13 @@ namespace XMPP { namespace Jingle {
 
     Origin Session::peerRole() const { return negateOrigin(d->role); }
 
+    bool Session::checkPeerCaps(const QString &ns) const
+    {
+        return d->manager->client()->capsManager()->disco(peer()).features().test(QStringList() << ns);
+    }
+
+    bool Session::isGroupingAllowed() const { return d->groupingAllowed; }
+
     XMPP::Stanza::Error Session::lastError() const { return d->lastError; }
 
     Application *Session::newContent(const QString &ns, Origin senders)
@@ -929,6 +1060,12 @@ namespace XMPP { namespace Jingle {
     }
 
     const QMap<ContentKey, Application *> &Session::contentList() const { return d->contentList; }
+
+    void Session::setGrouping(const QString &groupType, const QStringList &group)
+    {
+        d->groups.insert(groupType, group);
+        d->needNotifyGroup = true;
+    }
 
     ApplicationManagerPad::Ptr Session::applicationPad(const QString &ns)
     {
@@ -970,6 +1107,7 @@ namespace XMPP { namespace Jingle {
         for (auto &c : d->contentList) {
             c->prepare();
         }
+        d->notifyPads<&SessionManagerPad::onLocalAccepted>();
         d->planStep();
     }
 
@@ -979,8 +1117,10 @@ namespace XMPP { namespace Jingle {
         if (d->role == Origin::Initiator && d->state == State::Created) {
             d->state = State::ApprovedToSend;
             for (auto &c : d->contentList) {
+                c->markInitialApplication(true);
                 c->prepare();
             }
+            d->notifyPads<&SessionManagerPad::onLocalAccepted>();
             d->planStep();
         }
     }
@@ -1054,7 +1194,8 @@ namespace XMPP { namespace Jingle {
             if (!apps.size())
                 return false;
             d->initialIncomingUnacceptedContent = apps;
-            for (auto app : apps) {
+            for (auto app : qAsConst(apps)) {
+                app->markInitialApplication(true);
                 d->addAndInitContent(Origin::Initiator, app);
             }
             d->planStep();
@@ -1090,7 +1231,7 @@ namespace XMPP { namespace Jingle {
         case Action::SessionAccept:
             return d->handleIncomingSessionAccept(jingleEl);
         case Action::SessionInfo:
-            break;
+            return d->handleIncomingSessionInfo(jingleEl);
         case Action::SessionInitiate: // impossible case. but let compiler be happy
             break;
         case Action::SessionTerminate:
