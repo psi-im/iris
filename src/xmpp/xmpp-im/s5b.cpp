@@ -114,7 +114,7 @@ public:
 
 signals:
     void accepted();
-    void tryingHosts(const XMPP::StreamHostList &list);
+    void tryingHosts(const StreamHostList &list);
     void proxyConnect();
     void waitingForActivation();
     void connected();

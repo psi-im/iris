@@ -1468,7 +1468,7 @@ private slots:
 
                 QList<StunMessage::Attribute> list;
                 StunMessage::Attribute        attr;
-                attr.type = StunTypes::XOR_MAPPED_ADDRESS;
+                attr.type  = StunTypes::XOR_MAPPED_ADDRESS;
                 attr.value = StunTypes::createXorPeerAddress(fromAddr, fromPort, response.magic(), response.id());
                 list += attr;
 

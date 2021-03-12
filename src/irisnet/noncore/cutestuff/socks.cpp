@@ -151,8 +151,8 @@ static int spc_get_version(QByteArray &from, SPCS_VERSION *s)
         return -1;
     if (from.size() < 2)
         return 0;
-    auto          mlen = static_cast<unsigned char>(from.at(1));
-    int           num  = mlen;
+    auto mlen = static_cast<unsigned char>(from.at(1));
+    int  num  = mlen;
     if (num > 16) // who the heck has over 16 auth methods??
         return -1;
     if (from.size() < 2 + num)
@@ -334,9 +334,9 @@ static int sp_get_request(QByteArray &from, SPS_CONNREQ *s)
     if ((int)from.size() < full_len)
         return 0;
 
-    QString       host;
-    QHostAddress  addr;
-    auto          atype = static_cast<unsigned char>(from.at(3));
+    QString      host;
+    QHostAddress addr;
+    auto         atype = static_cast<unsigned char>(from.at(3));
 
     if (atype == 0x01) {
         full_len += 4;

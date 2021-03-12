@@ -173,22 +173,22 @@ signals:
     // void authFinished(bool, int, const QString &);
     void rosterGroupsDelimiterRequestFinished(const QString &);
     void rosterRequestFinished(bool, int, const QString &);
-    void rosterItemAdded(const XMPP::RosterItem &);
-    void rosterItemUpdated(const XMPP::RosterItem &);
-    void rosterItemRemoved(const XMPP::RosterItem &);
-    void resourceAvailable(const XMPP::Jid &, const XMPP::Resource &);
-    void resourceUnavailable(const XMPP::Jid &, const XMPP::Resource &);
-    void presenceError(const XMPP::Jid &, int, const QString &);
-    void subscription(const XMPP::Jid &, const QString &, const QString &);
-    void messageReceived(const XMPP::Message &);
+    void rosterItemAdded(const RosterItem &);
+    void rosterItemUpdated(const RosterItem &);
+    void rosterItemRemoved(const RosterItem &);
+    void resourceAvailable(const Jid &, const Resource &);
+    void resourceUnavailable(const Jid &, const Resource &);
+    void presenceError(const Jid &, int, const QString &);
+    void subscription(const Jid &, const QString &, const QString &);
+    void messageReceived(const Message &);
     void debugText(const QString &);
     void xmlIncoming(const QString &);
     void xmlOutgoing(const QString &);
     void stanzaElementOutgoing(QDomElement &);
-    void groupChatJoined(const XMPP::Jid &);
-    void groupChatLeft(const XMPP::Jid &);
-    void groupChatPresence(const XMPP::Jid &, const XMPP::Status &);
-    void groupChatError(const XMPP::Jid &, int, const QString &);
+    void groupChatJoined(const Jid &);
+    void groupChatLeft(const Jid &);
+    void groupChatPresence(const Jid &, const Status &);
+    void groupChatError(const Jid &, int, const QString &);
 
     void incomingJidLink();
 
@@ -209,10 +209,10 @@ private slots:
     void slotRosterRequestFinished();
 
     // basic daemons
-    void ppSubscription(const XMPP::Jid &, const QString &, const QString &);
-    void ppPresence(const XMPP::Jid &, const XMPP::Status &);
-    void pmMessage(const XMPP::Message &);
-    void prRoster(const XMPP::Roster &);
+    void ppSubscription(const Jid &, const QString &, const QString &);
+    void ppPresence(const Jid &, const Status &);
+    void pmMessage(const Message &);
+    void prRoster(const Roster &);
 
     void s5b_incomingReady();
     void ibb_incomingReady();

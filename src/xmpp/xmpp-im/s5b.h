@@ -103,7 +103,7 @@ signals:
     void proxyResult(bool b);                      // query success / fail
     void requesting();                             // sent actual S5B request (requester only)
     void accepted();                               // target accepted (requester only
-    void tryingHosts(const XMPP::StreamHostList &hosts); // currently connecting to these hosts
+    void tryingHosts(const StreamHostList &hosts); // currently connecting to these hosts
     void proxyConnect();                           // connecting to proxy
     void waitingForActivation();                   // waiting for activation (target only)
     void connected();                              // connection active
@@ -158,11 +158,11 @@ protected:
     const char *sidPrefix() const;
 
 private slots:
-    void ps_incoming(const XMPP::S5BRequest &req);
-    void ps_incomingUDPSuccess(const XMPP::Jid &from, const QString &dstaddr);
-    void ps_incomingActivate(const XMPP::Jid &from, const QString &sid, const XMPP::Jid &streamHost);
+    void ps_incoming(const S5BRequest &req);
+    void ps_incomingUDPSuccess(const Jid &from, const QString &dstaddr);
+    void ps_incomingActivate(const Jid &from, const QString &sid, const Jid &streamHost);
     void item_accepted();
-    void item_tryingHosts(const XMPP::StreamHostList &list);
+    void item_tryingHosts(const StreamHostList &list);
     void item_proxyConnect();
     void item_waitingForActivation();
     void item_connected();
@@ -306,9 +306,9 @@ public:
     bool take(const QDomElement &);
 
 signals:
-    void incoming(const XMPP::S5BRequest &req);
-    void incomingUDPSuccess(const XMPP::Jid &from, const QString &dstaddr);
-    void incomingActivate(const XMPP::Jid &from, const QString &sid, const XMPP::Jid &streamHost);
+    void incoming(const S5BRequest &req);
+    void incomingUDPSuccess(const Jid &from, const QString &dstaddr);
+    void incomingActivate(const Jid &from, const QString &sid, const Jid &streamHost);
 };
 
 class StreamHost {

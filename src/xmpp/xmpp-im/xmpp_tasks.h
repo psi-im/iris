@@ -130,7 +130,7 @@ public:
     bool take(const QDomElement &);
 
 signals:
-    void roster(const XMPP::Roster &);
+    void roster(const Roster &);
 
 private:
     class Private;
@@ -167,8 +167,8 @@ public:
     bool take(const QDomElement &);
 
 signals:
-    void presence(const XMPP::Jid &, const XMPP::Status &);
-    void subscription(const XMPP::Jid &, const QString &, const QString &);
+    void presence(const Jid &, const Status &);
+    void subscription(const Jid &, const QString &, const QString &);
 
 private:
     class Private;
@@ -206,7 +206,7 @@ public:
     bool take(const QDomElement &);
 
 signals:
-    void message(const XMPP::Message &);
+    void message(const Message &);
 
 private:
     class Private;
