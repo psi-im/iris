@@ -1,4 +1,6 @@
 #include "dtls.h"
+#include "xmpp_xmlcommon.h"
+
 #include <QtCrypto>
 #if QT_VERSION >= QT_VERSION_CHECK(5, 10, 0)
 #include <QRandomGenerator>
@@ -7,29 +9,77 @@
 
 #define DTLS_DEBUG qDebug
 
+/*
+Connection flow
+
+                    juliet                   |                   romeo
+---------------------------------------------------------------------------------------
+1 |           setup:NotSet                   |               setup:NotSet
+2 |  generate cert + compute fingerprint     |
+3 |           setup:actpass                  |
+4 |                             ----send fingerprint----> validate
+5 |                             <-------iq result--------
+5 |                                          |               setup:active
+6 |                                          |  generate cert + compute fingerprint
+7 |               validate      <---send fingerprint-----
+8 |           setup:passive                  |
+9 |         start dtls server                |
+10|                             --------iq result------->
+11|                                          |             start dtls client
+12|================================= DTLS HANDSHAKE ===================================
+*/
+
 namespace XMPP {
+const QString NS_DTLS(QStringLiteral("urn:xmpp:jingle:apps:dtls:0"));
+
+static std::array<const char *, 4> fpRoles { { "active", "passive", "actpass", "holdconn" } };
+Dtls::FingerPrint::FingerPrint(const QDomElement &el)
+{
+    auto ht = el.attribute(QLatin1String("hash"));
+    hash    = QStringRef(&ht);
+    hash.setData(QByteArray::fromHex(el.text().toLatin1()));
+    auto setupIt
+        = std::find(fpRoles.begin(), fpRoles.end(), el.attribute(QLatin1String("setup")).toLatin1().constData());
+    setup = Setup(setupIt == fpRoles.end() ? -1 : std::distance(fpRoles.begin(), setupIt));
+}
+
+QDomElement Dtls::FingerPrint::toXml(QDomDocument *doc) const
+{
+    auto binToHex = [](const QByteArray &in) {
+#if QT_VERSION >= QT_VERSION_CHECK(5, 9, 0)
+        return in.toHex(':');
+#else
+        QByteArray out  = in.toHex();
+        int        size = out.size();
+        for (int k = 2; k < size; k += 3, ++size) {
+            out.insert(k, ':');
+        }
+        return out;
+#endif
+    };
+    auto fingerprint = XMLHelper::textTagNS(doc, NS_DTLS, QLatin1String("fingerprint"), binToHex(hash.data()));
+    fingerprint.setAttribute(QLatin1String("hash"), hash.stringType());
+    fingerprint.setAttribute(QLatin1String("setup"), QLatin1String(fpRoles[setup]));
+    return fingerprint;
+}
 
 class Dtls::Private : public QObject {
     Q_OBJECT
 public:
-    Dtls *    q;
-    QCA::TLS *tls;
+    Dtls *           q;
+    QCA::TLS *       tls = nullptr;
+    QCA::PrivateKey  pkey;
+    QCA::Certificate cert;
 
-    Hash                         fingerprint;
-    Hash                         remoteFingerprint;
+    QString localJid;
+    QString remoteJid;
+    // original fingerprints
+    FingerPrint localFingerprint;
+    FingerPrint remoteFingerprint;
+
     QAbstractSocket::SocketError lastError = QAbstractSocket::UnknownSocketError;
 
-    Private(Dtls *q) : QObject(q), q(q)
-    {
-        tls = new QCA::TLS(QCA::TLS::Datagram);
-
-        connect(tls, &QCA::TLS::certificateRequested, tls, &QCA::TLS::continueAfterStep);
-        connect(tls, &QCA::TLS::handshaken, this, &Dtls::Private::tls_handshaken);
-        connect(tls, &QCA::TLS::readyRead, q, &Dtls::readyRead);
-        connect(tls, &QCA::TLS::readyReadOutgoing, q, &Dtls::readyReadOutgoing);
-        connect(tls, &QCA::TLS::closed, q, &Dtls::closed);
-        connect(tls, &QCA::TLS::error, this, &Dtls::Private::tls_error);
-    }
+    Private(Dtls *q) : QObject(q), q(q) { }
 
     static Hash computeFingerprint(const QCA::Certificate &cert, Hash::Type hashType)
     {
@@ -46,7 +96,7 @@ public:
         if (peerIdentity == QCA::TLS::Valid || peerIdentity == QCA::TLS::InvalidCertificate) {
             const auto  chain = tls->peerCertificateChain();
             const auto &cert  = chain.first();
-            if (computeFingerprint(cert, remoteFingerprint.type()) == remoteFingerprint) {
+            if (computeFingerprint(cert, remoteFingerprint.hash.type()) == remoteFingerprint.hash) {
                 DTLS_DEBUG("valid");
                 tls->continueAfterStep();
                 emit q->connected();
@@ -85,47 +135,135 @@ public:
         }
         emit q->errorOccurred(lastError);
     }
+
+    void setRemoteFingerprint(const FingerPrint &fp)
+    {
+        bool needRestart = false;
+        if (tls) {
+            if (remoteFingerprint == fp)
+                return;
+            // need to restart dtls. see rfc8842 (todo: but in fact we need more checks)
+            needRestart            = true;
+            localFingerprint.setup = Dtls::NotSet;
+        }
+        remoteFingerprint = localFingerprint;
+        if (needRestart)
+            emit q->needRestart();
+        if (localFingerprint.setup == Dtls::NotSet)
+            return; // will be handled in acceptIncoming
+
+        bool remoteActiveOrPassive
+            = remoteFingerprint.setup == Dtls::Passive || remoteFingerprint.setup == Dtls::Active;
+        if (localFingerprint.setup == Dtls::ActPass) { // response fingerprint
+            if (!remoteActiveOrPassive) {
+                qWarning("Unexpected remote fingerprint setup. Assume remote setup=active");
+                remoteFingerprint.setup = Dtls::Active;
+            }
+            localFingerprint.setup = remoteFingerprint.setup == Dtls::Active ? Dtls::Passive : Dtls::Active;
+            return;
+        }
+        // local is active or passive already, no idea in what scenario. probably something custom
+        bool roleConflict = remoteFingerprint.setup == localFingerprint.setup;
+        if (!roleConflict && !remoteActiveOrPassive)
+            return; // looks valid
+        if (roleConflict)
+            qWarning("setRemoteFingerprint: dtls role conflict");
+        if (!remoteActiveOrPassive)
+            qWarning("setRemoteFingerprint: expected active or passive remote fingerprint but got something else");
+        lastError = QAbstractSocket::OperationError;
+        emit q->errorOccurred(lastError);
+    }
+
+    void acceptIncoming()
+    {
+        if (cert.isNull()) {
+            generateCertificate();
+        }
+        Q_ASSERT(localFingerprint.setup == Dtls::NotSet);
+        if (remoteFingerprint.setup == Dtls::ActPass) {
+            localFingerprint.setup  = Dtls::Active;
+            remoteFingerprint.setup = Dtls::Passive;
+        } else {
+            localFingerprint.setup = remoteFingerprint.setup == Dtls::Active ? Dtls::Passive : Dtls::Active;
+        }
+        if (localFingerprint.setup == Dtls::Passive) {
+            negotiate(); // start server
+        }
+    }
+
+    void negotiate()
+    {
+        if (tls) {
+            delete tls;
+        }
+
+        if (!remoteFingerprint.isValid()) {
+            qWarning("remote fingerprint is not set");
+            lastError = QAbstractSocket::SocketError::OperationError;
+            emit q->errorOccurred(lastError);
+            return;
+        }
+
+        tls = new QCA::TLS(QCA::TLS::Datagram);
+        tls->setCertificate(cert, pkey);
+
+        connect(tls, &QCA::TLS::certificateRequested, tls, &QCA::TLS::continueAfterStep);
+        connect(tls, &QCA::TLS::handshaken, this, &Dtls::Private::tls_handshaken);
+        connect(tls, &QCA::TLS::readyRead, q, &Dtls::readyRead);
+        connect(tls, &QCA::TLS::readyReadOutgoing, q, &Dtls::readyReadOutgoing);
+        connect(tls, &QCA::TLS::closed, q, &Dtls::closed);
+        connect(tls, &QCA::TLS::error, this, &Dtls::Private::tls_error);
+
+        if (localFingerprint.setup == Dtls::Passive) {
+            qDebug("Starting DTLS server");
+            tls->startServer();
+        } else {
+            qDebug("Starting DTLS client");
+            tls->startClient();
+        }
+    }
+
+    void generateCertificate()
+    {
+        QCA::CertificateOptions opts;
+
+        QCA::CertificateInfo info;
+        info.insert(QCA::CommonName, QStringLiteral("iris.psi-im.org"));
+        if (!localJid.isEmpty())
+            info.insert(QCA::XMPP, localJid);
+        opts.setInfo(info);
+
+#if QT_VERSION >= QT_VERSION_CHECK(5, 10, 0)
+        QCA::BigInteger sn(QRandomGenerator::global()->generate());
+#else
+        QCA::BigInteger sn(qrand());
+#endif
+        opts.setSerialNumber(sn);
+
+        auto nowUTC = QDateTime::currentDateTimeUtc();
+        opts.setValidityPeriod(nowUTC, nowUTC.addDays(30));
+
+        QCA::Constraints constraints = { { QCA::DigitalSignature, QCA::KeyEncipherment, QCA::DataEncipherment,
+                                           QCA::ClientAuth, QCA::ServerAuth } };
+        opts.setConstraints(constraints);
+        opts.setAsCA();
+
+        pkey                  = QCA::KeyGenerator().createRSA(2048);
+        cert                  = QCA::Certificate(opts, pkey);
+        localFingerprint.hash = Private::computeFingerprint(cert, Hash::Sha256);
+    }
 };
 
-Dtls::Dtls(QObject *parent) : QObject(parent), d(new Private(this))
+Dtls::Dtls(QObject *parent, const QString &localJid, const QString &remoteJid) : QObject(parent), d(new Private(this))
 {
+    d->localJid  = localJid;
+    d->remoteJid = remoteJid;
     if (!d->tls->context()) {
         qWarning("DTLS is not supported by your version of QCA");
     }
 }
 
-void Dtls::generateCertificate(const QString &localJid)
-{
-    QCA::CertificateOptions opts;
-
-    QCA::CertificateInfo info;
-    info.insert(QCA::CommonName, QStringLiteral("iris.psi-im.org"));
-    if (!localJid.isEmpty())
-        info.insert(QCA::XMPP, localJid);
-    opts.setInfo(info);
-
-#if QT_VERSION >= QT_VERSION_CHECK(5, 10, 0)
-    QCA::BigInteger sn(QRandomGenerator::global()->generate());
-#else
-    QCA::BigInteger sn(qrand());
-#endif
-    opts.setSerialNumber(sn);
-
-    auto nowUTC = QDateTime::currentDateTimeUtc();
-    opts.setValidityPeriod(nowUTC, nowUTC.addDays(30));
-
-    QCA::Constraints constraints
-        = { { QCA::DigitalSignature, QCA::KeyEncipherment, QCA::DataEncipherment, QCA::ClientAuth, QCA::ServerAuth } };
-    opts.setConstraints(constraints);
-    opts.setAsCA();
-
-    auto pkey = QCA::KeyGenerator().createRSA(2048);
-    auto cert = QCA::Certificate(opts, pkey);
-    d->tls->setCertificate(cert, pkey);
-    d->fingerprint = Private::computeFingerprint(cert, Hash::Sha256);
-}
-
-void Dtls::setCertificate(const QCA::Certificate &cert, const QCA::PrivateKey &pkey)
+void Dtls::setLocalCertificate(const QCA::Certificate &cert, const QCA::PrivateKey &pkey)
 {
     Hash::Type hashType = Hash::Sha256;
     switch (cert.signatureAlgorithm()) {
@@ -144,18 +282,49 @@ void Dtls::setCertificate(const QCA::Certificate &cert, const QCA::PrivateKey &p
     }
 
     d->tls->setCertificate(cert, pkey);
-    d->fingerprint = Private::computeFingerprint(cert, hashType);
+    d->localFingerprint.hash = Private::computeFingerprint(cert, hashType);
 }
 
-Hash Dtls::fingerprint() { return d->fingerprint; }
+QCA::Certificate Dtls::localCertificate() const { return d->cert; }
 
-void Dtls::setRemoteFingerprint(const Hash &fingerprint) { d->remoteFingerprint = fingerprint; }
+QCA::Certificate Dtls::remoteCertificate() const
+{
+    if (!d->tls || d->tls->peerCertificateChain().isEmpty())
+        return {};
+    auto const &chain = d->tls->peerCertificateChain();
+    return chain.first();
+}
+
+void Dtls::initOutgoing()
+{
+    if (d->cert.isNull()) {
+        d->generateCertificate();
+    }
+    d->localFingerprint.setup = ActPass;
+}
+
+void Dtls::acceptIncoming() { d->acceptIncoming(); }
+
+void Dtls::onRemoteAcceptedFingerprint()
+{
+    if (d->localFingerprint.setup == Active) {
+        d->negotiate();
+    }
+}
+
+const Dtls::FingerPrint &Dtls::localFingerprint() const { return d->localFingerprint; }
+
+const Dtls::FingerPrint &Dtls::remoteFingerprint() const { return d->remoteFingerprint; }
+
+void Dtls::setRemoteFingerprint(const FingerPrint &fp) { d->setRemoteFingerprint(fp); }
 
 QAbstractSocket::SocketError Dtls::error() const { return d->lastError; }
 
-void Dtls::startServer() { d->tls->startServer(); }
+void Dtls::negotiate() { d->negotiate(); }
 
-void Dtls::startClient() { d->tls->startClient(); }
+bool Dtls::isStarted() const { return d->tls != nullptr; }
+
+bool Dtls::isSupported() { return QCA::isSupported("dtls"); }
 
 QByteArray Dtls::readDatagram()
 {

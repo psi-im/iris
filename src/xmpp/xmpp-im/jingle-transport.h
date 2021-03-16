@@ -70,6 +70,7 @@ namespace XMPP { namespace Jingle {
 
     signals:
         void connected();
+        void disconnected();
 
     protected:
         Hints _hints;
