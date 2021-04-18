@@ -7,44 +7,51 @@
 #endif
 #include <QAbstractSocket>
 
-#define DTLS_DEBUG qDebug
+#define DTLS_DEBUG(msg, ...) qDebug("dtls: " msg, ##__VA_ARGS__)
 
 /*
 Connection flow
 
                     juliet                   |                   romeo
 ---------------------------------------------------------------------------------------
-1 |           setup:NotSet                   |               setup:NotSet
+1 |             setup:NotSet                 |               setup:NotSet
 2 |  generate cert + compute fingerprint     |
-3 |           setup:actpass                  |
+3 |             setup:actpass                |
 4 |                             ----send fingerprint----> validate
 5 |                             <-------iq result--------
 5 |                                          |               setup:active
 6 |                                          |  generate cert + compute fingerprint
 7 |               validate      <---send fingerprint-----
-8 |           setup:passive                  |
-9 |         start dtls server                |
+8 |            setup:passive                 |
+9 |          start dtls server               |
 10|                             --------iq result------->
 11|                                          |             start dtls client
 12|================================= DTLS HANDSHAKE ===================================
 */
 
 namespace XMPP {
-const QString NS_DTLS(QStringLiteral("urn:xmpp:jingle:apps:dtls:0"));
 
 static std::array<const char *, 4> fpRoles { { "active", "passive", "actpass", "holdconn" } };
-Dtls::FingerPrint::FingerPrint(const QDomElement &el)
+
+QString Dtls::FingerPrint::ns() { return QStringLiteral("urn:xmpp:jingle:apps:dtls:0"); }
+
+bool Dtls::FingerPrint::parse(const QDomElement &el)
 {
+    if (el.namespaceURI() != ns()) {
+        qWarning("Unrecognized DTLS xmlns: %s. Parse it as if it were %s", qPrintable(el.namespaceURI()),
+                 qPrintable(ns()));
+    }
     auto ht = el.attribute(QLatin1String("hash"));
     hash    = QStringRef(&ht);
     hash.setData(QByteArray::fromHex(el.text().toLatin1()));
-    auto setupIt
-        = std::find(fpRoles.begin(), fpRoles.end(), el.attribute(QLatin1String("setup")).toLatin1().constData());
-    setup = Setup(setupIt == fpRoles.end() ? -1 : std::distance(fpRoles.begin(), setupIt));
+    auto setupIt = std::find(fpRoles.begin(), fpRoles.end(), el.attribute(QLatin1String("setup")).toLatin1());
+    setup        = Setup(setupIt == fpRoles.end() ? NotSet : std::distance(fpRoles.begin(), setupIt) + 1);
+    return isValid();
 }
 
 QDomElement Dtls::FingerPrint::toXml(QDomDocument *doc) const
 {
+    Q_ASSERT(setup != NotSet);
     auto binToHex = [](const QByteArray &in) {
 #if QT_VERSION >= QT_VERSION_CHECK(5, 9, 0)
         return in.toHex(':');
@@ -57,9 +64,10 @@ QDomElement Dtls::FingerPrint::toXml(QDomDocument *doc) const
         return out;
 #endif
     };
-    auto fingerprint = XMLHelper::textTagNS(doc, NS_DTLS, QLatin1String("fingerprint"), binToHex(hash.data()));
+    auto fingerprint
+        = XMLHelper::textTagNS(doc, ns(), QLatin1String("fingerprint"), QString::fromLatin1(binToHex(hash.data())));
     fingerprint.setAttribute(QLatin1String("hash"), hash.stringType());
-    fingerprint.setAttribute(QLatin1String("setup"), QLatin1String(fpRoles[setup]));
+    fingerprint.setAttribute(QLatin1String("setup"), QLatin1String(fpRoles[setup - 1]));
     return fingerprint;
 }
 
@@ -146,7 +154,7 @@ public:
             needRestart            = true;
             localFingerprint.setup = Dtls::NotSet;
         }
-        remoteFingerprint = localFingerprint;
+        remoteFingerprint = fp;
         if (needRestart)
             emit q->needRestart();
         if (localFingerprint.setup == Dtls::NotSet)
@@ -160,12 +168,17 @@ public:
                 remoteFingerprint.setup = Dtls::Active;
             }
             localFingerprint.setup = remoteFingerprint.setup == Dtls::Active ? Dtls::Passive : Dtls::Active;
+            if (localFingerprint.setup == Dtls::Passive)
+                negotiate();
             return;
         }
         // local is active or passive already, no idea in what scenario. probably something custom
         bool roleConflict = remoteFingerprint.setup == localFingerprint.setup;
-        if (!roleConflict && !remoteActiveOrPassive)
+        if (!roleConflict && !remoteActiveOrPassive) {
+            if (localFingerprint.setup == Dtls::Passive)
+                negotiate();
             return; // looks valid
+        }
         if (roleConflict)
             qWarning("setRemoteFingerprint: dtls role conflict");
         if (!remoteActiveOrPassive)
@@ -258,7 +271,7 @@ Dtls::Dtls(QObject *parent, const QString &localJid, const QString &remoteJid) :
 {
     d->localJid  = localJid;
     d->remoteJid = remoteJid;
-    if (!d->tls->context()) {
+    if (!isSupported()) {
         qWarning("DTLS is not supported by your version of QCA");
     }
 }
@@ -328,27 +341,43 @@ bool Dtls::isSupported() { return QCA::isSupported("dtls"); }
 
 QByteArray Dtls::readDatagram()
 {
+    if (!d->tls) {
+        DTLS_DEBUG("negotiation hasn't started yet. ignore readDatagram");
+        return {};
+    }
     QByteArray a = d->tls->read();
-    DTLS_DEBUG("dtls: read %d bytes of decrypted data", a.size());
+    DTLS_DEBUG("read %d bytes of decrypted data", a.size());
     return a;
 }
 
 QByteArray Dtls::readOutgoingDatagram()
 {
+    if (!d->tls) {
+        DTLS_DEBUG("negotiation hasn't started yet. ignore readOutgoingDatagram");
+        return {};
+    }
     auto ba = d->tls->readOutgoing();
-    DTLS_DEBUG("dtls: read outgoing packet of %d bytes", ba.size());
+    DTLS_DEBUG("read outgoing packet of %d bytes", ba.size());
     return ba;
 }
 
 void Dtls::writeDatagram(const QByteArray &data)
 {
-    DTLS_DEBUG("dtls: write %d bytes for encryption\n", data.size());
+    DTLS_DEBUG("write %d bytes for encryption\n", data.size());
+    if (!d->tls) {
+        DTLS_DEBUG("negotiation hasn't started yet. ignore writeDatagram");
+        return;
+    }
     d->tls->write(data);
 }
 
 void Dtls::writeIncomingDatagram(const QByteArray &data)
 {
-    DTLS_DEBUG("dtls: write incoming %d bytes for decryption\n", data.size());
+    DTLS_DEBUG("write incoming %d bytes for decryption\n", data.size());
+    if (!d->tls) {
+        DTLS_DEBUG("negotiation hasn't started yet. ignore incoming datagram");
+        return;
+    }
     d->tls->writeIncoming(data);
 }
 

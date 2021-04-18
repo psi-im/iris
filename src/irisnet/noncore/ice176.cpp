@@ -348,7 +348,8 @@ public:
         if (state == Stopped || state == Stopping)
             return; // stopped as a result of previous error?
 
-        state = Stopping;
+        canStartChecks = false;
+        state          = Stopping;
         pacTimer.reset();
         checkTimer.stop();
 
@@ -367,7 +368,6 @@ public:
 
     void addRemoteCandidates(const QList<Candidate> &list)
     {
-        Q_ASSERT(state == Started || state == Starting);
         QList<IceComponent::CandidateInfo::Ptr> remoteCandidates;
         for (const Candidate &c : list) {
             auto ci       = IceComponent::CandidateInfo::Ptr::create();
@@ -1641,9 +1641,12 @@ QString Ice176::localUfrag() const { return d->localUser; }
 
 QString Ice176::localPassword() const { return d->localPass; }
 
-void Ice176::setPeerUfrag(const QString &ufrag) { d->peerUser = ufrag; }
-
-void Ice176::setPeerPassword(const QString &pass) { d->peerPass = pass; }
+void Ice176::setRemoteCredentials(const QString &ufrag, const QString &pass)
+{
+    // TODO detect restart
+    d->peerUser = ufrag;
+    d->peerPass = pass;
+}
 
 void Ice176::addRemoteCandidates(const QList<Candidate> &list) { d->addRemoteCandidates(list); }
 
@@ -1651,6 +1654,12 @@ void Ice176::setRemoteGatheringComplete()
 {
     iceDebug("Got remote gathering complete signal");
     d->setRemoteGatheringComplete();
+}
+
+void Ice176::setRemoteSelectedCandidadates(const QList<Ice176::SelectedCandidate> &list)
+{
+    Q_UNUSED(list);
+    // This thing is likely useless since ICE knows exactly which pairs are nominated.
 }
 
 bool Ice176::canSendMedia() const { return d->readyToSendMedia; }

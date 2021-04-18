@@ -140,11 +140,15 @@ namespace Jingle {
         HighProbableConnect = 0x01, // e.g ICE. ICE will have priority over others thanks to Fast|MessageOriented
         AlwaysConnect       = 0x02, // e.g. IBB. basically it's always connected
 
-        // exclusive
-        Unreliable = 0x04, // losses are acceptable
-        Reliable   = 0x08, // losses are unacceptable
+        // 0x04 is reserved for possible Unordered
+        Ordered = 0x08, // where MessageOriented transport guarantees ordered delivery
 
-        Fast = 0x20, // assumes p2p or some light proxies like TURN/S5B (likely everything but IBB)
+        // exclusive
+        Unreliable = 0x10, // losses are acceptable
+        Reliable   = 0x20, // losses are unacceptable
+
+        Fast        = 0x40, // assumes p2p or some light proxies like TURN/S5B (likely everything but IBB)
+        LowOverhead = 0x80, // p2p only
 
         // exclusive
         StreamOriented  = 0x200,

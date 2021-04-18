@@ -410,8 +410,11 @@ namespace XMPP { namespace Jingle {
             state = State::Unacked;
             initialIncomingUnacceptedContent.clear();
             sendJingle(actionToSend, contents, [this, acceptApps, finalState](JT *jt) {
-                if (!jt->success())
+                if (!jt->success()) {
+                    qDebug("Seesion accept/initiate returned iq error");
+                    emit q->terminated();
                     return;
+                }
                 state = finalState;
                 for (const auto &h : acceptApps) {
                     auto app      = std::get<0>(h);

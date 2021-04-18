@@ -30,12 +30,15 @@ public:
         Setup setup = Setup(-1);
 
         FingerPrint() : setup(NotSet) { }
-        FingerPrint(const QDomElement &el);
+        inline FingerPrint(const QDomElement &el) { parse(el); }
         FingerPrint(const Hash &hash, Setup setup) : hash(hash), setup(setup) { }
+
+        static QString ns();
 
         inline bool operator==(const FingerPrint &other) const { return setup == other.setup || hash == other.hash; }
         inline bool operator!=(const FingerPrint &other) const { return !(*this == other); }
 
+        bool        parse(const QDomElement &el);
         inline bool isValid() const
         {
             return hash.isValid() && !hash.data().isEmpty() && setup >= Active && setup <= HoldConn;
@@ -47,7 +50,7 @@ public:
 
     // state machine stuff
     void initOutgoing();   // when it's our side first send dtls info
-    void acceptIncoming(); // when we need to response to the remote dtls info
+    void acceptIncoming(); // when we need to respond to the remote dtls info
     void onRemoteAcceptedFingerprint();
 
     void             setLocalCertificate(const QCA::Certificate &cert, const QCA::PrivateKey &pkey);
