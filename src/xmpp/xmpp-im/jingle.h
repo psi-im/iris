@@ -335,7 +335,7 @@ namespace Jingle {
         void       setRedirection(const Jid &to);
         const Jid &redirectionJid() const;
 
-        void                   registerApp(ApplicationManager *app);
+        void                   registerApplication(ApplicationManager *app);
         void                   unregisterApp(const QString &ns);
         bool                   isRegisteredApplication(const QString &ns);
         ApplicationManagerPad *applicationPad(Session *      session,

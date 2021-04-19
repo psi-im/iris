@@ -29,6 +29,8 @@
 
 #include <mutex>
 
+#define SCTP_DEBUG(msg, ...) qDebug("jingle-sctp: " msg, ##__VA_ARGS__)
+
 namespace XMPP { namespace Jingle { namespace SCTP {
 
     QDomElement MapElement::toXml(QDomDocument *doc) const
@@ -119,14 +121,14 @@ namespace XMPP { namespace Jingle { namespace SCTP {
 
     QByteArray Association::readOutgoing()
     {
-        qDebug("jignle-sctp: read outgoing");
+        SCTP_DEBUG("read outgoing");
         std::lock_guard<std::mutex> lock(d->mutex);
         return d->outgoingQueue.isEmpty() ? QByteArray() : d->outgoingQueue.dequeue();
     }
 
     void Association::writeIncoming(const QByteArray &data)
     {
-        qDebug("jignle-sctp: write incoming");
+        SCTP_DEBUG("write incoming");
         d->assoc.ProcessSctpData(reinterpret_cast<const uint8_t *>(data.data()), data.size());
     }
 
@@ -164,10 +166,18 @@ namespace XMPP { namespace Jingle { namespace SCTP {
         return channel;
     }
 
-    QList<Connection::Ptr> Association::channels() const { return d->channels.values() + d->pendingLocalChannels; }
+    QList<Connection::Ptr> Association::channels() const
+    {
+        QList<Connection::Ptr> ret;
+        ret.reserve(d->channels.size() + d->pendingLocalChannels.size());
+        ret += d->channels.values();
+        ret += d->pendingLocalChannels;
+        return ret;
+    }
 
     void Association::onTransportConnected()
     {
+        SCTP_DEBUG("starting sctp association");
         d->transportConnected = true;
         while (d->pendingLocalChannels.size()) {
             auto channel = d->pendingLocalChannels.dequeue().staticCast<WebRTCDataChannel>();

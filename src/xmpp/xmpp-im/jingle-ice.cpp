@@ -486,11 +486,12 @@ namespace XMPP { namespace Jingle { namespace ICE {
     };
 
     struct Component {
-        int                           componentIndex = 0;
-        bool                          initialized    = false;
-        bool                          lowOverhead    = false;
-        Dtls *                        dtls           = nullptr;
-        SCTP::Association *           sctp           = nullptr;
+        int                           componentIndex  = 0;
+        bool                          initialized     = false;
+        bool                          lowOverhead     = false;
+        bool                          needDatachannel = false;
+        Dtls *                        dtls            = nullptr;
+        SCTP::Association *           sctp            = nullptr;
         QSharedPointer<RawConnection> rawConnection;
         // QHash<quint16, Connection::Ptr> dataChannels;
     };
@@ -509,7 +510,6 @@ namespace XMPP { namespace Jingle { namespace ICE {
         bool                           offerSent                 = false;
         bool                           aborted                   = false;
         bool                           initialOfferReady         = false;
-        bool                           iceStarted                = false;
         bool                           remoteAcceptedFingerprint = false;
         quint16                        pendingActions            = 0;
         int                            proxiesInDiscoCount       = 0;
@@ -584,8 +584,11 @@ namespace XMPP { namespace Jingle { namespace ICE {
                 pendingActions |= NewFingerprint;
             }
             dtls->connect(dtls, &Dtls::readyRead, q, [this, componentIndex]() {
-                auto d = components[componentIndex].dtls->readDatagram();
-                // pass data to sctp
+                auto &component = components[componentIndex];
+                auto  d         = component.dtls->readDatagram();
+                if (component.sctp) {
+                    component.sctp->writeIncoming(d);
+                }
             });
             dtls->connect(dtls, &Dtls::readyReadOutgoing, q, [this, componentIndex]() {
                 ice->writeDatagram(componentIndex, components[componentIndex].dtls->readOutgoingDatagram());
@@ -689,17 +692,11 @@ namespace XMPP { namespace Jingle { namespace ICE {
 
             ice = new Ice176(q);
 
-            iceStarted = false;
-            //            iceA_status.channelsReady.resize(2);
-            //            iceA_status.channelsReady[0] = false;
-            //            iceA_status.channelsReady[1] = false;
-
             q->connect(ice, &XMPP::Ice176::started, q, [this]() {
                 for (auto const &c : as_const(components)) {
                     if (c.lowOverhead)
                         ice->flagComponentAsLowOverhead(c.componentIndex);
                 }
-                iceStarted = true;
             });
             q->connect(ice, &XMPP::Ice176::error, q, [this](XMPP::Ice176::Error err) {
                 q->_lastReason = Reason(Reason::Condition::FailedTransport, QString("ICE failed: %1").arg(err));
@@ -927,6 +924,24 @@ namespace XMPP { namespace Jingle { namespace ICE {
             // Do we need anything else to do here? connect signals for example?
         }
 
+        void initSctpAssociation(int componentIndex)
+        {
+            auto &c = components[componentIndex];
+            Q_ASSERT(c.sctp == nullptr);
+            c.sctp = new SCTP::Association(q);
+            pendingActions |= NewSctpAssociation;
+            if (q->wasAccepted() && q->state() != State::ApprovedToSend) // like we already sent our decision
+                emit q->updated();
+            if (remoteState->sctpMap.isValid()) {
+                // TODO if we already have associations params try to ruse them instead of making new one
+            }
+            q->connect(c.sctp, &SCTP::Association::readyReadOutgoing, q, [this, componentIndex]() {
+                auto &c   = components[componentIndex];
+                auto  buf = c.sctp->readOutgoing();
+                c.dtls->writeDatagram(buf);
+            });
+        }
+
         Connection::Ptr addDataChannel(TransportFeatures channelFeatures, const QString &label, int &componentIndex)
         {
             if (componentIndex == -1)
@@ -948,13 +963,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
                     qWarning("remote hasn't negotiated sctp association");
                     return {};
                 }
-                c.sctp = new SCTP::Association(q);
-                pendingActions |= NewSctpAssociation;
-                if (q->wasAccepted() && q->state() != State::ApprovedToSend) // like we already sent our decision
-                    emit q->updated();
-                if (remoteState->sctpMap.isValid()) {
-                    // TODO if we already have associations params try to ruse them instead of making new one
-                }
+                initSctpAssociation(componentIndex);
             }
             Q_UNUSED(channelFeatures); // TODO
             return c.sctp->newChannel(SCTP::Reliable, true, 0, 256, label);
@@ -984,6 +993,8 @@ namespace XMPP { namespace Jingle { namespace ICE {
         for (auto const &acceptor : a) {
             int ci = acceptor.componentIndex < 0 ? 0 : acceptor.componentIndex;
             d->ensureComponentExist(ci, acceptor.features & TransportFeature::LowOverhead); // it won't fail
+            if (acceptor.features & TransportFeature::DataOriented)
+                d->components[ci].needDatachannel = true;
         }
 
         if (Dtls::isSupported()
@@ -993,9 +1004,10 @@ namespace XMPP { namespace Jingle { namespace ICE {
 
             for (auto &c : d->components) {
                 d->setupDtls(c.componentIndex);
+                if (isRemote() && c.needDatachannel && !c.sctp) {
+                    d->initSctpAssociation(c.componentIndex);
+                }
             }
-
-            // TODO sctp
         }
 
         auto manager = dynamic_cast<Manager *>(_pad->manager())->d.data();

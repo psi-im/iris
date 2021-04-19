@@ -587,7 +587,7 @@ namespace XMPP { namespace Jingle {
 
     const Jid &Manager::redirectionJid() const { return d->redirectionJid; }
 
-    void Manager::registerApp(ApplicationManager *app)
+    void Manager::registerApplication(ApplicationManager *app)
     {
         auto const &nss = app->ns();
         for (auto const &ns : nss)
