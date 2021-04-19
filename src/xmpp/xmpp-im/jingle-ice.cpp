@@ -1154,9 +1154,8 @@ namespace XMPP { namespace Jingle { namespace ICE {
 
     TransportManagerPad *Manager::pad(Session *session) { return new Pad(this, session); }
 
-    void Manager::closeAll() { emit abortAllRequested(); }
-
-    QStringList Manager::discoFeatures() const { return { NS, NS_DTLS }; }
+    QStringList Manager::ns() const { return { NS }; }
+    QStringList Manager::discoFeatures() const { return { NS, NS_DTLS, SCTP::ns() }; }
 
     void Manager::setBasePort(int port) { d->basePort = port; }
 

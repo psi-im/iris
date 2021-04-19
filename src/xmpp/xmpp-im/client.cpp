@@ -175,13 +175,13 @@ Client::Client(QObject *par) : QObject(par)
 
     d->jingleManager = new Jingle::Manager(this);
     auto ft          = new Jingle::FileTransfer::Manager(this);
-    d->jingleManager->registerApp(Jingle::FileTransfer::NS, ft);
+    d->jingleManager->registerApp(ft);
     d->jingleS5BManager = new Jingle::S5B::Manager(d->jingleManager);
     d->jingleIBBManager = new Jingle::IBB::Manager(d->jingleManager);
     d->jingleICEManager = new Jingle::ICE::Manager(d->jingleManager);
-    d->jingleManager->registerTransport(Jingle::S5B::NS, d->jingleS5BManager);
-    d->jingleManager->registerTransport(Jingle::IBB::NS, d->jingleIBBManager);
-    // d->jingleManager->registerTransport(Jingle::ICE::NS, d->jingleICEManager);
+    d->jingleManager->registerTransport(d->jingleS5BManager);
+    d->jingleManager->registerTransport(d->jingleIBBManager);
+    // d->jingleManager->registerTransport(d->jingleICEManager);
 }
 
 Client::~Client()

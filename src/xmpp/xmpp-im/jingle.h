@@ -335,13 +335,13 @@ namespace Jingle {
         void       setRedirection(const Jid &to);
         const Jid &redirectionJid() const;
 
-        void                   registerApp(const QString &ns, ApplicationManager *app);
+        void                   registerApp(ApplicationManager *app);
         void                   unregisterApp(const QString &ns);
         bool                   isRegisteredApplication(const QString &ns);
         ApplicationManagerPad *applicationPad(Session *      session,
                                               const QString &ns); // allocates new pad on application manager
 
-        void                 registerTransport(const QString &ns, TransportManager *transport);
+        void                 registerTransport(TransportManager *transport);
         void                 unregisterTransport(const QString &ns);
         bool                 isRegisteredTransport(const QString &ns);
         TransportManagerPad *transportPad(Session *      session,

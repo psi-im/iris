@@ -400,7 +400,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
 
     ApplicationManagerPad *Manager::pad(Session *session) { return new Pad(this, session); }
 
-    void Manager::closeAll() { }
+    void Manager::closeAll(const QString &) { }
 
     QStringList Manager::discoFeatures() const { return { NS }; }
 

@@ -1740,8 +1740,6 @@ namespace XMPP { namespace Jingle { namespace S5B {
 
     TransportManagerPad *Manager::pad(Session *session) { return new Pad(this, session); }
 
-    void Manager::closeAll() { emit abortAllRequested(); }
-
     QStringList Manager::discoFeatures() const { return { NS }; }
 
     void Manager::addKeyMapping(const QString &key, Transport *transport) { d->key2transport.insert(key, transport); }

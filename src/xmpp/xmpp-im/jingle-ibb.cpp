@@ -438,8 +438,6 @@ namespace XMPP { namespace Jingle { namespace IBB {
 
     TransportManagerPad *Manager::pad(Session *session) { return new Pad(this, session); }
 
-    void Manager::closeAll() { emit abortAllRequested(); }
-
     QStringList Manager::discoFeatures() const { return { NS }; }
 
     XMPP::Jingle::Connection::Ptr Manager::makeConnection(const Jid &peer, const QString &sid, size_t blockSize)

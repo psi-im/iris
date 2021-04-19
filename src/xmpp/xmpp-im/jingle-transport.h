@@ -243,8 +243,9 @@ namespace XMPP { namespace Jingle {
 
         // this method is supposed to gracefully close all related sessions as a preparation for plugin unload for
         // example
-        virtual void closeAll() = 0;
+        virtual void closeAll(const QString &ns = QString());
 
+        virtual QStringList ns() const;
         virtual QStringList discoFeatures() const = 0;
     signals:
         void abortAllRequested(); // mostly used by transport instances to abort immediately

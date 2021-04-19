@@ -29,6 +29,7 @@ namespace XMPP { namespace Jingle {
     // Application
     //----------------------------------------------------------------------------
     ApplicationManager::ApplicationManager(QObject *parent) : QObject(parent) { }
+    QStringList ApplicationManager::ns() const { return discoFeatures(); }
 
     //----------------------------------------------------------------------------
     // Application

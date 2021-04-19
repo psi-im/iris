@@ -96,9 +96,10 @@ namespace Jingle { namespace ICE {
                                                              Origin                          creator) override;
         TransportManagerPad *                   pad(Session *session) override;
 
-        void closeAll() override;
-
+        QStringList ns() const override;
         QStringList discoFeatures() const override;
+
+        // TODO reimplement closeAll to support old protocols
 
         /**
          * @brief userProxy returns custom (set by user) SOCKS proxy JID
