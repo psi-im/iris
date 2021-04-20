@@ -103,6 +103,8 @@ namespace XMPP { namespace Jingle { namespace SCTP {
 
     Association::Association(QObject *parent) : QObject(parent), d(new AssociationPrivate(this)) { }
 
+    Association::~Association() { }
+
     void Association::setIdSelector(Association::IdSelector selector)
     {
         switch (selector) {

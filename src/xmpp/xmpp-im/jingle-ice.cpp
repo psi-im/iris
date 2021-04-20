@@ -983,7 +983,14 @@ namespace XMPP { namespace Jingle { namespace ICE {
         });
     }
 
-    Transport::~Transport() { qDebug("jingle-ice: destroyed"); }
+    Transport::~Transport()
+    {
+        for (auto &c : d->components) {
+            delete c.sctp;
+            delete c.dtls;
+        }
+        qDebug("jingle-ice: destroyed");
+    }
 
     void Transport::prepare()
     {

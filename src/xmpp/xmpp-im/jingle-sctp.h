@@ -73,6 +73,7 @@ namespace XMPP { namespace Jingle { namespace SCTP {
         enum class IdSelector { Odd, Even };
 
         Association(QObject *parent);
+        ~Association();
 
         void                   setIdSelector(IdSelector selector);
         QByteArray             readOutgoing();
@@ -91,7 +92,7 @@ namespace XMPP { namespace Jingle { namespace SCTP {
 
     signals:
         void readyReadOutgoing();
-        void newChannel(bool);
+        void newIncomingChannel();
 
     private:
         QScopedPointer<AssociationPrivate> d;

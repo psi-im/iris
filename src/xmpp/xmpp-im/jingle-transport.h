@@ -163,7 +163,6 @@ namespace XMPP { namespace Jingle {
         void updated();
         void failed(); // transport ailed for whatever reason. aborted for example. _state will be State::Finished
         void stateChanged();
-        void newChannel(); // emitted when incomming channel doesn't to any channel expectation (see expectChannel)
 
     protected:
         // just updates state and signals about the change. No any loggic attached to the new state

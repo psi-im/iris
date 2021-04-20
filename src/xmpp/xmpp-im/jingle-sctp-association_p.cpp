@@ -29,9 +29,17 @@ namespace XMPP { namespace Jingle { namespace SCTP {
 
     std::weak_ptr<Keeper> Keeper::instance;
 
-    Keeper::Keeper() { DepUsrSCTP::ClassInit(); }
+    Keeper::Keeper()
+    {
+        qDebug("init usrsctp");
+        DepUsrSCTP::ClassInit();
+    }
 
-    Keeper::~Keeper() { DepUsrSCTP::ClassDestroy(); }
+    Keeper::~Keeper()
+    {
+        qDebug("deinit usrsctp");
+        DepUsrSCTP::ClassDestroy();
+    }
 
     Keeper::Ptr Keeper::use()
     {

@@ -44,12 +44,12 @@ namespace XMPP { namespace Jingle { namespace SCTP {
     public:
         Association *                   q;
         Keeper::Ptr                     keeper;
-        RTC::SctpAssociation            assoc;
         QQueue<QByteArray>              outgoingQueue;
         std::mutex                      mutex;
         QHash<quint16, Connection::Ptr> channels; // streamId -> WebRTCDataChannel
         QQueue<Connection::Ptr>         pendingChannels;
         QQueue<Connection::Ptr>         pendingLocalChannels;
+        RTC::SctpAssociation            assoc;
 
         bool    transportConnected = false;
         bool    useOddStreamId     = false;
