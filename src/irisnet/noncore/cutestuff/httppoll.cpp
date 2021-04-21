@@ -469,7 +469,8 @@ void HttpProxyPost::setAuth(const QString &user, const QString &pass)
 
 bool HttpProxyPost::isActive() const { return d->sock.state() != BSocket::Idle; }
 
-void HttpProxyPost::post(const QString &proxyHost, int proxyPort, const QUrl &url, const QByteArray &data, bool asProxy)
+void HttpProxyPost::post(const QString &proxyHost, quint16 proxyPort, const QUrl &url, const QByteArray &data,
+                         bool asProxy)
 {
     resetConnection(true);
 
@@ -487,9 +488,9 @@ void HttpProxyPost::post(const QString &proxyHost, int proxyPort, const QUrl &ur
 #endif
     if (d->sock.state() != QAbstractSocket::ConnectingState) { // in case of http/1.1 it may be connected
         if (d->lastAddress.isNull()) {
-            d->sock.connectToHost(proxyHost, quintptr(proxyPort));
+            d->sock.connectToHost(proxyHost, proxyPort);
         } else {
-            d->sock.connectToHost(d->lastAddress, quintptr(proxyPort));
+            d->sock.connectToHost(d->lastAddress, proxyPort);
         }
     }
 }

@@ -655,7 +655,7 @@ private slots:
         WriteItem wi;
         wi.type = WriteItem::Turn;
         pendingWrites += wi;
-        sock->writeDatagram(buf, stunRelayAddr, quintptr(stunRelayPort));
+        sock->writeDatagram(buf, stunRelayAddr, quint16(stunRelayPort));
     }
 
     void turn_debugLine(const QString &line) { emit q->debugLine(line); }
@@ -761,7 +761,7 @@ void IceLocalTransport::writeDatagram(int path, const QByteArray &buf, const QHo
         wi.addr = addr;
         wi.port = port;
         d->pendingWrites += wi;
-        d->sock->writeDatagram(buf, addr, quintptr(port));
+        d->sock->writeDatagram(buf, addr, quint16(port));
     } else if (path == Relayed) {
         if (d->turn && d->turnActivated)
             d->turn->write(buf, addr, port);

@@ -325,7 +325,7 @@ void AdvancedConnector::connectToServer(const QString &server)
         if (!d->opt_host.isEmpty()) { /* if custom host:port */
             d->host = d->opt_host;
             d->port = d->opt_port;
-            s->connectToHost(d->host, quintptr(d->port));
+            s->connectToHost(d->host, quint16(d->port));
             return;
         } else if (d->opt_ssl != Never) { /* if ssl forced or should be probed */
             d->port = XMPP_LEGACY_PORT;
@@ -362,8 +362,8 @@ void AdvancedConnector::bs_connected()
 #endif
     if (d->proxy.type() == Proxy::None) {
         QHostAddress h = (static_cast<BSocket *>(d->bs))->peerAddress();
-        int          p = (static_cast<BSocket *>(d->bs))->peerPort();
-        setPeerAddress(h, quintptr(p));
+        quint16      p = (static_cast<BSocket *>(d->bs))->peerPort();
+        setPeerAddress(h, p);
     }
 
     // We won't use ssl with HttpPoll since it has ow tls handler enabled for https.
@@ -467,7 +467,7 @@ void AdvancedConnector::bs_error(int x)
         BSocket *s = static_cast<BSocket *>(d->bs);
         d->port    = XMPP_DEFAULT_PORT;
         // at this moment we already tried everything from srv. so just try the host itself
-        s->connectToHost(d->host, quintptr(d->port));
+        s->connectToHost(d->host, quint16(d->port));
     }
     /* otherwise we have no fallbacks and must have failed to connect */
     else {
