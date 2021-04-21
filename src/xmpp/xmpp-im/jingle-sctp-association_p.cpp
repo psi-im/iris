@@ -21,6 +21,8 @@
 #include "jingle-sctp.h"
 #include "jingle-webrtc-datachannel_p.h"
 
+#define SCTP_DEBUG(msg, ...) qDebug("jingle-sctp: " msg, ##__VA_ARGS__)
+
 namespace XMPP { namespace Jingle { namespace SCTP {
 
     static constexpr int MAX_STREAMS          = 65535; // let's change when we need something but webrtc dc.
@@ -61,7 +63,13 @@ namespace XMPP { namespace Jingle { namespace SCTP {
         qDebug("jignle-sctp: on connecting");
     }
 
-    void AssociationPrivate::OnSctpAssociationConnected(RTC::SctpAssociation *) { qDebug("jignle-sctp: on connected"); }
+    void AssociationPrivate::OnSctpAssociationConnected(RTC::SctpAssociation *)
+    {
+        qDebug("jignle-sctp: on connected");
+        for (auto &channel : channels) {
+            channel.staticCast<WebRTCDataChannel>()->connect();
+        }
+    }
 
     void AssociationPrivate::OnSctpAssociationFailed(RTC::SctpAssociation *) { qDebug("jignle-sctp: on failed"); }
 
@@ -111,7 +119,23 @@ namespace XMPP { namespace Jingle { namespace SCTP {
         reply[0] = DCEP_DATA_CHANNEL_ACK;
         write(reply, streamId, PPID_DCEP);
 
-        emit q->newChannel();
+        emit q->newIncomingChannel();
+    }
+
+    void AssociationPrivate::setIdSelector(IdSelector selector)
+    {
+        switch (selector) {
+        case IdSelector::Even:
+            useOddStreamId = false;
+            if (nextStreamId & 1)
+                nextStreamId++;
+            break;
+        case IdSelector::Odd:
+            useOddStreamId = true;
+            if (!(nextStreamId & 1))
+                nextStreamId++;
+            break;
+        }
     }
 
     bool AssociationPrivate::write(const QByteArray &data, quint16 streamId, quint32 ppid)
@@ -147,6 +171,80 @@ namespace XMPP { namespace Jingle { namespace SCTP {
         }
         nextStreamId = id + 2;
         return id;
+    }
+
+    Connection::Ptr AssociationPrivate::newChannel(Reliability reliable, bool ordered, quint32 reliability,
+                                                   quint16 priority, const QString &label, const QString &protocol)
+    {
+        SCTP_DEBUG("adding new channel");
+        int channelType = int(reliable);
+        if (ordered)
+            channelType |= 0x80;
+        auto channel
+            = QSharedPointer<WebRTCDataChannel>::create(this, channelType, priority, reliability, label, protocol);
+        if (transportConnected) {
+            auto id = takeNextStreamId();
+            if (id == 0xffff)
+                return {};
+            channel->setStreamId(id);
+            channels.insert(id, channel);
+            channelsLeft--;
+            qWarning("TODO negotiate datachannel itself");
+        } else {
+            pendingLocalChannels.enqueue(channel);
+        }
+
+        return channel;
+    }
+
+    QList<Connection::Ptr> AssociationPrivate::allChannels() const
+    {
+        QList<Connection::Ptr> ret;
+        ret.reserve(channels.size() + pendingLocalChannels.size());
+        ret += channels.values();
+        ret += pendingLocalChannels;
+        return ret;
+    }
+
+    Connection::Ptr AssociationPrivate::nextChannel()
+    {
+        if (pendingChannels.empty())
+            return {};
+        return pendingChannels.dequeue();
+    }
+
+    void AssociationPrivate::onTransportConnected()
+    {
+        SCTP_DEBUG("starting sctp association");
+        transportConnected = true;
+        while (pendingLocalChannels.size()) {
+            auto channel = pendingLocalChannels.dequeue().staticCast<WebRTCDataChannel>();
+            auto id      = takeNextStreamId();
+            if (id == 0xffff) { // impossible channel
+                channel->onError(QAbstractSocket::SocketResourceError);
+            } else {
+                channel->setStreamId(id);
+                channels.insert(id, channel);
+                channelsLeft--;
+            }
+        }
+        assoc.TransportConnected();
+    }
+
+    void AssociationPrivate::onTransportError(QAbstractSocket::SocketError error)
+    {
+        transportConnected = false;
+        for (auto &c : channels) {
+            c.staticCast<WebRTCDataChannel>()->onError(error);
+        }
+    }
+
+    void AssociationPrivate::onTransportClosed()
+    {
+        transportConnected = false;
+        for (auto &c : channels) {
+            c.staticCast<WebRTCDataChannel>()->onDisconnected(WebRTCDataChannel::TransportClosed);
+        }
     }
 
     void AssociationPrivate::onOutgoingData(const QByteArray &data)

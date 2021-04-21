@@ -22,6 +22,7 @@
 
 #include "jingle-connection.h"
 
+#include <QAbstractSocket>
 #include <QDomElement>
 #include <QObject>
 #include <QScopedPointer>
@@ -33,6 +34,7 @@ class QDomDocument;
 namespace XMPP { namespace Jingle { namespace SCTP {
     enum class Protocol { None, WebRTCDataChannel };
     enum Reliability { Reliable, PartialRexmit, PartialTimers };
+    enum class IdSelector { Odd, Even };
 
     struct MapElement {
         Protocol protocol = Protocol::None;
@@ -70,8 +72,6 @@ namespace XMPP { namespace Jingle { namespace SCTP {
         Q_OBJECT;
 
     public:
-        enum class IdSelector { Odd, Even };
-
         Association(QObject *parent);
         ~Association();
 

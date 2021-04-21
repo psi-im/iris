@@ -105,21 +105,7 @@ namespace XMPP { namespace Jingle { namespace SCTP {
 
     Association::~Association() { }
 
-    void Association::setIdSelector(Association::IdSelector selector)
-    {
-        switch (selector) {
-        case IdSelector::Even:
-            d->useOddStreamId = false;
-            if (d->nextStreamId & 1)
-                d->nextStreamId++;
-            break;
-        case IdSelector::Odd:
-            d->useOddStreamId = true;
-            if (!(d->nextStreamId & 1))
-                d->nextStreamId++;
-            break;
-        }
-    }
+    void Association::setIdSelector(IdSelector selector) { d->setIdSelector(selector); }
 
     QByteArray Association::readOutgoing()
     {
@@ -138,77 +124,20 @@ namespace XMPP { namespace Jingle { namespace SCTP {
 
     int Association::pendingChannels() const { return d->pendingChannels.size(); }
 
-    Connection::Ptr Association::nextChannel()
-    {
-        if (d->pendingChannels.empty())
-            return {};
-        return d->pendingChannels.dequeue();
-    }
+    Connection::Ptr Association::nextChannel() { return d->nextChannel(); }
 
     Connection::Ptr Association::newChannel(Reliability reliable, bool ordered, quint32 reliability, quint16 priority,
                                             const QString &label, const QString &protocol)
     {
-        int channelType = int(reliable);
-        if (ordered)
-            channelType |= 0x80;
-        auto channel
-            = QSharedPointer<WebRTCDataChannel>::create(d.data(), channelType, priority, reliability, label, protocol);
-        if (d->transportConnected) {
-            auto id = d->takeNextStreamId();
-            if (id == 0xffff)
-                return {};
-            channel->setStreamId(id);
-            d->channels.insert(id, channel);
-            d->channelsLeft--;
-            qWarning("TODO negotiate datachannel itself");
-        } else {
-            d->pendingLocalChannels.enqueue(channel);
-        }
-
-        return channel;
+        return d->newChannel(reliable, ordered, reliability, priority, label, protocol);
     }
 
-    QList<Connection::Ptr> Association::channels() const
-    {
-        QList<Connection::Ptr> ret;
-        ret.reserve(d->channels.size() + d->pendingLocalChannels.size());
-        ret += d->channels.values();
-        ret += d->pendingLocalChannels;
-        return ret;
-    }
+    QList<Connection::Ptr> Association::channels() const { return d->allChannels(); }
 
-    void Association::onTransportConnected()
-    {
-        SCTP_DEBUG("starting sctp association");
-        d->transportConnected = true;
-        while (d->pendingLocalChannels.size()) {
-            auto channel = d->pendingLocalChannels.dequeue().staticCast<WebRTCDataChannel>();
-            auto id      = d->takeNextStreamId();
-            if (id == 0xffff) { // impossible channel
-                channel->onError(QAbstractSocket::SocketResourceError);
-            } else {
-                channel->setStreamId(id);
-                d->channels.insert(id, channel);
-                d->channelsLeft--;
-            }
-        }
-        d->assoc.TransportConnected();
-    }
+    void Association::onTransportConnected() { d->onTransportConnected(); }
 
-    void Association::onTransportError(QAbstractSocket::SocketError error)
-    {
-        d->transportConnected = false;
-        for (auto &c : d->channels) {
-            c.staticCast<WebRTCDataChannel>()->onError(error);
-        }
-    }
+    void Association::onTransportError(QAbstractSocket::SocketError error) { d->onTransportError(error); }
 
-    void Association::onTransportClosed()
-    {
-        d->transportConnected = false;
-        for (auto &c : d->channels) {
-            c.staticCast<WebRTCDataChannel>()->onDisconnected(WebRTCDataChannel::TransportClosed);
-        }
-    }
+    void Association::onTransportClosed() { d->onTransportClosed(); }
 
 }}}

@@ -460,6 +460,8 @@ private slots:
             Datagram dg;
 
             QByteArray buf = sock->readDatagram(&from, &fromPort);
+            if (buf.isEmpty()) // it's weird we ever came here, but should relax static analyzer
+                break;
             if ((from == stunBindAddr && fromPort == stunBindPort)
                 || (from == stunRelayAddr && fromPort == stunRelayPort)) {
                 bool haveData = processIncomingStun(buf, from, fromPort, &dg);

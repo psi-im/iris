@@ -21,6 +21,7 @@
 
 #include "irisnet/noncore/sctp/DepUsrSCTP.hpp"
 #include "irisnet/noncore/sctp/SctpAssociation.hpp"
+#include "jingle-sctp.h"
 
 #include <QHash>
 #include <QQueue>
@@ -68,10 +69,19 @@ namespace XMPP { namespace Jingle { namespace SCTP {
         void OnSctpAssociationBufferedAmount(RTC::SctpAssociation *sctpAssociation, uint32_t len) override;
         void OnSctpStreamClosed(RTC::SctpAssociation *sctpAssociation, uint16_t streamId) override;
 
-        void    handleIncomingDataChannelOpen(const QByteArray &data, quint16 streamId);
-        bool    write(const QByteArray &data, quint16 streamId, quint32 ppid);
-        void    close(quint16 streamId);
-        quint16 takeNextStreamId();
+        void                   handleIncomingDataChannelOpen(const QByteArray &data, quint16 streamId);
+        void                   setIdSelector(IdSelector selector);
+        bool                   write(const QByteArray &data, quint16 streamId, quint32 ppid);
+        void                   close(quint16 streamId);
+        quint16                takeNextStreamId();
+        Connection::Ptr        newChannel(Reliability reliable, bool ordered, quint32 reliability, quint16 priority,
+                                          const QString &label, const QString &protocol);
+        QList<Connection::Ptr> allChannels() const;
+        Connection::Ptr        nextChannel();
+
+        void onTransportConnected();
+        void onTransportError(QAbstractSocket::SocketError error);
+        void onTransportClosed();
 
     private Q_SLOTS:
         void onOutgoingData(const QByteArray &data);

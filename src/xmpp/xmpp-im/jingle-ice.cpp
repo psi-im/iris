@@ -597,9 +597,8 @@ namespace XMPP { namespace Jingle { namespace ICE {
                 auto &c = components[componentIndex];
                 if (c.sctp) {
                     // see rfc8864 (6.1) and rfc8832 (6)
-                    c.sctp->setIdSelector(dtls->localFingerprint().setup == Dtls::Active
-                                              ? SCTP::Association::IdSelector::Even
-                                              : SCTP::Association::IdSelector::Odd);
+                    c.sctp->setIdSelector(dtls->localFingerprint().setup == Dtls::Active ? SCTP::IdSelector::Even
+                                                                                         : SCTP::IdSelector::Odd);
                     c.sctp->onTransportConnected();
                 }
                 if (c.rawConnection)
@@ -940,6 +939,8 @@ namespace XMPP { namespace Jingle { namespace ICE {
                 auto  buf = c.sctp->readOutgoing();
                 c.dtls->writeDatagram(buf);
             });
+            q->connect(c.sctp, &SCTP::Association::newIncomingChannel, q,
+                       [this, componentIndex]() { qDebug("new incoming sctp channel"); });
         }
 
         Connection::Ptr addDataChannel(TransportFeatures channelFeatures, const QString &label, int &componentIndex)
