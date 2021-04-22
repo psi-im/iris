@@ -767,7 +767,7 @@ void HttpProxyGetStream::get(const QString &proxyHost, int proxyPort, const QStr
     else
         fprintf(stderr, ", auth {%s,%s}\n", d->user.latin1(), d->pass.latin1());
 #endif
-    d->sock.connectToHost(proxyHost, quintptr(proxyPort));
+    d->sock.connectToHost(proxyHost, quint16(proxyPort));
 }
 
 void HttpProxyGetStream::stop() { resetConnection(); }

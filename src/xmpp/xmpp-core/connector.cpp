@@ -331,7 +331,7 @@ void AdvancedConnector::connectToServer(const QString &server)
             d->port = XMPP_LEGACY_PORT;
         }
 
-        s->connectToHost(XMPP_CLIENT_SRV, XMPP_CLIENT_TRANSPORT, d->host, quintptr(d->port));
+        s->connectToHost(XMPP_CLIENT_SRV, XMPP_CLIENT_TRANSPORT, d->host, quint16(d->port));
     }
 }
 
