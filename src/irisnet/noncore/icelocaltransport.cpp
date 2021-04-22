@@ -260,8 +260,8 @@ public:
 
         pool = StunTransactionPool::Ptr::create(StunTransaction::Udp);
         pool->setDebugLevel((StunTransactionPool::DebugLevel)debugLevel);
-        connect(pool.data(), SIGNAL(outgoingMessage(QByteArray, QHostAddress, int)),
-                SLOT(pool_outgoingMessage(QByteArray, QHostAddress, int)));
+        connect(pool.data(), SIGNAL(outgoingMessage(QByteArray, QHostAddress, quint16)),
+                SLOT(pool_outgoingMessage(QByteArray, QHostAddress, quint16)));
         connect(pool.data(), SIGNAL(needAuthParams()), SLOT(pool_needAuthParams()));
         connect(pool.data(), SIGNAL(debugLine(QString)), SLOT(pool_debugLine(QString)));
 

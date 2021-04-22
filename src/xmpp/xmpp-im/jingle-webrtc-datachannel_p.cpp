@@ -25,9 +25,11 @@
 namespace XMPP { namespace Jingle { namespace SCTP {
 
     WebRTCDataChannel::WebRTCDataChannel(AssociationPrivate *association, quint8 channelType, quint32 reliability,
-                                         quint16 priority, const QString &label, const QString &protocol) :
+                                         quint16 priority, const QString &label, const QString &protocol,
+                                         DcepState state) :
         association(association),
-        channelType(channelType), reliability(reliability), priority(priority), label(label), protocol(protocol)
+        channelType(channelType), reliability(reliability), priority(priority), label(label), protocol(protocol),
+        dcepState(state)
     {
     }
 
@@ -71,12 +73,16 @@ namespace XMPP { namespace Jingle { namespace SCTP {
         }
         QString label    = QString::fromUtf8(data.data() + 12, labelLength);
         QString protocol = QString::fromUtf8(data.data() + protoOff, protocolLength);
-        return QSharedPointer<WebRTCDataChannel>::create(assoc, channelType, priority, reliability, label, protocol);
+        // start with DcepNegotiated since caller will ack asap
+        auto channel       = QSharedPointer<WebRTCDataChannel>::create(assoc, channelType, priority, reliability, label,
+                                                                 protocol, DcepNegotiated);
+        channel->_isRemote = true;
+        return channel;
     }
 
     void WebRTCDataChannel::connect()
     {
-        Q_ASSERT(streamId == -1);
+        // Q_ASSERT(streamId == -1);
         auto utf8Label    = label.toUtf8();
         auto utf8Protocol = protocol.toUtf8();
 
@@ -94,6 +100,7 @@ namespace XMPP { namespace Jingle { namespace SCTP {
         data.replace(12, utf8Label.size(), utf8Label);
         data.replace(protoOff, utf8Protocol.size(), utf8Protocol);
 
+        dcepState = DcepOpening;
         association->write(data, streamId, PPID_DCEP);
     }
 
@@ -103,6 +110,16 @@ namespace XMPP { namespace Jingle { namespace SCTP {
     {
         Q_UNUSED(maxSize) // TODO or not?
         return datagrams.size() ? datagrams.takeFirst() : NetworkDatagram();
+    }
+
+    bool WebRTCDataChannel::sendDatagram(const NetworkDatagram &data)
+    {
+        bool        ordered  = !(channelType & 0x80);
+        Reliability reliable = ordered ? Reliable
+            : (channelType & 0x3) == 1 ? PartialRexmit
+            : (channelType & 0x3) == 2 ? PartialTimers
+                                       : Reliable;
+        return association->write(data.data(), streamId, PPID_BINARY, reliable, ordered, reliability);
     }
 
     qint64 WebRTCDataChannel::bytesAvailable() const { return 0; }
@@ -117,13 +134,6 @@ namespace XMPP { namespace Jingle { namespace SCTP {
         return TransportFeature::DataOriented | TransportFeature::Reliable | TransportFeature::Ordered
             | TransportFeature::Fast;
     }
-
-    qint64 WebRTCDataChannel::writeData(const char *data, qint64 maxSize)
-    {
-        return 0; // client->write(data, maxSize);
-    }
-
-    qint64 WebRTCDataChannel::readData(char *data, qint64 maxSize) { return 0; }
 
     void WebRTCDataChannel::onConnected()
     {
@@ -142,14 +152,18 @@ namespace XMPP { namespace Jingle { namespace SCTP {
             return;
         streamId         = -1;
         disconnectReason = reason;
-        setOpenMode(QIODevice::ReadOnly);
+        setOpenMode(openMode() & ~QIODevice::WriteOnly);
         emit disconnected();
     }
 
     void WebRTCDataChannel::onIncomingData(const QByteArray &data, quint32 ppid)
     {
         if (ppid == PPID_DCEP) {
-            if (data.isEmpty() || data[0] != DCEP_DATA_CHANNEL_ACK || !waitingAck) {
+            if (dcepState == NoDcep) {
+                qWarning("jingle-sctp: got dcep on prenegotiated datachannel");
+                return;
+            }
+            if (data.isEmpty() || data[0] != DCEP_DATA_CHANNEL_ACK || dcepState != DcepOpening) {
                 qWarning("jingle-sctp: unexpected DCEP. ignoring");
                 return;
             }

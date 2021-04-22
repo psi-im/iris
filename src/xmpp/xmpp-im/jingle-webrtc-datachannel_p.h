@@ -21,30 +21,37 @@
 
 namespace XMPP { namespace Jingle { namespace SCTP {
 
-    enum : quint32 { PPID_DCEP = 50 };
+    enum : quint32 {
+        PPID_DCEP         = 50,
+        PPID_STRING       = 51,
+        PPID_BINARY       = 53,
+        PPID_STRING_EMPTY = 56,
+        PPID_BINARY_EMPTY = 57
+    };
     enum : quint8 { DCEP_DATA_CHANNEL_ACK = 0x02, DCEP_DATA_CHANNEL_OPEN = 0x03 };
 
     class AssociationPrivate;
     class WebRTCDataChannel : public XMPP::Jingle::Connection {
         Q_OBJECT
     public:
-        enum DisconnectReason { TransportClosed, SctpClosed, ChannelClosed };
+        enum DisconnectReason { TransportClosed, SctpClosed, ChannelClosed, ChannelReplaced };
+        enum DcepState { NoDcep, DcepOpening, DcepNegotiated };
 
         AssociationPrivate *   association;
         QList<NetworkDatagram> datagrams;
         DisconnectReason       disconnectReason = ChannelClosed;
-        bool                   waitingAck       = false;
 
-        quint8  channelType = 0;
-        quint32 reliability = 0;
-        quint16 priority    = 256;
-        QString label;
-        QString protocol;
-        int     streamId = -1;
+        quint8    channelType = 0;
+        quint32   reliability = 0;
+        quint16   priority    = 256;
+        QString   label;
+        QString   protocol;
+        int       streamId  = -1;
+        DcepState dcepState = NoDcep;
 
         WebRTCDataChannel(AssociationPrivate *association, quint8 channelType = 0, quint32 reliability = 0,
-                          quint16 priority = 256, const QString &label = QString(),
-                          const QString &protocol = QString());
+                          quint16 priority = 256, const QString &label = QString(), const QString &protocol = QString(),
+                          DcepState state = NoDcep);
         static QSharedPointer<WebRTCDataChannel> fromChannelOpen(AssociationPrivate *assoc, const QByteArray &data);
 
         void setStreamId(quint16 id) { streamId = id; }
@@ -52,14 +59,11 @@ namespace XMPP { namespace Jingle { namespace SCTP {
 
         bool              hasPendingDatagrams() const override;
         NetworkDatagram   receiveDatagram(qint64 maxSize = -1) override;
+        bool              sendDatagram(const NetworkDatagram &data) override;
         qint64            bytesAvailable() const override;
         qint64            bytesToWrite() const override;
         void              close() override;
         TransportFeatures features() const override;
-
-    protected:
-        qint64 writeData(const char *data, qint64 maxSize);
-        qint64 readData(char *data, qint64 maxSize);
 
     public:
         void onConnected();

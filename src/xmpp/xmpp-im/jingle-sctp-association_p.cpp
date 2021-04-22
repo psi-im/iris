@@ -112,6 +112,11 @@ namespace XMPP { namespace Jingle { namespace SCTP {
 
         channel->setStreamId(streamId);
         pendingChannels.append(channel);
+        auto it = channels.constFind(streamId);
+        if (it != channels.constEnd()) {
+            qWarning("datachannel %u was replaced", streamId);
+            (*it).staticCast<WebRTCDataChannel>()->onDisconnected(WebRTCDataChannel::ChannelReplaced);
+        }
         channels.insert(streamId, channel);
 
         // acknowledge channel open instantly
@@ -138,12 +143,15 @@ namespace XMPP { namespace Jingle { namespace SCTP {
         }
     }
 
-    bool AssociationPrivate::write(const QByteArray &data, quint16 streamId, quint32 ppid)
+    bool AssociationPrivate::write(const QByteArray &data, quint16 streamId, quint32 ppid, Reliability reliable,
+                                   bool ordered, quint32 reliability)
     {
-        qDebug("jignle-sctp: write");
+        qDebug("jignle-sctp: write %d bytes on stream %u with ppid %u", data.size(), streamId, ppid);
         RTC::DataConsumer consumer;
-        consumer.sctpParameters.streamId = streamId;
-        consumer.sctpParameters.ordered  = true;
+        consumer.sctpParameters.streamId          = streamId;
+        consumer.sctpParameters.ordered           = ordered; // ordered=true also enables reliability
+        consumer.sctpParameters.maxPacketLifeTime = reliable == PartialTimers ? reliability : 0;
+        consumer.sctpParameters.maxRetransmits    = reliable == PartialRexmit ? reliability : 0;
         bool success;
         assoc.SendSctpMessage(
             &consumer, ppid, reinterpret_cast<const uint8_t *>(data.data()), data.size(),

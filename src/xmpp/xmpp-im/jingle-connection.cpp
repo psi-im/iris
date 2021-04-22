@@ -25,8 +25,27 @@ namespace XMPP { namespace Jingle {
 
     NetworkDatagram Connection::receiveDatagram(qint64 maxSize)
     {
+        qCritical("Calling unimplemented function receiveDatagram");
         Q_UNUSED(maxSize)
         return NetworkDatagram();
+    }
+
+    bool Connection::sendDatagram(const NetworkDatagram &)
+    {
+        qCritical("Calling unimplemented function sendDatagram");
+        return false;
+    }
+
+    qint64 Connection::writeData(const char *, qint64)
+    {
+        qCritical("Calling unimplemented function writeData");
+        return 0;
+    }
+
+    qint64 Connection::readData(char *, qint64)
+    {
+        qCritical("Calling unimplemented function readData");
+        return 0;
     }
 
     size_t Connection::blockSize() const

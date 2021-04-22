@@ -131,7 +131,7 @@ public:
     QByteArray               id;
     QByteArray               packet;
     QHostAddress             to_addr;
-    int                      to_port;
+    quint16                  to_port;
 
     int     rto, rc, rm, ti;
     int     tries;
@@ -171,7 +171,7 @@ public:
         t->deleteLater();
     }
 
-    void start(StunTransactionPool::Ptr _pool, const QHostAddress &toAddress, int toPort)
+    void start(StunTransactionPool::Ptr _pool, const QHostAddress &toAddress, quint16 toPort)
     {
         pool    = _pool;
         mode    = pool->d->mode;
@@ -326,7 +326,7 @@ private:
         pool->d->transmit(q);
     }
 
-    bool checkActiveAndFrom(const QHostAddress &from_addr, int from_port)
+    bool checkActiveAndFrom(const QHostAddress &from_addr, quint16 from_port)
     {
         if (!active)
             return false;
