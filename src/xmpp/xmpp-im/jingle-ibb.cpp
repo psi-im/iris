@@ -364,7 +364,7 @@ namespace XMPP { namespace Jingle { namespace IBB {
         return upd;
     }
 
-    bool Transport::isValid() const { return d; }
+    bool Transport::isValid() const { return bool(d); }
 
     TransportFeatures Transport::features() const
     {

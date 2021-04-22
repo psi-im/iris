@@ -86,7 +86,7 @@ public:
             return QByteArray();
 
         QByteArray buf;
-        buf.resize(sock->pendingDatagramSize());
+        buf.resize(int(sock->pendingDatagramSize()));
         sock->readDatagram(buf.data(), buf.size(), address, port);
         return buf;
     }
@@ -146,7 +146,7 @@ public:
     class Datagram {
     public:
         QHostAddress addr;
-        int          port;
+        quint16      port;
         QByteArray   buf;
     };
 
@@ -545,7 +545,7 @@ private slots:
         }
     }
 
-    void pool_outgoingMessage(const QByteArray &packet, const QHostAddress &toAddress, int toPort)
+    void pool_outgoingMessage(const QByteArray &packet, const QHostAddress &toAddress, quint16 toPort)
     {
         // warning: read StunTransactionPool docs before modifying
         //   this function
@@ -659,7 +659,7 @@ private slots:
         WriteItem wi;
         wi.type = WriteItem::Turn;
         pendingWrites += wi;
-        sock->writeDatagram(buf, stunRelayAddr, stunRelayPort);
+        sock->writeDatagram(buf, stunRelayAddr, quint16(stunRelayPort));
     }
 
     void turn_debugLine(const QString &line) { emit q->debugLine(line); }
@@ -742,7 +742,7 @@ bool IceLocalTransport::hasPendingDatagrams(int path) const
     }
 }
 
-QByteArray IceLocalTransport::readDatagram(int path, QHostAddress *addr, int *port)
+QByteArray IceLocalTransport::readDatagram(int path, QHostAddress *addr, quint16 *port)
 {
     QList<Private::Datagram> *in = nullptr;
     if (path == Direct)
@@ -769,7 +769,7 @@ void IceLocalTransport::writeDatagram(int path, const QByteArray &buf, const QHo
         wi.addr = addr;
         wi.port = port;
         d->pendingWrites += wi;
-        d->sock->writeDatagram(buf, addr, port);
+        d->sock->writeDatagram(buf, addr, quint16(port));
     } else if (path == Relayed) {
         if (d->turn && d->turnActivated)
             d->turn->write(buf, addr, port);

@@ -461,7 +461,7 @@ namespace XMPP { namespace Jingle { namespace S5B {
 
     void Candidate::setPort(quint16 port) { d->port = port; }
 
-    quint16 Candidate::localPort() const { return d->server ? d->server->serverPort() : 0; }
+    quint16 Candidate::localPort() const { return quint16(d->server ? d->server->serverPort() : 0); }
 
     QHostAddress Candidate::localAddress() const { return d->server ? d->server->serverAddress() : QHostAddress(); }
 

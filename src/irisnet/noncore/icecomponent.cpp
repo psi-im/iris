@@ -311,7 +311,7 @@ public:
             auto it = std::find_if(udpTransports.begin(), udpTransports.end(),
                                    [&](auto const &a) { return a->sock == lt; });
             Q_ASSERT(it != udpTransports.end());
-            addrAt = std::distance(udpTransports.begin(), it);
+            addrAt = int(std::distance(udpTransports.begin(), it));
             if (path == 1) {
                 // lower priority, but not as far as IceTurnTransport
                 addrAt += 512;
