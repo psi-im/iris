@@ -133,7 +133,7 @@ namespace XMPP { namespace Jingle { namespace SCTP {
     {
         // FIXME return proper featuers
         return TransportFeature::DataOriented | TransportFeature::Reliable | TransportFeature::Ordered
-            | TransportFeature::Fast;
+            | TransportFeature::Fast | TransportFeature::MessageOriented;
     }
 
     void WebRTCDataChannel::onConnected()

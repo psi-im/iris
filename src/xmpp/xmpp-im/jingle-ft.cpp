@@ -502,9 +502,16 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
                 return;
             }
             // qDebug("JINGLE-FT write %d bytes to connection", data.size());
-            if (connection->write(data) == -1) {
-                handleStreamFail();
-                return;
+            if (connection->features() & TransportFeature::MessageOriented) {
+                if (!connection->sendDatagram(data)) {
+                    handleStreamFail();
+                    return;
+                }
+            } else {
+                if (connection->write(data) == -1) {
+                    handleStreamFail();
+                    return;
+                }
             }
             emit q->progress(device->pos());
             bytesLeft -= data.size();
@@ -513,15 +520,20 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
         void readNextBlockFromTransport()
         {
             qint64 bytesAvail;
-            while (bytesLeft && (bytesAvail = connection->bytesAvailable())) {
-                qint64 sz = 65536; // shall we respect transport->blockSize() ?
-                if (sz > bytesLeft) {
-                    sz = bytesLeft;
+            while (bytesLeft && ((bytesAvail = connection->bytesAvailable()) || (connection->hasPendingDatagrams()))) {
+                QByteArray data;
+                if (connection->features() & TransportFeature::MessageOriented) {
+                    data = connection->receiveDatagram().data();
+                } else {
+                    qint64 sz = 65536; // shall we respect transport->blockSize() ?
+                    if (sz > bytesLeft) {
+                        sz = bytesLeft;
+                    }
+                    if (sz > bytesAvail) {
+                        sz = bytesAvail;
+                    }
+                    data = connection->read(sz);
                 }
-                if (sz > bytesAvail) {
-                    sz = bytesAvail;
-                }
-                QByteArray data = connection->read(sz);
                 // qDebug("JINGLE-FT read %d bytes from connection", data.size());
                 if (data.isEmpty()) {
                     handleStreamFail();
@@ -532,7 +544,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
                     return;
                 }
                 emit q->progress(device->pos());
-                bytesLeft -= sz;
+                bytesLeft -= data.size();
             }
             if (!bytesLeft) {
                 // TODO send <received>
@@ -543,6 +555,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
 
         void onConnectionConnected(Connection::Ptr newConnection)
         {
+            qDebug("jingle-ft: connected. ready to send user data");
             connection = newConnection;
             lastReason = Reason();
             lastError.reset();
