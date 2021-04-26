@@ -438,7 +438,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
 
         bool hasPendingDatagrams() const override { return datagrams.size() > 0; }
 
-        NetworkDatagram receiveDatagram(qint64 maxSize = -1) override
+        NetworkDatagram readDatagram(qint64 maxSize = -1) override
         {
             Q_UNUSED(maxSize) // TODO or not?
             return datagrams.size() ? datagrams.takeFirst() : NetworkDatagram();

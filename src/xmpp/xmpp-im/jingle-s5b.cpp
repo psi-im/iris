@@ -79,7 +79,7 @@ namespace XMPP { namespace Jingle { namespace S5B {
 
         bool hasPendingDatagrams() const { return datagrams.size() > 0; }
 
-        NetworkDatagram receiveDatagram(qint64 maxSize = -1)
+        NetworkDatagram readDatagram(qint64 maxSize = -1)
         {
             Q_UNUSED(maxSize) // TODO or not?
             return datagrams.size() ? datagrams.takeFirst() : NetworkDatagram();

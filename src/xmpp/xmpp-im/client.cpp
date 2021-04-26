@@ -181,7 +181,7 @@ Client::Client(QObject *par) : QObject(par)
     d->jingleICEManager = new Jingle::ICE::Manager(d->jingleManager);
     d->jingleManager->registerTransport(d->jingleS5BManager);
     d->jingleManager->registerTransport(d->jingleIBBManager);
-    // d->jingleManager->registerTransport(d->jingleICEManager);
+    d->jingleManager->registerTransport(d->jingleICEManager);
 }
 
 Client::~Client()
