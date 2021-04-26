@@ -38,6 +38,7 @@
 #if QT_VERSION >= QT_VERSION_CHECK(5, 10, 0)
 #include <QRandomGenerator>
 #endif
+#include <QCoreApplication>
 
 namespace XMPP { namespace Jingle {
     const QString NS(QStringLiteral("urn:xmpp:jingle:1"));
@@ -179,25 +180,34 @@ namespace XMPP { namespace Jingle {
     //----------------------------------------------------------------------------
     // Reason
     //----------------------------------------------------------------------------
-    static const QMap<QString, Reason::Condition> reasonConditions = {
-        { QStringLiteral("alternative-session"), Reason::AlternativeSession },
-        { QStringLiteral("busy"), Reason::Busy },
-        { QStringLiteral("cancel"), Reason::Cancel },
-        { QStringLiteral("connectivity-error"), Reason::ConnectivityError },
-        { QStringLiteral("decline"), Reason::Decline },
-        { QStringLiteral("expired"), Reason::Expired },
-        { QStringLiteral("failed-application"), Reason::FailedApplication },
-        { QStringLiteral("failed-transport"), Reason::FailedTransport },
-        { QStringLiteral("general-error"), Reason::GeneralError },
-        { QStringLiteral("gone"), Reason::Gone },
-        { QStringLiteral("incompatible-parameters"), Reason::IncompatibleParameters },
-        { QStringLiteral("media-error"), Reason::MediaError },
-        { QStringLiteral("security-error"), Reason::SecurityError },
-        { QStringLiteral("success"), Reason::Success },
-        { QStringLiteral("timeout"), Reason::Timeout },
-        { QStringLiteral("unsupported-applications"), Reason::UnsupportedApplications },
-        { QStringLiteral("unsupported-transports"), Reason::UnsupportedTransports },
-    };
+    using ReasonMap = QMap<QString, Reason::Condition>;
+    const ReasonMap &reasonConditions()
+    {
+        static std::unique_ptr<ReasonMap> conditions;
+        if (!conditions) {
+            conditions.reset(new ReasonMap({
+                { QStringLiteral("alternative-session"), Reason::AlternativeSession },
+                { QStringLiteral("busy"), Reason::Busy },
+                { QStringLiteral("cancel"), Reason::Cancel },
+                { QStringLiteral("connectivity-error"), Reason::ConnectivityError },
+                { QStringLiteral("decline"), Reason::Decline },
+                { QStringLiteral("expired"), Reason::Expired },
+                { QStringLiteral("failed-application"), Reason::FailedApplication },
+                { QStringLiteral("failed-transport"), Reason::FailedTransport },
+                { QStringLiteral("general-error"), Reason::GeneralError },
+                { QStringLiteral("gone"), Reason::Gone },
+                { QStringLiteral("incompatible-parameters"), Reason::IncompatibleParameters },
+                { QStringLiteral("media-error"), Reason::MediaError },
+                { QStringLiteral("security-error"), Reason::SecurityError },
+                { QStringLiteral("success"), Reason::Success },
+                { QStringLiteral("timeout"), Reason::Timeout },
+                { QStringLiteral("unsupported-applications"), Reason::UnsupportedApplications },
+                { QStringLiteral("unsupported-transports"), Reason::UnsupportedTransports },
+            }));
+            QObject::connect(qApp, &QCoreApplication::destroyed, []() { conditions.release(); });
+        }
+        return *conditions;
+    }
 
     class Reason::Private : public QSharedData {
     public:
@@ -230,7 +240,7 @@ namespace XMPP { namespace Jingle {
             } else if (c.namespaceURI() != rns) {
                 // TODO add here all the extensions to reason.
             } else {
-                condition = reasonConditions.value(c.tagName());
+                condition = reasonConditions().value(c.tagName());
             }
         }
 
@@ -270,7 +280,7 @@ namespace XMPP { namespace Jingle {
     QDomElement Reason::toXml(QDomDocument *doc) const
     {
         if (d && d->cond != NoReason) {
-            for (auto r = reasonConditions.cbegin(); r != reasonConditions.cend(); ++r) {
+            for (auto r = reasonConditions().cbegin(); r != reasonConditions().cend(); ++r) {
                 if (r.value() == d->cond) {
                     QDomElement e = doc->createElement(QLatin1String("reason"));
                     e.appendChild(doc->createElement(r.key()));
@@ -680,10 +690,10 @@ namespace XMPP { namespace Jingle {
     QStringList Manager::discoFeatures() const
     {
         QStringList ret;
-        for (auto const &mgr : d->applicationManagers) {
+        for (auto const &mgr : qAsConst(d->applicationManagers)) {
             ret += mgr->discoFeatures();
         }
-        for (auto const &mgr : d->transportManagers) {
+        for (auto const &mgr : qAsConst(d->transportManagers)) {
             ret += mgr->discoFeatures();
         }
         return ret;
