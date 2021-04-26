@@ -419,7 +419,8 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
 
     QStringList Manager::availableTransports() const
     {
-        return jingleManager->availableTransports(TransportFeature::Reliable | TransportFeature::DataOriented);
+        return jingleManager->availableTransports(TransportFeature::Reliable | TransportFeature::Ordered
+                                                  | TransportFeature::DataOriented);
     }
 
     //----------------------------------------------------------------------------

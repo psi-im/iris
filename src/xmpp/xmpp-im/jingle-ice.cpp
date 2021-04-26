@@ -1168,7 +1168,8 @@ namespace XMPP { namespace Jingle { namespace ICE {
     {
         return TransportFeature::HighProbableConnect | TransportFeature::Reliable | TransportFeature::Unreliable
             | TransportFeature::MessageOriented | TransportFeature::LiveOriented
-            | (Dtls::isSupported() ? TransportFeature::DataOriented : TransportFeature(0));
+            | (Dtls::isSupported() ? (TransportFeature::DataOriented | TransportFeature::Ordered)
+                                   : TransportFeature(0));
     }
 
     void Manager::setJingleManager(XMPP::Jingle::Manager *jm) { d->jingleManager = jm; }

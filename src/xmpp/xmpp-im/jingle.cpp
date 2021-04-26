@@ -544,10 +544,10 @@ namespace XMPP { namespace Jingle {
         Manager *              manager;
         QScopedPointer<JTPush> pushTask;
         // ns -> application
-        QMap<QString, QPointer<ApplicationManager>> applicationManagers;
+        std::map<QString, QPointer<ApplicationManager>> applicationManagers;
         // ns -> parser function
-        QMap<QString, QPointer<TransportManager>> transportManagers;
-        std::function<bool(const Jid &)>          remoteJidCecker;
+        std::map<QString, QPointer<TransportManager>> transportManagers;
+        std::function<bool(const Jid &)>              remoteJidCecker;
 
         // when set/valid any incoming session initiate will be replied with redirection error
         Jid                                   redirectionJid;
@@ -578,10 +578,10 @@ namespace XMPP { namespace Jingle {
     Manager::~Manager()
     {
         for (auto &m : d->transportManagers) {
-            m->setJingleManager(nullptr);
+            m.second->setJingleManager(nullptr);
         }
         for (auto &m : d->applicationManagers) {
-            m->setJingleManager(nullptr);
+            m.second->setJingleManager(nullptr);
         }
     }
 
@@ -601,48 +601,46 @@ namespace XMPP { namespace Jingle {
     {
         auto const &nss = app->ns();
         for (auto const &ns : nss)
-            d->applicationManagers.insert(ns, app);
+            d->applicationManagers.emplace(ns, app);
         app->setJingleManager(this);
     }
 
     void Manager::unregisterApp(const QString &ns)
     {
-        auto appManager = d->applicationManagers.value(ns);
-        if (appManager) {
-            appManager->closeAll(ns);
-            d->applicationManagers.remove(ns);
+        auto node = d->applicationManagers.extract(ns);
+        if (node) {
+            node.mapped()->closeAll(ns);
         }
     }
 
-    bool Manager::isRegisteredApplication(const QString &ns) { return d->applicationManagers.contains(ns); }
+    bool Manager::isRegisteredApplication(const QString &ns) { return d->applicationManagers.count(ns); }
 
     ApplicationManagerPad *Manager::applicationPad(Session *session, const QString &ns)
     {
-        auto am = d->applicationManagers.value(ns);
-        if (!am) {
+        auto it = d->applicationManagers.find(ns);
+        if (it == d->applicationManagers.end()) {
             return nullptr;
         }
-        return am->pad(session);
+        return it->second->pad(session);
     }
 
     void Manager::registerTransport(TransportManager *transport)
     {
         auto const &nss = transport->ns();
         for (auto const &ns : nss)
-            d->transportManagers.insert(ns, transport);
+            d->transportManagers.emplace(ns, transport);
         transport->setJingleManager(this);
     }
 
     void Manager::unregisterTransport(const QString &ns)
     {
-        auto trManager = d->transportManagers.value(ns);
+        auto trManager = d->transportManagers.extract(ns);
         if (trManager) {
-            trManager->closeAll(ns);
-            d->transportManagers.remove(ns);
+            trManager.mapped()->closeAll(ns);
         }
     }
 
-    bool Manager::isRegisteredTransport(const QString &ns) { return d->transportManagers.contains(ns); }
+    bool Manager::isRegisteredTransport(const QString &ns) { return d->transportManagers.count(ns); }
 
     bool Manager::isAllowedParty(const Jid &jid) const
     {
@@ -668,33 +666,36 @@ namespace XMPP { namespace Jingle {
 
     TransportManagerPad *Manager::transportPad(Session *session, const QString &ns)
     {
-        auto transportManager = d->transportManagers.value(ns);
-        if (!transportManager) {
+        auto transportManager = d->transportManagers.find(ns);
+        if (transportManager == d->transportManagers.end()) {
             return nullptr;
         }
-        return transportManager->pad(session);
+        return transportManager->second->pad(session);
     }
 
     QStringList Manager::availableTransports(const TransportFeatures &features) const
     {
-        QMap<int, QString> ret;
-        for (auto it = d->transportManagers.cbegin(); it != d->transportManagers.cend(); ++it) {
-            if (((*it)->features() & features) == features) {
-                ret.insert((*it)->features(), it.key());
-            }
+        std::vector<std::pair<int, QString>> prio;
+        prio.reserve(d->transportManagers.size());
+        for (auto const &[ns, m] : d->transportManagers) {
+            if (m->canMakeConnection(features, ns))
+                prio.emplace_back(m->features(), ns);
         }
+        std::sort(prio.begin(), prio.end(), [](auto const &a, auto const &b) { return a.first < b.first; });
+        QStringList nss;
+        std::transform(prio.begin(), prio.end(), std::back_inserter(nss), [](auto const &p) { return p.second; });
+        return nss;
         // sorting by features is totally unreliable, so we have TransportSelector to do better job
-        return ret.values();
     }
 
     QStringList Manager::discoFeatures() const
     {
         QStringList ret;
-        for (auto const &mgr : qAsConst(d->applicationManagers)) {
-            ret += mgr->discoFeatures();
+        for (auto const &mgr : d->applicationManagers) {
+            ret += mgr.second->discoFeatures();
         }
-        for (auto const &mgr : qAsConst(d->transportManagers)) {
-            ret += mgr->discoFeatures();
+        for (auto const &mgr : d->transportManagers) {
+            ret += mgr.second->discoFeatures();
         }
         return ret;
     }

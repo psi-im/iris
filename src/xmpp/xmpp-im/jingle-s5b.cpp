@@ -1710,7 +1710,8 @@ namespace XMPP { namespace Jingle { namespace S5B {
 
     TransportFeatures Manager::features() const
     {
-        return TransportFeature::Reliable | TransportFeature::Fast | TransportFeature::DataOriented;
+        return TransportFeature::Reliable | TransportFeature::Fast | TransportFeature::DataOriented
+            | TransportFeature::Ordered;
     }
 
     void Manager::setJingleManager(XMPP::Jingle::Manager *jm)
