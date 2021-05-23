@@ -101,7 +101,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
         void addData(const QByteArray &data = QByteArray());
 
     signals:
-        void hashReady(const XMPP::Jingle::FileTransfer::File &file);
+        void hashReady(const XMPP::Jingle::FileTransfer::Range &range);
 
     private:
         class Private;

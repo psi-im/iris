@@ -471,10 +471,8 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
                     return;
 
                 Range range(d->startPos, d->size);
-                File  file;
-                file.setHashes(QList<Hash>() << h);
-                file.setRange(range);
-                emit hashReady(file);
+                range.hashes << h;
+                emit hashReady(range);
                 d->startPos += d->size;
                 d->size = 0;
                 if (!data.isEmpty())
