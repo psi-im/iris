@@ -29,6 +29,7 @@
 #include "stuntypes.h"
 #include "udpportreserver.h"
 
+#include <QDeadlineTimer>
 #include <QEvent>
 #include <QNetworkInterface>
 #include <QQueue>
