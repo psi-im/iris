@@ -2,6 +2,7 @@
 
 #include "xmpp_client.h"
 #include "xmpp_jid.h"
+#include "xmpp_serverinfomanager.h"
 #include "xmpp_xmlcommon.h"
 
 namespace XMPP {
@@ -55,10 +56,10 @@ bool JT_ExternalServiceDiscovery::take(const QDomElement &x)
         }
         QString serviceTag(QLatin1String("service"));
         for (auto el = query.firstChildElement(serviceTag); !el.isNull(); el = el.nextSiblingElement(serviceTag)) {
-            services_.append(Service {});
-            auto &s = services_.last();
-            if (!s.parse(el)) {
-                services_.removeLast();
+            // services_.append(ExternalService {});
+            auto s = std::make_shared<ExternalService>();
+            if (s->parse(el)) {
+                services_.append(s);
             }
         }
         setSuccess();
@@ -69,7 +70,7 @@ bool JT_ExternalServiceDiscovery::take(const QDomElement &x)
     return true;
 }
 
-bool JT_ExternalServiceDiscovery::Service::parse(QDomElement &el)
+bool ExternalService::parse(QDomElement &el)
 {
     QString actionOpt     = el.attribute(QLatin1String("action"));
     QString expiresOpt    = el.attribute(QLatin1String("expires"));
@@ -96,16 +97,14 @@ bool JT_ExternalServiceDiscovery::Service::parse(QDomElement &el)
             return false;
     }
 
-    if (actionOpt.isEmpty()) {
-        if (actionOpt == QLatin1String("add"))
-            action = Action::Add;
-        else if (actionOpt == QLatin1String("modify"))
-            action = Action::Modify;
-        else if (actionOpt == QLatin1String("delete"))
-            action = Action::Delete;
-        else
-            return false;
-    }
+    if (actionOpt.isEmpty() || actionOpt == QLatin1String("add"))
+        action = Action::Add;
+    else if (actionOpt == QLatin1String("modify"))
+        action = Action::Modify;
+    else if (actionOpt == QLatin1String("delete"))
+        action = Action::Delete;
+    else
+        return false;
 
     if (!restrictedOpt.isEmpty()) {
         if (restrictedOpt == QLatin1String("true"))
@@ -115,6 +114,29 @@ bool JT_ExternalServiceDiscovery::Service::parse(QDomElement &el)
     }
 
     return true;
+}
+
+ExternalServiceDiscovery::ExternalServiceDiscovery(Client *client) : client_(client) { }
+
+bool ExternalServiceDiscovery::isSupported() const
+{
+    return client_->serverInfoManager()->features().test("urn:xmpp:extdisco:2");
+}
+
+void ExternalServiceDiscovery::services(QObject *ctx, ServicesCallback &&callback, const QString &type)
+{
+    if (!isSupported()) {
+        callback({});
+        return;
+    }
+
+    // TODO optimize me (get cache, check action, etc)
+    auto task = new JT_ExternalServiceDiscovery(client_->rootTask());
+    connect(task, &Task::finished, ctx, [this, task, cb = std::move(callback)]() {
+        services_ = task->services();
+        cb(services_);
+    });
+    task->getServices(type);
 }
 
 } // namespace XMPP
