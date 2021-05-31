@@ -176,8 +176,8 @@ void ExternalServiceDiscovery::services(QObject *ctx, ServicesCallback &&callbac
         if (types.isEmpty() || types.size() > 1) {
             currentTask = new JT_ExternalServiceDiscovery(client_->rootTask());
             connect(currentTask, &Task::finished, ctx, [this, types, cb = std::move(callback)]() {
-                currentTask = nullptr; // it will self-delete anyway
                 services_   = currentTask->services();
+                currentTask = nullptr; // it will self-delete anyway
                 cb(cachedServices(types));
             });
             currentTask->getServices();

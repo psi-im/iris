@@ -591,7 +591,8 @@ namespace XMPP { namespace Jingle { namespace ICE {
                                        ExternalService::Ptr turnUdp;
                                        ExternalService::Ptr turnTcp;
                                        for (auto const &s : qAsConst(services)) {
-                                           if (s->type == QLatin1String("stun"))
+                                           if (s->type == QLatin1String("stun")
+                                               && (s->transport.isEmpty() || s->transport == QLatin1String("udp")))
                                                stun = s;
                                            else if (s->type == QLatin1String("turn")) {
                                                if (s->transport == QLatin1String("tcp"))
