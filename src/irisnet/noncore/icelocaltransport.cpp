@@ -502,7 +502,7 @@ private slots:
         ObjectSessionWatcher watch(&sess);
 
         if (!dwrites.isEmpty()) {
-            for (const Written &wr : dwrites) {
+            for (const Written &wr : qAsConst(dwrites)) {
                 emit q->datagramsWritten(Direct, wr.count, wr.addr);
                 if (!watch.isValid())
                     return;
@@ -515,7 +515,7 @@ private slots:
         }
     }
 
-    void pool_outgoingMessage(const QByteArray &packet, const TransportAddress &toAddress)
+    void pool_outgoingMessage(const QByteArray &packet, const XMPP::TransportAddress &toAddress)
     {
         // warning: read StunTransactionPool docs before modifying
         //   this function
@@ -590,7 +590,7 @@ private slots:
         emit q->addressesChanged();
     }
 
-    void turn_packetsWritten(int count, const TransportAddress &addr)
+    void turn_packetsWritten(int count, const XMPP::TransportAddress &addr)
     {
         emit q->datagramsWritten(Relayed, count, addr);
     }
