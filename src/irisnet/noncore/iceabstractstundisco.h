@@ -5,6 +5,7 @@
 #include <QHostAddress>
 #include <QList>
 #include <QObject>
+#include <qca.h>
 
 #include <functional>
 #include <memory>
@@ -25,9 +26,10 @@ public:
         using Ptr = std::shared_ptr<Service>;
         QString             name;
         QString             username;
-        QString             password;
+        QCA::SecureArray    password;
         QString             host;
-        QList<QHostAddress> addresses;
+        QList<QHostAddress> addresses4;
+        QList<QHostAddress> addresses6;
         std::uint16_t       port = 0;
         Transport           transport;
         Flags               flags;

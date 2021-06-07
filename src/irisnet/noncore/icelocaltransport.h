@@ -19,6 +19,7 @@
 #ifndef ICELOCALTRANSPORT_H
 #define ICELOCALTRANSPORT_H
 
+#include "iceabstractstundisco.h"
 #include "icetransport.h"
 
 #include <QByteArray>
@@ -56,8 +57,7 @@ public:
     //   retries
     void start(const QHostAddress &addr);
 
-    void setStunBindService(const TransportAddress &addr);
-    void setStunRelayService(const TransportAddress &addr, const QString &user, const QCA::SecureArray &pass);
+    void addExternalService(AbstractStunDisco::Service::Ptr service);
 
     const TransportAddress &stunBindServiceAddress() const;
     const TransportAddress &stunRelayServiceAddress() const;

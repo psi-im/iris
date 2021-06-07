@@ -91,7 +91,7 @@ bool ExternalService::parse(QDomElement &el)
     QString actionOpt     = el.attribute(QLatin1String("action"));
     QString expiresOpt    = el.attribute(QLatin1String("expires"));
     name                  = el.attribute(QLatin1String("name"));
-    password              = el.attribute(QLatin1String("password"));
+    password              = el.attribute(QLatin1String("password")).toUtf8();
     QString restrictedOpt = el.attribute(QLatin1String("restricted"));
     transport             = el.attribute(QLatin1String("transport"));
     username              = el.attribute(QLatin1String("username"));

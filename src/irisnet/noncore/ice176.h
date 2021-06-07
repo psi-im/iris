@@ -98,12 +98,6 @@ public:
     // one per local address.  you must set local addresses first.
     void setExternalAddresses(const QList<ExternalAddress> &addrs);
 
-    void setStunBindService(const QHostAddress &addr, quint16 port); // REVIEW if we need both v4 and v6?
-    void setStunRelayUdpService(const QHostAddress &addr, quint16 port, const QString &user,
-                                const QCA::SecureArray &pass);
-    void setStunRelayTcpService(const QHostAddress &addr, quint16 port, const QString &user,
-                                const QCA::SecureArray &pass);
-
     // these all start out enabled, but can be disabled for diagnostic
     //   purposes
     void setUseLocal(bool enabled);

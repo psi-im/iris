@@ -149,6 +149,11 @@ public:
         QByteArray       buf;
     };
 
+    enum class State { None, Starting, Active, Stopping, Stopped };
+
+    using StunServer  = AbstractStunDisco::Service::Ptr;
+    using StunServers = QList<StunServer>;
+
     IceLocalTransport *      q;
     ObjectSession            sess;
     QUdpSocket *             extSock = nullptr;
@@ -161,17 +166,21 @@ public:
     TransportAddress         refAddr;
     TransportAddress         relAddr;
     QHostAddress             refAddrSource;
-    TransportAddress         stunBindAddr;
-    TransportAddress         stunRelayAddr;
-    QString                  stunUser;
-    QCA::SecureArray         stunPass;
-    QString                  clientSoftware;
-    QList<Datagram>          in;
-    QList<Datagram>          inRelayed;
-    QList<WriteItem>         pendingWrites;
-    int                      retryCount = 0;
-    bool                     stopping   = false;
-    int                      debugLevel = IceTransport::DL_None;
+
+    TransportAddress  stunBindAddr;
+    TransportAddress  stunRelayAddr;
+    StunServer        stunBindServer;
+    StunServer        stunRelayServer;
+    QList<StunServer> stuns;
+    QList<StunServer> turns;
+
+    QString          clientSoftware;
+    QList<Datagram>  in;
+    QList<Datagram>  inRelayed;
+    QList<WriteItem> pendingWrites;
+    int              retryCount = 0;
+    State            state      = State::None;
+    int              debugLevel = IceTransport::DL_None;
 
     Private(IceLocalTransport *_q) : QObject(_q), q(_q), sess(this) { }
 
@@ -202,38 +211,66 @@ public:
         relAddr       = TransportAddress();
         refAddr       = TransportAddress();
         refAddrSource = QHostAddress();
+        stunBindServer.reset();
+        stunRelayServer.reset();
+        stuns.clear();
+        turns.clear();
 
         in.clear();
         inRelayed.clear();
         pendingWrites.clear();
 
         retryCount = 0;
-        stopping   = false;
+        state      = State::None;
     }
 
     void start()
     {
         Q_ASSERT(!sock);
-
+        if (state >= State::Starting)
+            return;
+        state = State::Starting;
         sess.defer(this, "postStart");
     }
 
     void stop()
     {
         Q_ASSERT(sock);
-        if (stopping) {
+        if (state >= State::Stopping) {
             emit q->debugLine(QString("local transport %1 is already stopping. just wait...").arg(addr));
             return;
         } else {
             emit q->debugLine(QString("stopping local transport %1.").arg(addr));
         }
 
-        stopping = true;
+        state = State::Stopping;
 
         if (turn)
             turn->close(); // will emit stopped() eventually calling postStop()
         else
             sess.defer(this, "postStop");
+    }
+
+    bool isAcceptableService(AbstractStunDisco::Service::Ptr srv) const
+    {
+        Q_ASSERT(sock != nullptr);
+        return !(sock->localAddress().protocol() == QAbstractSocket::IPv4Protocol ? srv->addresses4 : srv->addresses6)
+                    .isEmpty()
+            && !(srv->flags & AbstractStunDisco::Tls) && srv->transport == AbstractStunDisco::Udp;
+        // TODO support STUN over DTLS
+    }
+
+    void addExternalService(AbstractStunDisco::Service::Ptr srv)
+    {
+        if (isAcceptableService(srv)) {
+            if (srv->flags & AbstractStunDisco::Relay) {
+                turns += srv;
+                do_stun();
+            } else {
+                stuns += srv;
+                do_turn();
+            }
+        }
     }
 
     void stunStart()
@@ -247,10 +284,21 @@ public:
         connect(pool.data(), &StunTransactionPool::debugLine, this, &Private::pool_debugLine);
 
         pool->setLongTermAuthEnabled(true);
-        if (!stunUser.isEmpty()) {
-            pool->setUsername(stunUser);
-            pool->setPassword(stunPass);
-        }
+
+        // cleanup useless
+        auto stuns_it = stuns.begin();
+        while (stuns_it != stuns.end())
+            if (isAcceptableService(*stuns_it))
+                ++stuns_it;
+            else
+                stuns_it = stuns.erase(stuns_it);
+
+        auto turns_it = turns.begin();
+        while (turns_it != turns.end())
+            if (isAcceptableService(*turns_it))
+                ++turns_it;
+            else
+                turns_it = turns.erase(turns_it);
 
         do_stun();
         do_turn();
@@ -258,9 +306,21 @@ public:
 
     void do_stun()
     {
-        if (!stunBindAddr.isValid()) {
+        if (!sock || stunBindAddr.isValid())
+            return; // too early
+        Q_ASSERT(stunBinding == nullptr);
+        emit q->debugLine("trying next STUN service...");
+        stunBindAddr = TransportAddress();
+        auto it      = std::find_if(stuns.begin(), stuns.end(),
+                               [](auto const &s) { return !(s->flags & AbstractStunDisco::Relay); });
+        if (it == stuns.end()) // if nothing to try
             return;
-        }
+        auto addresses
+            = sock->localAddress().protocol() == QAbstractSocket::IPv4Protocol ? (*it)->addresses4 : (*it)->addresses6;
+        stunBindAddr   = { addresses[0], (*it)->port };
+        stunBindServer = (*it);
+        stuns.erase(it);
+
         stunBinding = new StunBinding(pool.data());
         connect(stunBinding, &StunBinding::success, this, [&]() {
             refAddr       = stunBinding->reflexiveAddress();
@@ -269,21 +329,50 @@ public:
             delete stunBinding;
             stunBinding = nullptr;
 
+            ObjectSessionWatcher watch(&sess);
+
             emit q->addressesChanged();
+            if (watch.isValid()) {
+                stunBindAddr = TransportAddress();
+                do_stun();
+            }
         });
         connect(stunBinding, &StunBinding::error, this, [&](XMPP::StunBinding::Error) {
             delete stunBinding;
             stunBinding = nullptr;
+
+            ObjectSessionWatcher watch(&sess);
+
             emit q->error(IceLocalTransport::ErrorStun);
+            if (watch.isValid()) {
+                stunRelayAddr = TransportAddress();
+                do_turn();
+            }
         });
         stunBinding->start(stunBindAddr);
     }
 
     void do_turn()
     {
-        if (!stunRelayAddr.isValid()) {
+        if (!sock || stunRelayAddr.isValid())
+            return; // too early
+        Q_ASSERT(turn == nullptr);
+        emit q->debugLine("trying next TURN service...");
+        stunRelayAddr = TransportAddress();
+        auto it       = std::find_if(turns.begin(), turns.end(),
+                               [](auto const &s) { return s->flags & AbstractStunDisco::Relay; });
+        if (it != turns.end()) // if nothing to try
             return;
+        auto addresses
+            = sock->localAddress().protocol() == QAbstractSocket::IPv4Protocol ? (*it)->addresses4 : (*it)->addresses6;
+        stunRelayAddr = { addresses[0], (*it)->port }; // REVIEW random instead of 0?
+        if (!(*it)->username.isEmpty()) {
+            pool->setUsername((*it)->username);
+            pool->setPassword((*it)->password);
         }
+        stunRelayServer = (*it);
+        turns.erase(it);
+
         turn = new TurnClient(this);
         turn->setDebugLevel((TurnClient::DebugLevel)debugLevel);
         connect(turn, &TurnClient::connected, this, &Private::turn_connected);
@@ -296,7 +385,6 @@ public:
         connect(turn, &TurnClient::debugLine, this, &Private::turn_debugLine);
 
         turn->setClientSoftwareNameAndVersion(clientSoftware);
-
         turn->connectToHost(pool.data(), stunRelayAddr);
     }
 
@@ -326,7 +414,7 @@ private:
     bool handleRetry()
     {
         // don't allow retrying if activated or stopping)
-        if (turnActivated || stopping)
+        if (turnActivated || state >= State::Stopping)
             return false;
 
         ++retryCount;
@@ -394,7 +482,7 @@ private:
 private slots:
     void postStart()
     {
-        if (stopping)
+        if (state >= State::Stopping)
             return;
 
         if (extSock) {
@@ -410,7 +498,8 @@ private slots:
         }
 
         prepareSocket();
-
+        stunStart();
+        state = State::Active;
         emit q->started();
     }
 
@@ -532,7 +621,7 @@ private slots:
         sock->writeDatagram(packet, toAddress);
     }
 
-    void pool_needAuthParams(const TransportAddress &addr)
+    void pool_needAuthParams(const XMPP::TransportAddress &addr)
     {
         // we can get this signal if the user did not provide
         //   creds to us.  however, since this class doesn't support
@@ -652,15 +741,7 @@ void IceLocalTransport::start(const QHostAddress &addr)
 
 void IceLocalTransport::stop() { d->stop(); }
 
-void IceLocalTransport::setStunBindService(const TransportAddress &addr) { d->stunBindAddr = addr; }
-
-void IceLocalTransport::setStunRelayService(const TransportAddress &addr, const QString &user,
-                                            const QCA::SecureArray &pass)
-{
-    d->stunRelayAddr = addr;
-    d->stunUser      = user;
-    d->stunPass      = pass;
-}
+void IceLocalTransport::addExternalService(AbstractStunDisco::Service::Ptr service) { d->addExternalService(service); }
 
 const TransportAddress &IceLocalTransport::stunBindServiceAddress() const { return d->stunBindAddr; }
 

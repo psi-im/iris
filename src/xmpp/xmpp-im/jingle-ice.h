@@ -99,32 +99,10 @@ namespace Jingle { namespace ICE {
         QStringList ns() const override;
         QStringList discoFeatures() const override;
 
-        // TODO reimplement closeAll to support old protocols
-
-        /**
-         * @brief userProxy returns custom (set by user) SOCKS proxy JID
-         * @return
-         */
-        // Jid  userProxy() const;
-        // void setUserProxy(const Jid &jid);
-
-        /**
-         * @brief addKeyMapping sets mapping between key/socks hostname used for direct connection and transport.
-         *        The key is sha1(sid, initiator full jid, responder full jid)
-         * @param key
-         * @param transport
-         */
-        void addKeyMapping(const QString &key, Transport *transport);
-        void removeKeyMapping(const QString &key);
-
         void setBasePort(int port);
         void setExternalAddress(const QString &host);
         void setSelfAddress(const QHostAddress &addr);
-        void setStunBindService(const QString &host, int port);
-        void setStunRelayUdpService(const QString &host, int port, const QString &user, const QString &pass);
-        void setStunRelayTcpService(const QString &host, int port, const XMPP::AdvancedConnector::Proxy &proxy,
-                                    const QString &user, const QString &pass);
-        // stunProxy() const;
+        void setStunProxy(const XMPP::AdvancedConnector::Proxy &proxy, const QString &user, const QString &pass);
 
     private:
         friend class Transport;

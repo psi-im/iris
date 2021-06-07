@@ -55,16 +55,6 @@ public:
 
         // for example manually provided external address mapped to every local
         QList<Ice176::ExternalAddress> extAddrs;
-
-        TransportAddress stunBindAddr;
-
-        TransportAddress stunRelayUdpAddr;
-        QString          stunRelayUdpUser;
-        QCA::SecureArray stunRelayUdpPass;
-
-        TransportAddress stunRelayTcpAddr;
-        QString          stunRelayTcpUser;
-        QCA::SecureArray stunRelayTcpPass;
     };
 
     class LocalTransport {
@@ -101,11 +91,12 @@ public:
     QSharedPointer<IceTurnTransport>   tcpTurn;       // tcp relay candidate
     QList<Candidate>                   localCandidates;
     QHash<int, QSet<TransportAddress>> channelPeers;
-    bool                               useLocal        = true; // use local host candidates
-    bool                               useStunBind     = true;
-    bool                               useStunRelayUdp = true;
-    bool                               useStunRelayTcp = true;
-    bool                               localFinished   = false;
+    bool                               useLocal              = true; // use local host candidates
+    bool                               useStunBind           = true;
+    bool                               expectMoreStunServers = true;
+    bool                               useStunRelayUdp       = true;
+    bool                               useStunRelayTcp       = true;
+    bool                               localFinished         = false;
     // bool                               stunFinished      = false;
     bool gatheringComplete = false;
     int  debugLevel        = DL_Packet;
@@ -120,6 +111,7 @@ public:
         lt->qsock = socket;
         lt->addr  = la.addr;
         lt->sock  = QSharedPointer<IceLocalTransport>::create();
+        lt->sock->setClientSoftwareNameAndVersion(clientSoftware);
         lt->sock->setDebugLevel(IceTransport::DebugLevel(debugLevel));
         lt->network = la.network;
         lt->isVpn   = la.isVpn;
@@ -146,20 +138,6 @@ public:
     void update(QList<QUdpSocket *> *socketList)
     {
         Q_ASSERT(!stopping);
-
-        // only allow setting stun stuff once
-        if ((pending.stunBindAddr.isValid() && !config.stunBindAddr.isValid())
-            || (pending.stunRelayUdpAddr.isValid() && !config.stunRelayUdpAddr.isValid())
-            || (pending.stunRelayTcpAddr.isValid() && !config.stunRelayTcpAddr.isValid())) {
-            config.stunBindAddr     = pending.stunBindAddr;
-            config.stunRelayUdpAddr = pending.stunRelayUdpAddr;
-            config.stunRelayUdpUser = pending.stunRelayUdpUser;
-            config.stunRelayUdpPass = pending.stunRelayUdpPass;
-            config.stunRelayTcpAddr = pending.stunRelayTcpAddr;
-            config.stunRelayTcpUser = pending.stunRelayTcpUser;
-            config.stunRelayTcpPass = pending.stunRelayTcpPass;
-        }
-
         // for now, only allow setting localAddrs once
         if (!pending.localAddrs.isEmpty() && config.localAddrs.isEmpty()) {
             for (const Ice176::LocalAddress &la : as_const(pending.localAddrs)) {
@@ -186,17 +164,6 @@ public:
                 auto lt      = createLocalTransport(qsock, la);
                 lt->borrowed = borrowedSocket;
                 udpTransports += lt;
-
-                if (lt->addr.protocol() != QAbstractSocket::IPv6Protocol) {
-                    lt->sock->setClientSoftwareNameAndVersion(clientSoftware);
-                    if (useStunBind && config.stunBindAddr.isValid()) {
-                        lt->sock->setStunBindService(config.stunBindAddr);
-                    }
-                    if (useStunRelayUdp && config.stunRelayUdpAddr.isValid() && !config.stunRelayUdpUser.isEmpty()) {
-                        lt->sock->setStunRelayService(config.stunRelayUdpAddr, config.stunRelayUdpUser,
-                                                      config.stunRelayUdpPass);
-                    }
-                }
 
                 int port = qsock->localPort();
                 lt->sock->start(qsock);
@@ -524,7 +491,7 @@ private:
 private slots:
     void tryGatheringComplete()
     {
-        if (gatheringComplete || (tcpTurn && !tcpTurn->isStarted()))
+        if (gatheringComplete || (tcpTurn && !tcpTurn->isStarted()) || expectMoreStunServers)
             return;
 
         auto checkFinished = [&](const LocalTransport *lt) {
@@ -598,15 +565,8 @@ private slots:
 
         if (!lt->stun_started) {
             lt->stun_started = true;
-            if (useStunBind
-                && (lt->sock->stunBindServiceAddress().isValid() || lt->sock->stunRelayServiceAddress().isValid())) {
-                lt->sock->stunStart();
-                if (!watch.isValid())
-                    return;
-            } else {
+            if (!useStunBind || !expectMoreStunServers)
                 lt->stun_finished = true;
-                lt->turn_finished = true;
-            }
         }
 
         // check completeness of various stuff
@@ -797,22 +757,19 @@ void IceComponent::setLocalAddresses(const QList<Ice176::LocalAddress> &addrs) {
 
 void IceComponent::setExternalAddresses(const QList<Ice176::ExternalAddress> &addrs) { d->pending.extAddrs = addrs; }
 
-void IceComponent::setStunBindService(const TransportAddress &addr) { d->pending.stunBindAddr = addr; }
-
-void IceComponent::setStunRelayUdpService(const TransportAddress &addr, const QString &user,
-                                          const QCA::SecureArray &pass)
+void IceComponent::addExternalService(AbstractStunDisco::Service::Ptr service)
 {
-    d->pending.stunRelayUdpAddr = addr;
-    d->pending.stunRelayUdpUser = user;
-    d->pending.stunRelayUdpPass = pass;
+    if (!d->useStunBind && !(service->flags & AbstractStunDisco::Relay))
+        return; // ignore it.
+    for (auto const &lt : d->udpTransports) {
+        lt->sock->addExternalService(service);
+    }
 }
 
-void IceComponent::setStunRelayTcpService(const TransportAddress &addr, const QString &user,
-                                          const QCA::SecureArray &pass)
+void IceComponent::setExternalDiscoFinished(bool value)
 {
-    d->pending.stunRelayTcpAddr = addr;
-    d->pending.stunRelayTcpUser = user;
-    d->pending.stunRelayTcpPass = pass;
+    d->expectMoreStunServers = !value;
+    static_assert(false, "emit stopped or whatever if no further activity");
 }
 
 void IceComponent::setUseLocal(bool enabled) { d->useLocal = enabled; }

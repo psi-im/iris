@@ -29,6 +29,7 @@
 #include <QPointer>
 #include <QSet>
 #include <QVector>
+#include <qca.h>
 
 #include <chrono>
 #include <functional>
@@ -40,16 +41,16 @@ struct ExternalService {
     using Ptr = std::shared_ptr<ExternalService>;
     enum Action { Add, Delete, Modify };
 
-    Action         action = Action::Add;
-    QDeadlineTimer expires;            // optional
-    QString        host;               // required
-    QString        name;               // optional
-    QString        password;           // optional
-    std::uint16_t  port;               // required
-    bool           restricted = false; // optional
-    QString        transport;          // optional
-    QString        type;               // required
-    QString        username;           // optional
+    Action           action = Action::Add;
+    QDeadlineTimer   expires;            // optional
+    QString          host;               // required
+    QString          name;               // optional
+    QCA::SecureArray password;           // optional
+    std::uint16_t    port;               // required
+    bool             restricted = false; // optional
+    QString          transport;          // optional
+    QString          type;               // required
+    QString          username;           // optional
 
     bool parse(QDomElement &el);
          operator QString() const;

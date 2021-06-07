@@ -86,10 +86,10 @@ private:
             if (addr.isNull())
                 needResolve.append(s);
             else
-                s->addresses.append(addr);
+                (addr.protocol() == QAbstractSocket::IPv4Protocol ? s->addresses4 : s->addresses6).append(addr);
             if (l->restricted && s->password.isEmpty()) {
                 needCreds.append(s);
-            } else if (!s->addresses.isEmpty()) {
+            } else if (!s->addresses4.isEmpty() || !s->addresses6.isEmpty()) {
                 emit serviceAdded(s);
             } else
                 pendingWork_.append(s);
@@ -148,11 +148,14 @@ private:
     void setAddresses(const QString &host, const QList<QHostAddress> &addresses)
     {
         for (auto const &s : qAsConst(pendingWork_)) {
-            if (s->host == host && s->addresses.isEmpty()) {
+            if (s->host == host && s->addresses4.isEmpty() && s->addresses6.isEmpty()) {
                 if (addresses.isEmpty())
                     s->expires = QDeadlineTimer(); // expired
-                else
-                    s->addresses = addresses;
+                else {
+                    for (auto const &a : addresses) {
+                        (a.protocol() == QAbstractSocket::IPv4Protocol ? s->addresses4 : s->addresses6).append(a);
+                    }
+                }
             }
         }
         tryFinish();
@@ -204,7 +207,8 @@ private:
                 it = pendingWork_.erase(it);
                 continue;
             }
-            if (s.addresses.isEmpty() || (s.flags & AbstractStunDisco::Restricted && s.password.isEmpty())) {
+            if ((s.addresses4.isEmpty() || s.addresses6.isEmpty())
+                || (s.flags & AbstractStunDisco::Restricted && s.password.isEmpty())) {
                 ++it;
                 continue; // in progress yet.
             }
@@ -222,11 +226,51 @@ private:
     QList<AbstractStunDisco::Service::Ptr> pendingWork_;
 };
 
-StunDiscoManager::StunDiscoManager(Client *client) : QObject(client) { client_ = client; }
+class StunDiscoManager::Private {
+public:
+    Client *client;
+    QString stunBindHost;
+    int     stunBindPort;
+    QString stunRelayUdpHost;
+    int     stunRelayUdpPort;
+    QString stunRelayUdpUser;
+    QString stunRelayUdpPass;
+    QString stunRelayTcpHost;
+    int     stunRelayTcpPort;
+    QString stunRelayTcpUser;
+    QString stunRelayTcpPass;
+#error "Use all the above!"
+};
+
+StunDiscoManager::StunDiscoManager(Client *client) : QObject(client), d(new Private) { d->client = client; }
 
 StunDiscoManager::~StunDiscoManager() { }
 
 AbstractStunDisco *StunDiscoManager::createMonitor() { return new StunDiscoMonitor(this); }
+
+Client *StunDiscoManager::client() const { return d->client; }
+
+void StunDiscoManager::setStunBindService(const QString &host, int port)
+{
+    d->stunBindHost = host;
+    d->stunBindPort = port;
+}
+
+void StunDiscoManager::setStunRelayUdpService(const QString &host, int port, const QString &user, const QString &pass)
+{
+    d->stunRelayUdpHost = host;
+    d->stunRelayUdpPort = port;
+    d->stunRelayUdpUser = user;
+    d->stunRelayUdpPass = pass;
+}
+
+void StunDiscoManager::setStunRelayTcpService(const QString &host, int port, const QString &user, const QString &pass)
+{
+    d->stunRelayTcpHost = host;
+    d->stunRelayTcpPort = port;
+    d->stunRelayTcpUser = user;
+    d->stunRelayTcpPass = pass;
+}
 
 } // namespace XMPP
 

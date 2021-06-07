@@ -36,10 +36,15 @@ public:
     ~StunDiscoManager();
 
     AbstractStunDisco *createMonitor();
-    inline Client *    client() const { return client_; }
+    Client *           client() const;
+
+    void setStunBindService(const QString &host, int port);
+    void setStunRelayUdpService(const QString &host, int port, const QString &user, const QString &pass);
+    void setStunRelayTcpService(const QString &host, int port, const QString &user, const QString &pass);
 
 private:
-    Client *client_;
+    class Private;
+    std::unique_ptr<Private> d;
 };
 
 } // namespace XMPP

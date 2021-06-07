@@ -20,6 +20,7 @@
 #define ICECOMPONENT_H
 
 #include "ice176.h"
+#include "iceabstractstundisco.h"
 #include "icetransport.h"
 #include "turnclient.h"
 
@@ -95,10 +96,8 @@ public:
     //   must have been set for this to work
     void setExternalAddresses(const QList<Ice176::ExternalAddress> &addrs);
 
-    // can be set at any time, but only once.  later changes are ignored
-    void setStunBindService(const TransportAddress &addr);
-    void setStunRelayUdpService(const TransportAddress &addr, const QString &user, const QCA::SecureArray &pass);
-    void setStunRelayTcpService(const TransportAddress &addr, const QString &user, const QCA::SecureArray &pass);
+    void addExternalService(AbstractStunDisco::Service::Ptr service);
+    void setExternalDiscoFinished(bool value = true);
 
     // these all start out enabled, but can be disabled for diagnostic
     //   purposes

@@ -215,13 +215,6 @@ public:
     int                                     componentCount = 0;
     QList<Ice176::LocalAddress>             localAddrs;
     QList<Ice176::ExternalAddress>          extAddrs;
-    TransportAddress                        stunBindAddr;
-    TransportAddress                        stunRelayUdpAddr;
-    QString                                 stunRelayUdpUser;
-    QCA::SecureArray                        stunRelayUdpPass;
-    TransportAddress                        stunRelayTcpAddr;
-    QString                                 stunRelayTcpUser;
-    QCA::SecureArray                        stunRelayTcpPass;
     QPointer<AbstractStunDisco>             stunDiscoverer;
     QString                                 localUser, localPass;
     QString                                 peerUser, peerPass;
@@ -309,10 +302,18 @@ public:
         qDebug("found %s: %s:%hu %s %s", (service->flags & AbstractStunDisco::Relay) ? "TURN" : "STUN",
                qPrintable(service->host), port, service->transport == AbstractStunDisco::Tcp ? "tcp" : "udp",
                (service->flags & AbstractStunDisco::Tls) ? "tls" : "insecure");
+        for (auto const &c : components) {
+            c.ic->addExternalService(service);
+        }
     }
     void stunModified(AbstractStunDisco::Service::Ptr) { }
     void stunRemoved(AbstractStunDisco::Service::Ptr) { }
-    void stunDiscoFinished() { }
+    void stunDiscoFinished()
+    {
+        for (auto const &c : components) {
+            c.ic->setExternalDiscoFinished(true);
+        }
+    }
 
     void start()
     {
@@ -1624,24 +1625,6 @@ void Ice176::setPortReserver(UdpPortReserver *portReserver)
 void Ice176::setLocalAddresses(const QList<LocalAddress> &addrs) { d->updateLocalAddresses(addrs); }
 
 void Ice176::setExternalAddresses(const QList<ExternalAddress> &addrs) { d->updateExternalAddresses(addrs); }
-
-void Ice176::setStunBindService(const QHostAddress &addr, quint16 port) { d->stunBindAddr = { addr, port }; }
-
-void Ice176::setStunRelayUdpService(const QHostAddress &addr, quint16 port, const QString &user,
-                                    const QCA::SecureArray &pass)
-{
-    d->stunRelayUdpAddr = { addr, port };
-    d->stunRelayUdpUser = user;
-    d->stunRelayUdpPass = pass;
-}
-
-void Ice176::setStunRelayTcpService(const QHostAddress &addr, quint16 port, const QString &user,
-                                    const QCA::SecureArray &pass)
-{
-    d->stunRelayTcpAddr = { addr, port };
-    d->stunRelayTcpUser = user;
-    d->stunRelayTcpPass = pass;
-}
 
 void Ice176::setAllowIpExposure(bool enabled) { d->allowIpExposure = enabled; }
 

@@ -42,6 +42,7 @@
 #include <QElapsedTimer>
 #include <QNetworkInterface>
 #include <QTimer>
+#include <optional>
 
 template <class T> constexpr std::add_const_t<T> &as_const(T &t) noexcept { return t; }
 
@@ -227,46 +228,6 @@ namespace XMPP { namespace Jingle { namespace ICE {
         }
     };
 
-    class Resolver : public QObject {
-        Q_OBJECT
-        using QObject::QObject;
-
-        int                   counter;
-        std::function<void()> callback;
-
-        void onOneFinished()
-        {
-            if (!--counter) {
-                callback();
-                deleteLater();
-            }
-        }
-
-    public:
-        using ResolveList = std::list<std::pair<QString, std::reference_wrapper<QHostAddress>>>;
-
-        static void resolve(QObject *parent, ResolveList list, std::function<void()> &&callback)
-        {
-            auto resolver      = new Resolver(parent); // will be deleted when all finished. see onOneFinished
-            resolver->counter  = list.size();
-            resolver->callback = callback;
-            for (auto &item : list) {
-                // FIXME hosts may dup in the list. needs optimization
-                auto *dns = new NameResolver(parent);
-
-                connect(dns, &NameResolver::resultsReady, resolver,
-                        [result = item.second, resolver](const QList<XMPP::NameRecord> &records) {
-                            result.get() = records.first().address();
-                            resolver->onOneFinished();
-                        });
-                connect(dns, &NameResolver::error, resolver,
-                        [resolver](XMPP::NameResolver::Error) { resolver->onOneFinished(); });
-
-                dns->start(item.first.toLatin1());
-            }
-        }
-    };
-
     class IceStopper : public QObject {
         Q_OBJECT
 
@@ -338,24 +299,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
         QString      extHost;
         QHostAddress selfAddr;
 
-        QString stunBindHost;
-        int     stunBindPort;
-        QString stunRelayUdpHost;
-        int     stunRelayUdpPort;
-        QString stunRelayUdpUser;
-        QString stunRelayUdpPass;
-        QString stunRelayTcpHost;
-        int     stunRelayTcpPort;
-        QString stunRelayTcpUser;
-        QString stunRelayTcpPass;
-
         XMPP::TurnClient::Proxy stunProxy;
-
-        // FIMME it's reuiqred to split transports by direction otherwise we gonna hit conflicts.
-        // jid,transport-sid -> transport mapping
-        //        QSet<QPair<Jid, QString>>   sids;
-        //        QHash<QString, Transport *> key2transport;
-        //        Jid                         proxy;
     };
 
     class RawConnection : public XMPP::Jingle::Connection {
@@ -453,35 +397,18 @@ namespace XMPP { namespace Jingle { namespace ICE {
         QVector<Component>             components;
         QList<XMPP::Ice176::Candidate> pendingLocalCandidates; // cid to candidate mapping
         QScopedPointer<Element>        remoteState;
+        std::optional<QHostAddress>    extAddr;
 
-        // QString            sid;
-        // Transport::Mode    mode = Transport::Tcp;
-        // QTimer             probingTimer;
-        // QTimer             negotiationFinishTimer;
-        // QElapsedTimer      lastConnectionStart;
         // size_t             blockSize    = 8192;
         TcpPortDiscoverer *disco        = nullptr;
         UdpPortReserver *  portReserver = nullptr;
-        Resolver           resolver;
-        XMPP::Ice176 *     ice = nullptr;
+        XMPP::Ice176 *     ice          = nullptr;
 
         Dtls::Setup localDtlsRole  = Dtls::ActPass;
         Dtls::Setup remoteDtlsRole = Dtls::ActPass;
 #ifdef JINGLE_SCTP
         SCTP::MapElement sctp;
 #endif
-
-        QHostAddress extAddr;
-        QHostAddress stunBindAddr, stunRelayUdpAddr, stunRelayTcpAddr;
-        int          stunBindPort;
-        int          stunRelayUdpPort;
-        int          stunRelayTcpPort;
-        QString      stunRelayUdpUser;
-        QString      stunRelayUdpPass;
-        QString      stunRelayTcpUser;
-        QString      stunRelayTcpPass;
-        // QString
-
         // udp stuff
         bool         udpInitialized;
         quint16      udpPort;
@@ -581,92 +508,27 @@ namespace XMPP { namespace Jingle { namespace ICE {
             });
         }
 
-        void findStunAndTurn()
-        {
-            auto extDisco = q->pad()->session()->manager()->client()->externalServiceDiscovery();
-            using namespace std::chrono_literals;
-            if (extDisco->isSupported()) {
-                extDisco->services(q,
-                                   [this](const ExternalServiceList &services) {
-                                       ExternalService::Ptr stun;
-                                       ExternalService::Ptr turnUdp;
-                                       ExternalService::Ptr turnTcp;
-                                       for (auto const &s : qAsConst(services)) {
-                                           if (s->type == QLatin1String("stun")
-                                               && (s->transport.isEmpty() || s->transport == QLatin1String("udp")))
-                                               stun = s;
-                                           else if (s->type == QLatin1String("turn")) {
-                                               if (s->transport == QLatin1String("tcp"))
-                                                   turnTcp = s;
-                                               else
-                                                   turnUdp = s;
-                                           }
-                                       }
-                                       Resolver::ResolveList resList;
-                                       if (stun) {
-                                           stunBindAddr.setAddress(stun->host);
-                                           stunBindPort = stun->port;
-                                           if (stunBindAddr.isNull())
-                                               resList.emplace_back(stun->host, std::ref(stunBindAddr));
-                                       }
-                                       if (turnTcp) {
-                                           stunRelayTcpAddr.setAddress(turnTcp->host);
-                                           stunRelayTcpPort = turnTcp->port;
-                                           stunRelayTcpUser = turnTcp->username;
-                                           stunRelayTcpPass = turnTcp->password;
-                                           if (stunRelayTcpAddr.isNull())
-                                               resList.emplace_back(turnTcp->host, std::ref(stunRelayTcpAddr));
-                                       }
-                                       if (turnUdp) {
-                                           stunRelayUdpAddr.setAddress(turnUdp->host);
-                                           stunRelayUdpPort = turnUdp->port;
-                                           stunRelayUdpUser = turnUdp->username;
-                                           stunRelayUdpPass = turnUdp->password;
-                                           if (stunRelayUdpAddr.isNull())
-                                               resList.emplace_back(turnUdp->host, std::ref(stunRelayUdpAddr));
-                                       }
-                                       if (resList.empty()) {
-                                           startIce();
-                                       } else {
-                                           Resolver::resolve(q, resList, [this]() {
-                                               qDebug("resolver finished");
-                                               startIce();
-                                           });
-                                       }
-                                   },
-                                   5min, { "stun", "turn" });
-                return;
-            }
-
-            auto manager     = dynamic_cast<Manager *>(q->pad()->manager())->d.data();
-            stunBindPort     = manager->stunBindPort;
-            stunRelayUdpPort = manager->stunRelayUdpPort;
-            stunRelayTcpPort = manager->stunRelayTcpPort;
-            stunRelayUdpUser = manager->stunRelayUdpUser;
-            stunRelayUdpPass = manager->stunRelayUdpPass;
-            stunRelayTcpUser = manager->stunRelayTcpUser;
-            stunRelayTcpPass = manager->stunRelayTcpPass;
-            Resolver::resolve(q,
-                              { { manager->extHost, std::ref(extAddr) },
-                                { manager->stunBindHost, std::ref(stunBindAddr) },
-                                { manager->stunRelayUdpHost, std::ref(stunRelayUdpAddr) },
-                                { manager->stunRelayTcpHost, std::ref(stunRelayTcpAddr) } },
-                              [this]() {
-                                  qDebug("resolver finished");
-                                  startIce();
-                              });
-        }
-
         void startIce()
         {
             auto manager = dynamic_cast<Manager *>(q->_pad->manager())->d.data();
-
-            if (!stunBindAddr.isNull() && stunBindPort > 0)
-                qDebug("STUN service: %s;%d", qPrintable(stunBindAddr.toString()), stunBindPort);
-            if (!stunRelayUdpAddr.isNull() && stunRelayUdpPort > 0 && !stunRelayUdpUser.isEmpty())
-                qDebug("TURN w/ UDP service: %s;%d", qPrintable(stunRelayUdpAddr.toString()), stunRelayUdpPort);
-            if (!stunRelayTcpAddr.isNull() && stunRelayTcpPort > 0 && !stunRelayTcpUser.isEmpty())
-                qDebug("TURN w/ TCP service: %s;%d", qPrintable(stunRelayTcpAddr.toString()), stunRelayTcpPort);
+            if (!manager->extHost.isEmpty() && !extAddr) {
+                // if we should resolve external address first. lets do it and then restart
+                auto dns = new NameResolver(q);
+                q->connect(dns, &NameResolver::resultsReady, q, [this](const QList<XMPP::NameRecord> &records) {
+                    for (const auto &r : records)
+                        if (r.type() == NameRecord::A) {
+                            extAddr = r.address();
+                            startIce();
+                            break;
+                        }
+                });
+                q->connect(dns, &NameResolver::error, q, [this](XMPP::NameResolver::Error) {
+                    extAddr = QHostAddress();
+                    startIce();
+                });
+                dns->start(manager->extHost.toLatin1());
+                return;
+            }
 
             auto listenAddrs = Ice176::availableNetworkAddresses();
 
@@ -742,10 +604,6 @@ namespace XMPP { namespace Jingle { namespace ICE {
             ice->setProxy(manager->stunProxy);
             if (portReserver)
                 ice->setPortReserver(portReserver);
-
-            // QList<XMPP::Ice176::LocalAddress> localAddrs;
-            // XMPP::Ice176::LocalAddress addr;
-
             // FIXME: the following is not true, a local address is not
             //   required, for example if you use TURN with TCP only
 
@@ -753,20 +611,12 @@ namespace XMPP { namespace Jingle { namespace ICE {
             //   we don't have a local address, we won't handle it as
             //   an error here.  instead, we'll start Ice176 anyway,
             //   which should immediately error back at us.
-            /*if(manager->selfAddr.isNull())
-            {
-                printf("no self address to use.  this will fail.\n");
-                return;
-            }
-
-            addr.addr = manager->selfAddr;
-            localAddrs += addr;*/
             ice->setLocalAddresses(localAddrs);
 
             // if an external address is manually provided, then apply
             //   it only to the selfAddr.  FIXME: maybe we should apply
             //   it to all local addresses?
-            if (!extAddr.isNull()) {
+            if (!extAddr->isNull()) {
                 QList<XMPP::Ice176::ExternalAddress> extAddrs;
                 /*XMPP::Ice176::ExternalAddress eaddr;
                 eaddr.base = addr;
@@ -775,20 +625,13 @@ namespace XMPP { namespace Jingle { namespace ICE {
                 for (const XMPP::Ice176::LocalAddress &la : as_const(localAddrs)) {
                     XMPP::Ice176::ExternalAddress ea;
                     ea.base = la;
-                    ea.addr = extAddr;
+                    ea.addr = *extAddr;
                     extAddrs += ea;
                 }
                 ice->setExternalAddresses(extAddrs);
             }
 
-            if (!stunBindAddr.isNull() && stunBindPort > 0)
-                ice->setStunBindService(stunBindAddr, stunBindPort);
-            if (!stunRelayUdpAddr.isNull() && !stunRelayUdpUser.isEmpty())
-                ice->setStunRelayUdpService(stunRelayUdpAddr, stunRelayUdpPort, stunRelayUdpUser,
-                                            stunRelayUdpPass.toUtf8());
-            if (!stunRelayTcpAddr.isNull() && !stunRelayTcpUser.isEmpty())
-                ice->setStunRelayTcpService(stunRelayTcpAddr, stunRelayTcpPort, stunRelayTcpUser,
-                                            stunRelayTcpPass.toUtf8());
+            ice->setProxy(manager->stunProxy);
             ice->setStunDiscoverer(q->pad()->session()->manager()->client()->stunDiscoManager()->createMonitor());
 
             ice->setComponentCount(components.count());
@@ -1028,7 +871,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
             }
         }
 
-        d->findStunAndTurn();
+        d->startIce();
         emit updated();
     }
 
@@ -1198,28 +1041,8 @@ namespace XMPP { namespace Jingle { namespace ICE {
 
     void Manager::setSelfAddress(const QHostAddress &addr) { d->selfAddr = addr; }
 
-    void Manager::setStunBindService(const QString &host, int port)
+    void Manager::setStunProxy(const XMPP::AdvancedConnector::Proxy &proxy, const QString &user, const QString &pass)
     {
-        d->stunBindHost = host;
-        d->stunBindPort = port;
-    }
-
-    void Manager::setStunRelayUdpService(const QString &host, int port, const QString &user, const QString &pass)
-    {
-        d->stunRelayUdpHost = host;
-        d->stunRelayUdpPort = port;
-        d->stunRelayUdpUser = user;
-        d->stunRelayUdpPass = pass;
-    }
-
-    void Manager::setStunRelayTcpService(const QString &host, int port, const XMPP::AdvancedConnector::Proxy &proxy,
-                                         const QString &user, const QString &pass)
-    {
-        d->stunRelayTcpHost = host;
-        d->stunRelayTcpPort = port;
-        d->stunRelayTcpUser = user;
-        d->stunRelayTcpPass = pass;
-
         XMPP::TurnClient::Proxy tproxy;
 
         if (proxy.type() == XMPP::AdvancedConnector::Proxy::HttpConnect) {
