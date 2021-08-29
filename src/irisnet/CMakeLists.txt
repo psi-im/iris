@@ -46,6 +46,8 @@ set(SOURCES
     noncore/icecomponent.cpp
     noncore/icelocaltransport.cpp
     noncore/iceturntransport.cpp
+    noncore/icecandidate.cpp
+    noncore/stunsession.cpp
     noncore/processquit.cpp
     noncore/stunallocate.cpp
     noncore/stunbinding.cpp
@@ -84,10 +86,12 @@ set(HEADERS
     noncore/icelocaltransport.h
     noncore/icetransport.h
     noncore/iceturntransport.h
+    noncore/icecandidate.h
     noncore/processquit.h
     noncore/stunallocate.h
     noncore/stunbinding.h
     noncore/stuntransaction.h
+    noncore/stunsession.h
     noncore/turnclient.h
     noncore/udpportreserver.h
     noncore/tcpportreserver.h

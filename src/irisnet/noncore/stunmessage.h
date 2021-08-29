@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2009  Barracuda Networks, Inc.
+ * Copyright (C) 2013-2021 Psi IM team
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -64,6 +65,8 @@ public:
     void setMagic(const quint8 *magic); // 4 bytes
     void setId(const quint8 *id);       // 12 bytes
     void setAttributes(const QList<Attribute> &attribs);
+    void addAttribute(const Attribute &attr);
+    void setAttribute(const Attribute &attr);
 
     QByteArray         toBinary(int validationFlags = 0, const QByteArray &key = QByteArray()) const;
     static StunMessage fromBinary(const QByteArray &a, ConvertResult *result = nullptr, int validationFlags = 0,

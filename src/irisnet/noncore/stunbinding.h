@@ -51,6 +51,7 @@ public:
     void start(const XMPP::TransportAddress &addr); // use addr association
     void cancel();
 
+    const TransportAddress &stunAddress() const;
     const TransportAddress &reflexiveAddress() const;
 
     // non-translatable diagnostic string for convenience

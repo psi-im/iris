@@ -3,10 +3,10 @@
 #include <QCoreApplication>
 #include <QtCrypto>
 
-namespace XMPP {
+namespace XMPP::ICE {
 
 struct Foundation {
-    IceComponent::CandidateType type;
+    CandidateType               type;
     const QHostAddress          baseAddr;
     const QHostAddress          stunServAddr;
     QAbstractSocket::SocketType stunRequestProto;
@@ -39,20 +39,20 @@ static QChar randomPrintableChar()
         return '0' + (c - 52);
 }
 
-struct IceAgent::Private {
+struct Agent::Private {
     QHash<Foundation, QString> foundations;
 };
 
-IceAgent *IceAgent::instance()
+Agent *Agent::instance()
 {
-    static auto i = new IceAgent(QCoreApplication::instance());
+    static auto i = new Agent(QCoreApplication::instance());
     return i;
 }
 
-IceAgent::~IceAgent() { }
+Agent::~Agent() { }
 
-QString IceAgent::foundation(IceComponent::CandidateType type, const QHostAddress baseAddr,
-                             const QHostAddress &stunServAddr, QAbstractSocket::SocketType stunRequestProto)
+QString Agent::foundation(CandidateType type, const QHostAddress baseAddr, const QHostAddress &stunServAddr,
+                          QAbstractSocket::SocketType stunRequestProto)
 {
     Foundation f { type, baseAddr, stunServAddr, stunRequestProto };
     QString    ret = d->foundations.value(f);
@@ -66,7 +66,7 @@ QString IceAgent::foundation(IceComponent::CandidateType type, const QHostAddres
     return ret;
 }
 
-QString IceAgent::randomCredential(int len)
+QString Agent::randomCredential(int len)
 {
     QString out;
     out.reserve(len);
@@ -75,6 +75,6 @@ QString IceAgent::randomCredential(int len)
     return out;
 }
 
-IceAgent::IceAgent(QObject *parent) : QObject(parent), d(new Private) { }
+Agent::Agent(QObject *parent) : QObject(parent), d(new Private) { }
 
 } // namespace XMPP

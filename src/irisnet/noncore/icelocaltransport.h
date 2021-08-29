@@ -20,11 +20,13 @@
 #define ICELOCALTRANSPORT_H
 
 #include "iceabstractstundisco.h"
+#include "icecandidate.h"
 #include "icetransport.h"
 
 #include <QByteArray>
-#include <QEnableSharedFromThis>
+#include <QNetworkInterface>
 #include <QObject>
+#include <memory>
 
 class QHostAddress;
 class QUdpSocket;
@@ -33,45 +35,43 @@ namespace QCA {
 class SecureArray;
 }
 
-namespace XMPP {
+namespace XMPP::ICE {
 // this class manages a single port on a single interface, including the
 //   relationship with an associated STUN/TURN server.  if TURN is used, this
 //   class offers two paths (0=direct and 1=relayed), otherwise it offers
 //   just one path (0=direct)
-class IceLocalTransport : public IceTransport, public QEnableSharedFromThis<IceLocalTransport> {
+class LocalTransport : public Transport, public std::enable_shared_from_this<LocalTransport> {
     Q_OBJECT
 
 public:
+    using Ptr = std::shared_ptr<LocalTransport>;
+
+    class LocalAddress {
+    public:
+        QHostAddress                     addr;
+        int                              network = 0; // 0 = unknown. see QNetworkInterface::index doc
+        QNetworkInterface::InterfaceType type    = QNetworkInterface::Unknown;
+    };
+
     enum Error { ErrorBind = ErrorCustom, ErrorStun, ErrorTurn };
 
-    IceLocalTransport(QObject *parent = nullptr);
-    ~IceLocalTransport();
+    LocalTransport(QObject *parent = nullptr);
+    ~LocalTransport();
+
+    static Ptr make() { return std::make_shared<LocalTransport>(); }
+
+    // if socket is passed turn ErrorMismatch won't be handled (potentially worthen the connectivity)
+    void                             setSocket(QUdpSocket *socket, bool borrowedSocket, const LocalAddress &la);
+    QUdpSocket *                     takeBorrowedSocket();
+    QNetworkInterface::InterfaceType networkType() const;
+    TransportAddress                 localAddress() const;
+    const QHostAddress &             externalAddress() const;
+    void                             setExternalAddress(const QHostAddress &addr);
 
     void setClientSoftwareNameAndVersion(const QString &str);
+    void setStunDiscoverer(AbstractStunDisco *discoverer);
 
-    // passed socket must already be bind()'ed, don't support
-    //   ErrorMismatch retries
-    void start(QUdpSocket *sock);
-
-    // bind to this address on a random port, do support ErrorMismatch
-    //   retries
-    void start(const QHostAddress &addr);
-
-    void addExternalService(AbstractStunDisco::Service::Ptr service);
-
-    const TransportAddress &stunBindServiceAddress() const;
-    const TransportAddress &stunRelayServiceAddress() const;
-
-    // obtain relay / reflexive
-    void stunStart();
-
-    const TransportAddress &localAddress() const;
-    const TransportAddress &serverReflexiveAddress() const;
-    QHostAddress            reflexiveAddressSource() const; // address of stun/turn server provided the srflx
-    const TransportAddress &relayedAddress() const;
-
-    bool isStunAlive() const;
-    bool isTurnAlive() const;
+    void start();
 
     // reimplemented
     void       stop() override;
@@ -88,7 +88,9 @@ signals:
     //   and server reflexive address may disappear.
     // if start(QUdpSocket*) was used, then ErrorMismatch is not handled,
     //   and this signal will only be emitted to add addresses
-    void addressesChanged();
+    // void addressesChanged();
+
+    void candidateFound(std::shared_ptr<CandidateInfo> candidate);
 
 private:
     class Private;

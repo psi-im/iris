@@ -113,6 +113,7 @@ public:
     void connectToHost(const TransportAddress &addr, Mode mode = PlainMode);
 
     const TransportAddress &serverAddress() const;
+    bool                    isUdp() const;
 
     // for UDP, use this function to process incoming packets instead of
     //   read().
@@ -127,9 +128,13 @@ public:
     void    setRealm(const QString &realm);
     void    continueAfterParams(const TransportAddress &addr);
 
+    QString          username() const;
+    QCA::SecureArray password() const;
+
     void close();
 
     StunAllocate *stunAllocate();
+    bool          isActivated() const;
 
     void addChannelPeer(const TransportAddress &addr);
 

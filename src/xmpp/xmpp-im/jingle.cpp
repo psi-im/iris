@@ -546,7 +546,8 @@ namespace XMPP { namespace Jingle {
         Jid                                   redirectionJid;
         XMPP::Stanza::Error                   lastError;
         QHash<QPair<Jid, QString>, Session *> sessions;
-        int                                   maxSessions = -1; // no limit
+        int                                   maxSessions     = -1; // no limit
+        bool                                  allowIpExposure = true;
 
         void setupSession(Session *s)
         {
@@ -656,6 +657,10 @@ namespace XMPP { namespace Jingle {
     }
 
     void Manager::setRemoteJidChecker(std::function<bool(const Jid &)> checker) { d->remoteJidCecker = checker; }
+
+    void XMPP::Jingle::Manager::setAllowIpExposure(bool allow) { d->allowIpExposure = allow; }
+
+    bool XMPP::Jingle::Manager::isIpExposureAllowed() const { return d->allowIpExposure; }
 
     TransportManagerPad *Manager::transportPad(Session *session, const QString &ns)
     {

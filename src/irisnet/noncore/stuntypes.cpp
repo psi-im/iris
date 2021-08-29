@@ -22,6 +22,7 @@
 #include "transportaddress.h"
 
 #include <QtCrypto>
+#include <QtEndian>
 #include <stdio.h>
 
 #define STRING_MAX_CHARS 127
@@ -200,6 +201,13 @@ namespace StunTypes {
         return val;
     }
 
+    QByteArray createTransactionTransmitCounter(int requestCnt, int responseCnt)
+    {
+        QByteArray val(4, 0);
+        write32((quint8 *)val.data(), ((responseCnt << 8) | requestCnt) << 16);
+        return val;
+    }
+
     bool parseMappedAddress(const QByteArray &val, TransportAddress &addr)
     {
         if (val[1] == 0x02 && val.size() == 20) // IPv6
@@ -370,6 +378,17 @@ namespace StunTypes {
         const quint8 *p = (const quint8 *)val.data();
         *i              = read64(p);
         return true;
+    }
+
+    bool parseTransactionTransmitCounter(const QByteArray &data, int &req, int &res)
+    {
+        if (data.size() == 4) {
+            quint32 val = qFromBigEndian<quint32>(data.data()) >> 16;
+            req         = val & 0xff;
+            res         = (val >> 8) & 0xff;
+            return true;
+        }
+        return false;
     }
 
 #define METHOD_ENTRY(x)                                                                                                \
@@ -633,5 +652,6 @@ namespace StunTypes {
     }
 
     void print_packet(const StunMessage &message) { printf("%s\n", qPrintable(print_packet_str(message))); }
+
 } // namespace StunTypes
 } // namespace XMPP

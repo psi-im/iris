@@ -234,6 +234,8 @@ void StunBinding::start(const TransportAddress &addr) { d->start(addr); }
 
 void StunBinding::cancel() { d->cancel(); }
 
+const TransportAddress &StunBinding::stunAddress() const { return d->stunAddr; }
+
 const TransportAddress &StunBinding::reflexiveAddress() const { return d->addr; }
 
 QString StunBinding::errorString() const { return d->errorString; }

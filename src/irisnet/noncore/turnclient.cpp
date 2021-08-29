@@ -146,11 +146,9 @@ public:
 
     void unsetPool()
     {
-        // in udp mode, we don't own the pool
-        if (!udp && pool) {
-            pool->disconnect(this);
-            pool.reset();
-        }
+        // note, for udp it's upto external enityty to keep reference to the pool
+        pool->disconnect(this);
+        pool.reset();
     }
 
     void cleanup()
@@ -365,10 +363,9 @@ public:
                     if (debugLevel >= TurnClient::DL_Packet)
                         emit q->debugLine("Received STUN-based data packet");
                     return data;
-                } else {
-                    if (debugLevel >= TurnClient::DL_Packet)
-                        emit q->debugLine("Warning: server responded with an unexpected STUN packet, skipping.");
                 }
+                if (debugLevel >= TurnClient::DL_Packet)
+                    emit q->debugLine("Warning: server responded with an unexpected STUN packet, skipping.");
 
                 return QByteArray();
             }
@@ -775,7 +772,7 @@ private slots:
             bs->write(packet);
     }
 
-    void pool_needAuthParams(const TransportAddress &addr) { emit q->needAuthParams(addr); }
+    void pool_needAuthParams(const XMPP::TransportAddress &addr) { emit q->needAuthParams(addr); }
 
     void pool_debugLine(const QString &line) { emit q->debugLine(line); }
 
@@ -875,6 +872,8 @@ void TurnClient::connectToHost(const TransportAddress &addr, Mode mode)
 
 const TransportAddress &TurnClient::serverAddress() const { return d->serverAddr; }
 
+bool TurnClient::isUdp() const { return d->udp; }
+
 QByteArray TurnClient::processIncomingDatagram(const QByteArray &buf, bool notStun, TransportAddress &addr)
 {
     return d->processNonPoolPacket(buf, notStun, addr);
@@ -917,9 +916,15 @@ void TurnClient::continueAfterParams(const TransportAddress &addr)
     d->pool->continueAfterParams(addr);
 }
 
+QString TurnClient::username() const { return d->user; }
+
+QCA::SecureArray TurnClient::password() const { return d->pass; }
+
 void TurnClient::close() { d->do_close(); }
 
 StunAllocate *TurnClient::stunAllocate() { return d->allocate; }
+
+bool TurnClient::isActivated() const { return d->allocateStarted; }
 
 void TurnClient::addChannelPeer(const TransportAddress &addr) { d->addChannelPeer(addr); }
 

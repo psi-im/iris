@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010  Barracuda Networks, Inc.
+ * Copyright (C) 2021  Sergey Ilinykh
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -16,11 +16,29 @@
  *
  */
 
-#include "icetransport.h"
+#ifndef XMPP_STUNSESSION_H
+#define XMPP_STUNSESSION_H
 
-namespace XMPP::ICE {
-Transport::Transport(QObject *parent) : QObject(parent) { }
+#include <QObject>
 
-Transport::~Transport() { }
+#include "iceabstractstundisco.h"
+#include "transportaddress.h"
+
+namespace XMPP {
+
+class StunSession : public QObject {
+    Q_OBJECT
+public:
+    enum Type { StunServer, RelayServer, Peer };
+
+    explicit StunSession(AbstractStunDisco::Service::Ptr service, QObject *parent = nullptr);
+    explicit StunSession(const QHostAddress &peerAddr, std::uint16_t peerPort, QObject *parent = nullptr);
+
+    void start();
+
+signals:
+};
 
 } // namespace XMPP
+
+#endif // XMPP_STUNSESSION_H

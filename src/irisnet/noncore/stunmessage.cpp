@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2009  Barracuda Networks, Inc.
+ * Copyright (C) 2013-2021 Psi IM team
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -423,6 +424,24 @@ void StunMessage::setAttributes(const QList<Attribute> &attribs)
 {
     ENSURE_D
     d->attribs = attribs;
+}
+
+void StunMessage::addAttribute(const Attribute &attr)
+{
+    ENSURE_D
+    d->attribs.append(attr);
+}
+
+void StunMessage::setAttribute(const Attribute &attr)
+{
+    ENSURE_D
+    for (auto &i : qAsConst(d->attribs)) {
+        if (i.type == attr.type) {
+            const_cast<Attribute &>(i).value = attr.value; // w/o attribs detach but still modifying
+            return;
+        }
+    }
+    d->attribs.append(attr);
 }
 
 QByteArray StunMessage::toBinary(int validationFlags, const QByteArray &key) const

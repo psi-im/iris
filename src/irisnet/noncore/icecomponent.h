@@ -21,6 +21,8 @@
 
 #include "ice176.h"
 #include "iceabstractstundisco.h"
+#include "icecandidate.h"
+#include "icelocaltransport.h"
 #include "icetransport.h"
 #include "turnclient.h"
 
@@ -30,34 +32,14 @@ class QUdpSocket;
 
 namespace XMPP {
 class UdpPortReserver;
+}
 
-class IceComponent : public QObject {
+namespace XMPP::ICE {
+
+class Component : public QObject {
     Q_OBJECT
 
 public:
-    enum CandidateType { HostType, PeerReflexiveType, ServerReflexiveType, RelayedType };
-
-    class CandidateInfo {
-    public:
-        using Ptr = QSharedPointer<CandidateInfo>;
-
-        CandidateType type;
-        int           priority;
-        int           componentId;
-        int           network;
-
-        TransportAddress addr;    // address according to candidate type
-        TransportAddress base;    // network interface address
-        TransportAddress related; // not used in agent but usefule for diagnostics
-
-        QString foundation;
-        QString id;
-
-        static Ptr  makeRemotePrflx(int componentId, const TransportAddress &fromAddr, quint32 priority);
-        inline bool operator==(const CandidateInfo &o) const { return addr == o.addr && componentId == o.componentId; }
-        inline bool operator==(CandidateInfo::Ptr o) const { return *this == *o; }
-    };
-
     class Candidate {
     public:
         // unique across all candidates within this component
@@ -71,14 +53,14 @@ public:
         CandidateInfo::Ptr info;
 
         // note that these may be the same for multiple candidates
-        QSharedPointer<IceTransport> iceTransport;
-        int                          path;
+        std::shared_ptr<Transport> iceTransport;
+        // int                           path;
     };
 
     enum DebugLevel { DL_None, DL_Info, DL_Packet };
 
-    IceComponent(int id, QObject *parent = nullptr);
-    ~IceComponent();
+    Component(int id, QObject *parent = nullptr);
+    ~Component();
 
     int  id() const;
     bool isGatheringComplete() const;
@@ -90,21 +72,16 @@ public:
     UdpPortReserver *portReserver() const;
 
     // can be set once, but later changes are ignored
-    void setLocalAddresses(const QList<Ice176::LocalAddress> &addrs);
+    void setLocalAddresses(const QList<XMPP::ICE::LocalTransport::LocalAddress> &addrs);
 
     // can be set once, but later changes are ignored.  local addresses
     //   must have been set for this to work
     void setExternalAddresses(const QList<Ice176::ExternalAddress> &addrs);
 
-    void addExternalService(AbstractStunDisco::Service::Ptr service);
-    void setExternalDiscoFinished(bool value = true);
-
     // these all start out enabled, but can be disabled for diagnostic
     //   purposes
     void setUseLocal(bool enabled); // where to make local host candidates
-    void setUseStunBind(bool enabled);
-    void setUseStunRelayUdp(bool enabled);
-    void setUseStunRelayTcp(bool enabled);
+    void setStunDiscoverer(AbstractStunDisco *discoverer);
 
     /**
      * @brief update component with local listening sockets
@@ -116,7 +93,7 @@ public:
     void stop();
 
     // prflx priority to use when replying from this transport/path
-    int peerReflexivePriority(QSharedPointer<IceTransport> iceTransport, int path) const;
+    int peerReflexivePriority(std::shared_ptr<Transport> iceTransport, int path) const;
 
     void addLocalPeerReflexiveCandidate(const TransportAddress &addr, CandidateInfo::Ptr base, quint32 priority);
 
@@ -127,10 +104,10 @@ public:
 signals:
     // this is emitted in the same pass of the eventloop that a
     //   transport/path becomes ready
-    void candidateAdded(const XMPP::IceComponent::Candidate &c);
+    void candidateAdded(const XMPP::ICE::Component::Candidate &c);
 
     // this is emitted just before a transport/path will be deleted
-    void candidateRemoved(const XMPP::IceComponent::Candidate &c);
+    void candidateRemoved(const XMPP::ICE::Component::Candidate &c);
 
     // indicates all the initial HostType candidates have been pushed.
     //   note that it is possible there are no HostType candidates.

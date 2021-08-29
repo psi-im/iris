@@ -32,10 +32,16 @@ class Client;
 class StunDiscoManager : public QObject {
     Q_OBJECT
 public:
+    enum UseFlag { UseBind = 0x1, UseRelayUdp = 0x2, UseRelayTcp = 0x4 };
+    Q_DECLARE_FLAGS(UseFlags, UseFlag)
+
+    static constexpr UseFlags RelayUseFlags  = UseFlags { UseRelayUdp | UseRelayTcp };
+    static constexpr UseFlags DirectUseFlags = UseBind;
+
     StunDiscoManager(Client *client);
     ~StunDiscoManager();
 
-    AbstractStunDisco *createMonitor();
+    AbstractStunDisco *createMonitor(UseFlags useFlags = UseFlags { UseBind | UseRelayUdp | UseRelayTcp });
     Client *           client() const;
 
     void setStunBindService(const QString &host, int port);
@@ -48,5 +54,7 @@ private:
 };
 
 } // namespace XMPP
+
+Q_DECLARE_OPERATORS_FOR_FLAGS(XMPP::StunDiscoManager::UseFlags)
 
 #endif // XMPP_STUNDISCO_H

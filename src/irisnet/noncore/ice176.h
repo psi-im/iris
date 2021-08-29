@@ -22,6 +22,7 @@
 #include "turnclient.h"
 
 #include <QHostAddress>
+#include <QNetworkInterface>
 #include <QObject>
 #include <QString>
 
@@ -40,13 +41,6 @@ public:
     enum Error { ErrorGeneric, ErrorDisconnected };
 
     enum Mode { Initiator, Responder };
-
-    class LocalAddress {
-    public:
-        QHostAddress addr;
-        int          network = -1; // -1 = unknown
-        bool         isVpn   = false;
-    };
 
     class ExternalAddress {
     public:
@@ -101,9 +95,6 @@ public:
     // these all start out enabled, but can be disabled for diagnostic
     //   purposes
     void setUseLocal(bool enabled);
-    void setUseStunBind(bool enabled);
-    void setUseStunRelayUdp(bool enabled);
-    void setUseStunRelayTcp(bool enabled);
     void setAllowIpExposure(bool enabled);
     void setStunDiscoverer(AbstractStunDisco *discoverer);
 
@@ -157,7 +148,7 @@ public:
 
     QList<SelectedCandidate> selectedCandidates() const;
 
-    static QList<QHostAddress> availableNetworkAddresses();
+    static QList<LocalAddress> availableNetworkAddresses();
 
 signals:
     // indicates that the ice engine is started and is ready to receive

@@ -38,13 +38,12 @@
 #include <array>
 #include <chrono>
 #include <memory>
+#include <utility>
 
 #include <QElapsedTimer>
 #include <QNetworkInterface>
 #include <QTimer>
 #include <optional>
-
-template <class T> constexpr std::add_const_t<T> &as_const(T &t) noexcept { return t; }
 
 namespace XMPP { namespace Jingle { namespace ICE {
     const QString NS(QStringLiteral("urn:xmpp:jingle:transports:ice:0"));
@@ -530,34 +529,25 @@ namespace XMPP { namespace Jingle { namespace ICE {
                 return;
             }
 
-            auto listenAddrs = Ice176::availableNetworkAddresses();
-
-            QList<XMPP::Ice176::LocalAddress> localAddrs;
-
-            QStringList strList;
-            for (const QHostAddress &h : as_const(listenAddrs)) {
-                XMPP::Ice176::LocalAddress addr;
-                addr.addr = h;
-                localAddrs += addr;
-                strList += h.toString();
+            auto                localAddrs = Ice176::availableNetworkAddresses();
+            QList<QHostAddress> hostList;
+            hostList.reserve(localAddrs.size());
+            if (!localAddrs.isEmpty())
+                printf("Host addresses:\n");
+            for (auto const &la : localAddrs) {
+                hostList.append(la.addr);
+                printf("  %s\n", qPrintable(la.addr.toString()));
             }
-
             if (manager->basePort != -1) {
                 portReserver = new XMPP::UdpPortReserver(q);
-                portReserver->setAddresses(listenAddrs);
+                portReserver->setAddresses(hostList);
                 portReserver->setPorts(manager->basePort, 4);
-            }
-
-            if (!strList.isEmpty()) {
-                printf("Host addresses:\n");
-                for (const QString &s : as_const(strList))
-                    printf("  %s\n", qPrintable(s));
             }
 
             ice = new Ice176(q);
 
             q->connect(ice, &XMPP::Ice176::started, q, [this]() {
-                for (auto const &c : as_const(components)) {
+                for (auto const &c : std::as_const(components)) {
                     if (c.lowOverhead)
                         ice->flagComponentAsLowOverhead(c.componentIndex);
                 }
@@ -586,7 +576,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
                     if (!components[0].dtls) // if empty
                         notifyRawConnected();
                     else if (remoteAcceptedFingerprint)
-                        for (const auto &c : as_const(components))
+                        for (const auto &c : std::as_const(components))
                             c.dtls->onRemoteAcceptedFingerprint();
                 },
                 Qt::QueuedConnection); // signal is not DOR-SS
@@ -622,7 +612,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
                 eaddr.base = addr;
                 eaddr.addr = extAddr;
                 extAddrs += eaddr;*/
-                for (const XMPP::Ice176::LocalAddress &la : as_const(localAddrs)) {
+                for (const XMPP::Ice176::LocalAddress &la : std::as_const(localAddrs)) {
                     XMPP::Ice176::ExternalAddress ea;
                     ea.base = la;
                     ea.addr = *extAddr;
@@ -632,7 +622,15 @@ namespace XMPP { namespace Jingle { namespace ICE {
             }
 
             ice->setProxy(manager->stunProxy);
-            ice->setStunDiscoverer(q->pad()->session()->manager()->client()->stunDiscoManager()->createMonitor());
+
+            auto jingleManager   = q->pad()->session()->manager();
+            bool allowIpExposure = jingleManager->isIpExposureAllowed();
+            ice->setAllowIpExposure(allowIpExposure);
+
+            auto useFlags = XMPP::StunDiscoManager::RelayUseFlags;
+            if (allowIpExposure)
+                useFlags |= XMPP::StunDiscoManager::DirectUseFlags;
+            ice->setStunDiscoverer(jingleManager->client()->stunDiscoManager()->createMonitor(useFlags));
 
             ice->setComponentCount(components.count());
             ice->setLocalFeatures(Ice176::Trickle);

@@ -22,6 +22,8 @@
 #include <QByteArray>
 #include <QEnableSharedFromThis>
 #include <QObject>
+#include <chrono>
+#include <optional>
 
 #include "transportaddress.h"
 
@@ -99,6 +101,7 @@ public:
     //   required to provide a fingerprint.
     void setFingerprintRequired(bool enabled);
 
+    std::optional<std::chrono::microseconds> rtt() const;
 signals:
     // you must use a direct connection with this signal and call
     //   setMessage() in the slot.  this signal may occur many times

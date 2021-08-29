@@ -128,6 +128,7 @@ namespace StunTypes {
     QByteArray createAlternateServer(const XMPP::TransportAddress &addr);
     QByteArray createIceControlled(quint64 i);
     QByteArray createIceControlling(quint64 i);
+    QByteArray createTransactionTransmitCounter(int requestCnt, int responseCnt = 0);
 
     bool parseMappedAddress(const QByteArray &val, TransportAddress &addr);
     bool parseUsername(const QByteArray &val, QString *username);
@@ -148,6 +149,7 @@ namespace StunTypes {
     bool parseAlternateServer(const QByteArray &val, TransportAddress &addr);
     bool parseIceControlled(const QByteArray &val, quint64 *i);
     bool parseIceControlling(const QByteArray &val, quint64 *i);
+    bool parseTransactionTransmitCounter(const QByteArray &val, int &req, int &res);
 
     QString methodToString(int method);
     QString attributeTypeToString(int type);

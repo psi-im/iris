@@ -31,6 +31,7 @@
 #include <QTime>
 #include <QTimer>
 #include <QtCrypto>
+#include <optional>
 
 Q_DECLARE_METATYPE(XMPP::StunTransaction::Error)
 
@@ -127,7 +128,9 @@ public:
     StunTransaction::Mode    mode;
     StunMessage              origMessage;
     QByteArray               id;
-    QByteArray               packet;
+    StunMessage              outMessage;
+    QVector<QElapsedTimer>   triesRtt;
+    std::optional<quint32>   rtt; // in milliseconds, RFC 7982
     TransportAddress         to_addr;
 
     // defaults from RFC 5389
@@ -240,18 +243,7 @@ public:
             key = QCA::Hash("md5").process(buf).toByteArray();
         }
 
-        if (!key.isEmpty())
-            packet = out.toBinary(StunMessage::MessageIntegrity | StunMessage::Fingerprint, key);
-        else
-            packet = out.toBinary(StunMessage::Fingerprint);
-
-        if (packet.isEmpty()) {
-            // since a transaction is not cancelable nor reusable,
-            //   there's no DOR-SR issue here
-            QMetaObject::invokeMethod(q, "error", Qt::QueuedConnection,
-                                      Q_ARG(XMPP::StunTransaction::Error, StunTransaction::ErrorGeneric));
-            return;
-        }
+        outMessage = std::move(out);
 
         active = true;
         tries  = 1; // we transmit immediately here, so count it
@@ -302,6 +294,30 @@ private slots:
 private:
     void transmit()
     {
+        StunMessage::Attribute attr;
+        attr.type  = StunTypes::TRANSACTION_TRANSMIT_COUNTER;
+        attr.value = StunTypes::createTransactionTransmitCounter(tries);
+        outMessage.setAttribute(attr);
+        if (!rtt) {
+            if (tries < triesRtt.size())
+                triesRtt.resize(tries);
+            triesRtt[tries - 1].start();
+        }
+
+        QByteArray packet;
+        if (!key.isEmpty())
+            packet = outMessage.toBinary(StunMessage::MessageIntegrity | StunMessage::Fingerprint, key);
+        else
+            packet = outMessage.toBinary(StunMessage::Fingerprint);
+
+        if (packet.isEmpty()) {
+            // since a transaction is not cancelable nor reusable,
+            //   there's no DOR-SR issue here
+            QMetaObject::invokeMethod(q, "error", Qt::QueuedConnection,
+                                      Q_ARG(XMPP::StunTransaction::Error, StunTransaction::ErrorGeneric));
+            return;
+        }
+
         if (pool->d->debugLevel >= StunTransactionPool::DL_Packet) {
             QString str = QString("STUN SEND: elapsed=") + QString::number(time.elapsed());
             if (to_addr.isValid())
@@ -335,6 +351,14 @@ private:
         if (pool->d->debugLevel >= StunTransactionPool::DL_Packet)
             emit pool->debugLine(QString("matched incoming response to existing request.  elapsed=")
                                  + QString::number(time.elapsed()));
+        if (!rtt) {
+            auto ttc = msg.attribute(StunTypes::TRANSACTION_TRANSMIT_COUNTER);
+            int  reqCnt, rspCnt;
+            if (!ttc.isNull() && StunTypes::parseTransactionTransmitCounter(ttc, reqCnt, rspCnt)
+                && rspCnt <= triesRtt.size()) {
+                rtt = quint32(triesRtt[rspCnt - 1].elapsed());
+            }
+        }
 
         // will be set to true when receiving an Unauthorized error
         bool unauthError = false;
@@ -483,6 +507,14 @@ void StunTransaction::setShortTermUsername(const QString &username) { d->stuser 
 void StunTransaction::setShortTermPassword(const QString &password) { d->stpass = password; }
 
 void StunTransaction::setFingerprintRequired(bool enabled) { d->fpRequired = enabled; }
+
+std::optional<std::chrono::microseconds> StunTransaction::rtt() const
+{
+    if (d->rtt) {
+        return std::chrono::milliseconds(*d->rtt);
+    }
+    return std::nullopt;
+}
 
 //----------------------------------------------------------------------------
 // StunTransactionPool

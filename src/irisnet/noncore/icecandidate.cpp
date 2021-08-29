@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010  Barracuda Networks, Inc.
+ * Copyright (C) 2021 Psi IM Team
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -16,11 +16,22 @@
  *
  */
 
-#include "icetransport.h"
+#include "icecandidate.h"
+#include <QUuid>
 
 namespace XMPP::ICE {
-Transport::Transport(QObject *parent) : QObject(parent) { }
 
-Transport::~Transport() { }
+CandidateInfo::Ptr CandidateInfo::makeRemotePrflx(int componentId, const TransportAddress &fromAddr, quint32 priority)
+{
+    auto c  = std::make_shared<CandidateInfo>();
+    c->addr = fromAddr;
+    c->addr.addr.setScopeId(QString());
+    c->type        = PeerReflexiveType;
+    c->priority    = priority;
+    c->foundation  = QUuid::createUuid().toString();
+    c->componentId = componentId;
+    c->network     = -1;
+    return c;
+}
 
-} // namespace XMPP
+}

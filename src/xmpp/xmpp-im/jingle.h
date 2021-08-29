@@ -362,6 +362,9 @@ namespace Jingle {
         bool isAllowedParty(const Jid &jid) const;
         void setRemoteJidChecker(std::function<bool(const Jid &)> checker);
 
+        void setAllowIpExposure(bool allow);
+        bool isIpExposureAllowed() const;
+
         Session *           session(const Jid &remoteJid, const QString &sid);
         Session *           newSession(const Jid &j);
         QString             registerSession(Session *session);

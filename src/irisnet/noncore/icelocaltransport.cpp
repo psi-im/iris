@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Copyright (C) 2009-2010  Barracuda Networks, Inc.
  *
  * This library is free software; you can redistribute it and/or
@@ -18,6 +18,8 @@
 
 #include "icelocaltransport.h"
 
+#include "iceagent.h"
+#include "icecandidate.h"
 #include "objectsession.h"
 #include "stunallocate.h"
 #include "stunbinding.h"
@@ -26,13 +28,14 @@
 #include "turnclient.h"
 
 #include <QHostAddress>
+#include <QTimer>
 #include <QUdpSocket>
 #include <QtCrypto>
 
 // don't queue more incoming packets than this per transmit path
 #define MAX_PACKET_QUEUE 64
 
-namespace XMPP {
+namespace XMPP::ICE {
 enum { Direct, Relayed };
 
 //----------------------------------------------------------------------------
@@ -123,9 +126,9 @@ private slots:
 };
 
 //----------------------------------------------------------------------------
-// IceLocalTransport
+// LocalTransport
 //----------------------------------------------------------------------------
-class IceLocalTransport::Private : public QObject {
+class LocalTransport::Private : public QObject {
     Q_OBJECT
 
 public:
@@ -149,40 +152,47 @@ public:
         QByteArray       buf;
     };
 
-    enum class State { None, Starting, Active, Stopping, Stopped };
-
     using StunServer  = AbstractStunDisco::Service::Ptr;
     using StunServers = QList<StunServer>;
 
-    IceLocalTransport *      q;
-    ObjectSession            sess;
-    QUdpSocket *             extSock = nullptr;
-    SafeUdpSocket *          sock    = nullptr;
-    StunTransactionPool::Ptr pool;
-    StunBinding *            stunBinding   = nullptr;
-    TurnClient *             turn          = nullptr;
-    bool                     turnActivated = false;
-    TransportAddress         addr;
-    TransportAddress         refAddr;
-    TransportAddress         relAddr;
-    QHostAddress             refAddrSource;
+    struct RecoveringTurn {
+        StunServer  server;
+        TurnClient *client     = nullptr;
+        int         retryCount = 0;
+    };
 
-    TransportAddress  stunBindAddr;
-    TransportAddress  stunRelayAddr;
-    StunServer        stunBindServer;
-    StunServer        stunRelayServer;
-    QList<StunServer> stuns;
-    QList<StunServer> turns;
+    enum class State { None, Starting, Active, Stopping, Stopped };
+
+    LocalTransport *            q;
+    ObjectSession               sess;
+    QUdpSocket *                extSock = nullptr;
+    SafeUdpSocket *             sock    = nullptr;
+    StunTransactionPool::Ptr    pool;
+    std::vector<RecoveringTurn> turnClients;
+    std::vector<StunBinding *>  stunClients;
+    AbstractStunDisco *         stunDiscoverer = nullptr;
+    // TransportAddress            addr;
+    LocalAddress localAddress;
+    QHostAddress extAddr; // either configured or server reflexive address
+    // TransportAddress         refAddr;
+    // TransportAddress         relAddr;
+    // QHostAddress             refAddrSource;
+
+    // TransportAddress  stunBindAddr;
+    // TransportAddress  stunRelayAddr;
+    QList<StunServer> pendingStuns;
 
     QString          clientSoftware;
     QList<Datagram>  in;
     QList<Datagram>  inRelayed;
     QList<WriteItem> pendingWrites;
-    int              retryCount = 0;
-    State            state      = State::None;
-    int              debugLevel = IceTransport::DL_None;
 
-    Private(IceLocalTransport *_q) : QObject(_q), q(_q), sess(this) { }
+    State state             = State::None;
+    bool  gatheringComplete = false;
+    bool  borrowedSocket    = false; // where extSock is borrowed from a port reserver
+    int   debugLevel        = Transport::DL_None;
+
+    Private(LocalTransport *_q) : QObject(_q), q(_q), sess(this) { }
 
     ~Private() { reset(); }
 
@@ -190,12 +200,14 @@ public:
     {
         sess.reset();
 
-        delete stunBinding;
-        stunBinding = nullptr;
-
-        delete turn;
-        turn          = nullptr;
-        turnActivated = false;
+        for (auto s : stunClients)
+            disconnect(s);
+        qDeleteAll(stunClients);
+        stunClients.clear();
+        for (auto t : turnClients)
+            disconnect(t.client);
+        qDeleteAll(turnClients);
+        turnClients.clear();
 
         if (sock) { // if started
             if (extSock) {
@@ -207,21 +219,14 @@ public:
             sock = nullptr;
         }
 
-        addr          = TransportAddress();
-        relAddr       = TransportAddress();
-        refAddr       = TransportAddress();
-        refAddrSource = QHostAddress();
-        stunBindServer.reset();
-        stunRelayServer.reset();
-        stuns.clear();
-        turns.clear();
+        addr = TransportAddress();
+        pendingStuns.clear();
 
         in.clear();
         inRelayed.clear();
         pendingWrites.clear();
 
-        retryCount = 0;
-        state      = State::None;
+        state = State::None;
     }
 
     void start()
@@ -230,7 +235,42 @@ public:
         if (state >= State::Starting)
             return;
         state = State::Starting;
-        sess.defer(this, "postStart");
+        QTimer::singleShot(0, this, [this]() {
+            if (state >= State::Stopping)
+                return;
+
+            if (extSock) {
+                sock = new SafeUdpSocket(extSock, this);
+            } else {
+                QUdpSocket *qsock = createSocket(); // will be bound to whatever is passed to q->start()
+                if (!qsock) {
+                    // signal emitted in this case.  bail
+                    return;
+                }
+
+                sock = new SafeUdpSocket(qsock, this);
+            }
+
+            prepareSocket();
+
+            pool = StunTransactionPool::Ptr::create(StunTransaction::Udp);
+            pool->setDebugLevel((StunTransactionPool::DebugLevel)debugLevel);
+            connect(pool.data(), &StunTransactionPool::outgoingMessage, this, &Private::pool_outgoingMessage);
+            connect(pool.data(), &StunTransactionPool::needAuthParams, this, &Private::pool_needAuthParams);
+            connect(pool.data(), &StunTransactionPool::debugLine, this,
+                    [this](const QString &line) { emit q->debugLine(line); });
+            pool->setLongTermAuthEnabled(true);
+
+            for (auto const &s : pendingStuns) {
+                if (isAcceptableService(s)) {
+                    initExternalService(s);
+                }
+            }
+            pendingStuns = {};
+
+            state = State::Active;
+            emit q->started();
+        });
     }
 
     void stop()
@@ -245,147 +285,44 @@ public:
 
         state = State::Stopping;
 
-        if (turn)
-            turn->close(); // will emit stopped() eventually calling postStop()
-        else
+        if (stunDiscoverer) {
+            stunDiscoverer->disconnect(this);
+            stunDiscoverer = nullptr;
+        }
+        for (auto s : stunClients)
+            disconnect(s);
+        qDeleteAll(stunClients);
+        stunClients.clear();
+        if (turnClients.empty()) {
             sess.defer(this, "postStop");
-    }
-
-    bool isAcceptableService(AbstractStunDisco::Service::Ptr srv) const
-    {
-        Q_ASSERT(sock != nullptr);
-        return !(sock->localAddress().protocol() == QAbstractSocket::IPv4Protocol ? srv->addresses4 : srv->addresses6)
-                    .isEmpty()
-            && !(srv->flags & AbstractStunDisco::Tls) && srv->transport == AbstractStunDisco::Udp;
-        // TODO support STUN over DTLS
-    }
-
-    void addExternalService(AbstractStunDisco::Service::Ptr srv)
-    {
-        if (isAcceptableService(srv)) {
-            if (srv->flags & AbstractStunDisco::Relay) {
-                turns += srv;
-                do_stun();
-            } else {
-                stuns += srv;
-                do_turn();
-            }
-        }
-    }
-
-    void stunStart()
-    {
-        Q_ASSERT(!pool);
-
-        pool = StunTransactionPool::Ptr::create(StunTransaction::Udp);
-        pool->setDebugLevel((StunTransactionPool::DebugLevel)debugLevel);
-        connect(pool.data(), &StunTransactionPool::outgoingMessage, this, &Private::pool_outgoingMessage);
-        connect(pool.data(), &StunTransactionPool::needAuthParams, this, &Private::pool_needAuthParams);
-        connect(pool.data(), &StunTransactionPool::debugLine, this, &Private::pool_debugLine);
-
-        pool->setLongTermAuthEnabled(true);
-
-        // cleanup useless
-        auto stuns_it = stuns.begin();
-        while (stuns_it != stuns.end())
-            if (isAcceptableService(*stuns_it))
-                ++stuns_it;
-            else
-                stuns_it = stuns.erase(stuns_it);
-
-        auto turns_it = turns.begin();
-        while (turns_it != turns.end())
-            if (isAcceptableService(*turns_it))
-                ++turns_it;
-            else
-                turns_it = turns.erase(turns_it);
-
-        do_stun();
-        do_turn();
-    }
-
-    void do_stun()
-    {
-        if (!sock || stunBindAddr.isValid())
-            return; // too early
-        Q_ASSERT(stunBinding == nullptr);
-        emit q->debugLine("trying next STUN service...");
-        stunBindAddr = TransportAddress();
-        auto it      = std::find_if(stuns.begin(), stuns.end(),
-                               [](auto const &s) { return !(s->flags & AbstractStunDisco::Relay); });
-        if (it == stuns.end()) // if nothing to try
             return;
-        auto addresses
-            = sock->localAddress().protocol() == QAbstractSocket::IPv4Protocol ? (*it)->addresses4 : (*it)->addresses6;
-        stunBindAddr   = { addresses[0], (*it)->port };
-        stunBindServer = (*it);
-        stuns.erase(it);
-
-        stunBinding = new StunBinding(pool.data());
-        connect(stunBinding, &StunBinding::success, this, [&]() {
-            refAddr       = stunBinding->reflexiveAddress();
-            refAddrSource = stunBindAddr.addr;
-
-            delete stunBinding;
-            stunBinding = nullptr;
-
-            ObjectSessionWatcher watch(&sess);
-
-            emit q->addressesChanged();
-            if (watch.isValid()) {
-                stunBindAddr = TransportAddress();
-                do_stun();
-            }
-        });
-        connect(stunBinding, &StunBinding::error, this, [&](XMPP::StunBinding::Error) {
-            delete stunBinding;
-            stunBinding = nullptr;
-
-            ObjectSessionWatcher watch(&sess);
-
-            emit q->error(IceLocalTransport::ErrorStun);
-            if (watch.isValid()) {
-                stunRelayAddr = TransportAddress();
-                do_turn();
-            }
-        });
-        stunBinding->start(stunBindAddr);
+        }
+        for (auto &t : turnClients)
+            t.client->close(); // will emit closed()
     }
 
-    void do_turn()
+    void setStunDiscoverer(AbstractStunDisco *discoverer)
     {
-        if (!sock || stunRelayAddr.isValid())
-            return; // too early
-        Q_ASSERT(turn == nullptr);
-        emit q->debugLine("trying next TURN service...");
-        stunRelayAddr = TransportAddress();
-        auto it       = std::find_if(turns.begin(), turns.end(),
-                               [](auto const &s) { return s->flags & AbstractStunDisco::Relay; });
-        if (it != turns.end()) // if nothing to try
-            return;
-        auto addresses
-            = sock->localAddress().protocol() == QAbstractSocket::IPv4Protocol ? (*it)->addresses4 : (*it)->addresses6;
-        stunRelayAddr = { addresses[0], (*it)->port }; // REVIEW random instead of 0?
-        if (!(*it)->username.isEmpty()) {
-            pool->setUsername((*it)->username);
-            pool->setPassword((*it)->password);
+        stunDiscoverer = discoverer;
+        connect(discoverer, &AbstractStunDisco::serviceAdded, this, [this](StunServer service) {
+            if (state <= State::Starting)
+                pendingStuns.append(service);
+            else if (state < State::Stopping && isAcceptableService(service))
+                initExternalService(service);
+        });
+        connect(discoverer, &AbstractStunDisco::serviceModified, this, [this](AbstractStunDisco::Service::Ptr) {});
+        connect(discoverer, &AbstractStunDisco::serviceRemoved, this, [this](AbstractStunDisco::Service::Ptr) {});
+        connect(discoverer, &AbstractStunDisco::discoFinished, this, [this]() {});
+    }
+
+    QUdpSocket *takeBorrowedSocket()
+    {
+        if (borrowedSocket) {
+            extSock->disconnect(this);
+            auto r         = extSock;
+            borrowedSocket = false;
+            return r;
         }
-        stunRelayServer = (*it);
-        turns.erase(it);
-
-        turn = new TurnClient(this);
-        turn->setDebugLevel((TurnClient::DebugLevel)debugLevel);
-        connect(turn, &TurnClient::connected, this, &Private::turn_connected);
-        connect(turn, &TurnClient::tlsHandshaken, this, &Private::turn_tlsHandshaken);
-        connect(turn, &TurnClient::closed, this, &Private::turn_closed);
-        connect(turn, &TurnClient::activated, this, &Private::turn_activated);
-        connect(turn, &TurnClient::packetsWritten, this, &Private::turn_packetsWritten);
-        connect(turn, &TurnClient::error, this, &Private::turn_error);
-        connect(turn, &TurnClient::outgoingDatagram, this, &Private::turn_outgoingDatagram);
-        connect(turn, &TurnClient::debugLine, this, &Private::turn_debugLine);
-
-        turn->setClientSoftwareNameAndVersion(clientSoftware);
-        turn->connectToHost(pool.data(), stunRelayAddr);
     }
 
 private:
@@ -395,7 +332,7 @@ private:
         QUdpSocket *qsock = new QUdpSocket(this);
         if (!qsock->bind(addr.addr, 0)) {
             delete qsock;
-            emit q->error(IceLocalTransport::ErrorBind);
+            emit q->error(LocalTransport::ErrorBind);
             return nullptr;
         }
 
@@ -404,30 +341,29 @@ private:
 
     void prepareSocket()
     {
-        addr = sock->localTransportAddress();
+        // addr = sock->localTransportAddress();
 
         connect(sock, &SafeUdpSocket::readyRead, this, &Private::sock_readyRead);
         connect(sock, &SafeUdpSocket::datagramsWritten, this, &Private::sock_datagramsWritten);
     }
 
-    // return true if we are retrying, false if we should error out
-    bool handleRetry()
+    /*
+     * Hadles TURN Allocate Mismatch error (3 attempts to sucessfully connect)
+     * return true if we are retrying, false if we should error out
+     */
+    bool handleAllocateMismatch(RecoveringTurn &turn)
     {
         // don't allow retrying if activated or stopping)
-        if (turnActivated || state >= State::Stopping)
+        if (turn.client->isActivated() || state >= State::Stopping)
             return false;
 
-        ++retryCount;
-        if (retryCount < 3) {
-            if (debugLevel >= IceTransport::DL_Info)
+        ++turn.retryCount;
+        if (turn.retryCount < 3) {
+            if (debugLevel >= Transport::DL_Info)
                 emit q->debugLine("retrying...");
 
             delete sock;
             sock = nullptr;
-
-            // to receive this error, it is a Relay, so change
-            //   the mode
-            // stunType = IceLocalTransport::Relay;
 
             QUdpSocket *qsock = createSocket();
             if (!qsock) {
@@ -437,76 +373,253 @@ private:
             }
 
             sock = new SafeUdpSocket(qsock, this);
-
             prepareSocket();
 
-            refAddr       = TransportAddress();
-            refAddrSource = QHostAddress();
-
-            relAddr = TransportAddress();
-
-            do_turn();
-
-            // tell the world that our local address probably
-            //   changed, and that we lost our reflexive address
-            emit q->addressesChanged();
             return true;
         }
 
         return false;
     }
 
-    // return true if data packet, false if pool or nothing
+    /**
+     * Process data coming from a stun/turn server (not peer)
+     *
+     * return true if data packet, false if pool or nothing
+     */
     bool processIncomingStun(const QByteArray &buf, const TransportAddress &fromAddr, Datagram *dg)
     {
         QByteArray       data;
         TransportAddress dataAddr;
 
         bool notStun;
-        if (!pool->writeIncomingMessage(buf, &notStun, fromAddr) && turn) {
-            data = turn->processIncomingDatagram(buf, notStun, dataAddr);
+        if (pool->writeIncomingMessage(buf, &notStun, fromAddr))
+            return false; // handled as stun transaction. no data
+        // turn servers use the same pool. So if the incomming packet is from a tern server it has to be a data packet
+        for (auto const &rt : turnClients) {
+            if (!rt.client->isUdp())
+                continue;
+            data = rt.client->processIncomingDatagram(buf, notStun, dataAddr);
             if (!data.isNull()) {
                 dg->addr = dataAddr;
                 dg->buf  = data;
                 return true;
-            } else {
-                if (debugLevel >= IceTransport::DL_Packet)
-                    emit q->debugLine(
-                        "Warning: server responded with what doesn't seem to be a STUN or data packet, skipping.");
             }
         }
+        if (debugLevel >= Transport::DL_Packet)
+            emit q->debugLine(
+                "Warning: server responded with what doesn't seem to be a STUN or data packet, skipping.");
 
         return false;
     }
 
-private slots:
-    void postStart()
+    // called when one of external services was deleted
+    void onExtServiceFinished()
     {
-        if (state >= State::Stopping)
+        if (!stunClients.empty() || !turnClients.empty())
             return;
-
-        if (extSock) {
-            sock = new SafeUdpSocket(extSock, this);
-        } else {
-            QUdpSocket *qsock = createSocket();
-            if (!qsock) {
-                // signal emitted in this case.  bail
-                return;
-            }
-
-            sock = new SafeUdpSocket(qsock, this);
+        gatheringComplete = true;
+        if (state == State::Stopping) {
+            reset();
+            state = State::Stopped;
+            emit q->stopped();
+            return;
         }
-
-        prepareSocket();
-        stunStart();
-        state = State::Active;
-        emit q->started();
     }
 
     void postStop()
     {
         reset();
         emit q->stopped();
+    }
+
+    void addTcpTurn(AbstractStunDisco::Service::Ptr service, const QHostAddress &addr)
+    {
+        auto turn = std::make_shared<TurnClient>();
+        turn->setDebugLevel(TurnClient::DebugLevel(debugLevel));
+        connect(turn.get(), &TurnClient::activated, this, [this, turn]() {
+            auto allocate = turn->stunAllocate();
+            auto refAddr  = allocate->reflexiveAddress();
+            if (debugLevel >= Transport::DL_Info)
+                emit q->debugLine(QLatin1String("Server says we are ") + refAddr);
+            auto relayAddr = allocate->relayedAddress();
+            if (debugLevel >= Transport::DL_Info)
+                emit q->debugLine(QLatin1String("Server relays via ") + relayAddr);
+
+            auto ci        = CandidateInfo::make();
+            ci->addr       = relayAddr;
+            ci->related    = refAddr;
+            ci->type       = RelayedType;
+            ci->base       = ci->addr;
+            ci->network    = localAddress.network;
+            ci->foundation = Agent::instance()->foundation(RelayedType, ci->base.addr, turn->serverAddress().addr,
+                                                           QAbstractSocket::TcpSocket);
+            emit q->candidateFound(ci);
+        });
+        connect(turn.get(), &TurnClient::closed, this, [this, turn]() {
+            ObjectSessionWatcher watch(&sess);
+
+            removeLocalCandidates(turn->sharedFromThis());
+            if (!watch.isValid())
+                return;
+
+            turn->disconnect(this);
+            turn.reset();
+
+            tryStopped();
+        });
+        connect(turn.data(), &IceTurnTransport::error, this, [this](int e) {
+            Q_UNUSED(e)
+
+            ObjectSessionWatcher watch(&sess);
+
+            removeLocalCandidates(tcpTurn);
+            if (!watch.isValid())
+                return;
+
+            tcpTurn->disconnect(this);
+            tcpTurn.reset();
+            tryGatheringComplete();
+        });
+        connect(turn.data(), &IceTurnTransport::debugLine, this,
+                [this](const QString &line) { emit q->debugLine(line); });
+        turn->setClientSoftwareNameAndVersion(clientSoftware);
+        turn->setProxy(proxy);
+        turn->setUsername(service->username);
+        turn->setPassword(service->password);
+        auto taddr = TransportAddress { addr, service->port };
+        turn->start(taddr);
+        tcpTurn.append(turn);
+
+        emit q->debugLine(QLatin1String("starting TURN transport with server ") + taddr
+                          + QLatin1String(" for component ") + QString::number(id));
+    }
+
+    bool isAcceptableService(AbstractStunDisco::Service::Ptr srv) const
+    {
+        Q_ASSERT(sock != nullptr);
+        return !(sock->localAddress().protocol() == QAbstractSocket::IPv4Protocol ? srv->addresses4 : srv->addresses6)
+                    .isEmpty()
+            && (srv->transport == AbstractStunDisco::Tcp || !(srv->flags & AbstractStunDisco::Tls));
+        // TODO support STUN over DTLS
+    }
+
+    void onServerReflexiveFound(const TransportAddress &rflxAddr, const QHostAddress &sourceAddr)
+    {
+        auto ci     = CandidateInfo::make();
+        ci->addr    = rflxAddr;
+        ci->base    = { sock->localAddress(), sock->localPort() };
+        ci->related = ci->base;
+        ci->type    = ServerReflexiveType;
+        // ci->componentId = id;
+        // ci->priority    = choose_default_priority(ci->type, 65535 - addrAt, lt->isVpn, ci->componentId);
+        ci->network = localAddress.network;
+        ci->foundation
+            = Agent::instance()->foundation(ServerReflexiveType, ci->base.addr, sourceAddr, QAbstractSocket::UdpSocket);
+        emit q->candidateFound(ci);
+    }
+
+    void addStun(StunServer service)
+    {
+        auto binding = new StunBinding(pool.data());
+        connect(binding, &StunBinding::success, this, [this, binding]() {
+            auto refAddr       = binding->reflexiveAddress();
+            auto refAddrSource = binding->stunAddress().addr;
+            delete binding;
+            onServerReflexiveFound(refAddr, refAddrSource);
+        });
+        connect(binding, &StunBinding::error, this, [this, binding](XMPP::StunBinding::Error err) {
+            emit q->debugLine(QString("stun bind failed: ") + QString::number(int(err)));
+            delete binding;
+        });
+        connect(binding, &QObject::destroyed, this, [this, binding]() {
+            auto it = std::find(stunClients.begin(), stunClients.end(), binding);
+            stunClients.erase(it);
+            onExtServiceFinished();
+        });
+        auto &addresses = sock->localAddress().protocol() == QAbstractSocket::IPv4Protocol ? service->addresses4
+                                                                                           : service->addresses6;
+        stunClients.push_back(binding);
+        binding->start({ addresses[0], service->port });
+    }
+
+    void addTurn(StunServer service)
+    {
+        if (!service->username.isEmpty()) {
+            pool->setUsername(service->username);
+            pool->setPassword(service->password);
+        }
+
+        auto turn = new TurnClient(this);
+        turn->setDebugLevel((TurnClient::DebugLevel)debugLevel);
+        connect(turn, &TurnClient::connected, this, [this, turn]() {
+            if (debugLevel >= IceTransport::DL_Info)
+                emit q->debugLine(QString(turn->serverAddress()) + QLatin1String(" turn_connected"));
+        });
+        connect(turn, &TurnClient::tlsHandshaken, this, [this, turn]() {
+            if (debugLevel >= IceTransport::DL_Info)
+                emit q->debugLine(QString(turn->serverAddress()) + QLatin1String(" turn_tlsHandshaken"));
+        });
+        connect(turn, &TurnClient::closed, this, [this, turn]() {
+            if (debugLevel >= IceTransport::DL_Info)
+                emit q->debugLine(QString(turn->serverAddress()) + QLatin1String(" turn_closed"));
+            delete turn;
+        });
+        connect(turn, &TurnClient::activated, this, [this]() {
+            StunAllocate *allocate = turnClients->stunAllocate();
+
+            // take reflexive address from TURN only if we are not using a
+            //   separate STUN server
+            if (!stunBindAddr.isValid() || stunBindAddr == stunRelayAddr) {
+                refAddr       = allocate->reflexiveAddress();
+                refAddrSource = stunRelayAddr.addr;
+            }
+
+            if (debugLevel >= IceTransport::DL_Info)
+                emit q->debugLine(QLatin1String("Server says we are ") + allocate->reflexiveAddress());
+
+            relAddr = allocate->relayedAddress();
+            if (debugLevel >= IceTransport::DL_Info)
+                emit q->debugLine(QLatin1String("Server relays via ") + relAddr);
+
+            emit q->addressesChanged();
+        });
+        connect(turn, &TurnClient::packetsWritten, this, [this](int count, const XMPP::TransportAddress &addr) {
+            emit q->datagramsWritten(Relayed, count, addr);
+        });
+        connect(turn, &TurnClient::error, this, [this, turn](XMPP::TurnClient::Error e) {
+            if (debugLevel >= IceTransport::DL_Info)
+                emit q->debugLine(QString(turn->serverAddress()) + QString(" turn_error: ") + turn->errorString());
+            if (e == TurnClient::ErrorMismatch && !extSock && handleAllocateMismatch(*findTurn(turn)))
+                return;
+            delete turn;
+        });
+        connect(turn, &TurnClient::outgoingDatagram, this, [this](const QByteArray &buf) {
+            WriteItem wi;
+            wi.type = WriteItem::Turn;
+            pendingWrites += wi;
+            sock->writeDatagram(buf, stunRelayAddr);
+        });
+        connect(turn, &TurnClient::debugLine, this,
+                [this, turn](const QString &line) { emit q->debugLine(QString(turn->serverAddress()) + ' ' + line); });
+        connect(turn, &QObject::destroyed, this, [this]() mutable {
+            auto it = findTurn(sender());
+            turnClients.erase(it);
+            onExtServiceFinished();
+        });
+        turn->setClientSoftwareNameAndVersion(clientSoftware);
+        turnClients.push_back({ service, turn, 0 });
+
+        auto &addresses = sock->localAddress().protocol() == QAbstractSocket::IPv4Protocol ? service->addresses4
+                                                                                           : service->addresses6;
+        turn->connectToHost(pool.data(), { addresses[0], service->port });
+    }
+
+    void initExternalService(AbstractStunDisco::Service::Ptr service)
+    {
+        if (service->flags & AbstractStunDisco::Relay)
+            addStun(service);
+        else
+            addTurn(service);
     }
 
     void sock_readyRead()
@@ -520,11 +633,17 @@ private slots:
             TransportAddress from;
             Datagram         dg;
 
-            QByteArray buf = sock->readDatagram(from);
-            if (buf.isEmpty()) // it's weird we ever came here, but should relax static analyzer
+            QByteArray buf = sock->readDatagram(from); // got raw udp payload
+            if (buf.isEmpty())                         // it's weird we ever came here, but should relax static analyzer
                 break;
             qDebug("got packet from %s", qPrintable(from));
-            if (from == stunBindAddr || from == stunRelayAddr) {
+            bool isFromStun = std::any_of(stunClients.begin(), stunClients.end(),
+                                          [&from](auto const &i) { return i->stunAddress() == from; });
+            if (!isFromStun)
+                isFromStun = std::any_of(turnClients.begin(), turnClients.end(),
+                                         [&from](auto const &i) { return i->serverAddress() == from; });
+
+            if (isFromStun) {
                 bool haveData = processIncomingStun(buf, from, &dg);
 
                 // processIncomingStun could cause signals to
@@ -600,7 +719,7 @@ private slots:
 
         if (twrites > 0) {
             // note: this will invoke turn_packetsWritten()
-            turn->outgoingDatagramsWritten(twrites);
+            turnClients->outgoingDatagramsWritten(twrites);
         }
     }
 
@@ -630,144 +749,52 @@ private slots:
         pool->continueAfterParams(addr);
     }
 
-    void pool_debugLine(const QString &line) { emit q->debugLine(line); }
-
-    void turn_connected()
+    inline std::vector<RecoveringTurn>::iterator findTurn(QObject *client)
     {
-        if (debugLevel >= IceTransport::DL_Info)
-            emit q->debugLine("turn_connected");
+        return std::find_if(turnClients.begin(), turnClients.end(),
+                            [client](auto const &r) { return r.client == client; });
     }
-
-    void turn_tlsHandshaken()
-    {
-        if (debugLevel >= IceTransport::DL_Info)
-            emit q->debugLine("turn_tlsHandshaken");
-    }
-
-    void turn_closed()
-    {
-        if (debugLevel >= IceTransport::DL_Info)
-            emit q->debugLine("turn_closed");
-
-        delete turn;
-        turn          = nullptr;
-        turnActivated = false;
-
-        postStop();
-    }
-
-    void turn_activated()
-    {
-        StunAllocate *allocate = turn->stunAllocate();
-
-        // take reflexive address from TURN only if we are not using a
-        //   separate STUN server
-        if (!stunBindAddr.isValid() || stunBindAddr == stunRelayAddr) {
-            refAddr       = allocate->reflexiveAddress();
-            refAddrSource = stunRelayAddr.addr;
-        }
-
-        if (debugLevel >= IceTransport::DL_Info)
-            emit q->debugLine(QLatin1String("Server says we are ") + allocate->reflexiveAddress());
-
-        relAddr = allocate->relayedAddress();
-        if (debugLevel >= IceTransport::DL_Info)
-            emit q->debugLine(QLatin1String("Server relays via ") + relAddr);
-
-        turnActivated = true;
-
-        emit q->addressesChanged();
-    }
-
-    void turn_packetsWritten(int count, const XMPP::TransportAddress &addr)
-    {
-        emit q->datagramsWritten(Relayed, count, addr);
-    }
-
-    void turn_error(XMPP::TurnClient::Error e)
-    {
-        if (debugLevel >= IceTransport::DL_Info)
-            emit q->debugLine(QString("turn_error: ") + turn->errorString());
-
-        delete turn;
-        turn              = nullptr;
-        bool wasActivated = turnActivated;
-        turnActivated     = false;
-
-        if (e == TurnClient::ErrorMismatch) {
-            if (!extSock && handleRetry())
-                return;
-        }
-
-        // this means our relay died on us.  in the future we might
-        //   consider reporting this
-        if (wasActivated)
-            return;
-
-        emit q->error(IceLocalTransport::ErrorTurn);
-        // don't report any error
-        // if(stunType == IceLocalTransport::Relay || (stunType == IceLocalTransport::Auto && !stunBinding))
-        //    emit q->addressesChanged();
-    }
-
-    void turn_outgoingDatagram(const QByteArray &buf)
-    {
-        WriteItem wi;
-        wi.type = WriteItem::Turn;
-        pendingWrites += wi;
-        sock->writeDatagram(buf, stunRelayAddr);
-    }
-
-    void turn_debugLine(const QString &line) { emit q->debugLine(line); }
 };
 
-IceLocalTransport::IceLocalTransport(QObject *parent) : IceTransport(parent) { d = new Private(this); }
+LocalTransport::LocalTransport(QObject *parent) : Transport(parent) { d = new Private(this); }
 
-IceLocalTransport::~IceLocalTransport() { delete d; }
+LocalTransport::~LocalTransport() { delete d; }
 
-void IceLocalTransport::setClientSoftwareNameAndVersion(const QString &str) { d->clientSoftware = str; }
-
-void IceLocalTransport::start(QUdpSocket *sock)
+void LocalTransport::setSocket(QUdpSocket *socket, bool borrowedSocket, const LocalAddress &la)
 {
-    d->extSock = sock;
-    d->start();
+    d->extSock        = socket;
+    d->borrowedSocket = socket ? borrowedSocket : false;
+    d->localAddress   = la;
 }
 
-void IceLocalTransport::start(const QHostAddress &addr)
+QUdpSocket *LocalTransport::takeBorrowedSocket() { return d->takeBorrowedSocket(); }
+
+QNetworkInterface::InterfaceType LocalTransport::networkType() const { return d->localAddress.type; }
+
+const QHostAddress &LocalTransport::externalAddress() const { return d->extAddr; }
+
+void LocalTransport::setExternalAddress(const QHostAddress &addr) { d->extAddr = addr; }
+
+void LocalTransport::setClientSoftwareNameAndVersion(const QString &str) { d->clientSoftware = str; }
+
+void LocalTransport::start() { d->start(); }
+
+void LocalTransport::setStunDiscoverer(AbstractStunDisco *discoverer) { d->setStunDiscoverer(discoverer); }
+
+void LocalTransport::stop() { d->stop(); }
+
+TransportAddress LocalTransport::localAddress() const
 {
-    d->addr.addr = addr;
-    d->start();
+    return d->sock ? d->sock->localTransportAddress() : TransportAddress();
 }
 
-void IceLocalTransport::stop() { d->stop(); }
-
-void IceLocalTransport::addExternalService(AbstractStunDisco::Service::Ptr service) { d->addExternalService(service); }
-
-const TransportAddress &IceLocalTransport::stunBindServiceAddress() const { return d->stunBindAddr; }
-
-const TransportAddress &IceLocalTransport::stunRelayServiceAddress() const { return d->stunRelayAddr; }
-
-void IceLocalTransport::stunStart() { d->stunStart(); }
-
-const TransportAddress &IceLocalTransport::localAddress() const { return d->addr; }
-
-const TransportAddress &IceLocalTransport::serverReflexiveAddress() const { return d->refAddr; }
-
-QHostAddress IceLocalTransport::reflexiveAddressSource() const { return d->refAddrSource; }
-
-const TransportAddress &IceLocalTransport::relayedAddress() const { return d->relAddr; }
-
-bool IceLocalTransport::isStunAlive() const { return d->stunBinding != nullptr; }
-
-bool IceLocalTransport::isTurnAlive() const { return d->turn != nullptr; }
-
-void IceLocalTransport::addChannelPeer(const TransportAddress &addr)
+void LocalTransport::addChannelPeer(const TransportAddress &addr)
 {
-    if (d->turn)
-        d->turn->addChannelPeer(addr);
+    if (d->turnClients)
+        d->turnClients->addChannelPeer(addr);
 }
 
-bool IceLocalTransport::hasPendingDatagrams(int path) const
+bool LocalTransport::hasPendingDatagrams(int path) const
 {
     if (path == Direct)
         return !d->in.isEmpty();
@@ -779,7 +806,7 @@ bool IceLocalTransport::hasPendingDatagrams(int path) const
     }
 }
 
-QByteArray IceLocalTransport::readDatagram(int path, TransportAddress &addr)
+QByteArray LocalTransport::readDatagram(int path, TransportAddress &addr)
 {
     QList<Private::Datagram> *in = nullptr;
     if (path == Direct)
@@ -797,7 +824,7 @@ QByteArray IceLocalTransport::readDatagram(int path, TransportAddress &addr)
         return QByteArray();
 }
 
-void IceLocalTransport::writeDatagram(int path, const QByteArray &buf, const TransportAddress &addr)
+void LocalTransport::writeDatagram(int path, const QByteArray &buf, const TransportAddress &addr)
 {
     if (path == Direct) {
         Private::WriteItem wi;
@@ -806,22 +833,22 @@ void IceLocalTransport::writeDatagram(int path, const QByteArray &buf, const Tra
         d->pendingWrites += wi;
         d->sock->writeDatagram(buf, addr);
     } else if (path == Relayed) {
-        if (d->turn && d->turnActivated)
-            d->turn->write(buf, addr);
+        if (d->turnClients && d->turnClients->isActivated())
+            d->turnClients->write(buf, addr);
     } else
         Q_ASSERT(0);
 }
 
-void IceLocalTransport::setDebugLevel(DebugLevel level)
+void LocalTransport::setDebugLevel(DebugLevel level)
 {
     d->debugLevel = level;
     if (d->pool)
         d->pool->setDebugLevel((StunTransactionPool::DebugLevel)level);
-    if (d->turn)
-        d->turn->setDebugLevel((TurnClient::DebugLevel)level);
+    if (d->turnClients)
+        d->turnClients->setDebugLevel((TurnClient::DebugLevel)level);
 }
 
-void IceLocalTransport::changeThread(QThread *thread)
+void LocalTransport::changeThread(QThread *thread)
 {
     if (d->pool)
         d->pool->moveToThread(thread);

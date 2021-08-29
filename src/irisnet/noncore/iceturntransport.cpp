@@ -41,16 +41,37 @@ public:
 
     Private(IceTurnTransport *_q) : QObject(_q), q(_q), turn(this), debugLevel(IceTransport::DL_None)
     {
-        connect(&turn, &TurnClient::connected, this, &Private::turn_connected);
-        connect(&turn, &TurnClient::tlsHandshaken, this, &Private::turn_tlsHandshaken);
-        connect(&turn, &TurnClient::closed, this, &Private::turn_closed);
-        connect(&turn, &TurnClient::needAuthParams, this, &Private::turn_needAuthParams);
-        connect(&turn, &TurnClient::retrying, this, &Private::turn_retrying);
+        connect(&turn, &TurnClient::connected, this, [this]() {
+            if (debugLevel >= IceTransport::DL_Info)
+                emit q->debugLine("turn_connected");
+        });
+        connect(&turn, &TurnClient::tlsHandshaken, this, [this]() {
+            if (debugLevel >= IceTransport::DL_Info)
+                emit q->debugLine("turn_tlsHandshaken");
+        });
+        connect(&turn, &TurnClient::closed, this, [this]() {
+            if (debugLevel >= IceTransport::DL_Info)
+                emit q->debugLine("turn_closed");
+
+            emit q->stopped();
+        });
+        connect(&turn, &TurnClient::needAuthParams, this, [this](const TransportAddress &addr) {
+            // we can get this signal if the user did not provide
+            //   creds to us.  however, since this class doesn't support
+            //   prompting just continue on as if we had a blank
+            //   user/pass
+            turn.continueAfterParams(addr);
+        });
+        connect(&turn, &TurnClient::retrying, this, [this]() {
+            if (debugLevel >= IceTransport::DL_Info)
+                emit q->debugLine("turn_retrying");
+        });
         connect(&turn, &TurnClient::activated, this, &Private::turn_activated);
-        connect(&turn, &TurnClient::readyRead, this, &Private::turn_readyRead);
-        connect(&turn, &TurnClient::packetsWritten, this, &Private::turn_packetsWritten);
+        connect(&turn, &TurnClient::readyRead, this, [this]() { emit q->readyRead(0); });
+        connect(&turn, &TurnClient::packetsWritten, this,
+                [this](int count, const TransportAddress &addr) { emit q->datagramsWritten(0, count, addr); });
         connect(&turn, &TurnClient::error, this, &Private::turn_error);
-        connect(&turn, &TurnClient::debugLine, this, &Private::turn_debugLine);
+        connect(&turn, &TurnClient::debugLine, this, [this](const QString &line) { emit q->debugLine(line); });
     }
 
     void start()
@@ -63,40 +84,6 @@ public:
     void stop() { turn.close(); }
 
 private slots:
-    void turn_connected()
-    {
-        if (debugLevel >= IceTransport::DL_Info)
-            emit q->debugLine("turn_connected");
-    }
-
-    void turn_tlsHandshaken()
-    {
-        if (debugLevel >= IceTransport::DL_Info)
-            emit q->debugLine("turn_tlsHandshaken");
-    }
-
-    void turn_closed()
-    {
-        if (debugLevel >= IceTransport::DL_Info)
-            emit q->debugLine("turn_closed");
-
-        emit q->stopped();
-    }
-
-    void turn_needAuthParams(const TransportAddress &addr)
-    {
-        // we can get this signal if the user did not provide
-        //   creds to us.  however, since this class doesn't support
-        //   prompting just continue on as if we had a blank
-        //   user/pass
-        turn.continueAfterParams(addr);
-    }
-
-    void turn_retrying()
-    {
-        if (debugLevel >= IceTransport::DL_Info)
-            emit q->debugLine("turn_retrying");
-    }
 
     void turn_activated()
     {
@@ -116,10 +103,6 @@ private slots:
         emit q->started();
     }
 
-    void turn_readyRead() { emit q->readyRead(0); }
-
-    void turn_packetsWritten(int count, const TransportAddress &addr) { emit q->datagramsWritten(0, count, addr); }
-
     void turn_error(XMPP::TurnClient::Error e)
     {
         if (debugLevel >= IceTransport::DL_Info)
@@ -128,8 +111,6 @@ private slots:
         turnErrorCode = e;
         emit q->error(IceTurnTransport::ErrorTurn);
     }
-
-    void turn_debugLine(const QString &line) { emit q->debugLine(line); }
 };
 
 IceTurnTransport::IceTurnTransport(QObject *parent) : IceTransport(parent) { d = new Private(this); }

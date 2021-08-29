@@ -32,7 +32,8 @@ class StunDiscoMonitor : public AbstractStunDisco {
 public:
     using StunList = QList<AbstractStunDisco::Service::Ptr>;
 
-    StunDiscoMonitor(StunDiscoManager *manager) : AbstractStunDisco(manager), manager_(manager)
+    StunDiscoMonitor(StunDiscoManager::UseFlags useFlags, StunDiscoManager *manager) :
+        AbstractStunDisco(manager), useFlags_(useFlags), manager_(manager)
     {
         auto extdisco = manager->client()->externalServiceDiscovery();
         connect(extdisco, &ExternalServiceDiscovery::serviceAdded, this,
@@ -82,6 +83,16 @@ private:
             s->username  = l->username;
             s->password  = l->password;
             s->host      = l->host;
+
+            // filter according to use flags
+            if (s->flags & AbstractStunDisco::Relay) {
+                if (s->transport == AbstractStunDisco::Tcp && !useFlags_.testFlag(StunDiscoManager::UseRelayTcp))
+                    continue;
+                if (s->transport == AbstractStunDisco::Udp && !useFlags_.testFlag(StunDiscoManager::UseRelayUdp))
+                    continue;
+            } else if (!useFlags_.testFlag(StunDiscoManager::UseBind))
+                continue;
+
             QHostAddress addr(l->host);
             if (addr.isNull())
                 needResolve.append(s);
@@ -90,7 +101,7 @@ private:
             if (l->restricted && s->password.isEmpty()) {
                 needCreds.append(s);
             } else if (!s->addresses4.isEmpty() || !s->addresses6.isEmpty()) {
-                emit serviceAdded(s);
+                onServiceAdded(s);
             } else
                 pendingWork_.append(s);
         }
@@ -100,7 +111,7 @@ private:
         if (!needCreds.isEmpty())
             getCreds(needCreds);
         if (final) {
-            emit discoFinished();
+            onDiscoFinished();
             deleteLater();
         }
     }
@@ -212,15 +223,31 @@ private:
                 ++it;
                 continue; // in progress yet.
             }
-            emit serviceAdded(*it);
+            onServiceAdded(*it);
             it = pendingWork_.erase(it);
         }
         if (pendingWork_.isEmpty()) {
             if (inProgress_)
-                emit discoFinished();
+                onDiscoFinished();
         }
     }
 
+    void onServiceAdded(AbstractStunDisco::Service::Ptr service)
+    {
+        quint16 port = service->port ? service->port : ((service->flags & AbstractStunDisco::Tls) ? 5349 : 3478);
+        qDebug("found %s: %s:%hu %s %s", (service->flags & AbstractStunDisco::Relay) ? "TURN" : "STUN",
+               qPrintable(service->host), port, service->transport == AbstractStunDisco::Tcp ? "tcp" : "udp",
+               (service->flags & AbstractStunDisco::Tls) ? "tls" : "insecure");
+        emit serviceAdded(service);
+    }
+
+    void onDiscoFinished()
+    {
+        qDebug("STUN disco finished");
+        emit discoFinished();
+    }
+
+    StunDiscoManager::UseFlags             useFlags_;
     StunDiscoManager *                     manager_;
     bool                                   inProgress_ = false; // initial disco
     QList<AbstractStunDisco::Service::Ptr> pendingWork_;
@@ -246,7 +273,7 @@ StunDiscoManager::StunDiscoManager(Client *client) : QObject(client), d(new Priv
 
 StunDiscoManager::~StunDiscoManager() { }
 
-AbstractStunDisco *StunDiscoManager::createMonitor() { return new StunDiscoMonitor(this); }
+AbstractStunDisco *StunDiscoManager::createMonitor(UseFlags useFlags) { return new StunDiscoMonitor(useFlags, this); }
 
 Client *StunDiscoManager::client() const { return d->client; }
 

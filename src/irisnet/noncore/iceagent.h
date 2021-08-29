@@ -1,27 +1,28 @@
 #ifndef XMPP_ICEAGENT_H
 #define XMPP_ICEAGENT_H
 
+#include "icecandidate.h"
 #include "icecomponent.h"
 
 #include <QObject>
 #include <memory>
 
-namespace XMPP {
+namespace XMPP::ICE {
 
-class IceAgent : public QObject {
+class Agent : public QObject {
     Q_OBJECT
 public:
-    static IceAgent *instance();
-    ~IceAgent();
+    static Agent *instance();
+    ~Agent();
 
-    QString foundation(IceComponent::CandidateType type, const QHostAddress baseAddr,
+    QString foundation(CandidateType type, const QHostAddress baseAddr,
                        const QHostAddress &        stunServAddr     = QHostAddress(),
                        QAbstractSocket::SocketType stunRequestProto = QAbstractSocket::UnknownSocketType);
 
     static QString randomCredential(int len);
 
 private:
-    explicit IceAgent(QObject *parent = nullptr);
+    explicit Agent(QObject *parent = nullptr);
 
 signals:
 

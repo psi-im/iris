@@ -27,7 +27,11 @@ class QHostAddress;
 
 namespace XMPP {
 class TransportAddress;
-class IceTransport : public QObject {
+}
+
+namespace XMPP::ICE {
+
+class Transport : public QObject {
     Q_OBJECT
 
 public:
@@ -35,8 +39,8 @@ public:
 
     enum DebugLevel { DL_None, DL_Info, DL_Packet };
 
-    IceTransport(QObject *parent = nullptr);
-    ~IceTransport();
+    Transport(QObject *parent = nullptr);
+    ~Transport();
 
     virtual void stop() = 0;
 
@@ -60,7 +64,7 @@ signals:
     void debugLine(const QString &str);
 };
 
-inline uint qHash(const QWeakPointer<IceTransport> &p) { return qHash(p.toStrongRef().data()); }
+inline uint qHash(const QWeakPointer<Transport> &p) { return qHash(p.toStrongRef().data()); }
 
 } // namespace XMPP
 
