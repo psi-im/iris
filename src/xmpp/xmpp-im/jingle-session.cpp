@@ -185,7 +185,8 @@ namespace XMPP { namespace Jingle {
             if (needNotifyGroup
                 && (action == Action::SessionInitiate || action == Action::SessionAccept || action == Action::ContentAdd
                     || action == Action::ContentAccept)) {
-                for (auto const &g : genGroupingXML())
+                const auto xmls = genGroupingXML();
+                for (auto const &g : xmls)
                     xml.appendChild(g);
                 needNotifyGroup = false;
             }
@@ -830,7 +831,7 @@ namespace XMPP { namespace Jingle {
 
         bool handleIncomingTransportReplace(const QDomElement &jingleEl)
         {
-            QList<std::tuple<Application *, QSharedPointer<Transport>, QDomElement>> passed;
+            QVector<std::tuple<Application *, QSharedPointer<Transport>, QDomElement>> passed;
             QList<QDomElement>                                                       toReject;
             QString contentTag(QStringLiteral("content"));
             bool    doTieBreak = false;
@@ -913,7 +914,7 @@ namespace XMPP { namespace Jingle {
         bool handleIncomingTransportAccept(const QDomElement &jingleEl)
         {
             QString                                  contentTag(QStringLiteral("content"));
-            QList<QPair<Application *, QDomElement>> updates;
+            QVector<QPair<Application *, QDomElement>> updates;
             for (QDomElement ce = jingleEl.firstChildElement(contentTag); !ce.isNull();
                  ce             = ce.nextSiblingElement(contentTag)) {
                 ContentBase cb(ce);
@@ -963,7 +964,7 @@ namespace XMPP { namespace Jingle {
         bool handleIncomingTransportInfo(const QDomElement &jingleEl)
         {
             QString                                              contentTag(QStringLiteral("content"));
-            QList<QPair<QSharedPointer<Transport>, QDomElement>> updates;
+            QVector<QPair<QSharedPointer<Transport>, QDomElement>> updates;
             for (QDomElement ce = jingleEl.firstChildElement(contentTag); !ce.isNull();
                  ce             = ce.nextSiblingElement(contentTag)) {
                 Application *app = nullptr;

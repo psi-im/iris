@@ -268,7 +268,8 @@ QDomElement XData::Field::toXml(QDomDocument *doc, bool submitForm) const
         for (const MediaUri &uri : _mediaElement) {
             QDomElement uriEl = doc->createElement("uri");
             QString     type  = uri.mimeType;
-            for (const QString &k : uri.params.keys()) {
+            const QStringList &klist = uri.params.keys();
+            for (const QString &k : klist) {
                 type += ";" + k + "=" + uri.params[k];
             }
             uriEl.setAttribute("type", type);
@@ -300,7 +301,7 @@ QSize XData::Field::MediaElement::mediaSize() const { return _size; }
 
 bool XData::Field::MediaElement::checkSupport(const QStringList &wildcards)
 {
-    for (const XData::Field::MediaUri &uri : *this) {
+    for (const XData::Field::MediaUri &uri : qAsConst(*this)) {
         for (const QString &wildcard : wildcards) {
             if (QRegExp(wildcard, Qt::CaseSensitive, QRegExp::Wildcard).exactMatch(uri.mimeType)) {
                 return true;

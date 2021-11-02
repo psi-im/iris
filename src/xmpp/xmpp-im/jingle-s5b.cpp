@@ -310,7 +310,7 @@ namespace XMPP { namespace Jingle { namespace S5B {
 
         void setupIncomingSocksClient()
         {
-            connect(socksClient, &SocksClient::error, [this](int error) {
+            connect(socksClient, &SocksClient::error, this, [this](int error) {
                 Q_UNUSED(error)
                 state = Candidate::Discarded;
             });
@@ -1117,7 +1117,8 @@ namespace XMPP { namespace Jingle { namespace S5B {
         void onLocalServerDiscovered()
         {
             bool hasNewCandidates = false;
-            for (auto serv : disco->takeServers()) {
+            const auto &servers          = disco->takeServers();
+            for (const auto &serv : servers) {
                 auto s5bserv = serv.staticCast<S5BServer>();
                 s5bserv->registerKey(directAddr);
                 Candidate c(q, serv, generateCid());

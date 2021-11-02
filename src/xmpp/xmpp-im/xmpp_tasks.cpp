@@ -431,7 +431,7 @@ void JT_Roster::onGo()
         iq                = createIQ(doc(), "set", to.full(), id());
         QDomElement query = doc()->createElementNS("jabber:iq:roster", "query");
         iq.appendChild(query);
-        for (const QDomElement &it : d->itemList)
+        for (const QDomElement &it : qAsConst(d->itemList))
             query.appendChild(it);
         send(iq);
     } else if (type == GetDelimiter) {
@@ -452,7 +452,7 @@ QString JT_Roster::toString() const
 
     QDomElement i = doc()->createElement("request");
     i.setAttribute("type", "JT_Roster");
-    for (const QDomElement &it : d->itemList)
+    for (const QDomElement &it : qAsConst(d->itemList))
         i.appendChild(it);
     return lineEncode(Stream::xmlToString(i));
 }
@@ -615,7 +615,8 @@ void JT_Presence::pres(const Status &s)
         }
 
         // bits of binary
-        for (const BoBData &bd : s.bobDataList()) {
+        const auto &bdlist = s.bobDataList();
+        for (const BoBData &bd : bdlist) {
             tag.appendChild(bd.toXml(doc()));
         }
     }

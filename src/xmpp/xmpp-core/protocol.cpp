@@ -989,7 +989,7 @@ bool CoreProtocol::dialbackStep(const QDomElement &e)
                 Jid to(Jid(e.attribute("to")).domain());
                 Jid from(Jid(e.attribute("from")).domain());
                 if (isIncoming()) {
-                    QString key = e.text();
+                    [[maybe_unused]] QString key = e.text();
                     // TODO: report event
                 } else {
                     bool   ok = e.attribute("type") == "valid";
@@ -1008,9 +1008,9 @@ bool CoreProtocol::dialbackStep(const QDomElement &e)
             } else if (e.tagName() == "verify") {
                 Jid     to(Jid(e.attribute("to")).domain());
                 Jid     from(Jid(e.attribute("from")).domain());
-                QString id = e.attribute("id");
+                [[maybe_unused]] QString id = e.attribute("id");
                 if (isIncoming()) {
-                    QString key = e.text();
+                    [[maybe_unused]] QString key = e.text();
                     // TODO: report event
                 } else {
                     bool   ok = e.attribute("type") == "valid";
@@ -1273,7 +1273,7 @@ bool CoreProtocol::normalStep(const QDomElement &e)
             }
         } else {
             QDomElement mechs = doc.createElementNS(NS_SASL, "mechanisms");
-            for (const QString &it : sasl_mechlist) {
+            for (const QString &it : qAsConst(sasl_mechlist)) {
                 QDomElement m = doc.createElement("mechanism");
                 m.appendChild(doc.createTextNode(it));
                 mechs.appendChild(m);
@@ -1363,7 +1363,7 @@ bool CoreProtocol::normalStep(const QDomElement &e)
             if (f.sasl_supported) {
 #ifdef XMPP_TEST
                 QString s = "SASL mechs:";
-                for (QStringList::ConstIterator it = f.sasl_mechs.begin(); it != f.sasl_mechs.end(); ++it)
+                for (QStringList::ConstIterator it = f.sasl_mechs.constBegin(); it != f.sasl_mechs.constEnd(); ++it)
                     s += QString(" [%1]").arg((*it));
                 TD::msg(s);
 #endif
@@ -1371,7 +1371,8 @@ bool CoreProtocol::normalStep(const QDomElement &e)
             if (f.compress_supported) {
 #ifdef XMPP_TEST
                 QString s = "Compression mechs:";
-                for (QStringList::ConstIterator it = f.compression_mechs.begin(); it != f.compression_mechs.end(); ++it)
+                for (QStringList::ConstIterator it = f.compression_mechs.constBegin();
+                     it != f.compression_mechs.constEnd(); ++it)
                     s += QString(" [%1]").arg((*it));
                 TD::msg(s);
 #endif
