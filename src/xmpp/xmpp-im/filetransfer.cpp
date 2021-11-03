@@ -542,10 +542,10 @@ void JT_FT::request(const Jid &to, const QString &_id, const QString &fname, qlo
     QDomElement field = doc()->createElement("field");
     field.setAttribute("var", "stream-method");
     field.setAttribute("type", "list-single");
-    for (QStringList::ConstIterator it = streamTypes.begin(); it != streamTypes.end(); ++it) {
+    for (const auto &streamType : streamTypes) {
         QDomElement option = doc()->createElement("option");
         QDomElement value  = doc()->createElement("value");
-        value.appendChild(doc()->createTextNode(*it));
+        value.appendChild(doc()->createTextNode(streamType));
         option.appendChild(value);
         field.appendChild(option);
     }

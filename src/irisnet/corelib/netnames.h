@@ -524,7 +524,7 @@ public:
     WeightedNameRecordList &operator<<(const NameRecord &);
 
 private:
-    typedef QMultiMap<int /* weight */, NameRecord>                   WeightedNameRecordPriorityGroup;
+    typedef QMultiMap<int /* weight */, NameRecord>                       WeightedNameRecordPriorityGroup;
     typedef std::map<int /* priority */, WeightedNameRecordPriorityGroup> WNRL;
 
     WNRL           priorityGroups;

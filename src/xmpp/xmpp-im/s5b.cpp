@@ -58,8 +58,8 @@ static QString makeKey(const QString &sid, const Jid &requester, const Jid &targ
 
 static bool haveHost(const StreamHostList &list, const Jid &j)
 {
-    for (StreamHostList::ConstIterator it = list.begin(); it != list.end(); ++it) {
-        if ((*it).jid().compare(j))
+    for (const auto &streamHost : list) {
+        if (streamHost.jid().compare(j))
             return true;
     }
     return false;
@@ -965,8 +965,8 @@ bool S5BManager::targetShouldOfferProxy(Entry *e)
 
     // if target, don't offer any proxy if the requester already did
     const StreamHostList &hosts = e->c->d->req.hosts;
-    for (StreamHostList::ConstIterator it = hosts.begin(); it != hosts.end(); ++it) {
-        if ((*it).isProxy())
+    for (const auto &host : hosts) {
+        if (host.isProxy())
             return false;
     }
 
@@ -1747,8 +1747,8 @@ void S5BConnector::start(const Jid &self, const StreamHostList &hosts, const QSt
 #ifdef S5B_DEBUG
     qDebug("S5BConnector: starting [%p]!\n", this);
 #endif
-    for (StreamHostList::ConstIterator it = hosts.begin(); it != hosts.end(); ++it) {
-        Item *i = new Item(self, *it, key, udp);
+    for (const auto &host : hosts) {
+        Item *i = new Item(self, host, key, udp);
         connect(i, SIGNAL(result(bool)), SLOT(item_result(bool)));
         d->itemList.append(i);
         i->start();
@@ -1859,12 +1859,12 @@ void JT_S5B::request(const Jid &to, const QString &sid, const QString &dstaddr, 
     }
     query.setAttribute("mode", udp ? "udp" : "tcp");
     iq.appendChild(query);
-    for (StreamHostList::ConstIterator it = hosts.begin(); it != hosts.end(); ++it) {
+    for (const auto &host : hosts) {
         QDomElement shost = doc()->createElement("streamhost");
-        shost.setAttribute("jid", (*it).jid().full());
-        shost.setAttribute("host", (*it).host());
-        shost.setAttribute("port", QString::number((*it).port()));
-        if ((*it).isProxy()) {
+        shost.setAttribute("jid", host.jid().full());
+        shost.setAttribute("host", host.host());
+        shost.setAttribute("port", QString::number(host.port()));
+        if (host.isProxy()) {
             QDomElement p = doc()->createElementNS("http://affinix.com/jabber/stream", "proxy");
             shost.appendChild(p);
         }

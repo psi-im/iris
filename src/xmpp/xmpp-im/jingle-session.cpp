@@ -832,7 +832,7 @@ namespace XMPP { namespace Jingle {
         bool handleIncomingTransportReplace(const QDomElement &jingleEl)
         {
             QVector<std::tuple<Application *, QSharedPointer<Transport>, QDomElement>> passed;
-            QList<QDomElement>                                                       toReject;
+            QList<QDomElement>                                                         toReject;
             QString contentTag(QStringLiteral("content"));
             bool    doTieBreak = false;
             for (QDomElement ce = jingleEl.firstChildElement(contentTag); !ce.isNull();
@@ -913,7 +913,7 @@ namespace XMPP { namespace Jingle {
 
         bool handleIncomingTransportAccept(const QDomElement &jingleEl)
         {
-            QString                                  contentTag(QStringLiteral("content"));
+            QString                                    contentTag(QStringLiteral("content"));
             QVector<QPair<Application *, QDomElement>> updates;
             for (QDomElement ce = jingleEl.firstChildElement(contentTag); !ce.isNull();
                  ce             = ce.nextSiblingElement(contentTag)) {
@@ -963,7 +963,7 @@ namespace XMPP { namespace Jingle {
 
         bool handleIncomingTransportInfo(const QDomElement &jingleEl)
         {
-            QString                                              contentTag(QStringLiteral("content"));
+            QString                                                contentTag(QStringLiteral("content"));
             QVector<QPair<QSharedPointer<Transport>, QDomElement>> updates;
             for (QDomElement ce = jingleEl.firstChildElement(contentTag); !ce.isNull();
                  ce             = ce.nextSiblingElement(contentTag)) {

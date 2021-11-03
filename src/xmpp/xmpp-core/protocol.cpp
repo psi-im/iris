@@ -1006,8 +1006,8 @@ bool CoreProtocol::dialbackStep(const QDomElement &e)
                     }
                 }
             } else if (e.tagName() == "verify") {
-                Jid     to(Jid(e.attribute("to")).domain());
-                Jid     from(Jid(e.attribute("from")).domain());
+                Jid                      to(Jid(e.attribute("to")).domain());
+                Jid                      from(Jid(e.attribute("from")).domain());
                 [[maybe_unused]] QString id = e.attribute("id");
                 if (isIncoming()) {
                     [[maybe_unused]] QString key = e.text();
@@ -1363,17 +1363,16 @@ bool CoreProtocol::normalStep(const QDomElement &e)
             if (f.sasl_supported) {
 #ifdef XMPP_TEST
                 QString s = "SASL mechs:";
-                for (QStringList::ConstIterator it = f.sasl_mechs.constBegin(); it != f.sasl_mechs.constEnd(); ++it)
-                    s += QString(" [%1]").arg((*it));
+                for (const auto &saslMech : qAsConst(f.sasl_mechs))
+                    s += QString(" [%1]").arg(saslMech);
                 TD::msg(s);
 #endif
             }
             if (f.compress_supported) {
 #ifdef XMPP_TEST
                 QString s = "Compression mechs:";
-                for (QStringList::ConstIterator it = f.compression_mechs.constBegin();
-                     it != f.compression_mechs.constEnd(); ++it)
-                    s += QString(" [%1]").arg((*it));
+                for (const auto &comprMech : qAsConst(f.compression_mechs))
+                    s += QString(" [%1]").arg(comprMech);
                 TD::msg(s);
 #endif
             }

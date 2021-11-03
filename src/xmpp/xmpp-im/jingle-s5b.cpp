@@ -1116,7 +1116,7 @@ namespace XMPP { namespace Jingle { namespace S5B {
 
         void onLocalServerDiscovered()
         {
-            bool hasNewCandidates = false;
+            bool        hasNewCandidates = false;
             const auto &servers          = disco->takeServers();
             for (const auto &serv : servers) {
                 auto s5bserv = serv.staticCast<S5BServer>();

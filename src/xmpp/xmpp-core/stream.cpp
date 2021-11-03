@@ -1124,7 +1124,7 @@ bool ClientStream::handleNeed()
 #endif
 
         // ensure simplesasl provider is installed
-        bool found = false;
+        bool        found     = false;
         const auto &providers = QCA::providers();
         for (QCA::Provider *p : providers) {
             if (p->name() == "simplesasl") {
@@ -1160,7 +1160,7 @@ bool ClientStream::handleNeed()
             ml = prefOrdered.values() + unpreferred;
         }
 
-        QString saslProvider;
+        QString     saslProvider;
         const auto &meches = d->mechProviders.keys();
         for (const QString &mech : meches) {
             if (ml.contains(mech)) {

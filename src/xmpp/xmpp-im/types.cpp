@@ -2401,8 +2401,8 @@ bool RosterItem::isPush() const { return v_push; }
 
 bool RosterItem::inGroup(const QString &g) const
 {
-    for (QStringList::ConstIterator it = v_groups.begin(); it != v_groups.end(); ++it) {
-        if (*it == g)
+    for (const auto &vgroup : v_groups) {
+        if (vgroup == g)
             return true;
     }
     return false;
@@ -2449,8 +2449,8 @@ QDomElement RosterItem::toXml(QDomDocument *doc) const
     item.setAttribute("subscription", v_subscription.toString());
     if (!v_ask.isEmpty())
         item.setAttribute("ask", v_ask);
-    for (QStringList::ConstIterator it = v_groups.begin(); it != v_groups.end(); ++it)
-        item.appendChild(textTag(doc, "group", *it));
+    for (const auto &vgroup : v_groups)
+        item.appendChild(textTag(doc, "group", vgroup));
 
     return item;
 }
