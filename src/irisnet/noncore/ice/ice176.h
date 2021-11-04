@@ -19,6 +19,7 @@
 #ifndef ICE176_H
 #define ICE176_H
 
+#include "localaddress.h"
 #include "turnclient.h"
 
 #include <QHostAddress>
@@ -44,9 +45,9 @@ public:
 
     class ExternalAddress {
     public:
-        LocalAddress base;
-        QHostAddress addr;
-        int          portBase; // -1 = same as base
+        ICE::LocalAddress base;
+        QHostAddress      addr;
+        int               portBase; // -1 = same as base
 
         ExternalAddress() : portBase(-1) { }
     };
@@ -87,7 +88,7 @@ public:
     // note: ownership is not passed
     void setPortReserver(UdpPortReserver *portReserver);
 
-    void setLocalAddresses(const QList<LocalAddress> &addrs);
+    void setLocalAddresses(const QList<ICE::LocalAddress> &addrs);
 
     // one per local address.  you must set local addresses first.
     void setExternalAddresses(const QList<ExternalAddress> &addrs);
@@ -138,9 +139,6 @@ public:
     //   in short, use this on audio, but not on video.
     void flagComponentAsLowOverhead(int componentIndex);
 
-    // FIXME: this should probably be in netinterface.h or such
-    static bool isIPv6LinkLocalAddress(const QHostAddress &addr);
-
     void changeThread(QThread *thread);
 
     bool isLocalGatheringComplete() const;
@@ -148,7 +146,7 @@ public:
 
     QList<SelectedCandidate> selectedCandidates() const;
 
-    static QList<LocalAddress> availableNetworkAddresses();
+    static QList<ICE::LocalAddress> availableNetworkAddresses();
 
 signals:
     // indicates that the ice engine is started and is ready to receive

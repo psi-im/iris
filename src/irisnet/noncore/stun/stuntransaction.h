@@ -178,7 +178,7 @@ signals:
     //   writeIncomingMessage() during outgoingMessage() could cause
     //   a transaction's finished() or error() signals to emit during
     //   start(), which would violate DOR-DS.
-    void outgoingMessage(const QByteArray &packet, const TransportAddress &addr);
+    void outgoingMessage(const StunMessage &packet, const TransportAddress &addr);
 
     void needAuthParams(const TransportAddress &);
 

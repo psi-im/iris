@@ -20,11 +20,6 @@ set(SOURCES
     corelib/irisnetglobal.cpp
     corelib/irisnetplugin.cpp
 
-    noncore/icetransport.cpp
-    noncore/stunmessage.cpp
-    noncore/stuntypes.cpp
-    noncore/stunutil.cpp
-
     noncore/cutestuff/bytestream.cpp
     noncore/cutestuff/httpconnect.cpp
     noncore/cutestuff/httppoll.cpp
@@ -40,19 +35,28 @@ set(SOURCES
     corelib/objectsession.cpp
     corelib/netinterface_qtname.cpp
     corelib/netinterface_qtnet.cpp
+    corelib/iputil.cpp
 
-    noncore/iceagent.cpp
-    noncore/ice176.cpp
-    noncore/icecomponent.cpp
-    noncore/icelocaltransport.cpp
-    noncore/iceturntransport.cpp
-    noncore/icecandidate.cpp
-    noncore/stunsession.cpp
     noncore/processquit.cpp
-    noncore/stunallocate.cpp
-    noncore/stunbinding.cpp
-    noncore/stuntransaction.cpp
-    noncore/turnclient.cpp
+
+    noncore/ice/icetransport.cpp
+    noncore/ice/iceagent.cpp
+    noncore/ice/ice176.cpp
+    noncore/ice/icecomponent.cpp
+    noncore/ice/icelocaltransport.cpp
+    noncore/ice/iceturntransport.cpp
+    noncore/ice/icecandidate.cpp
+    noncore/ice/localaddress.cpp
+
+    noncore/stun/stunmessage.cpp
+    noncore/stun/stuntypes.cpp
+    noncore/stun/stunutil.cpp
+    noncore/stun/stunsession.cpp
+    noncore/stun/stunallocate.cpp
+    noncore/stun/stunbinding.cpp
+    noncore/stun/stuntransaction.cpp
+    noncore/stun/turnclient.cpp
+
     noncore/udpportreserver.cpp
     noncore/tcpportreserver.cpp
     noncore/dtls.cpp
@@ -69,34 +73,37 @@ set(HEADERS
     corelib/irisnetglobal.h
     corelib/irisnetglobal_p.h
 
-    noncore/stunmessage.h
-    noncore/stuntypes.h
-    noncore/stunutil.h
-
     corelib/addressresolver.h
     corelib/irisnetplugin.h
     corelib/netavailability.h
     corelib/netinterface.h
     corelib/netnames.h
     corelib/objectsession.h
+    corelib/iputil.h
 
-    noncore/iceagent.h
-    noncore/ice176.h
-    noncore/icecomponent.h
-    noncore/icelocaltransport.h
-    noncore/icetransport.h
-    noncore/iceturntransport.h
-    noncore/icecandidate.h
     noncore/processquit.h
-    noncore/stunallocate.h
-    noncore/stunbinding.h
-    noncore/stuntransaction.h
-    noncore/stunsession.h
-    noncore/turnclient.h
     noncore/udpportreserver.h
     noncore/tcpportreserver.h
     noncore/dtls.h
-    noncore/iceabstractstundisco.h
+
+    noncore/ice/iceagent.h
+    noncore/ice/ice176.h
+    noncore/ice/icecomponent.h
+    noncore/ice/icelocaltransport.h
+    noncore/ice/icetransport.h
+    noncore/ice/iceturntransport.h
+    noncore/ice/icecandidate.h
+    noncore/ice/localaddress.h
+    noncore/ice/iceabstractstundisco.h
+
+    noncore/stun/stunmessage.h
+    noncore/stun/stuntypes.h
+    noncore/stun/stunutil.h
+    noncore/stun/stunallocate.h
+    noncore/stun/stunbinding.h
+    noncore/stun/stuntransaction.h
+    noncore/stun/stunsession.h
+    noncore/stun/turnclient.h
 
     noncore/cutestuff/bsocket.h
     noncore/cutestuff/bytestream.h

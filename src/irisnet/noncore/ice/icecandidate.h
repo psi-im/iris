@@ -20,6 +20,7 @@
 
 #include <memory>
 
+#include "iceabstractstundisco.h"
 #include "transportaddress.h"
 
 namespace XMPP::ICE {
@@ -41,6 +42,8 @@ public:
 
     QString foundation;
     QString id;
+
+    AbstractStunDisco::Service::Ptr stunHost; // for rflx/turn candidates
 
     static inline Ptr make() { return std::make_shared<CandidateInfo>(); }
     static Ptr        makeRemotePrflx(int componentId, const TransportAddress &fromAddr, quint32 priority);

@@ -25,10 +25,13 @@
 #include "icecomponent.h"
 #include "icelocaltransport.h"
 #include "iceturntransport.h"
-#include "stunbinding.h"
-#include "stunmessage.h"
-#include "stuntransaction.h"
-#include "stuntypes.h"
+#include "iputil.h"
+#include "localaddress.h"
+#include "stun/stunbinding.h"
+#include "stun/stunmessage.h"
+#include "stun/stuntransaction.h"
+#include "stun/stuntypes.h"
+#include "stun/turnclient.h"
 #include "udpportreserver.h"
 
 #include <QDeadlineTimer>
@@ -58,69 +61,6 @@ static qint64 calc_pair_priority(int a, int b)
     if (a > b)
         ++priority;
     return priority;
-}
-
-// scope values: 0 = local, 1 = link-local, 2 = private, 3 = public
-// FIXME: dry (this is in psi avcall also)
-static int getAddressScope(const QHostAddress &a)
-{
-    if (a.isLoopback())
-        return 0;
-    if (a.protocol() == QAbstractSocket::IPv6Protocol) {
-        if (XMPP::Ice176::isIPv6LinkLocalAddress(a))
-            return 1;
-    } else if (a.protocol() == QAbstractSocket::IPv4Protocol) {
-        quint32 v4 = a.toIPv4Address();
-        quint8  a0 = quint8(v4 >> 24);
-        quint8  a1 = quint8((v4 >> 16) & 0xff);
-        if (a0 == 169 && a1 == 254)
-            return 1;
-        else if (a0 == 10)
-            return 2;
-        else if (a0 == 172 && a1 >= 16 && a1 <= 31)
-            return 2;
-        else if (a0 == 192 && a1 == 168)
-            return 2;
-    }
-
-    return 3;
-}
-
-// -1 = a is higher priority, 1 = b is higher priority, 0 = equal
-static int comparePriority(const Ice176::LocalAddress &a, const Ice176::LocalAddress &b)
-{
-    // prefer closer scope
-    int a_scope = getAddressScope(a.addr);
-    int b_scope = getAddressScope(b.addr);
-    if (a_scope < b_scope)
-        return -1;
-    else if (a_scope > b_scope)
-        return 1;
-
-    // prefer ipv6
-    if (a.addr.protocol() == QAbstractSocket::IPv6Protocol && b.addr.protocol() != QAbstractSocket::IPv6Protocol)
-        return -1;
-    else if (b.addr.protocol() == QAbstractSocket::IPv6Protocol && a.addr.protocol() != QAbstractSocket::IPv6Protocol)
-        return 1;
-
-    return 0;
-}
-
-static QList<Ice176::LocalAddress> sortAddrs(const QList<Ice176::LocalAddress> &in)
-{
-    QList<Ice176::LocalAddress> out;
-
-    for (const auto &a : in) {
-        int at;
-        for (at = 0; at < out.count(); ++at) {
-            if (comparePriority(a, out[at]) < 0)
-                break;
-        }
-
-        out.insert(at, a);
-    }
-
-    return out;
 }
 
 class Ice176::Private : public QObject {
@@ -190,7 +130,7 @@ public:
     class Component {
     public:
         int                     id              = 0;
-        ICE::Component *        ic              = nullptr;
+        ICE::Component         *ic              = nullptr;
         std::unique_ptr<QTimer> nominationTimer = std::unique_ptr<QTimer>();
         CandidatePair::Ptr      selectedPair; // final selected pair. won't be changed
         CandidatePair::Ptr      highestPair;  // current highest priority pair to send data
@@ -204,17 +144,17 @@ public:
         bool nominating = false; // with aggressive nomination it's always false
     };
 
-    Ice176 *                            q;
+    Ice176                             *q;
     Ice176::Mode                        mode;
     State                               state = Stopped;
     QTimer                              checkTimer;
     TurnClient::Proxy                   proxy;
-    UdpPortReserver *                   portReserver = nullptr;
+    UdpPortReserver                    *portReserver = nullptr;
     std::unique_ptr<QTimer>             pacTimer;
     int                                 nominationTimeout = 3000; // 3s
     int                                 pacTimeout     = 30000; // 30s todo: compute from rto. see draft-ietf-ice-pac-06
     int                                 componentCount = 1;
-    QList<Ice176::LocalAddress>         localAddrs;
+    QList<ICE::LocalAddress>            localAddrs;
     QList<Ice176::ExternalAddress>      extAddrs;
     QPointer<AbstractStunDisco>         stunDiscoverer;
     QString                             localUser, localPass;
@@ -266,7 +206,7 @@ public:
         return -1;
     }
 
-    void updateLocalAddresses(const QList<LocalAddress> &addrs)
+    void updateLocalAddresses(const QList<ICE::LocalAddress> &addrs)
     {
         // for now, ignore address changes during operation
         if (state != Stopped)
@@ -317,7 +257,6 @@ public:
             c.ic         = new ICE::Component(c.id, this);
             c.ic->setDebugLevel(ICE::Component::DL_Packet);
             connect(c.ic, &ICE::Component::candidateAdded, this, &Private::ic_candidateAdded);
-            connect(c.ic, &ICE::Component::candidateRemoved, this, &Private::ic_candidateRemoved);
             connect(c.ic, &ICE::Component::localFinished, this, &Private::ic_localFinished);
             connect(c.ic, &ICE::Component::gatheringComplete, this, &Private::ic_gatheringComplete);
             connect(c.ic, &ICE::Component::stopped, this, &Private::ic_stopped);
@@ -452,7 +391,7 @@ public:
         //   should qualify as a HACK or not.
         //   trying to relay to localhost is pretty
         //   stupid anyway
-        if (lc->type == ICE::RelayedType && getAddressScope(rc->addr.addr) == 0) {
+        if (lc->type == ICE::RelayedType && IpUtil::isLoopbackAddress(rc->addr.addr)) {
             qDebug("Skip building pair: %s - %s (relay to localhost)", qPrintable(lc->addr), qPrintable(rc->addr));
             return {};
         }
@@ -461,7 +400,7 @@ public:
         pair->local  = lc;
         pair->remote = rc;
         if (pair->local->addr.addr.protocol() == QAbstractSocket::IPv6Protocol
-            && isIPv6LinkLocalAddress(pair->local->addr.addr))
+            && IpUtil::isLinkLocalAddress(pair->local->addr.addr))
             pair->remote->addr.addr.setScopeId(pair->local->addr.addr.scopeId());
         if (mode == Ice176::Initiator)
             pair->priority = calc_pair_priority(lc->priority, rc->priority);
@@ -589,8 +528,11 @@ public:
                         return;
                     }
 
-                    ICE::Component::Candidate &lc   = localCandidates[at];
-                    int                        path = lc.path;
+                    ICE::Component::Candidate &lc          = localCandidates[at];
+                    auto                       stunSession = lc.stunSession.lock();
+                    if (!stunSession) {
+                        // TODO
+                    }
 
                     iceDebug("send connectivity check for pair %s%s", qPrintable(*pair),
                              (mode == Initiator
@@ -632,7 +574,7 @@ public:
     }
 
     void doPairing(const QList<ICE::Component::Candidate> &localCandidates,
-                   const QList<ICE::CandidateInfo::Ptr> &  remoteCandidates)
+                   const QList<ICE::CandidateInfo::Ptr>   &remoteCandidates)
     {
         QList<std::shared_ptr<CandidatePair>> pairs;
         for (const ICE::Component::Candidate &cc : localCandidates) {
@@ -896,7 +838,7 @@ public:
                                [&](auto const &p) { return *(p->local) == locCand.info && *(p->remote) == remCand; });
 
         CandidatePair::Ptr pair        = (it == checkList.pairs.end()) ? CandidatePair::Ptr() : *it;
-        Component &        component   = *findComponent(locCand.info->componentId);
+        Component         &component   = *findComponent(locCand.info->componentId);
         qint64             minPriority = component.highestPair ? component.highestPair->priority : 0;
         if (pair) {
             if (pair->priority < minPriority) {
@@ -1310,8 +1252,8 @@ private slots:
                  cc.info->addr.port);
 
         if (!iceTransports.contains(cc.iceTransport)) {
-            connect(cc.iceTransport.data(), &ICE::Transport::readyRead, this, &Private::it_readyRead);
-            connect(cc.iceTransport.data(), &ICE::Transport::datagramsWritten, this, &Private::it_datagramsWritten);
+            connect(cc.iceTransport.get(), &ICE::Transport::readyRead, this, &Private::it_readyRead);
+            connect(cc.iceTransport.get(), &ICE::Transport::datagramsWritten, this, &Private::it_datagramsWritten);
 
             iceTransports += cc.iceTransport;
         }
@@ -1477,7 +1419,7 @@ private slots:
 
             StunMessage::ConvertResult result;
             StunMessage                msg = StunMessage::fromBinary(buf, &result,
-                                                      StunMessage::MessageIntegrity | StunMessage::Fingerprint, reqkey);
+                                                                     StunMessage::MessageIntegrity | StunMessage::Fingerprint, reqkey);
             if (!msg.isNull() && (msg.mclass() == StunMessage::Request || msg.mclass() == StunMessage::Indication)) {
                 iceDebug("received validated request or indication from %s", qPrintable(fromAddr));
                 QString user = QString::fromUtf8(msg.attribute(StunTypes::USERNAME));
@@ -1532,7 +1474,7 @@ private slots:
             } else {
                 QByteArray  reskey = peerPass.toUtf8();
                 StunMessage msg    = StunMessage::fromBinary(
-                    buf, &result, StunMessage::MessageIntegrity | StunMessage::Fingerprint, reskey);
+                       buf, &result, StunMessage::MessageIntegrity | StunMessage::Fingerprint, reskey);
                 if (!msg.isNull()
                     && (msg.mclass() == StunMessage::SuccessResponse || msg.mclass() == StunMessage::ErrorResponse)) {
                     iceDebug("received validated response from %s to %s", qPrintable(fromAddr),
@@ -1603,7 +1545,7 @@ void Ice176::setPortReserver(UdpPortReserver *portReserver)
     d->portReserver = portReserver;
 }
 
-void Ice176::setLocalAddresses(const QList<LocalAddress> &addrs) { d->updateLocalAddresses(addrs); }
+void Ice176::setLocalAddresses(const QList<ICE::LocalAddress> &addrs) { d->updateLocalAddresses(addrs); }
 
 void Ice176::setExternalAddresses(const QList<ExternalAddress> &addrs) { d->updateExternalAddresses(addrs); }
 
@@ -1675,16 +1617,6 @@ void Ice176::writeDatagram(int componentIndex, const QByteArray &datagram) { d->
 
 void Ice176::flagComponentAsLowOverhead(int componentIndex) { d->flagComponentAsLowOverhead(componentIndex); }
 
-bool Ice176::isIPv6LinkLocalAddress(const QHostAddress &addr)
-{
-    Q_ASSERT(addr.protocol() == QAbstractSocket::IPv6Protocol);
-    Q_IPV6ADDR addr6 = addr.toIPv6Address();
-    quint16    hi    = addr6[0];
-    hi <<= 8;
-    hi += addr6[1];
-    return (hi & 0xffc0) == 0xfe80;
-}
-
 void Ice176::changeThread(QThread *thread)
 {
     for (auto &c : d->localCandidates) {
@@ -1714,10 +1646,10 @@ QList<Ice176::SelectedCandidate> Ice176::selectedCandidates() const
     return ret;
 }
 
-QList<Ice176::LocalAddress> Ice176::availableNetworkAddresses()
+QList<ICE::LocalAddress> Ice176::availableNetworkAddresses()
 {
-    QList<Ice176::LocalAddress> listenAddrs;
-    auto const                  interfaces = QNetworkInterface::allInterfaces();
+    QList<ICE::LocalAddress> listenAddrs;
+    auto const               interfaces = QNetworkInterface::allInterfaces();
 #ifdef Q_OS_UNIX
     static const auto ignored
         = QStringList { QStringLiteral("vmnet"), QStringLiteral("vnic"), QStringLiteral("vboxnet") };
@@ -1749,7 +1681,7 @@ QList<Ice176::LocalAddress> Ice176::availableNetworkAddresses()
                 || (h.protocol() == QAbstractSocket::IPv4Protocol && h.toIPv4Address() < 0x01000000))
                 continue;
 
-            auto la = LocalAddress { h, ni.index(), ni.type() };
+            auto la = ICE::LocalAddress { h, ni.index(), ni.type() };
             // don't put the same address in twice.
             //   this also means that if there are
             //   two link-local ipv6 interfaces
@@ -1759,13 +1691,13 @@ QList<Ice176::LocalAddress> Ice176::availableNetworkAddresses()
                 continue;
 
             // TODO review if the next condition is needed (and the above too)
-            if (h.protocol() == QAbstractSocket::IPv6Protocol && XMPP::Ice176::isIPv6LinkLocalAddress(h))
+            if (h.protocol() == QAbstractSocket::IPv6Protocol && IpUtil::isLinkLocalAddress(h))
                 h.setScopeId(ni.name());
             listenAddrs += la;
         }
     }
 
-    return sortAddrs(listenAddrs);
+    return ICE::LocalAddress::sort(listenAddrs);
 }
 
 } // namespace XMPP

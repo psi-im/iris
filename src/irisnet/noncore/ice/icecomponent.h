@@ -24,6 +24,7 @@
 #include "icecandidate.h"
 #include "icelocaltransport.h"
 #include "icetransport.h"
+#include "stun/stunsession.h"
 #include "turnclient.h"
 
 #include <QList>
@@ -54,7 +55,7 @@ public:
 
         // note that these may be the same for multiple candidates
         std::shared_ptr<Transport> iceTransport;
-        // int                           path;
+        std::weak_ptr<StunSession> stunSession;
     };
 
     enum DebugLevel { DL_None, DL_Info, DL_Packet };
@@ -72,7 +73,7 @@ public:
     UdpPortReserver *portReserver() const;
 
     // can be set once, but later changes are ignored
-    void setLocalAddresses(const QList<XMPP::ICE::LocalTransport::LocalAddress> &addrs);
+    void setLocalAddresses(const QList<ICE::LocalAddress> &addrs);
 
     // can be set once, but later changes are ignored.  local addresses
     //   must have been set for this to work
@@ -105,9 +106,6 @@ signals:
     // this is emitted in the same pass of the eventloop that a
     //   transport/path becomes ready
     void candidateAdded(const XMPP::ICE::Component::Candidate &c);
-
-    // this is emitted just before a transport/path will be deleted
-    void candidateRemoved(const XMPP::ICE::Component::Candidate &c);
 
     // indicates all the initial HostType candidates have been pushed.
     //   note that it is possible there are no HostType candidates.

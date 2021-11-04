@@ -50,7 +50,7 @@ class Component::Private : public QObject {
 public:
     class Config {
     public:
-        QList<LocalTransport::LocalAddress> localAddrs;
+        QList<ICE::LocalAddress> localAddrs;
 
         // for example manually provided external address mapped to every local
         QList<Ice176::ExternalAddress> extAddrs;
@@ -69,21 +69,20 @@ public:
         bool                     borrowed     = false;
     };*/
 
-    Component *                     q;
+    Component                      *q;
     ObjectSession                   sess;
     int                             id;
     QString                         clientSoftware;
     TurnClient::Proxy               proxy;
-    UdpPortReserver *               portReserver = nullptr;
-    Config                          pending;
+    UdpPortReserver                *portReserver = nullptr;
+    Config                          pendingConfig;
     Config                          config;
     bool                            stopping = false;
     QList<ICE::LocalTransport::Ptr> udpTransports; // transport for local host-only candidates
 
-    QList<Candidate>                   localCandidates;
-    QHash<int, QSet<TransportAddress>> channelPeers;
-    bool                               useLocal      = true; // use local host candidates
-    bool                               localFinished = false;
+    QList<Candidate> localCandidates;
+    bool             useLocal      = true; // use local host candidates
+    bool             localFinished = false;
     // bool                               stunFinished      = false;
     bool               gatheringComplete = false;
     int                debugLevel        = DL_Packet;
@@ -93,8 +92,7 @@ public:
 
     ~Private() { qDeleteAll(udpTransports); }
 
-    ICE::LocalTransport::Ptr createLocalTransport(QUdpSocket *socket, bool borrowedSocket,
-                                                  const ICE::LocalTransport::LocalAddress &la)
+    ICE::LocalTransport::Ptr createLocalTransport(QUdpSocket *socket, bool borrowedSocket, const ICE::LocalAddress &la)
     {
         auto lt = ICE::LocalTransport::make();
         lt->setSocket(socket, borrowedSocket, la);
@@ -121,8 +119,8 @@ public:
     {
         Q_ASSERT(!stopping);
         // for now, only allow setting localAddrs once
-        if (!pending.localAddrs.isEmpty() && config.localAddrs.isEmpty()) {
-            for (const auto &la : std::as_const(pending.localAddrs)) {
+        if (!pendingConfig.localAddrs.isEmpty() && config.localAddrs.isEmpty()) {
+            for (const auto &la : std::as_const(pendingConfig.localAddrs)) {
                 // skip duplicate addrs
                 if (findLocalAddr(la.addr) != -1)
                     continue;
@@ -155,8 +153,8 @@ public:
         }
 
         // extAddrs created on demand if present, but only once
-        if (!pending.extAddrs.isEmpty() && config.extAddrs.isEmpty()) {
-            config.extAddrs = pending.extAddrs;
+        if (!pendingConfig.extAddrs.isEmpty() && config.extAddrs.isEmpty()) {
+            config.extAddrs = pendingConfig.extAddrs;
 
             bool need_doExt = false;
 
@@ -243,7 +241,8 @@ public:
                 addrAt = 1024;
         }
 
-        return choose_default_priority(PeerReflexiveType, 65535 - addrAt, false, id);
+        return choose_default_priority(PeerReflexiveType, 65535 - addrAt, QNetworkInterface::Ethernet,
+                                       id); // ethernet? really?
     }
 
     void flagPathAsLowOverhead(int id, const TransportAddress &addr)
@@ -475,26 +474,6 @@ private:
 #endif
     }
 
-    void removeLocalCandidates(const std::shared_ptr<Transport> sock)
-    {
-        ObjectSessionWatcher watch(&sess);
-
-        for (int n = 0; n < localCandidates.count(); ++n) {
-            Candidate &c = localCandidates[n];
-
-            if (c.iceTransport == sock) {
-                Candidate tmp = localCandidates.takeAt(n);
-                --n; // adjust position
-
-                channelPeers.remove(tmp.id);
-
-                emit q->candidateRemoved(tmp);
-                if (!watch.isValid())
-                    return;
-            }
-        }
-    }
-
     void storeLocalNotReduntantCandidate(const Candidate &c)
     {
         ObjectSessionWatcher watch(&sess);
@@ -509,7 +488,7 @@ private:
         }
     }
 
-    bool allStopped() const { return udpTransports.isEmpty() && tcpTurn.isEmpty(); }
+    bool allStopped() const { return udpTransports.isEmpty(); }
 
     void tryStopped()
     {
@@ -523,7 +502,6 @@ private:
         ObjectSessionWatcher watch(&sess);
 
         emit q->debugLine(QLatin1String("Stopping local transport: ") + lt->localAddress().addr.toString());
-        removeLocalCandidates(lt);
         if (!watch.isValid())
             return false;
 
@@ -664,9 +642,9 @@ void Component::setPortReserver(UdpPortReserver *portReserver) { d->portReserver
 
 UdpPortReserver *Component::portReserver() const { return d->portReserver; }
 
-void Component::setLocalAddresses(const QList<LocalTransport::LocalAddress> &addrs) { d->pending.localAddrs = addrs; }
+void Component::setLocalAddresses(const QList<ICE::LocalAddress> &addrs) { d->pendingConfig.localAddrs = addrs; }
 
-void Component::setExternalAddresses(const QList<Ice176::ExternalAddress> &addrs) { d->pending.extAddrs = addrs; }
+void Component::setExternalAddresses(const QList<Ice176::ExternalAddress> &addrs) { d->pendingConfig.extAddrs = addrs; }
 
 void Component::setUseLocal(bool enabled) { d->useLocal = enabled; }
 

@@ -19,7 +19,7 @@
 
 #include "tcpportreserver.h"
 
-#include "ice176.h"
+#include "iputil.h"
 
 #include <QNetworkInterface>
 #include <QTcpServer>
@@ -103,12 +103,10 @@ void TcpPortDiscoverer::addLocalServers()
             //   only use the first one
             if (listenAddrs.contains(h))
                 continue;
-#if QT_VERSION >= QT_VERSION_CHECK(5, 11, 0)
-            if (h.protocol() == QAbstractSocket::IPv6Protocol && h.isLinkLocal())
-#else
-            if (h.protocol() == QAbstractSocket::IPv6Protocol && XMPP::Ice176::isIPv6LinkLocalAddress(h))
-#endif
+
+            if (h.protocol() == QAbstractSocket::IPv6Protocol && IpUtil::isLinkLocalAddress(h))
                 h.setScopeId(ni.name());
+
             listenAddrs += h;
         }
     }

@@ -47,7 +47,7 @@ class SafeUdpSocket : public QObject {
 
 private:
     ObjectSession sess;
-    QUdpSocket *  sock;
+    QUdpSocket   *sock;
     int           writtenCount;
 
 public:
@@ -163,14 +163,14 @@ public:
 
     enum class State { None, Starting, Active, Stopping, Stopped };
 
-    LocalTransport *            q;
+    LocalTransport             *q;
     ObjectSession               sess;
-    QUdpSocket *                extSock = nullptr;
-    SafeUdpSocket *             sock    = nullptr;
+    QUdpSocket                 *extSock = nullptr;
+    SafeUdpSocket              *sock    = nullptr;
     StunTransactionPool::Ptr    pool;
     std::vector<RecoveringTurn> turnClients;
     std::vector<StunBinding *>  stunClients;
-    AbstractStunDisco *         stunDiscoverer = nullptr;
+    AbstractStunDisco          *stunDiscoverer = nullptr;
     // TransportAddress            addr;
     LocalAddress localAddress;
     QHostAddress extAddr; // either configured or server reflexive address
@@ -457,31 +457,24 @@ private:
         });
         connect(turn.get(), &TurnClient::closed, this, [this, turn]() {
             ObjectSessionWatcher watch(&sess);
-
-            removeLocalCandidates(turn->sharedFromThis());
+            emit                 q->candidateClosed(turn);
             if (!watch.isValid())
                 return;
 
             turn->disconnect(this);
-            turn.reset();
-
-            tryStopped();
         });
-        connect(turn.data(), &IceTurnTransport::error, this, [this](int e) {
+        connect(turn.get(), &TurnClient::error, this, [this, turn](XMPP::TurnClient::Error e) {
             Q_UNUSED(e)
 
             ObjectSessionWatcher watch(&sess);
 
-            removeLocalCandidates(tcpTurn);
+            removeLocalCandidates(turn);
             if (!watch.isValid())
                 return;
 
-            tcpTurn->disconnect(this);
-            tcpTurn.reset();
-            tryGatheringComplete();
+            turn->disconnect(this);
         });
-        connect(turn.data(), &IceTurnTransport::debugLine, this,
-                [this](const QString &line) { emit q->debugLine(line); });
+        connect(turn.get(), &TurnClient::debugLine, this, [this](const QString &line) { emit q->debugLine(line); });
         turn->setClientSoftwareNameAndVersion(clientSoftware);
         turn->setProxy(proxy);
         turn->setUsername(service->username);

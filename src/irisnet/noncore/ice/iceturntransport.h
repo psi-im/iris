@@ -29,7 +29,7 @@
 
 namespace XMPP {
 // for the turn transport, only path 0 is used
-class IceTurnTransport : public IceTransport, public QEnableSharedFromThis<IceTurnTransport> {
+class IceTurnTransport : public ICE::Transport, public QEnableSharedFromThis<IceTurnTransport> {
     Q_OBJECT
 
 public:

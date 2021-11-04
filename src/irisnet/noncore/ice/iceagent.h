@@ -16,7 +16,7 @@ public:
     ~Agent();
 
     QString foundation(CandidateType type, const QHostAddress baseAddr,
-                       const QHostAddress &        stunServAddr     = QHostAddress(),
+                       const QHostAddress         &stunServAddr     = QHostAddress(),
                        QAbstractSocket::SocketType stunRequestProto = QAbstractSocket::UnknownSocketType);
 
     static QString randomCredential(int len);

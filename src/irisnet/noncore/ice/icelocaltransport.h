@@ -46,13 +46,6 @@ class LocalTransport : public Transport, public std::enable_shared_from_this<Loc
 public:
     using Ptr = std::shared_ptr<LocalTransport>;
 
-    class LocalAddress {
-    public:
-        QHostAddress                     addr;
-        int                              network = 0; // 0 = unknown. see QNetworkInterface::index doc
-        QNetworkInterface::InterfaceType type    = QNetworkInterface::Unknown;
-    };
-
     enum Error { ErrorBind = ErrorCustom, ErrorStun, ErrorTurn };
 
     LocalTransport(QObject *parent = nullptr);
@@ -62,10 +55,10 @@ public:
 
     // if socket is passed turn ErrorMismatch won't be handled (potentially worthen the connectivity)
     void                             setSocket(QUdpSocket *socket, bool borrowedSocket, const LocalAddress &la);
-    QUdpSocket *                     takeBorrowedSocket();
+    QUdpSocket                      *takeBorrowedSocket();
     QNetworkInterface::InterfaceType networkType() const;
     TransportAddress                 localAddress() const;
-    const QHostAddress &             externalAddress() const;
+    const QHostAddress              &externalAddress() const;
     void                             setExternalAddress(const QHostAddress &addr);
 
     void setClientSoftwareNameAndVersion(const QString &str);

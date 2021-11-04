@@ -39,18 +39,18 @@ public:
     int               debugLevel;
     bool              started = false;
 
-    Private(IceTurnTransport *_q) : QObject(_q), q(_q), turn(this), debugLevel(IceTransport::DL_None)
+    Private(IceTurnTransport *_q) : QObject(_q), q(_q), turn(this), debugLevel(ICE::Transport::DL_None)
     {
         connect(&turn, &TurnClient::connected, this, [this]() {
-            if (debugLevel >= IceTransport::DL_Info)
+            if (debugLevel >= ICE::Transport::DL_Info)
                 emit q->debugLine("turn_connected");
         });
         connect(&turn, &TurnClient::tlsHandshaken, this, [this]() {
-            if (debugLevel >= IceTransport::DL_Info)
+            if (debugLevel >= ICE::Transport::DL_Info)
                 emit q->debugLine("turn_tlsHandshaken");
         });
         connect(&turn, &TurnClient::closed, this, [this]() {
-            if (debugLevel >= IceTransport::DL_Info)
+            if (debugLevel >= ICE::Transport::DL_Info)
                 emit q->debugLine("turn_closed");
 
             emit q->stopped();
@@ -63,7 +63,7 @@ public:
             turn.continueAfterParams(addr);
         });
         connect(&turn, &TurnClient::retrying, this, [this]() {
-            if (debugLevel >= IceTransport::DL_Info)
+            if (debugLevel >= ICE::Transport::DL_Info)
                 emit q->debugLine("turn_retrying");
         });
         connect(&turn, &TurnClient::activated, this, &Private::turn_activated);
@@ -90,10 +90,10 @@ private slots:
         StunAllocate *allocate = turn.stunAllocate();
 
         auto saddr = allocate->reflexiveAddress();
-        if (debugLevel >= IceTransport::DL_Info)
+        if (debugLevel >= ICE::Transport::DL_Info)
             emit q->debugLine(QLatin1String("Server says we are ") + saddr);
         saddr = allocate->relayedAddress();
-        if (debugLevel >= IceTransport::DL_Info)
+        if (debugLevel >= ICE::Transport::DL_Info)
             emit q->debugLine(QLatin1String("Server relays via ") + saddr);
 
         relayAddr = saddr;
@@ -105,7 +105,7 @@ private slots:
 
     void turn_error(XMPP::TurnClient::Error e)
     {
-        if (debugLevel >= IceTransport::DL_Info)
+        if (debugLevel >= ICE::Transport::DL_Info)
             emit q->debugLine(QString("turn_error: ") + turn.errorString());
 
         turnErrorCode = e;
@@ -113,7 +113,7 @@ private slots:
     }
 };
 
-IceTurnTransport::IceTurnTransport(QObject *parent) : IceTransport(parent) { d = new Private(this); }
+IceTurnTransport::IceTurnTransport(QObject *parent) : ICE::Transport(parent) { d = new Private(this); }
 
 IceTurnTransport::~IceTurnTransport() { delete d; }
 

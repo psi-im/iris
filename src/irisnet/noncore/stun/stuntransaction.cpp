@@ -91,7 +91,7 @@ class StunTransactionPoolPrivate : public QObject {
     Q_OBJECT
 
 public:
-    StunTransactionPool *                q;
+    StunTransactionPool                 *q;
     StunTransaction::Mode                mode;
     QSet<StunTransaction *>              transactions;
     QHash<StunTransaction *, QByteArray> transToId;
@@ -552,7 +552,7 @@ void StunTransactionPoolPrivate::remove(StunTransaction *trans)
 
 void StunTransactionPoolPrivate::transmit(StunTransaction *trans)
 {
-    emit q->outgoingMessage(trans->d->packet, trans->d->to_addr);
+    emit q->outgoingMessage(trans->d->outMessage, trans->d->to_addr);
 }
 
 StunTransactionPool::StunTransactionPool(StunTransaction::Mode mode)

@@ -20,6 +20,7 @@
 #include "jingle-s5b.h"
 
 #include "ice176.h"
+#include "iputil.h"
 #include "jingle-session.h"
 #include "jingle.h"
 #include "s5b.h"
@@ -50,7 +51,7 @@ namespace XMPP { namespace Jingle { namespace S5B {
         Q_OBJECT
 
         QList<NetworkDatagram> datagrams;
-        SocksClient *          client = nullptr;
+        SocksClient           *client = nullptr;
         Transport::Mode        mode   = Transport::Tcp;
 
     public:
@@ -136,7 +137,7 @@ namespace XMPP { namespace Jingle { namespace S5B {
         Q_OBJECT
 
         QMap<QString, SocksClient *> clients;
-        SocksClient *                client = nullptr;
+        SocksClient                 *client = nullptr;
 
     public:
         using QObject::QObject;
@@ -154,13 +155,8 @@ namespace XMPP { namespace Jingle { namespace S5B {
                 QList<QNetworkAddressEntry> entries = ni.addressEntries();
                 for (const QNetworkAddressEntry &na : entries) {
                     QHostAddress ha = na.ip();
-                    if (ha.protocol() == QAbstractSocket::IPv6Protocol &&
-#if QT_VERSION >= QT_VERSION_CHECK(5, 11, 0)
-                        ha.isLinkLocal()
-#else
-                        XMPP::Ice176::isIPv6LinkLocalAddress(ha)
-#endif
-                            ) // && proxyHost.isInSubnet(ha, na.prefixLength())
+                    if (ha.protocol() == QAbstractSocket::IPv6Protocol
+                        && IpUtil::isLinkLocalAddress(ha)) // && proxyHost.isInSubnet(ha, na.prefixLength())
                     {
                         auto client = new SocksClient(this);
                         clients.insert(ni.name(), client);
@@ -235,7 +231,7 @@ namespace XMPP { namespace Jingle { namespace S5B {
         Candidate::State    state    = Candidate::New;
 
         QSharedPointer<S5BServer> server;
-        SocksClient *             socksClient = nullptr;
+        SocksClient              *socksClient = nullptr;
 
         QString toString() const
         {
@@ -253,13 +249,8 @@ namespace XMPP { namespace Jingle { namespace S5B {
                            std::function<void(bool)> callback, bool isUdp)
         {
             QHostAddress ha(host);
-            if (!ha.isNull() && ha.protocol() == QAbstractSocket::IPv6Protocol && ha.scopeId().isEmpty() &&
-#if QT_VERSION >= QT_VERSION_CHECK(5, 11, 0)
-                ha.isLinkLocal()
-#else
-                XMPP::Ice176::isIPv6LinkLocalAddress(ha)
-#endif
-            ) {
+            if (!ha.isNull() && ha.protocol() == QAbstractSocket::IPv6Protocol && ha.scopeId().isEmpty()
+                && IpUtil::isLinkLocalAddress(ha)) {
                 qDebug() << "connect to " << toString() << "with key=" << key << "using V6LinkLocalSocksConnector";
                 // we have link local address without scope. We have to enumerate all possible scopes.
                 auto v6llConnector = new V6LinkLocalSocksConnector(this);
@@ -581,7 +572,7 @@ namespace XMPP { namespace Jingle { namespace S5B {
     public:
         enum PendingActions { NewCandidate = 1, CandidateUsed = 2, CandidateError = 4, Activated = 8, ProxyError = 16 };
 
-        Transport *                  q                            = nullptr;
+        Transport                   *q                            = nullptr;
         bool                         p2pAllowed                   = true;
         bool                         offerSent                    = false;
         bool                         waitingAck                   = true;

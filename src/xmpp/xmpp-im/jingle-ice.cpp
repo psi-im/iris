@@ -386,7 +386,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
             NewSctpAssociation = 16
         };
 
-        Transport *                    q                         = nullptr;
+        Transport                     *q                         = nullptr;
         bool                           offerSent                 = false;
         bool                           aborted                   = false;
         bool                           initialOfferReady         = false;
@@ -400,8 +400,8 @@ namespace XMPP { namespace Jingle { namespace ICE {
 
         // size_t             blockSize    = 8192;
         TcpPortDiscoverer *disco        = nullptr;
-        UdpPortReserver *  portReserver = nullptr;
-        XMPP::Ice176 *     ice          = nullptr;
+        UdpPortReserver   *portReserver = nullptr;
+        XMPP::Ice176      *ice          = nullptr;
 
         Dtls::Setup localDtlsRole  = Dtls::ActPass;
         Dtls::Setup remoteDtlsRole = Dtls::ActPass;
@@ -612,7 +612,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
                 eaddr.base = addr;
                 eaddr.addr = extAddr;
                 extAddrs += eaddr;*/
-                for (const XMPP::Ice176::LocalAddress &la : std::as_const(localAddrs)) {
+                for (const auto &la : std::as_const(localAddrs)) {
                     XMPP::Ice176::ExternalAddress ea;
                     ea.base = la;
                     ea.addr = *extAddr;
