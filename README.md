@@ -37,7 +37,7 @@ Iris depends on Qt and QCA.
   * Account registration
   * Password changing
   * Agent/Transport registration
-  * VCards
+  * vCards
   * Basic Groupchat
   * OpenPGP capable
   * S5B Direct Connections
