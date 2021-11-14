@@ -31,7 +31,7 @@ Iris depends on Qt and QCA.
   * Roster management
   * Subscriptions
 
-* JEP extensions:
+* XEP extensions:
   * Version/Time requests
   * Service Discovery (disco, browse, and older ‘agents’ modes)
   * Account registration
