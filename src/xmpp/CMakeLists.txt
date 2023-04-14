@@ -123,4 +123,6 @@ target_include_directories(iris
         ${CMAKE_SOURCE_DIR}/include/iris
         ${CMAKE_SOURCE_DIR}/src
         ${Qca_INCLUDE_DIR}
+    PUBLIC
+        $<INSTALL_INTERFACE:include/xmpp>
 )
