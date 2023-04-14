@@ -19,10 +19,12 @@ jobs:
         include:
           - tag: minimal
             deps: |
+              libb2-dev
               libqca-qt5-2-dev
             options: -DIRIS_ENABLE_JINGLE_SCTP=OFF
           - tag: system-libs
             deps: |
+              libb2-dev
               libqca-qt5-2-dev
               libusrsctp-dev
             options: -DIRIS_BUNDLED_QCA=OFF -DIRIS_BUNDLED_USRSCTP=OFF
