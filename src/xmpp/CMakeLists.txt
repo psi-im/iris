@@ -85,16 +85,14 @@ endif()
 
 if(B2_FOUND)
     message(STATUS "Building with system blake2 library")
-    target_link_libraries(iris PUBLIC ${B2_LIBRARY})
+    target_link_libraries(iris PRIVATE ${B2_LIBRARY})
 else()
     if(NOT IRIS_BUNDLED_QCA)
         message(STATUS "No system blake2 and bundled QCA is disabled. Expect slow hashing.")
     endif()
     target_sources(iris PRIVATE
-            blake2/blake2b-ref.c
-            blake2/blake2s-ref.c
-            blake2/blake2.h
-            blake2/blake2-impl.h
+        blake2/blake2b-ref.c
+        blake2/blake2s-ref.c
     )
 endif()
 
