@@ -1,0 +1,62 @@
+name: CI
+on:
+  - push
+  - pull_request
+  - workflow_dispatch
+
+jobs:
+  test-linux:
+    runs-on: ubuntu-latest
+    env:
+      CCACHE_DIR: ${{github.workspace}}/ccache
+      CCACHE_MAXSIZE: 100M
+    strategy:
+      matrix:
+        tag:
+          - minimal
+          - system-libs
+          - bundled-libs
+        include:
+          - tag: minimal
+            deps: |
+              libqca-qt5-2-dev
+            options: -DIRIS_ENABLE_JINGLE_SCTP=OFF
+          - tag: system-libs
+            deps: |
+              libqca-qt5-2-dev
+              libusrsctp-dev
+            options: -DIRIS_BUNDLED_QCA=OFF -DIRIS_BUNDLED_USRSCTP=OFF
+          - tag: bundled-libs
+            deps: null
+            options: -DIRIS_BUNDLED_QCA=ON -DIRIS_BUNDLED_USRSCTP=ON -DIRIS_BUILD_TOOLS=ON
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Install dependencies
+        uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: |
+            ${{matrix.deps}}
+            ccache
+            ninja-build
+            qtbase5-dev
+          version: ${{matrix.tag}}
+      - name: Configure
+        run: |
+          cmake -B ${{github.workspace}}/build -G Ninja \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            ${{matrix.options}}
+      - name: Restore cache
+        uses: actions/cache/restore@v3
+        with:
+          key: ccache-linux-${{matrix.tag}}
+          path: ${{github.workspace}}/ccache
+      - name: Build
+        run: |
+          cmake --build ${{github.workspace}}/build -v -j $(nproc)
+      - name: Save cache
+        uses: actions/cache@v3
+        with:
+          key: ccache-linux-${{matrix.tag}}
+          path: ${{github.workspace}}/ccache
