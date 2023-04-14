@@ -102,10 +102,10 @@ target_link_libraries(iris
     PRIVATE
         $<BUILD_INTERFACE:stringprep>
         $<BUILD_INTERFACE:irisnet>
+        ZLIB::ZLIB
     PUBLIC
         ${Qca_LIBRARY}
         Qt5::Core Qt5::Gui Qt5::Network Qt5::Xml
-        ZLIB::ZLIB
 )
 
 if(IRIS_BUNDLED_QCA)
