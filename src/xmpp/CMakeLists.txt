@@ -1,115 +1,10 @@
 cmake_minimum_required(VERSION 3.10.0)
 
-add_definitions(-DXMPP_TEST)
-
 find_package(ZLIB REQUIRED)
-get_filename_component(ABS_PARENT_DIR "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
-get_filename_component(ABS_ROOT_DIR "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
-include_directories(
-    ${CMAKE_CURRENT_BINARY_DIR}
-    ${CMAKE_CURRENT_LIST_DIR}
-    ${ABS_PARENT_DIR}
-    ${ABS_PARENT_DIR}/irisnet/corelib
-    xmpp-core
-    xmpp-im
-    ${ZLIB_INCLUDE_DIRS}
-    ${QCA_INCLUDES}
-    )
 
-set(HEADERS
-    xmpp-core/parser.h
-    xmpp-core/protocol.h
-    xmpp-core/sm.h
-    xmpp-core/td.h
-    xmpp-core/xmlprotocol.h
-    xmpp-core/xmpp_stanza.h
+add_library(iris)
 
-    xmpp-im/xmpp_address.h
-    xmpp-im/xmpp_hash.h
-    xmpp-im/xmpp_thumbs.h
-    xmpp-im/xmpp_agentitem.h
-    xmpp-im/xmpp_captcha.h
-    xmpp-im/xmpp_chatstate.h
-    xmpp-im/xmpp_discoitem.h
-    xmpp-im/xmpp_features.h
-    xmpp-im/xmpp_form.h
-    xmpp-im/xmpp_htmlelement.h
-    xmpp-im/xmpp_httpauthrequest.h
-    xmpp-im/xmpp_liveroster.h
-    xmpp-im/xmpp_liverosteritem.h
-    xmpp-im/xmpp_message.h
-    xmpp-im/xmpp_muc.h
-    xmpp-im/xmpp_reference.h
-    xmpp-im/xmpp_pubsubitem.h
-    xmpp-im/xmpp_pubsubretraction.h
-    xmpp-im/xmpp_receipts.h
-    xmpp-im/xmpp_resource.h
-    xmpp-im/xmpp_resourcelist.h
-    xmpp-im/xmpp_roster.h
-    xmpp-im/xmpp_rosteritem.h
-    xmpp-im/xmpp_rosterx.h
-    xmpp-im/xmpp_status.h
-    xmpp-im/xmpp_subsets.h
-    xmpp-im/xmpp_url.h
-    xmpp-im/xmpp_vcard.h
-    xmpp-im/xmpp_xdata.h
-    xmpp-im/xmpp_xmlcommon.h
-    xmpp-im/xmpp_encryption.h
-    xmpp-im/xmpp_externalservicediscovery.h
-    xmpp-im/stundisco.h
-
-    base/randomnumbergenerator.h
-    base/randrandomnumbergenerator.h
-    base/timezone.h
-
-    xmpp-im/im.h
-
-    jid/jid.h
-
-    sasl/digestmd5proplist.h
-    sasl/digestmd5response.h
-    sasl/plainmessage.h
-    sasl/scramsha1message.h
-    sasl/scramsha1response.h
-    sasl/scramsha1signature.h
-
-    blake2/blake2qt.h
-
-    xmpp-core/compressionhandler.h
-    xmpp-core/securestream.h
-    xmpp-core/xmpp.h
-    xmpp-core/xmpp_clientstream.h
-    xmpp-core/xmpp_stream.h
-
-    xmpp-im/xmpp_caps.h
-    xmpp-im/filetransfer.h
-    xmpp-im/httpfileupload.h
-    xmpp-im/s5b.h
-    xmpp-im/xmpp_bitsofbinary.h
-    xmpp-im/xmpp_bytestream.h
-    xmpp-im/xmpp_client.h
-    xmpp-im/xmpp_discoinfotask.h
-    xmpp-im/xmpp_ibb.h
-    xmpp-im/xmpp_serverinfomanager.h
-    xmpp-im/xmpp_task.h
-    xmpp-im/xmpp_tasks.h
-    xmpp-im/jingle.h
-    xmpp-im/jingle-connection.h
-    xmpp-im/jingle-transport.h
-    xmpp-im/jingle-nstransportslist.h
-    xmpp-im/jingle-application.h
-    xmpp-im/jingle-session.h
-    xmpp-im/jingle-ft.h
-    xmpp-im/jingle-ice.h
-    xmpp-im/jingle-s5b.h
-    xmpp-im/jingle-ibb.h
-    xmpp-im/jingle-file.h
-
-    zlib/zlibcompressor.h
-    zlib/zlibdecompressor.h
-    )
-
-set(SOURCES
+target_sources(iris PRIVATE
     xmpp-core/compressionhandler.cpp
     xmpp-core/connector.cpp
     xmpp-core/parser.cpp
@@ -177,60 +72,57 @@ set(SOURCES
 
     xmpp-im/s5b.cpp
     xmpp-im/xmpp_features.cpp
-    )
+)
 
-if(JINGLE_SCTP)
-    list(APPEND SOURCES
+if(IRIS_ENABLE_JINGLE_SCTP)
+    target_compile_definitions(iris PRIVATE JINGLE_SCTP)
+    target_sources(iris PRIVATE
         xmpp-im/jingle-sctp.cpp
         xmpp-im/jingle-sctp-association_p.cpp
         xmpp-im/jingle-webrtc-datachannel_p.cpp
-        )
-
-    list(APPEND HEADERS
-        xmpp-im/jingle-sctp.h
-        xmpp-im/jingle-sctp-association_p.h
-        xmpp-im/jingle-webrtc-datachannel_p.h
-        )
+    )
 endif()
-
-if(NOT MSVC)
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c11")
-endif()
-
-add_library(iris
-    STATIC
-    ${HEADERS}
-    ${SOURCES}
-)
-
-set_property(TARGET iris PROPERTY C_STANDARD 11)
 
 if(B2_FOUND)
     message(STATUS "Building with system blake2 library")
-    target_compile_definitions(iris PUBLIC IRIS_SYSTEM_BLAKE2)
     target_link_libraries(iris PRIVATE ${B2_LIBRARY})
 else()
-    if (NOT BUNDLED_QCA)
+    if(NOT IRIS_BUNDLED_QCA)
         message(STATUS "No system blake2 and bundled QCA is disabled. Expect slow hashing.")
     endif()
     target_sources(iris PRIVATE
-            blake2/blake2b-ref.c
-            blake2/blake2s-ref.c
-            blake2/blake2.h
-            blake2/blake2-impl.h)
-    target_include_directories(iris PRIVATE blake2)
+        blake2/blake2b-ref.c
+        blake2/blake2s-ref.c
+    )
 endif()
 
+target_link_libraries(iris
+    PRIVATE
+        $<BUILD_INTERFACE:stringprep>
+        $<BUILD_INTERFACE:irisnet>
+        ZLIB::ZLIB
+    PUBLIC
+        ${Qca_LIBRARY}
+        Qt5::Core Qt5::Gui Qt5::Network Qt5::Xml
+)
 
-target_link_libraries(iris PRIVATE ${EXTRA_LDFLAGS} stringprep irisnet)
-target_link_libraries(iris PUBLIC ${ZLIB_LIBRARY} Qt5::Core Qt5::Gui Qt5::Network Qt5::Xml)
-target_link_libraries(iris PUBLIC ${qca_LIB})
-if (BUNDLED_QCA)
+if(IRIS_BUNDLED_QCA)
     add_dependencies(iris QcaProject)
-    include_directories(${Qca_INCLUDE_DIR})
-    target_include_directories(iris INTERFACE ${Qca_INCLUDE_DIR})
+    target_include_directories(iris PUBLIC ${Qca_INCLUDE_DIR})
     target_link_libraries(iris PUBLIC OpenSSL::SSL)
 endif()
 
-target_compile_definitions(iris INTERFACE IRISNET_STATIC)
-target_include_directories(iris INTERFACE ${ABS_ROOT_DIR}/include ${ABS_ROOT_DIR}/include/iris ${ABS_PARENT_DIR})
+if(IRIS_ENABLE_DEBUG)
+    target_compile_definitions(iris PRIVATE XMPP_TEST)
+endif()
+
+target_compile_definitions(iris PUBLIC IRISNET_STATIC)
+
+target_include_directories(iris
+    PRIVATE
+        ${CMAKE_SOURCE_DIR}/include/iris
+        ${CMAKE_SOURCE_DIR}/src
+        ${Qca_INCLUDE_DIR}
+    PUBLIC
+        $<INSTALL_INTERFACE:include/xmpp>
+)
