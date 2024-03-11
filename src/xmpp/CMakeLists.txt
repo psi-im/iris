@@ -4,7 +4,105 @@ find_package(ZLIB REQUIRED)
 
 add_library(iris)
 
+set(XMPP_JID_HEADERS jid/jid.h)
+
+set(XMPP_CORE_HEADERS
+    xmpp-core/parser.h
+    xmpp-core/protocol.h
+    xmpp-core/sm.h
+    xmpp-core/td.h
+    xmpp-core/xmlprotocol.h
+    xmpp-core/xmpp_stanza.h
+
+    xmpp-core/compressionhandler.h
+    xmpp-core/securestream.h
+    xmpp-core/xmpp.h
+    xmpp-core/xmpp_clientstream.h
+    xmpp-core/xmpp_stream.h
+)
+
+set(XMPP_IM_HEADERS
+    xmpp-im/xmpp_address.h
+    xmpp-im/xmpp_hash.h
+    xmpp-im/xmpp_thumbs.h
+    xmpp-im/xmpp_agentitem.h
+    xmpp-im/xmpp_captcha.h
+    xmpp-im/xmpp_chatstate.h
+    xmpp-im/xmpp_discoitem.h
+    xmpp-im/xmpp_features.h
+    xmpp-im/xmpp_form.h
+    xmpp-im/xmpp_htmlelement.h
+    xmpp-im/xmpp_httpauthrequest.h
+    xmpp-im/xmpp_liveroster.h
+    xmpp-im/xmpp_liverosteritem.h
+    xmpp-im/xmpp_message.h
+    xmpp-im/xmpp_muc.h
+    xmpp-im/xmpp_reference.h
+    xmpp-im/xmpp_pubsubitem.h
+    xmpp-im/xmpp_pubsubretraction.h
+    xmpp-im/xmpp_receipts.h
+    xmpp-im/xmpp_resource.h
+    xmpp-im/xmpp_resourcelist.h
+    xmpp-im/xmpp_roster.h
+    xmpp-im/xmpp_rosteritem.h
+    xmpp-im/xmpp_rosterx.h
+    xmpp-im/xmpp_status.h
+    xmpp-im/xmpp_subsets.h
+    xmpp-im/xmpp_url.h
+    xmpp-im/xmpp_vcard.h
+    xmpp-im/xmpp_xdata.h
+    xmpp-im/xmpp_xmlcommon.h
+    xmpp-im/xmpp_encryption.h
+    xmpp-im/xmpp_externalservicediscovery.h
+    xmpp-im/stundisco.h
+    xmpp-im/im.h
+    xmpp-im/xmpp_caps.h
+    xmpp-im/filetransfer.h
+    xmpp-im/httpfileupload.h
+    xmpp-im/s5b.h
+    xmpp-im/xmpp_bitsofbinary.h
+    xmpp-im/xmpp_bytestream.h
+    xmpp-im/xmpp_client.h
+    xmpp-im/xmpp_discoinfotask.h
+    xmpp-im/xmpp_ibb.h
+    xmpp-im/xmpp_serverinfomanager.h
+    xmpp-im/xmpp_task.h
+    xmpp-im/xmpp_tasks.h
+    xmpp-im/jingle.h
+    xmpp-im/jingle-connection.h
+    xmpp-im/jingle-transport.h
+    xmpp-im/jingle-nstransportslist.h
+    xmpp-im/jingle-application.h
+    xmpp-im/jingle-session.h
+    xmpp-im/jingle-ft.h
+    xmpp-im/jingle-ice.h
+    xmpp-im/jingle-s5b.h
+    xmpp-im/jingle-ibb.h
+    xmpp-im/jingle-file.h
+    xmpp-im/jingle-sctp.h
+)
+
+set(XMPP_HEADERS_PRIVATE
+    sasl/digestmd5proplist.h
+    sasl/digestmd5response.h
+    sasl/plainmessage.h
+    sasl/scramsha1message.h
+    sasl/scramsha1response.h
+    sasl/scramsha1signature.h
+    zlib/zlibcompressor.h
+    zlib/zlibdecompressor.h
+    blake2/blake2qt.h
+
+    base/randomnumbergenerator.h
+    base/randrandomnumbergenerator.h
+    base/timezone.h
+)
+
 target_sources(iris PRIVATE
+    ${XMPP_JID_HEADERS}
+    ${XMPP_CORE_HEADERS}
+    ${XMPP_IM_HEADERS}
+    ${XMPP_HEADERS_PRIVATE}
     xmpp-core/compressionhandler.cpp
     xmpp-core/connector.cpp
     xmpp-core/parser.cpp
@@ -79,7 +177,9 @@ if(IRIS_ENABLE_JINGLE_SCTP)
     target_sources(iris PRIVATE
         xmpp-im/jingle-sctp.cpp
         xmpp-im/jingle-sctp-association_p.cpp
+        xmpp-im/jingle-sctp-association_p.h
         xmpp-im/jingle-webrtc-datachannel_p.cpp
+        xmpp-im/jingle-webrtc-datachannel_p.h
     )
 endif()
 
@@ -118,11 +218,35 @@ endif()
 
 target_compile_definitions(iris PUBLIC IRISNET_STATIC)
 
-target_include_directories(iris
-    PRIVATE
-        ${CMAKE_SOURCE_DIR}/include/iris
-        ${CMAKE_SOURCE_DIR}/src
-        ${Qca_INCLUDE_DIR}
-    PUBLIC
-        $<INSTALL_INTERFACE:include/xmpp>
-)
+if(IS_SUBPROJECT)
+    target_include_directories(iris
+        PUBLIC
+            ${iris_SOURCE_DIR}/include
+            ${iris_SOURCE_DIR}/src
+            ${Qca_INCLUDE_DIR}
+        )
+    target_include_directories(iris
+        PRIVATE
+            ${iris_SOURCE_DIR}/include/iris
+        )
+else()
+    target_include_directories(iris
+        PRIVATE
+            ${iris_SOURCE_DIR}/include
+            ${iris_SOURCE_DIR}/src
+            ${Qca_INCLUDE_DIR}
+        )
+endif()
+target_include_directories(iris PUBLIC $<INSTALL_INTERFACE:include/xmpp>)
+
+if (IRIS_ENABLE_INSTALL)
+    install(FILES ${XMPP_JID_HEADERS}
+        DESTINATION ${IRIS_INSTALL_INCLUDEDIR}/xmpp/jid
+    )
+    install(FILES ${XMPP_CORE_HEADERS}
+        DESTINATION ${IRIS_INSTALL_INCLUDEDIR}/xmpp/xmpp-core
+    )
+    install(FILES ${XMPP_IM_HEADERS}
+        DESTINATION ${IRIS_INSTALL_INCLUDEDIR}/xmpp/xmpp-im
+    )
+endif()

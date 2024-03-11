@@ -59,12 +59,14 @@ if(APPLE OR (MSVC OR USE_MXE))
     set(IRIS_DEFAULT_BUNDLED_QCA ON)
 endif()
 
-option(IRIS_ENABLE_INSTALL "Enable installation" OFF)
+option(IRIS_ENABLE_INSTALL "Enable installation" ON)
 option(IRIS_ENABLE_JINGLE_SCTP "Enable SCTP over ICE Jingle transport / data channels" ON)
 option(IRIS_BUNDLED_QCA "Adds: DTLS, Blake2b and other useful for XMPP crypto-stuff" ${IRIS_DEFAULT_BUNDLED_QCA})
 option(IRIS_BUNDLED_USRSCTP "Compile compatible UsrSCTP lib (required for datachannel Jingle transport)" ${IRIS_DEFAULT_BUNDLED_USRSCTP})
 option(IRIS_BUILD_TOOLS "Build tools and examples" OFF)
 option(IRIS_ENABLE_DEBUG "Enable debugging code paths" OFF)
+
+set(IRIS_INSTALL_INCLUDEDIR ${CMAKE_INSTALL_INCLUDEDIR}/xmpp/iris)
 
 set(CMAKE_CXX_STANDARD 17)
 
@@ -151,114 +153,6 @@ if(IRIS_ENABLE_INSTALL)
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig
     )
 
-    set(IRISNET_CORELIB_HEADERS
-        src/irisnet/corelib/addressresolver.h
-        src/irisnet/corelib/irisnetexport.h
-        src/irisnet/corelib/irisnetglobal.h
-        src/irisnet/corelib/irisnetplugin.h
-        src/irisnet/corelib/netavailability.h
-        src/irisnet/corelib/netinterface.h
-        src/irisnet/corelib/netnames.h
-        src/irisnet/corelib/objectsession.h
-    )
-    set(IRISNET_NONCORE_HEADERS
-        src/irisnet/noncore/cutestuff/bsocket.h
-        src/irisnet/noncore/cutestuff/bytestream.h
-        src/irisnet/noncore/cutestuff/httpconnect.h
-        src/irisnet/noncore/cutestuff/httppoll.h
-        src/irisnet/noncore/cutestuff/socks.h
-        src/irisnet/noncore/dtls.h
-        src/irisnet/noncore/ice176.h
-        src/irisnet/noncore/iceabstractstundisco.h
-        src/irisnet/noncore/iceagent.h
-        src/irisnet/noncore/legacy/ndns.h
-        src/irisnet/noncore/legacy/srvresolver.h
-        src/irisnet/noncore/processquit.h
-        src/irisnet/noncore/stunallocate.h
-        src/irisnet/noncore/stunbinding.h
-        src/irisnet/noncore/stunmessage.h
-        src/irisnet/noncore/stuntransaction.h
-        src/irisnet/noncore/tcpportreserver.h
-        src/irisnet/noncore/turnclient.h
-        src/irisnet/noncore/udpportreserver.h
-    )
-    set(XMPP_JID_HEADERS
-        src/xmpp/jid/jid.h
-    )
-    set(XMPP_CORE_HEADERS
-        src/xmpp/xmpp-core/xmpp.h
-        src/xmpp/xmpp-core/xmpp_clientstream.h
-        src/xmpp/xmpp-core/xmpp_stanza.h
-        src/xmpp/xmpp-core/xmpp_stream.h
-    )
-    set(XMPP_IM_HEADERS
-        src/xmpp/xmpp-im/filetransfer.h
-        src/xmpp/xmpp-im/httpfileupload.h
-        src/xmpp/xmpp-im/im.h
-        src/xmpp/xmpp-im/jingle-application.h
-        src/xmpp/xmpp-im/jingle-ft.h
-        src/xmpp/xmpp-im/jingle-ice.h
-        src/xmpp/xmpp-im/jingle-nstransportslist.h
-        src/xmpp/xmpp-im/jingle-s5b.h
-        src/xmpp/xmpp-im/jingle-session.h
-        src/xmpp/xmpp-im/jingle-transport.h
-        src/xmpp/xmpp-im/jingle.h
-        src/xmpp/xmpp-im/s5b.h
-        src/xmpp/xmpp-im/xmpp_address.h
-        src/xmpp/xmpp-im/xmpp_agentitem.h
-        src/xmpp/xmpp-im/xmpp_bitsofbinary.h
-        src/xmpp/xmpp-im/xmpp_caps.h
-        src/xmpp/xmpp-im/xmpp_captcha.h
-        src/xmpp/xmpp-im/xmpp_chatstate.h
-        src/xmpp/xmpp-im/xmpp_client.h
-        src/xmpp/xmpp-im/xmpp_discoinfotask.h
-        src/xmpp/xmpp-im/xmpp_discoitem.h
-        src/xmpp/xmpp-im/xmpp_encryption.h
-        src/xmpp/xmpp-im/xmpp_encryptionhandler.h
-        src/xmpp/xmpp-im/xmpp_features.h
-        src/xmpp/xmpp-im/xmpp_hash.h
-        src/xmpp/xmpp-im/xmpp_htmlelement.h
-        src/xmpp/xmpp-im/xmpp_httpauthrequest.h
-        src/xmpp/xmpp-im/xmpp_liveroster.h
-        src/xmpp/xmpp-im/xmpp_liverosteritem.h
-        src/xmpp/xmpp-im/xmpp_message.h
-        src/xmpp/xmpp-im/xmpp_muc.h
-        src/xmpp/xmpp-im/xmpp_pubsubitem.h
-        src/xmpp/xmpp-im/xmpp_pubsubretraction.h
-        src/xmpp/xmpp-im/xmpp_reference.h
-        src/xmpp/xmpp-im/xmpp_resource.h
-        src/xmpp/xmpp-im/xmpp_resourcelist.h
-        src/xmpp/xmpp-im/xmpp_roster.h
-        src/xmpp/xmpp-im/xmpp_rosteritem.h
-        src/xmpp/xmpp-im/xmpp_rosterx.h
-        src/xmpp/xmpp-im/xmpp_serverinfomanager.h
-        src/xmpp/xmpp-im/xmpp_status.h
-        src/xmpp/xmpp-im/xmpp_subsets.h
-        src/xmpp/xmpp-im/xmpp_task.h
-        src/xmpp/xmpp-im/xmpp_tasks.h
-        src/xmpp/xmpp-im/xmpp_thumbs.h
-        src/xmpp/xmpp-im/xmpp_url.h
-        src/xmpp/xmpp-im/xmpp_vcard.h
-        src/xmpp/xmpp-im/xmpp_xdata.h
-        src/xmpp/xmpp-im/xmpp_xmlcommon.h
-    )
-
-    set(IRIS_INSTALL_INCLUDEDIR ${CMAKE_INSTALL_INCLUDEDIR}/xmpp/iris)
-    install(FILES ${IRISNET_CORELIB_HEADERS}
-        DESTINATION ${IRIS_INSTALL_INCLUDEDIR}/irisnet/corelib
-    )
-    install(FILES ${IRISNET_NONCORE_HEADERS}
-        DESTINATION ${IRIS_INSTALL_INCLUDEDIR}/irisnet/noncore
-    )
-    install(FILES ${XMPP_JID_HEADERS}
-        DESTINATION ${IRIS_INSTALL_INCLUDEDIR}/xmpp/jid
-    )
-    install(FILES ${XMPP_CORE_HEADERS}
-        DESTINATION ${IRIS_INSTALL_INCLUDEDIR}/xmpp/xmpp-core
-    )
-    install(FILES ${XMPP_IM_HEADERS}
-        DESTINATION ${IRIS_INSTALL_INCLUDEDIR}/xmpp/xmpp-im
-    )
     install(DIRECTORY include/iris
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/xmpp
         FILES_MATCHING PATTERN "*.h"

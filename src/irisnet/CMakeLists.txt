@@ -7,7 +7,41 @@ list(APPEND CMAKE_MODULE_PATH
 
 add_library(irisnet STATIC)
 
+set(IRISNET_CORELIB_HEADERS
+    corelib/addressresolver.h
+    corelib/irisnetexport.h
+    corelib/irisnetglobal.h
+    corelib/irisnetplugin.h
+    corelib/netavailability.h
+    corelib/netinterface.h
+    corelib/netnames.h
+    corelib/objectsession.h
+)
+set(IRISNET_NONCORE_HEADERS
+    noncore/cutestuff/bsocket.h
+    noncore/cutestuff/bytestream.h
+    noncore/cutestuff/httpconnect.h
+    noncore/cutestuff/httppoll.h
+    noncore/cutestuff/socks.h
+    noncore/dtls.h
+    noncore/ice176.h
+    noncore/iceabstractstundisco.h
+    noncore/iceagent.h
+    noncore/legacy/ndns.h
+    noncore/legacy/srvresolver.h
+    noncore/processquit.h
+    noncore/stunallocate.h
+    noncore/stunbinding.h
+    noncore/stunmessage.h
+    noncore/stuntransaction.h
+    noncore/tcpportreserver.h
+    noncore/turnclient.h
+    noncore/udpportreserver.h
+)
+
 target_sources(irisnet PRIVATE
+    ${IRISNET_CORELIB_HEADERS}
+    ${IRISNET_NONCORE_HEADERS}
     corelib/irisnetglobal.cpp
     corelib/irisnetplugin.cpp
 
@@ -72,8 +106,8 @@ endif()
 
 target_include_directories(irisnet
     PRIVATE
-        ${CMAKE_SOURCE_DIR}/include/iris
-        ${CMAKE_SOURCE_DIR}/src
+        ${iris_SOURCE_DIR}/include/iris
+        ${iris_SOURCE_DIR}/src
         ${Qca_INCLUDE_DIR}
     PUBLIC
         ${USRSCTP_INCLUDES}
@@ -95,3 +129,12 @@ target_link_libraries(irisnet PUBLIC
     ${Qca_LIBRARY} ${USRSCTP_LIBRARY}
     Qt5::Core Qt5::Network Qt5::Xml
 )
+
+if(IRIS_ENABLE_INSTALL)
+    install(FILES ${IRISNET_CORELIB_HEADERS}
+        DESTINATION ${IRIS_INSTALL_INCLUDEDIR}/irisnet/corelib
+    )
+    install(FILES ${IRISNET_NONCORE_HEADERS}
+        DESTINATION ${IRIS_INSTALL_INCLUDEDIR}/irisnet/noncore
+    )
+endif()
