@@ -83,7 +83,7 @@ if(QT_DEFAULT_MAJOR_VERSION LESS 6)
 else()
     find_package(Qt6 REQUIRED COMPONENTS Core Gui Xml Network)
 endif()
-message(STATUS "Qt${QT_DEFAULT_MAJOR_VERSION} found, version ${Qt6Core_VERSION}")
+message(STATUS "Qt${QT_DEFAULT_MAJOR_VERSION} found, version ${Qt${QT_DEFAULT_MAJOR_VERSION}Core_VERSION}")
 
 # Find QCA package or use bundled if enabled
 include(IrisQCA)
