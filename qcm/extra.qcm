@@ -58,7 +58,7 @@ public:
         }
         if (universal) {
             str += "contains(QT_CONFIG,x86):contains(QT_CONFIG,ppc) {\n"
-                   "	CONFIG += x86 ppc\n"
+                   "    CONFIG += x86 ppc\n"
                    "}\n";
 
             if (!sdk.isEmpty())

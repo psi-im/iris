@@ -28,7 +28,7 @@ public:
             qc_universal_enabled = true;
 
             QString str = "contains(QT_CONFIG,x86):contains(QT_CONFIG,ppc) {\n"
-                          "	CONFIG += x86 ppc\n"
+                          "    CONFIG += x86 ppc\n"
                           "}\n";
 
             QString sdk = qc_getenv("QC_MAC_SDK");
