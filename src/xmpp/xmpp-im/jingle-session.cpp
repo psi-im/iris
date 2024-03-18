@@ -306,7 +306,7 @@ namespace XMPP { namespace Jingle {
             }
 
             QMultiMap<Application::Update, Application *> updates;
-            qDebug("jingle-doStep: %lld applications have updates", signalingContent.size());
+            qDebug("jingle-doStep: %lld applications have updates", qsizetype(signalingContent.size()));
             for (auto app : std::as_const(signalingContent)) {
                 auto updateType = app->evaluateOutgoingUpdate();
                 if (updateType.action != Action::NoAction) {

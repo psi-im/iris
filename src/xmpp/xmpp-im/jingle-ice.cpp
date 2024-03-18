@@ -704,7 +704,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
                        [this](const QList<XMPP::Ice176::Candidate> &candidates) {
                            pendingActions |= NewCandidate;
                            pendingLocalCandidates += candidates;
-                           qDebug("discovered %lld local candidates", candidates.size());
+                           qDebug("discovered %lld local candidates", qsizetype(candidates.size()));
                            for (auto const &c : candidates) {
                                qDebug(" - %s:%d", qPrintable(c.ip.toString()), c.port);
                            }
