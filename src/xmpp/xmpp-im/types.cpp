@@ -1140,14 +1140,6 @@ void Message::setForwarded(const Forwarding &frw) { MessageD()->forwarding = frw
 
 const Forwarding &Message::forwarded() const { return d->forwarding; }
 
-void Message::setCarbonDirection(Message::CarbonDir cd) { MessageD()->carbonDir = cd; }
-
-Message::CarbonDir Message::carbonDirection() const { return d ? d->carbonDir : NoCarbon; }
-
-void Message::setForwardedFrom(const Jid &jid) { MessageD()->forwardedFrom = jid; }
-
-Jid Message::forwardedFrom() const { return d ? d->forwardedFrom : Jid(); }
-
 bool Message::spooled() const { return d && d->spooled; }
 
 void Message::setSpooled(bool b) { MessageD()->spooled = b; }

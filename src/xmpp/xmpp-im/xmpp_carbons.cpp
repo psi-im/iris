@@ -21,30 +21,27 @@
 #include <QDomElement>
 
 #include "xmpp_carbons.h"
-#include "xmpp_xmlcommon.h"
-#include "xmpp_message.h"
+#include "xmpp_client.h"
 #include "xmpp_forwarding.h"
+#include "xmpp_message.h"
 #include "xmpp_task.h"
 #include "xmpp_tasks.h"
+#include "xmpp_xmlcommon.h"
 
-namespace XMPP
-{
+namespace XMPP {
 
 static const QString xmlns_carbons(QStringLiteral("urn:xmpp:carbons:2"));
 
-
-class CarbonsSubscriber : public JT_PushMessage::Subscriber
-{
+class CarbonsSubscriber : public JT_PushMessage::Subscriber {
 public:
-        bool xmlEvent(const QDomElement &root, QDomElement &e, Client *client, int userData, bool nested) override;
-        bool messageEvent(Message &msg, int userData, bool nested) override;
+    bool xmlEvent(const QDomElement &root, QDomElement &e, Client *client, int userData, bool nested) override;
+    bool messageEvent(Message &msg, int userData, bool nested) override;
 
 private:
-        Forwarding frw;
+    Forwarding frw;
 };
 
-class JT_MessageCarbons : public Task
-{
+class JT_MessageCarbons : public Task {
     Q_OBJECT
 
 public:
@@ -63,14 +60,11 @@ private:
 //----------------------------------------------------------------------------
 // JT_MessageCarbons
 //----------------------------------------------------------------------------
-JT_MessageCarbons::JT_MessageCarbons(Task *parent)
-    : Task(parent)
-{
-}
+JT_MessageCarbons::JT_MessageCarbons(Task *parent) : Task(parent) { }
 
 void JT_MessageCarbons::enable()
 {
-    iq = createIQ(doc(), QString::fromLatin1("set"), QString(), id());
+    iq                 = createIQ(doc(), QString::fromLatin1("set"), QString(), id());
     QDomElement enable = doc()->createElement(QString::fromLatin1("enable"));
     enable.setAttribute(QString::fromLatin1("xmlns"), xmlns_carbons);
     iq.appendChild(enable);
@@ -78,7 +72,7 @@ void JT_MessageCarbons::enable()
 
 void JT_MessageCarbons::disable()
 {
-    iq = createIQ(doc(), QString::fromLatin1("set"), QString(), id());
+    iq                  = createIQ(doc(), QString::fromLatin1("set"), QString(), id());
     QDomElement disable = doc()->createElement(QString::fromLatin1("disable"));
     disable.setAttribute(QString::fromLatin1("xmlns"), xmlns_carbons);
     iq.appendChild(disable);
@@ -122,8 +116,7 @@ bool CarbonsSubscriber::xmlEvent(const QDomElement &root, QDomElement &e, Client
                 }
                 child = child.nextSiblingElement();
             }
-        }
-        else
+        } else
             drop = true;
         e = QDomElement();
     }
@@ -146,39 +139,39 @@ bool CarbonsSubscriber::messageEvent(Message &msg, int userData, bool nested)
 
 class CarbonsManager::Private {
 public:
-    ~Private() {
-//        if (sbs.get())
-//            unsubscribe();
+    ~Private()
+    {
+        //        if (sbs.get())
+        //            unsubscribe();
     }
 
-    void subscribe() {
-        push_m->subscribeXml(sbs.get(), QString::fromLatin1("received"), xmlns_carbons, Forwarding::ForwardedCarbonsReceived);
+    void subscribe()
+    {
+        push_m->subscribeXml(sbs.get(), QString::fromLatin1("received"), xmlns_carbons,
+                             Forwarding::ForwardedCarbonsReceived);
         push_m->subscribeXml(sbs.get(), QString::fromLatin1("sent"), xmlns_carbons, Forwarding::ForwardedCarbonsSent);
         push_m->subscribeMessage(sbs.get(), 0);
     }
 
-    void unsubscribe() {
+    void unsubscribe()
+    {
         push_m->unsubscribeXml(sbs.get(), QString::fromLatin1("received"), xmlns_carbons);
         push_m->unsubscribeXml(sbs.get(), QString::fromLatin1("sent"), xmlns_carbons);
         push_m->unsubscribeMessage(sbs.get());
     }
 
-    JT_PushMessage *push_m;
+    JT_PushMessage                    *push_m;
     std::unique_ptr<CarbonsSubscriber> sbs;
-    bool enable = false;
+    bool                               enable = false;
 };
 
-CarbonsManager::CarbonsManager(JT_PushMessage *push_m)
-    : QObject(push_m)
-    , d(new Private)
+CarbonsManager::CarbonsManager(JT_PushMessage *push_m) : QObject(push_m), d(new Private)
 {
     d->push_m = push_m;
     d->sbs.reset(new CarbonsSubscriber());
 }
 
-CarbonsManager::~CarbonsManager()
-{
-}
+CarbonsManager::~CarbonsManager() { }
 
 QDomElement CarbonsManager::privateElement(QDomDocument &doc)
 {
@@ -193,32 +186,35 @@ void CarbonsManager::setEnabled(bool enable)
     if (enable) {
         d->subscribe();
         JT_MessageCarbons *jt = new JT_MessageCarbons(d->push_m->client()->rootTask());
-        connect(jt, &JT_MessageCarbons::finished, this, [=]() {
-            if (jt->success())
-                d->enable = true;
-            else
-                d->unsubscribe();
-            emit finished();
-        }, Qt::QueuedConnection);
+        connect(
+            jt, &JT_MessageCarbons::finished, this,
+            [=]() {
+                if (jt->success())
+                    d->enable = true;
+                else
+                    d->unsubscribe();
+                emit finished();
+            },
+            Qt::QueuedConnection);
         jt->enable();
         jt->go(true);
-    }
-    else {
+    } else {
         JT_MessageCarbons *jt = new JT_MessageCarbons(d->push_m->client()->rootTask());
-        connect(jt, &JT_MessageCarbons::finished, this, [=]() {
-            d->enable = false;
-            d->unsubscribe();
-            emit finished();
-        }, Qt::QueuedConnection);
+        connect(
+            jt, &JT_MessageCarbons::finished, this,
+            [=]() {
+                d->enable = false;
+                d->unsubscribe();
+                emit finished();
+            },
+            Qt::QueuedConnection);
         jt->disable();
         jt->go(true);
     }
 }
 
-bool CarbonsManager::isEnabled() const {
-    return d->enable;
-}
+bool CarbonsManager::isEnabled() const { return d->enable; }
 
-} //namespace XMPP
+} // namespace XMPP
 
 #include "xmpp_carbons.moc"

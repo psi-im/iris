@@ -19,14 +19,13 @@
  */
 
 #include "xmpp_forwarding.h"
-#include "xmpp_xmlcommon.h"
-#include "xmpp_tasks.h"
 #include "xmpp_client.h"
-#include "xmpp_stream.h"
 #include "xmpp_message.h"
+#include "xmpp_stream.h"
+#include "xmpp_tasks.h"
+#include "xmpp_xmlcommon.h"
 
-namespace XMPP
-{
+namespace XMPP {
 
 static const QString xmlns_forward(QStringLiteral("urn:xmpp:forward:0"));
 static const QString xmlns_delay(QStringLiteral("urn:xmpp:delay"));
@@ -35,52 +34,36 @@ static const QString xmlns_delay(QStringLiteral("urn:xmpp:delay"));
 // class Forwarding
 //--------------------------------------------------
 
-Forwarding::Forwarding()
-    : type_(ForwardedNone)
-{
-}
+Forwarding::Forwarding() : type_(ForwardedNone) { }
 
-Forwarding::Forwarding(const Forwarding &other)
-    : type_(other.type_)
-    , ts_(other.ts_)
-    , msg_(other.msg_)
-{
-}
+Forwarding::Forwarding(const Forwarding &other) : type_(other.type_), ts_(other.ts_), msg_(other.msg_) { }
 
-Forwarding::~Forwarding()
-{
-}
+Forwarding::~Forwarding() { }
 
-Forwarding & Forwarding::operator=(const Forwarding &from)
+Forwarding &Forwarding::operator=(const Forwarding &from)
 {
     if (this != &from) {
         type_ = from.type_;
-        ts_ = from.ts_;
-        msg_ = from.msg_;
+        ts_   = from.ts_;
+        msg_  = from.msg_;
     }
     return *this;
 }
 
-Forwarding::Type Forwarding::type() const
-{
-    return type_;
-}
+Forwarding::Type Forwarding::type() const { return type_; }
 
 void Forwarding::setType(Type type)
 {
     if (type_ != type) {
         type_ = type;
         if (type == ForwardedNone) {
-            ts_ = QDateTime();
+            ts_  = QDateTime();
             msg_ = Message();
         }
     }
 }
 
-bool Forwarding::isCarbons() const
-{
-    return (type_ == ForwardedCarbonsSent || type_ == ForwardedCarbonsReceived);
-}
+bool Forwarding::isCarbons() const { return (type_ == ForwardedCarbonsSent || type_ == ForwardedCarbonsReceived); }
 
 QDateTime Forwarding::timeStamp() const
 {
@@ -89,44 +72,35 @@ QDateTime Forwarding::timeStamp() const
     return msg_.timeStamp();
 }
 
-void Forwarding::setTimeStamp(const QDateTime &ts)
-{
-    ts_ = ts;
-}
+void Forwarding::setTimeStamp(const QDateTime &ts) { ts_ = ts; }
 
-Message Forwarding::message() const
-{
-    return msg_;
-}
+Message Forwarding::message() const { return msg_; }
 
-void Forwarding::setMessage(const Message &msg)
-{
-    msg_ = msg;
-}
+void Forwarding::setMessage(const Message &msg) { msg_ = msg; }
 
 bool Forwarding::fromXml(const QDomElement &e, Client *client)
 {
     if (e.tagName() != QString::fromLatin1("forwarded") || e.attribute(QString::fromLatin1("xmlns")) != xmlns_forward)
         return false;
 
-    bool correct = false;
-    type_ = Forwarding::ForwardedNone;
+    bool correct      = false;
+    type_             = Forwarding::ForwardedNone;
     QDomElement child = e.firstChildElement();
     while (!child.isNull()) {
         if (child.tagName() == QString::fromLatin1("message")) {
             if (client->pushMessage()->processXmlSubscribers(child, client, true))
                 break;
-            Stanza s = client->stream().createStanza(addCorrectNS(child));
+            Stanza  s = client->stream().createStanza(addCorrectNS(child));
             Message msg;
             if (msg.fromStanza(s, client->manualTimeZoneOffset(), client->timeZoneOffset())) {
                 if (client->pushMessage()->processMessageSubscribers(msg, true))
                     break;
-                msg_ = msg;
-                type_ = ForwardedMessage;
+                msg_    = msg;
+                type_   = ForwardedMessage;
                 correct = true;
             }
-        }
-        else if (child.tagName() == QString::fromLatin1("delay") && child.attribute(QString::fromLatin1("xmlns")) == xmlns_delay) {
+        } else if (child.tagName() == QString::fromLatin1("delay")
+                   && child.attribute(QString::fromLatin1("xmlns")) == xmlns_delay) {
             ts_ = QDateTime::fromString(child.attribute(QString::fromLatin1("stamp")).left(19), Qt::ISODate);
         }
         child = child.nextSiblingElement();
@@ -136,7 +110,7 @@ bool Forwarding::fromXml(const QDomElement &e, Client *client)
 
 QDomElement Forwarding::toXml(Stream *stream) const
 {
-    if (type_ == ForwardedNone || !msg_)
+    if (type_ == ForwardedNone || msg_.isNull())
         return QDomElement();
 
     QDomElement e = stream->doc().createElement(QString::fromLatin1("forwarded"));
@@ -155,9 +129,10 @@ QDomElement Forwarding::toXml(Stream *stream) const
 // class ForwardingManager
 //--------------------------------------------------
 
-class ForwardingSubscriber :  public JT_PushMessage::Subscriber {
+class ForwardingSubscriber : public JT_PushMessage::Subscriber {
 public:
-    bool xmlEvent(const QDomElement &root, QDomElement &e, Client *c, int userData, bool nested) override {
+    bool xmlEvent(const QDomElement &root, QDomElement &e, Client *c, int userData, bool nested) override
+    {
         Q_UNUSED(root)
         Q_UNUSED(userData)
         frw.setType(Forwarding::ForwardedNone);
@@ -170,7 +145,8 @@ public:
         return false;
     }
 
-    bool messageEvent(Message &msg, int userData, bool nested) override {
+    bool messageEvent(Message &msg, int userData, bool nested) override
+    {
         Q_UNUSED(userData)
         if (!nested && frw.type() != Forwarding::ForwardedNone) {
             msg.setForwarded(frw);
@@ -189,28 +165,22 @@ private:
 
 class ForwardingManager::Private {
 public:
-    ~Private() {
-//        if (sbs.get()) {
-//            push_m->unsubscribeXml(sbs.get(), QLatin1String("forwarded"), xmlns_forward);
-//            push_m->unsubscribeMessage(sbs.get());
-//        }
+    ~Private()
+    {
+        //        if (sbs.get()) {
+        //            push_m->unsubscribeXml(sbs.get(), QLatin1String("forwarded"), xmlns_forward);
+        //            push_m->unsubscribeMessage(sbs.get());
+        //        }
     }
 
-    JT_PushMessage *push_m;
+    JT_PushMessage                       *push_m;
     std::unique_ptr<ForwardingSubscriber> sbs;
-    bool enabled = false;
+    bool                                  enabled = false;
 };
 
-ForwardingManager::ForwardingManager(JT_PushMessage *push_m)
-    : QObject(push_m)
-    , d(new Private)
-{
-    d->push_m = push_m;
-}
+ForwardingManager::ForwardingManager(JT_PushMessage *push_m) : QObject(push_m), d(new Private) { d->push_m = push_m; }
 
-ForwardingManager::~ForwardingManager()
-{
-}
+ForwardingManager::~ForwardingManager() { }
 
 void ForwardingManager::setEnabled(bool enabled)
 {
@@ -221,8 +191,7 @@ void ForwardingManager::setEnabled(bool enabled)
         d->sbs.reset(new ForwardingSubscriber());
         d->push_m->subscribeXml(d->sbs.get(), QString::fromLatin1("forwarded"), xmlns_forward, 0);
         d->push_m->subscribeMessage(d->sbs.get(), 0);
-    }
-    else {
+    } else {
         d->push_m->unsubscribeXml(d->sbs.get(), QString::fromLatin1("forwarded"), xmlns_forward);
         d->push_m->unsubscribeMessage(d->sbs.get());
         d->sbs.reset();
@@ -230,8 +199,6 @@ void ForwardingManager::setEnabled(bool enabled)
     d->enabled = enabled;
 }
 
-bool ForwardingManager::isEnabled() const {
-    return d->enabled;
-}
+bool ForwardingManager::isEnabled() const { return d->enabled; }
 
 } // namespace XMPP
