@@ -19,55 +19,53 @@
 #ifndef ICETRANSPORT_H
 #define ICETRANSPORT_H
 
-#include <QObject>
 #include <QByteArray>
+#include <QObject>
+#include <QWeakPointer>
 
 class QHostAddress;
 
 namespace XMPP {
-
-class IceTransport : public QObject
-{
+class TransportAddress;
+class IceTransport : public QObject {
     Q_OBJECT
 
 public:
-    enum Error
-    {
-        ErrorGeneric,
-        ErrorCustom
-    };
+    enum Error { ErrorGeneric, ErrorCustom };
 
-    enum DebugLevel
-    {
-        DL_None,
-        DL_Info,
-        DL_Packet
-    };
+    enum DebugLevel { DL_None, DL_Info, DL_Packet };
 
-    IceTransport(QObject *parent = 0);
+    IceTransport(QObject *parent = nullptr);
     ~IceTransport();
 
     virtual void stop() = 0;
 
-    virtual bool hasPendingDatagrams(int path) const = 0;
-    virtual QByteArray readDatagram(int path, QHostAddress *addr, int *port) = 0;
-    virtual void writeDatagram(int path, const QByteArray &buf, const QHostAddress &addr, int port) = 0;
-    virtual void addChannelPeer(const QHostAddress &addr, int port) = 0;
+    virtual bool       hasPendingDatagrams(int path) const                                          = 0;
+    virtual QByteArray readDatagram(int path, TransportAddress &addr)                               = 0;
+    virtual void       writeDatagram(int path, const QByteArray &buf, const TransportAddress &addr) = 0;
+    virtual void       addChannelPeer(const TransportAddress &addr)                                 = 0;
 
     virtual void setDebugLevel(DebugLevel level) = 0;
+    virtual void changeThread(QThread *thread)   = 0;
 
 signals:
     void started();
-    void stopped();
+    void stopped(); // emitted when stop() finished cleaning up
     void error(int e);
 
     void readyRead(int path);
-    void datagramsWritten(int path, int count, const QHostAddress &addr, int port);
+    void datagramsWritten(int path, int count, const TransportAddress &addr);
 
     // not DOR-SS/DS safe
     void debugLine(const QString &str);
 };
 
-}
-
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+inline uint qHash(const QWeakPointer<IceTransport> &p) { return qHash(p.toStrongRef().data()); }
+#else
+inline size_t qHash(const QWeakPointer<IceTransport> &p) { return qHash(p.toStrongRef().data()); }
 #endif
+
+} // namespace XMPP
+
+#endif // ICETRANSPORT_H

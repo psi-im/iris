@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Rion
+ * Copyright (C) 2016  Sergey Ilinykh
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -19,55 +19,45 @@
 #ifndef XMPP_CAPTCHA_H
 #define XMPP_CAPTCHA_H
 
-#include <QDateTime>
-
 #include "xmpp/jid/jid.h"
 #include "xmpp_url.h"
 
-namespace XMPP
-{
-    class Message;
-    class XData;
+#include <QDateTime>
 
-    class CaptchaChallengePrivate;
-    class CaptchaChallenge
-    {
-    public:
-        enum Result {
-            Passed,
-            Unavailable,
-            NotAcceptable
-        };
+namespace XMPP {
+class CaptchaChallengePrivate;
+class Message;
+class XData;
 
-        enum State {
-            New,
-            Success,
-            Fail
-        };
+class CaptchaChallenge {
+public:
+    enum Result { Passed, Unavailable, NotAcceptable };
 
-        static const int Timeout = 120; // secs
+    enum State { New, Success, Fail };
 
-        CaptchaChallenge();
-        CaptchaChallenge(const Message &);
-        CaptchaChallenge(const CaptchaChallenge &);
-        ~CaptchaChallenge();
+    static const int Timeout = 120; // secs
 
-        CaptchaChallenge & operator=(const CaptchaChallenge &);
+    CaptchaChallenge();
+    CaptchaChallenge(const Message &);
+    CaptchaChallenge(const CaptchaChallenge &);
+    ~CaptchaChallenge();
 
-        bool isValid() const;
-        const Jid &offendedJid() const;
-        const Jid &arbiter() const;
-        const XData &form() const;
-        QString explanation() const;
-        const UrlList &urls() const;
-        State state() const;
+    CaptchaChallenge &operator=(const CaptchaChallenge &);
 
-        Result validateResponse(const XData &);
+    bool           isValid() const;
+    const Jid     &offendedJid() const;
+    const Jid     &arbiter() const;
+    const XData   &form() const;
+    QString        explanation() const;
+    const UrlList &urls() const;
+    State          state() const;
 
-    private:
-        friend class CaptchaChallengePrivate;
-        QSharedDataPointer<CaptchaChallengePrivate> d;
-    };
-}
+    Result validateResponse(const XData &);
 
-#endif
+private:
+    friend class CaptchaChallengePrivate;
+    QSharedDataPointer<CaptchaChallengePrivate> d;
+};
+} // namespace XMPP
+
+#endif // XMPP_CAPTCHA_H

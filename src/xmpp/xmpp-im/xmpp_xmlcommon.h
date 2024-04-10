@@ -1,6 +1,6 @@
 /*
  * xmlcommon.h - helper functions for dealing with XML
- * Copyright (C) 2001, 2002  Justin Karneges
+ * Copyright (C) 2001-2002  Justin Karneges
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -17,88 +17,88 @@
  *
  */
 
-#ifndef JABBER_XMLCOMMON_H
-#define JABBER_XMLCOMMON_H
+#ifndef XMPP_XMLCOMMON_H
+#define XMPP_XMLCOMMON_H
 
-#include <qdom.h>
-#include <qlist.h>
+#include <QDomNode>
+#include <QList>
 
+class QColor;
 class QDateTime;
 class QRect;
 class QSize;
-class QColor;
-class QStringList;
 
-class XDomNodeList
-{
+class XDomNodeList {
 public:
     XDomNodeList();
     XDomNodeList(const XDomNodeList &from);
     XDomNodeList(const QDomNodeList &from);
     ~XDomNodeList();
-    XDomNodeList & operator=(const XDomNodeList &from);
+    XDomNodeList &operator=(const XDomNodeList &from);
 
     QDomNode at(int index) const { return item(index); }
-    int count() const { return (int)length(); }
-    bool isEmpty() const;
+    int      count() const { return (int)length(); }
+    bool     isEmpty() const;
     QDomNode item(int index) const;
-    uint length() const;
-    int size() const { return (int)length(); }
+    uint     length() const;
+    int      size() const { return (int)length(); }
 
     void append(const QDomNode &i);
 
     bool operator==(const XDomNodeList &a) const;
 
-    bool operator!=(const XDomNodeList &a) const
-    {
-        return !operator==(a);
-    }
+    bool operator!=(const XDomNodeList &a) const { return !operator==(a); }
 
 private:
     QList<QDomNode> list;
 };
 
-QDateTime stamp2TS(const QString &ts);
-bool stamp2TS(const QString &ts, QDateTime *d);
-QString TS2stamp(const QDateTime &d);
-QDomElement textTag(QDomDocument *doc, const QString &name, const QString &content);
-QString tagContent(const QDomElement &e);
+QDateTime    stamp2TS(const QString &ts);
+bool         stamp2TS(const QString &ts, QDateTime *d);
+QString      TS2stamp(const QDateTime &d);
+QDomElement  textTag(QDomDocument *doc, const QString &name, const QString &content);
+QDomElement  textTagNS(QDomDocument *doc, const QString &ns, const QString &name, const QString &content);
+QString      tagContent(const QDomElement &e);
 XDomNodeList childElementsByTagNameNS(const QDomElement &e, const QString &nsURI, const QString &localName);
-QDomElement createIQ(QDomDocument *doc, const QString &type, const QString &to, const QString &id);
-QDomElement queryTag(const QDomElement &e);
-QString queryNS(const QDomElement &e);
-void getErrorFromElement(const QDomElement &e, const QString &baseNS, int *code, QString *str);
-QDomElement addCorrectNS(const QDomElement &e);
+QDomElement  createIQ(QDomDocument *doc, const QString &type, const QString &to, const QString &id);
+QDomElement  queryTag(const QDomElement &e);
+QString      queryNS(const QDomElement &e);
+void         getErrorFromElement(const QDomElement &e, const QString &baseNS, int *code, QString *str);
+QDomElement  addCorrectNS(const QDomElement &e);
 
 namespace XMLHelper {
-    //QDomElement findSubTag(const QDomElement &e, const QString &name, bool *found);
-    bool hasSubTag(const QDomElement &e, const QString &name);
 
-    QDomElement emptyTag(QDomDocument *doc, const QString &name);
-    QString subTagText(const QDomElement &e, const QString &name);
+// QDomElement findSubTag(const QDomElement &e, const QString &name, bool *found);
+bool hasSubTag(const QDomElement &e, const QString &name);
 
-    QDomElement textTag(QDomDocument &doc, const QString &name, const QString &content);
-    QDomElement textTag(QDomDocument &doc, const QString &name, int content);
-    QDomElement textTag(QDomDocument &doc, const QString &name, bool content);
-    QDomElement textTag(QDomDocument &doc, const QString &name, QSize &s);
-    QDomElement textTag(QDomDocument &doc, const QString &name, QRect &r);
-    void setTagText(QDomElement &e, const QString &text);
-    QDomElement stringListToXml(QDomDocument &doc, const QString &name, const QStringList &l);
+QDomElement emptyTag(QDomDocument *doc, const QString &name);
+QString     subTagText(const QDomElement &e, const QString &name);
 
-    void readEntry(const QDomElement &e, const QString &name, QString *v);
-    void readNumEntry(const QDomElement &e, const QString &name, int *v);
-    void readBoolEntry(const QDomElement &e, const QString &name, bool *v);
-    void readSizeEntry(const QDomElement &e, const QString &name, QSize *v);
-    void readRectEntry(const QDomElement &e, const QString &name, QRect *v);
-    void readColorEntry(const QDomElement &e, const QString &name, QColor *v);
+QDomElement textTag(QDomDocument &doc, const QString &name, const QString &content);
+QDomElement textTag(QDomDocument &doc, const QString &name, qint64 content);
+QDomElement textTag(QDomDocument &doc, const QString &name, bool content);
+QDomElement textTag(QDomDocument &doc, const QString &name, QSize &s);
+QDomElement textTag(QDomDocument &doc, const QString &name, QRect &r);
+QDomElement textTagNS(QDomDocument *doc, const QString &ns, const QString &name, const QString &content);
+QDomElement textTagNS(QDomDocument *doc, const QString &ns, const QString &name, const QByteArray &content);
+void        setTagText(QDomElement &e, const QString &text);
+QDomElement stringListToXml(QDomDocument &doc, const QString &name, const QStringList &l);
 
-    void xmlToStringList(const QDomElement &e, const QString &name, QStringList *v);
+void readEntry(const QDomElement &e, const QString &name, QString *v);
+void readNumEntry(const QDomElement &e, const QString &name, int *v);
+void readBoolEntry(const QDomElement &e, const QString &name, bool *v);
+void readSizeEntry(const QDomElement &e, const QString &name, QSize *v);
+void readRectEntry(const QDomElement &e, const QString &name, QRect *v);
+void readColorEntry(const QDomElement &e, const QString &name, QColor *v);
 
-    void setBoolAttribute(QDomElement e, const QString &name, bool b);
-    void readBoolAttribute(QDomElement e, const QString &name, bool *v);
+void xmlToStringList(const QDomElement &e, const QString &name, QStringList *v);
 
-    //QString tagContent(const QDomElement &e); // obsolete;
-    QString sanitizedLang(const QString &lang);
-}
+void setBoolAttribute(QDomElement e, const QString &name, bool b);
+void readBoolAttribute(QDomElement e, const QString &name, bool *v);
 
-#endif
+// QString tagContent(const QDomElement &e); // obsolete;
+QString sanitizedLang(const QString &lang);
+
+} // namespace XMLHelper
+
+#endif // XMPP_XMLCOMMON_H

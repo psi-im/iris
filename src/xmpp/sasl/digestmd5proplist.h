@@ -19,28 +19,26 @@
 #ifndef DIGESTMD5PROPLIST_H
 #define DIGESTMD5PROPLIST_H
 
-#include <QList>
 #include <QByteArray>
+#include <QList>
 
 namespace XMPP {
-    struct DIGESTMD5Prop
-    {
-        QByteArray var, val;
-    };
+struct DIGESTMD5Prop {
+    QByteArray var, val;
+};
 
-    class DIGESTMD5PropList : public QList<DIGESTMD5Prop>
-    {
-        public:
-            DIGESTMD5PropList();
+class DIGESTMD5PropList : public QList<DIGESTMD5Prop> {
+public:
+    DIGESTMD5PropList();
 
-            void set(const QByteArray &var, const QByteArray &val);
-            QByteArray get(const QByteArray &var) const;
-            QByteArray toString() const;
-            bool fromString(const QByteArray &str);
+    void       set(const QByteArray &var, const QByteArray &val);
+    QByteArray get(const QByteArray &var) const;
+    QByteArray toString() const;
+    bool       fromString(const QByteArray &str);
 
-        private:
-            int varCount(const QByteArray &var) const;
-    };
-}
+private:
+    int varCount(const QByteArray &var) const;
+};
+} // namespace XMPP
 
-#endif
+#endif // DIGESTMD5PROPLIST_H

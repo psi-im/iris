@@ -19,25 +19,23 @@
 #ifndef UDPPORTRESERVER_H
 #define UDPPORTRESERVER_H
 
-#include <QObject>
 #include <QList>
+#include <QObject>
 
 class QHostAddress;
 class QUdpSocket;
 
 namespace XMPP {
-
 // call both setAddresses() and setPorts() at least once for socket
 //   reservations to occur.  at any time you can update the list of addresses
 //   (interfaces) and ports to reserve.  note that the port must be available
 //   on all addresses in order for it to get reserved.
 // note: you must return all sockets back to this class before destructing
-class UdpPortReserver : public QObject
-{
+class UdpPortReserver : public QObject {
     Q_OBJECT
 
 public:
-    UdpPortReserver(QObject *parent = 0);
+    UdpPortReserver(QObject *parent = nullptr);
     ~UdpPortReserver();
 
     void setAddresses(const QList<QHostAddress> &addrs);
@@ -58,15 +56,14 @@ public:
     //   able to bind to a port for it to be considered reserved, this
     //   function always returns a list with a size that is a multiple of
     //   the number of addresses.
-    QList<QUdpSocket*> borrowSockets(int portCount, QObject *parent = 0);
+    QList<QUdpSocket *> borrowSockets(int portCount, QObject *parent = nullptr);
 
-    void returnSockets(const QList<QUdpSocket*> &sockList);
+    void returnSockets(const QList<QUdpSocket *> &sockList);
 
 private:
     class Private;
     Private *d;
 };
+} // namespace XMPP
 
-}
-
-#endif
+#endif // UDPPORTRESERVER_H

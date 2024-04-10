@@ -1,6 +1,6 @@
 /*
  * xmlcommon.cpp - helper functions for dealing with XML
- * Copyright (C) 2001, 2002  Justin Karneges
+ * Copyright (C) 2001-2002  Justin Karneges
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -17,92 +17,71 @@
  *
  */
 
-#include <QString>
-#include <QDateTime>
-#include <QSize>
-#include <QRect>
-#include <QStringList>
-#include <QColor>
-#include <QLocale>
-
 #include "xmpp_xmlcommon.h"
+
 #include "xmpp_stanza.h"
+
+#include <QColor>
+#include <QDateTime>
+#include <QLocale>
+#include <QRect>
+#include <QSize>
+#include <QString>
+#include <QStringList>
 
 //----------------------------------------------------------------------------
 // XDomNodeList
 //----------------------------------------------------------------------------
-XDomNodeList::XDomNodeList()
-{
-}
+XDomNodeList::XDomNodeList() { }
 
-XDomNodeList::XDomNodeList(const XDomNodeList &from) :
-    list(from.list)
-{
-}
+XDomNodeList::XDomNodeList(const XDomNodeList &from) : list(from.list) { }
 
 XDomNodeList::XDomNodeList(const QDomNodeList &from)
 {
-    for(int n = 0; n < from.count(); ++n)
+    for (int n = 0; n < from.count(); ++n)
         list += from.item(n);
 }
 
-XDomNodeList::~XDomNodeList()
-{
-}
+XDomNodeList::~XDomNodeList() { }
 
-XDomNodeList & XDomNodeList::operator=(const XDomNodeList &from)
+XDomNodeList &XDomNodeList::operator=(const XDomNodeList &from)
 {
     list = from.list;
     return *this;
 }
 
-bool XDomNodeList::isEmpty() const
-{
-    return list.isEmpty();
-}
+bool XDomNodeList::isEmpty() const { return list.isEmpty(); }
 
-QDomNode XDomNodeList::item(int index) const
-{
-    return list.value(index);
-}
+QDomNode XDomNodeList::item(int index) const { return list.value(index); }
 
-uint XDomNodeList::length() const
-{
-    return (uint)list.count();
-}
+uint XDomNodeList::length() const { return (uint)list.count(); }
 
-bool XDomNodeList::operator==(const XDomNodeList &a) const
-{
-    return (list == a.list);
-}
+bool XDomNodeList::operator==(const XDomNodeList &a) const { return (list == a.list); }
 
-void XDomNodeList::append(const QDomNode &i)
-{
-    list += i;
-}
+void XDomNodeList::append(const QDomNode &i) { list += i; }
 
 // YYYYMMDDThh:mm:ss
 QDateTime stamp2TS(const QString &ts)
 {
-    if(ts.length() != 17)
+    if (ts.length() != 17)
         return QDateTime();
 
-    int year  = ts.mid(0,4).toInt();
-    int month = ts.mid(4,2).toInt();
-    int day   = ts.mid(6,2).toInt();
+    int year  = QStringView { ts }.mid(0, 4).toInt();
+    int month = QStringView { ts }.mid(4, 2).toInt();
+    int day   = QStringView { ts }.mid(6, 2).toInt();
 
-    int hour  = ts.mid(9,2).toInt();
-    int min   = ts.mid(12,2).toInt();
-    int sec   = ts.mid(15,2).toInt();
+    int hour = QStringView { ts }.mid(9, 2).toInt();
+    int min  = QStringView { ts }.mid(12, 2).toInt();
+    int sec  = QStringView { ts }.mid(15, 2).toInt();
 
     QDate xd;
     xd.setDate(year, month, day);
-    if(!xd.isValid())
+    if (!xd.isValid())
         return QDateTime();
 
     QTime xt;
     xt.setHMS(hour, min, sec);
-    if(!xt.isValid())
+    if (!xt.isValid())
         return QDateTime();
 
     return QDateTime(xd, xt);
@@ -121,23 +100,25 @@ bool stamp2TS(const QString &ts, QDateTime *d)
 
 QString TS2stamp(const QDateTime &d)
 {
-    QString str;
-
-    str.sprintf("%04d%02d%02dT%02d:%02d:%02d",
-        d.date().year(),
-        d.date().month(),
-        d.date().day(),
-        d.time().hour(),
-        d.time().minute(),
-        d.time().second());
+    QString str = QString::asprintf("%04d%02d%02dT%02d:%02d:%02d", d.date().year(), d.date().month(), d.date().day(),
+                                    d.time().hour(), d.time().minute(), d.time().second());
 
     return str;
 }
 
 QDomElement textTag(QDomDocument *doc, const QString &name, const QString &content)
 {
-    QDomElement tag = doc->createElement(name);
-    QDomText text = doc->createTextNode(content);
+    QDomElement tag  = doc->createElement(name);
+    QDomText    text = doc->createTextNode(content);
+    tag.appendChild(text);
+
+    return tag;
+}
+
+QDomElement textTagNS(QDomDocument *doc, const QString &ns, const QString &name, const QString &content)
+{
+    QDomElement tag  = doc->createElementNS(ns, name);
+    QDomText    text = doc->createTextNode(content);
     tag.appendChild(text);
 
     return tag;
@@ -146,16 +127,15 @@ QDomElement textTag(QDomDocument *doc, const QString &name, const QString &conte
 QString tagContent(const QDomElement &e)
 {
     // look for some tag content
-    for(QDomNode n = e.firstChild(); !n.isNull(); n = n.nextSibling()) {
+    for (QDomNode n = e.firstChild(); !n.isNull(); n = n.nextSibling()) {
         QDomText i = n.toText();
-        if(i.isNull())
+        if (i.isNull())
             continue;
         return i.data();
     }
 
     return "";
 }
-
 
 /**
  * \brief obtain direct child elements of a certain kind.  unlike
@@ -169,16 +149,15 @@ QString tagContent(const QDomElement &e)
 XDomNodeList childElementsByTagNameNS(const QDomElement &e, const QString &nsURI, const QString &localName)
 {
     XDomNodeList out;
-    for(QDomNode n = e.firstChild(); !n.isNull(); n = n.nextSibling()) {
-        if(!n.isElement())
+    for (QDomNode n = e.firstChild(); !n.isNull(); n = n.nextSibling()) {
+        if (!n.isElement())
             continue;
         QDomElement i = n.toElement();
-        if(i.namespaceURI() == nsURI && i.localName() == localName)
+        if (i.namespaceURI() == nsURI && i.localName() == localName)
             out.append(i);
     }
     return out;
 }
-
 
 /**
  * \brief create a new IQ stanza
@@ -187,15 +166,15 @@ XDomNodeList childElementsByTagNameNS(const QDomElement &e, const QString &nsURI
  * \param to destination jid
  * \param id stanza id
  * \return the created stanza
-*/
+ */
 QDomElement createIQ(QDomDocument *doc, const QString &type, const QString &to, const QString &id)
 {
     QDomElement iq = doc->createElement("iq");
-    if(!type.isEmpty())
+    if (!type.isEmpty())
         iq.setAttribute("type", type);
-    if(!to.isEmpty())
+    if (!to.isEmpty())
         iq.setAttribute("to", to);
-    if(!id.isEmpty())
+    if (!id.isEmpty())
         iq.setAttribute("id", id);
 
     return iq;
@@ -203,16 +182,10 @@ QDomElement createIQ(QDomDocument *doc, const QString &type, const QString &to, 
 
 /** \brief returns direct child element named "query"
  * \return the element (or a null QDomElemnt if not found)
-*/
-QDomElement queryTag(const QDomElement &e)
-{
-    return e.firstChildElement("query");
-}
+ */
+QDomElement queryTag(const QDomElement &e) { return e.firstChildElement("query"); }
 
-QString queryNS(const QDomElement &e)
-{
-    return e.firstChildElement("query").attribute("xmlns");
-}
+QString queryNS(const QDomElement &e) { return e.firstChildElement("query").namespaceURI(); }
 
 /**
     \brief Extracts the error code and description from the stanza element.
@@ -238,15 +211,15 @@ QString queryNS(const QDomElement &e)
 void getErrorFromElement(const QDomElement &e, const QString &baseNS, int *code, QString *str)
 {
     QDomElement tag = e.firstChildElement("error");
-    if(tag.isNull())
+    if (tag.isNull())
         return;
 
     XMPP::Stanza::Error err;
     err.fromXml(tag, baseNS);
 
-    if(code)
+    if (code)
         *code = err.code();
-    if(str)
+    if (str)
         *str = err.toString();
 }
 
@@ -261,18 +234,19 @@ QDomElement addCorrectNS(const QDomElement &e)
         frag.appendChild(nl.item(x).cloneNode());*/
 
     // find from this to parent closest node with xmlns/namespaceURI
-    QDomNode n = e;
-    while(!n.isNull() && !n.toElement().hasAttribute("xmlns") && n.toElement().namespaceURI().isEmpty())
+    QDomNode       n     = e;
+    static QString xmlns = QStringLiteral("xmlns");
+    while (!n.isNull() && !n.toElement().hasAttribute(xmlns) && n.toElement().namespaceURI().isEmpty())
         n = n.parentNode();
     QString ns;
-    if(n.isNull() || !n.toElement().hasAttribute("xmlns")) { // if not found or it's namespaceURI
+    if (n.isNull() || !n.toElement().hasAttribute(xmlns)) { // if not found or it's namespaceURI
         if (n.toElement().namespaceURI().isEmpty()) { // if nothing found, then use default jabber:client namespace
             ns = "jabber:client";
         } else {
             ns = n.toElement().namespaceURI();
         }
     } else { // if found node with xmlns
-        ns = n.toElement().attribute("xmlns");
+        ns = n.toElement().attribute(xmlns);
     }
     // at this point `ns` is either detected namespace of `e` or jabber:client
     // make a new node
@@ -280,32 +254,30 @@ QDomElement addCorrectNS(const QDomElement &e)
 
     // copy attributes
     QDomNamedNodeMap al = e.attributes();
-    for(x = 0; x < al.count(); ++x) {
+    for (x = 0; x < al.count(); ++x) {
         QDomAttr a = al.item(x).toAttr();
-        if(a.name() != "xmlns")
+        if (a.name() != xmlns)
             i.setAttributeNodeNS(a.cloneNode().toAttr());
     }
 
     // copy children
     QDomNodeList nl = e.childNodes();
-    for(x = 0; x < nl.count(); ++x) {
+    for (x = 0; x < nl.count(); ++x) {
         QDomNode n = nl.item(x);
-        if(n.isElement())
+        if (n.isElement())
             i.appendChild(addCorrectNS(n.toElement()));
         else
             i.appendChild(n.cloneNode());
     }
 
-    //i.appendChild(frag);
+    // i.appendChild(frag);
     return i;
 }
 
 //----------------------------------------------------------------------------
 // XMLHelper
 //----------------------------------------------------------------------------
-
 namespace XMLHelper {
-
 QDomElement emptyTag(QDomDocument *doc, const QString &name)
 {
     QDomElement tag = doc->createElement(name);
@@ -313,32 +285,29 @@ QDomElement emptyTag(QDomDocument *doc, const QString &name)
     return tag;
 }
 
-bool hasSubTag(const QDomElement &e, const QString &name)
-{
-    return !e.firstChildElement(name).isNull();
-}
+bool hasSubTag(const QDomElement &e, const QString &name) { return !e.firstChildElement(name).isNull(); }
 
 QString subTagText(const QDomElement &e, const QString &name)
 {
     QDomElement i = e.firstChildElement(name);
-    if ( !i.isNull() )
+    if (!i.isNull())
         return i.text();
-    return QString::null;
+    return QString();
 }
 
 QDomElement textTag(QDomDocument &doc, const QString &name, const QString &content)
 {
-    QDomElement tag = doc.createElement(name);
-    QDomText text = doc.createTextNode(content);
+    QDomElement tag  = doc.createElement(name);
+    QDomText    text = doc.createTextNode(content);
     tag.appendChild(text);
 
     return tag;
 }
 
-QDomElement textTag(QDomDocument &doc, const QString &name, int content)
+QDomElement textTag(QDomDocument &doc, const QString &name, qint64 content)
 {
-    QDomElement tag = doc.createElement(name);
-    QDomText text = doc.createTextNode(QString::number(content));
+    QDomElement tag  = doc.createElement(name);
+    QDomText    text = doc.createTextNode(QString::number(content));
     tag.appendChild(text);
 
     return tag;
@@ -346,8 +315,8 @@ QDomElement textTag(QDomDocument &doc, const QString &name, int content)
 
 QDomElement textTag(QDomDocument &doc, const QString &name, bool content)
 {
-    QDomElement tag = doc.createElement(name);
-    QDomText text = doc.createTextNode(content ? "true" : "false");
+    QDomElement tag  = doc.createElement(name);
+    QDomText    text = doc.createTextNode(content ? "true" : "false");
     tag.appendChild(text);
 
     return tag;
@@ -355,11 +324,10 @@ QDomElement textTag(QDomDocument &doc, const QString &name, bool content)
 
 QDomElement textTag(QDomDocument &doc, const QString &name, QSize &s)
 {
-    QString str;
-    str.sprintf("%d,%d", s.width(), s.height());
+    QString str = QString::asprintf("%d,%d", s.width(), s.height());
 
-    QDomElement tag = doc.createElement(name);
-    QDomText text = doc.createTextNode(str);
+    QDomElement tag  = doc.createElement(name);
+    QDomText    text = doc.createTextNode(str);
     tag.appendChild(text);
 
     return tag;
@@ -367,11 +335,10 @@ QDomElement textTag(QDomDocument &doc, const QString &name, QSize &s)
 
 QDomElement textTag(QDomDocument &doc, const QString &name, QRect &r)
 {
-    QString str;
-    str.sprintf("%d,%d,%d,%d", r.x(), r.y(), r.width(), r.height());
+    QString str = QString::asprintf("%d,%d,%d,%d", r.x(), r.y(), r.width(), r.height());
 
-    QDomElement tag = doc.createElement(name);
-    QDomText text = doc.createTextNode(str);
+    QDomElement tag  = doc.createElement(name);
+    QDomText    text = doc.createTextNode(str);
     tag.appendChild(text);
 
     return tag;
@@ -380,8 +347,8 @@ QDomElement textTag(QDomDocument &doc, const QString &name, QRect &r)
 QDomElement stringListToXml(QDomDocument &doc, const QString &name, const QStringList &l)
 {
     QDomElement tag = doc.createElement(name);
-    for(QStringList::ConstIterator it = l.begin(); it != l.end(); ++it)
-        tag.appendChild(textTag(doc, "item", *it));
+    for (const auto &it : l)
+        tag.appendChild(textTag(doc, "item", it));
 
     return tag;
 }
@@ -422,7 +389,7 @@ QDomElement stringListToXml(QDomDocument &doc, const QString &name, const QStrin
 void readEntry(const QDomElement &e, const QString &name, QString *v)
 {
     QDomElement tag = e.firstChildElement(name);
-    if(tag.isNull())
+    if (tag.isNull())
         return;
     *v = tagContent(tag);
 }
@@ -430,7 +397,7 @@ void readEntry(const QDomElement &e, const QString &name, QString *v)
 void readNumEntry(const QDomElement &e, const QString &name, int *v)
 {
     QDomElement tag = e.firstChildElement(name);
-    if(tag.isNull())
+    if (tag.isNull())
         return;
     *v = tagContent(tag).toInt();
 }
@@ -438,18 +405,18 @@ void readNumEntry(const QDomElement &e, const QString &name, int *v)
 void readBoolEntry(const QDomElement &e, const QString &name, bool *v)
 {
     QDomElement tag = e.firstChildElement(name);
-    if(tag.isNull())
+    if (tag.isNull())
         return;
-    *v = (tagContent(tag) == "true") ? true: false;
+    *v = tagContent(tag) == "true";
 }
 
 void readSizeEntry(const QDomElement &e, const QString &name, QSize *v)
 {
     QDomElement tag = e.firstChildElement(name);
-    if(tag.isNull())
+    if (tag.isNull())
         return;
     QStringList list = tagContent(tag).split(',');
-    if(list.count() != 2)
+    if (list.count() != 2)
         return;
     QSize s;
     s.setWidth(list[0].toInt());
@@ -460,10 +427,10 @@ void readSizeEntry(const QDomElement &e, const QString &name, QSize *v)
 void readRectEntry(const QDomElement &e, const QString &name, QRect *v)
 {
     QDomElement tag = e.firstChildElement(name);
-    if(tag.isNull())
+    if (tag.isNull())
         return;
     QStringList list = tagContent(tag).split(',');
-    if(list.count() != 4)
+    if (list.count() != 4)
         return;
     QRect r;
     r.setX(list[0].toInt());
@@ -476,40 +443,41 @@ void readRectEntry(const QDomElement &e, const QString &name, QRect *v)
 void readColorEntry(const QDomElement &e, const QString &name, QColor *v)
 {
     QDomElement tag = e.firstChildElement(name);
-    if(tag.isNull())
+    if (tag.isNull())
         return;
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
     QColor c;
     c.setNamedColor(tagContent(tag));
-    if(c.isValid())
+#else
+    auto c = QColor::fromString(tagContent(tag));
+#endif
+    if (c.isValid())
         *v = c;
 }
 
 void xmlToStringList(const QDomElement &e, const QString &name, QStringList *v)
 {
     QDomElement tag = e.firstChildElement(name);
-    if(tag.isNull())
+    if (tag.isNull())
         return;
     QStringList list;
-    for(QDomNode n = tag.firstChild(); !n.isNull(); n = n.nextSibling()) {
+    for (QDomNode n = tag.firstChild(); !n.isNull(); n = n.nextSibling()) {
         QDomElement i = n.toElement();
-        if(i.isNull())
+        if (i.isNull())
             continue;
-        if(i.tagName() == "item")
+        if (i.tagName() == "item")
             list += tagContent(i);
     }
     *v = list;
 }
 
-void setBoolAttribute(QDomElement e, const QString &name, bool b)
-{
-    e.setAttribute(name, b ? "true" : "false");
-}
+void setBoolAttribute(QDomElement e, const QString &name, bool b) { e.setAttribute(name, b ? "true" : "false"); }
 
 void readBoolAttribute(QDomElement e, const QString &name, bool *v)
 {
-    if(e.hasAttribute(name)) {
+    if (e.hasAttribute(name)) {
         QString s = e.attribute(name);
-        *v = (s == "true") ? true: false;
+        *v        = s == "true";
     }
 }
 
@@ -523,9 +491,16 @@ QString sanitizedLang(const QString &lang)
     return QString();
 }
 
-void setTagText(QDomElement &e, const QString &text)
+void setTagText(QDomElement &e, const QString &text) { e.appendChild(e.ownerDocument().createTextNode(text)); }
+
+QDomElement textTagNS(QDomDocument *doc, const QString &ns, const QString &name, const QString &content)
 {
-    e.appendChild(e.ownerDocument().createTextNode(text));
+    return ::textTagNS(doc, ns, name, content);
 }
 
+QDomElement textTagNS(QDomDocument *doc, const QString &ns, const QString &name, const QByteArray &content)
+{
+    return ::textTagNS(doc, ns, name, QString::fromLatin1(content.toBase64()));
 }
+
+} // namespace XMLHelper

@@ -20,117 +20,119 @@
 #ifndef XMPP_MUC_H
 #define XMPP_MUC_H
 
+#include "xmpp/jid/jid.h"
+
 #include <QDomElement>
 #include <QString>
 
-#include "xmpp/jid/jid.h"
+namespace XMPP {
+class MUCItem {
+public:
+    enum Affiliation { UnknownAffiliation, Outcast, NoAffiliation, Member, Admin, Owner };
+    enum Role { UnknownRole, NoRole, Visitor, Participant, Moderator };
 
-namespace XMPP
-{
-    class MUCItem
-    {
-    public:
-        enum Affiliation { UnknownAffiliation, Outcast, NoAffiliation, Member, Admin, Owner };
-        enum Role { UnknownRole, NoRole, Visitor, Participant, Moderator };
+    struct Actor {
+        Jid     jid;
+        QString nick;
 
-        MUCItem(Role = UnknownRole, Affiliation = UnknownAffiliation);
-        MUCItem(const QDomElement&);
-
-        void setNick(const QString&);
-        void setJid(const Jid&);
-        void setAffiliation(Affiliation);
-        void setRole(Role);
-        void setActor(const Jid&);
-        void setReason(const QString&);
-
-        const QString& nick() const;
-        const Jid& jid() const; // real jid of muc participant
-        Affiliation affiliation() const;
-        Role role() const;
-        const Jid& actor() const;
-        const QString& reason() const;
-
-        void fromXml(const QDomElement&);
-        QDomElement toXml(QDomDocument&);
-
-        bool operator==(const MUCItem& o);
-
-    private:
-        QString nick_;
-        Jid jid_, actor_;
-        Affiliation affiliation_;
-        Role role_;
-        QString reason_;
+        bool operator==(const Actor &o) const;
     };
 
-    class MUCInvite
-    {
-    public:
-        MUCInvite();
-        MUCInvite(const QDomElement&);
-        MUCInvite(const Jid& to, const QString& reason = QString());
+    MUCItem(Role = UnknownRole, Affiliation = UnknownAffiliation);
+    MUCItem(const QDomElement &);
 
-        const Jid& to() const;
-        void setTo(const Jid&);
-        const Jid& from() const;
-        void setFrom(const Jid&);
-        const QString& reason() const;
-        void setReason(const QString&);
-        bool cont() const;
-        void setCont(bool);
+    void setNick(const QString &);
+    void setJid(const Jid &);
+    void setAffiliation(Affiliation);
+    void setRole(Role);
+    void setActor(const Actor &);
+    void setReason(const QString &);
 
+    const QString &nick() const;
+    const Jid     &jid() const; // real jid of muc participant
+    Affiliation    affiliation() const;
+    Role           role() const;
+    const Actor   &actor() const;
+    const QString &reason() const;
 
-        void fromXml(const QDomElement&);
-        QDomElement toXml(QDomDocument&) const;
-        bool isNull() const;
+    void        fromXml(const QDomElement &);
+    QDomElement toXml(QDomDocument &);
 
-    private:
-        Jid to_, from_;
-        QString reason_, password_;
-        bool cont_;
-    };
+    bool operator==(const MUCItem &o) const;
 
-    class MUCDecline
-    {
-    public:
-        MUCDecline();
-        MUCDecline(const Jid& to, const QString& reason);
-        MUCDecline(const QDomElement&);
+private:
+    QString     nick_;
+    Jid         jid_;
+    Actor       actor_;
+    Affiliation affiliation_;
+    Role        role_;
+    QString     reason_;
+};
 
-        const Jid& to() const;
-        void setTo(const Jid&);
-        const Jid& from() const;
-        void setFrom(const Jid&);
-        const QString& reason() const;
-        void setReason(const QString&);
+class MUCInvite {
+public:
+    MUCInvite();
+    MUCInvite(const QDomElement &);
+    MUCInvite(const Jid &to, const QString &reason = QString());
 
-        void fromXml(const QDomElement&);
-        QDomElement toXml(QDomDocument&) const;
-        bool isNull() const;
+    const Jid     &to() const;
+    void           setTo(const Jid &);
+    const Jid     &from() const;
+    void           setFrom(const Jid &);
+    const QString &reason() const;
+    void           setReason(const QString &);
+    bool           cont() const;
+    void           setCont(bool);
 
-    private:
-        Jid to_, from_;
-        QString reason_;
-    };
+    void        fromXml(const QDomElement &);
+    QDomElement toXml(QDomDocument &) const;
+    bool        isNull() const;
 
-    class MUCDestroy
-    {
-    public:
-        MUCDestroy();
-        MUCDestroy(const QDomElement&);
+private:
+    Jid     to_, from_;
+    QString reason_, password_;
+    bool    cont_;
+};
 
-        const Jid& jid() const;
-        void setJid(const Jid&);
-        const QString& reason() const;
-        void setReason(const QString&);
+class MUCDecline {
+public:
+    MUCDecline();
+    MUCDecline(const Jid &to, const QString &reason);
+    MUCDecline(const QDomElement &);
 
-        void fromXml(const QDomElement&);
-        QDomElement toXml(QDomDocument&) const;
+    const Jid     &to() const;
+    void           setTo(const Jid &);
+    const Jid     &from() const;
+    void           setFrom(const Jid &);
+    const QString &reason() const;
+    void           setReason(const QString &);
 
-    private:
-        Jid jid_;
-        QString reason_;
-    };
-}
+    void        fromXml(const QDomElement &);
+    QDomElement toXml(QDomDocument &) const;
+    bool        isNull() const;
 
-#endif
+private:
+    Jid     to_, from_;
+    QString reason_;
+};
+
+class MUCDestroy {
+public:
+    MUCDestroy();
+    MUCDestroy(const QDomElement &);
+
+    const Jid     &jid() const;
+    void           setJid(const Jid &);
+    const QString &reason() const;
+    void           setReason(const QString &);
+
+    void        fromXml(const QDomElement &);
+    QDomElement toXml(QDomDocument &) const;
+
+private:
+    Jid     jid_;
+    QString reason_;
+};
+} // namespace XMPP
+
+#endif // XMPP_MUC_H

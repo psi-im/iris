@@ -19,22 +19,19 @@
 #ifndef XMPP_PUBSUBRETRACTION_H
 #define XMPP_PUBSUBRETRACTION_H
 
-#include <QString>
 #include <QDomElement>
+#include <QString>
 
-namespace XMPP
-{
+namespace XMPP {
+class PubSubRetraction {
+public:
+    PubSubRetraction();
+    PubSubRetraction(const QString &id);
+    const QString &id() const;
 
-    class PubSubRetraction
-    {
-    public:
-        PubSubRetraction();
-        PubSubRetraction(const QString& id);
-        const QString& id() const;
+private:
+    QString id_;
+};
+} // namespace XMPP
 
-    private:
-        QString id_;
-    };
-}
-
-#endif
+#endif // XMPP_PUBSUBRETRACTION_H

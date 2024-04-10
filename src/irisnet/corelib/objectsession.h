@@ -22,44 +22,32 @@
 #include <QObject>
 
 namespace XMPP {
-
 class ObjectSessionPrivate;
 class ObjectSessionWatcherPrivate;
 
-class ObjectSession : public QObject
-{
+class ObjectSession : public QObject {
     Q_OBJECT
 
 public:
-    ObjectSession(QObject *parent = 0);
+    ObjectSession(QObject *parent = nullptr);
     ~ObjectSession();
 
     // clear all deferred requests, invalidate watchers
     void reset();
 
     bool isDeferred(QObject *obj, const char *method);
-    void defer(QObject *obj, const char *method,
-        QGenericArgument val0 = QGenericArgument(),
-        QGenericArgument val1 = QGenericArgument(),
-        QGenericArgument val2 = QGenericArgument(),
-        QGenericArgument val3 = QGenericArgument(),
-        QGenericArgument val4 = QGenericArgument(),
-        QGenericArgument val5 = QGenericArgument(),
-        QGenericArgument val6 = QGenericArgument(),
-        QGenericArgument val7 = QGenericArgument(),
-        QGenericArgument val8 = QGenericArgument(),
-        QGenericArgument val9 = QGenericArgument());
-    void deferExclusive(QObject *obj, const char *method,
-        QGenericArgument val0 = QGenericArgument(),
-        QGenericArgument val1 = QGenericArgument(),
-        QGenericArgument val2 = QGenericArgument(),
-        QGenericArgument val3 = QGenericArgument(),
-        QGenericArgument val4 = QGenericArgument(),
-        QGenericArgument val5 = QGenericArgument(),
-        QGenericArgument val6 = QGenericArgument(),
-        QGenericArgument val7 = QGenericArgument(),
-        QGenericArgument val8 = QGenericArgument(),
-        QGenericArgument val9 = QGenericArgument());
+    void defer(QObject *obj, const char *method, QGenericArgument val0 = QGenericArgument(),
+               QGenericArgument val1 = QGenericArgument(), QGenericArgument val2 = QGenericArgument(),
+               QGenericArgument val3 = QGenericArgument(), QGenericArgument val4 = QGenericArgument(),
+               QGenericArgument val5 = QGenericArgument(), QGenericArgument val6 = QGenericArgument(),
+               QGenericArgument val7 = QGenericArgument(), QGenericArgument val8 = QGenericArgument(),
+               QGenericArgument val9 = QGenericArgument());
+    void deferExclusive(QObject *obj, const char *method, QGenericArgument val0 = QGenericArgument(),
+                        QGenericArgument val1 = QGenericArgument(), QGenericArgument val2 = QGenericArgument(),
+                        QGenericArgument val3 = QGenericArgument(), QGenericArgument val4 = QGenericArgument(),
+                        QGenericArgument val5 = QGenericArgument(), QGenericArgument val6 = QGenericArgument(),
+                        QGenericArgument val7 = QGenericArgument(), QGenericArgument val8 = QGenericArgument(),
+                        QGenericArgument val9 = QGenericArgument());
 
     void pause();
     void resume();
@@ -69,8 +57,7 @@ private:
     ObjectSessionPrivate *d;
 };
 
-class ObjectSessionWatcher
-{
+class ObjectSessionWatcher {
 public:
     ObjectSessionWatcher(ObjectSession *sess);
     ~ObjectSessionWatcher();
@@ -81,7 +68,6 @@ private:
     friend class ObjectSessionPrivate;
     ObjectSessionWatcherPrivate *d;
 };
+} // namespace XMPP
 
-}
-
-#endif
+#endif // OBJECTSESSION_H

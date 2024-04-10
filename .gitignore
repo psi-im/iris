@@ -18,3 +18,5 @@ object_script.*
 /lib
 /plugins
 *.user*
+build-*
+3rdparty/qca

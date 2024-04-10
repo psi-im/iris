@@ -22,13 +22,11 @@
 #include "irisnetglobal.h"
 
 namespace XMPP {
-
-class NetAvailability : public QObject
-{
+class NetAvailability : public QObject {
     Q_OBJECT
 
 public:
-    NetAvailability(QObject *parent = 0);
+    NetAvailability(QObject *parent = nullptr);
     ~NetAvailability();
 
     bool isAvailable() const;
@@ -41,7 +39,6 @@ private:
     friend class Private;
     Private *d;
 };
+} // namespace XMPP
 
-}
-
-#endif
+#endif // NETAVAILABILITY_H

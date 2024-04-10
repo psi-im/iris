@@ -3,8 +3,7 @@
 
 #include <qdom.h>
 
-class TD
-{
+class TD {
 public:
     TD();
     ~TD();
@@ -16,5 +15,4 @@ public:
     static void incomingXml(const QDomElement &);
 };
 
-#endif
-
+#endif // TESTDEBUG_H

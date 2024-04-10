@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010 Rion
+ * Copyright (C) 2010  Sergey Ilinykh
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public
@@ -19,85 +19,82 @@
 #ifndef XMPP_BITSOFBINARY_H
 #define XMPP_BITSOFBINARY_H
 
-#include <QDomElement>
-#include <QObject>
-#include <QHash>
-#include <QSharedDataPointer>
-#include <QFile>
-
 #include "xmpp/jid/jid.h"
+#include "xmpp_hash.h"
 
-namespace XMPP
-{
-    class JT_BitsOfBinary;
-    class Client;
+#include <QDomElement>
+#include <QFile>
+#include <QHash>
+#include <QObject>
+#include <QSharedDataPointer>
 
-    class BoBData
-    {
-        class Private;
-    public:
-        BoBData();
-        BoBData(const BoBData &other);
-        BoBData(const QDomElement &);
-        ~BoBData();
-        BoBData &operator=(const BoBData &other);
+namespace XMPP {
+class Client;
+class JT_BitsOfBinary;
 
-        bool isNull() const;
+class BoBData {
+    class Private;
 
-        QString cid() const;
-        void setCid(const QString &);
+public:
+    BoBData();
+    BoBData(const BoBData &other);
+    BoBData(const QDomElement &);
+    ~BoBData();
+    BoBData &operator=(const BoBData &other);
 
-        QByteArray data() const;
-        void setData(const QByteArray &);
+    bool isNull() const;
 
-        QString type() const;
-        void setType(const QString &);
+    static Hash cidToHash(const QString &cid);
 
-        unsigned int maxAge() const;
-        void setMaxAge(unsigned int);
+    QString cid() const;
+    void    setCid(const QString &);
 
-        void fromXml(const QDomElement &);
-        QDomElement toXml(QDomDocument *doc) const;
+    const Hash &hash() const;
+    void        setHash(const Hash &hash);
 
-    private:
-        QSharedDataPointer<Private> d;
-    };
+    QByteArray data() const;
+    void       setData(const QByteArray &);
 
+    QString type() const;
+    void    setType(const QString &);
 
+    unsigned int maxAge() const;
+    void         setMaxAge(unsigned int);
 
-    class BoBCache : public QObject
-    {
-        Q_OBJECT
+    void        fromXml(const QDomElement &);
+    QDomElement toXml(QDomDocument *doc) const;
 
-    public:
-        BoBCache(QObject *parent);
-        virtual void put(const BoBData &) = 0;
-        virtual BoBData get(const QString &) = 0;
-    };
+private:
+    QSharedDataPointer<Private> d;
+};
 
+class BoBCache : public QObject {
+    Q_OBJECT
 
+public:
+    BoBCache(QObject *parent);
+    virtual void    put(const BoBData &) = 0;
+    virtual BoBData get(const Hash &)    = 0;
+};
 
-    class BoBManager : public QObject
-    {
-        Q_OBJECT
+class BoBManager : public QObject {
+    Q_OBJECT
 
-    public:
-        BoBManager(Client *);
-        void setCache(BoBCache*);
+public:
+    BoBManager(Client *);
+    void setCache(BoBCache *);
 
-        BoBData bobData(const QString &);
-        // file data, mime type, max age in seconds
-        BoBData append(const QByteArray &data, const QString &type,
-                            unsigned int maxAge = 0);
-        QString append(QFile &file,
-                             const QString &type = "application/octet-stream");
-        void append(const BoBData &);
+    BoBData bobData(const QString &);
+    // file data, mime type, max age in seconds
+    BoBData append(const QByteArray &data, const QString &type, unsigned int maxAge = 0);
+    Hash    append(QFile         &file,
+                   const QString &type = "application/octet-stream"); // this method adds just to runtime cache
+    void    append(const BoBData &);
 
-    private:
-        BoBCache *_cache;
-        QHash<QString, QPair<QString,QString> > _localFiles; //cid => (filename, mime)
-    };
-
-}
+private:
+    BoBCache                                  *_cache;
+    QHash<XMPP::Hash, QPair<QString, QString>> _localFiles; // cid => (filename, mime)
+};
+} // namespace XMPP
 
 #endif // XMPP_BITSOFBINARY_H

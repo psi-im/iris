@@ -19,26 +19,24 @@
 #ifndef XMPP_RESOURCELIST_H
 #define XMPP_RESOURCELIST_H
 
-#include <QList>
-
 #include "xmpp_resource.h"
+
+#include <QList>
 
 class QString;
 
-namespace XMPP
-{
-    class ResourceList : public QList<Resource>
-    {
-    public:
-        ResourceList();
-        ~ResourceList();
+namespace XMPP {
+class ResourceList : public QList<Resource> {
+public:
+    ResourceList();
+    ~ResourceList();
 
-        ResourceList::Iterator find(const QString &);
-        ResourceList::Iterator priority();
+    ResourceList::Iterator find(const QString &);
+    ResourceList::Iterator priority();
 
-        ResourceList::ConstIterator find(const QString &) const;
-        ResourceList::ConstIterator priority() const;
-    };
-}
+    ResourceList::ConstIterator find(const QString &) const;
+    ResourceList::ConstIterator priority() const;
+};
+} // namespace XMPP
 
-#endif
+#endif // XMPP_RESOURCELIST_H

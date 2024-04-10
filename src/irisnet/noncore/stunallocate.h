@@ -19,91 +19,64 @@
 #ifndef STUNALLOCATE_H
 #define STUNALLOCATE_H
 
-#include <QObject>
-#include <QList>
 #include <QHostAddress>
+#include <QList>
+#include <QObject>
+
+#include "transportaddress.h"
 
 class QByteArray;
 
 namespace XMPP {
-
 class StunMessage;
 class StunTransactionPool;
+class TransportAddress;
 
-class StunAllocate : public QObject
-{
+class StunAllocate : public QObject {
     Q_OBJECT
 
 public:
-    enum Error
-    {
-        ErrorGeneric,
-        ErrorTimeout,
-        ErrorAuth,
-        ErrorRejected,
-        ErrorProtocol,
-        ErrorCapacity,
-        ErrorMismatch
-    };
+    enum Error { ErrorGeneric, ErrorTimeout, ErrorAuth, ErrorRejected, ErrorProtocol, ErrorCapacity, ErrorMismatch };
 
-    class Channel
-    {
+    class Channel {
     public:
-        QHostAddress address;
-        int port;
+        TransportAddress address;
 
-        Channel(const QHostAddress &_address, int _port) :
-            address(_address),
-            port(_port)
-        {
-        }
+        Channel(const TransportAddress &_address) : address(_address) { }
 
-        inline bool operator==(const Channel &other)
-        {
-            if(address == other.address && port == other.port)
-                return true;
-            else
-                return false;
-        }
-
-        inline bool operator!=(const Channel &other)
-        {
-            return !operator==(other);
-        }
+        inline bool operator==(const Channel &other) const { return address == other.address; }
+        inline bool operator!=(const Channel &other) const { return !operator==(other); }
     };
 
-    StunAllocate(StunTransactionPool *pool);
+    StunAllocate(XMPP::StunTransactionPool *pool);
     ~StunAllocate();
 
     void setClientSoftwareNameAndVersion(const QString &str);
 
     void start();
-    void start(const QHostAddress &addr, int port); // use addr association
+    void start(const TransportAddress &addr); // use addr association
     void stop();
 
     QString serverSoftwareNameAndVersion() const;
 
-    QHostAddress reflexiveAddress() const;
-    int reflexivePort() const;
-
-    QHostAddress relayedAddress() const;
-    int relayedPort() const;
+    const TransportAddress &reflexiveAddress() const;
+    const TransportAddress &relayedAddress() const;
 
     QList<QHostAddress> permissions() const;
-    void setPermissions(const QList<QHostAddress> &perms);
+    void                setPermissions(const QList<QHostAddress> &perms);
 
     QList<Channel> channels() const;
-    void setChannels(const QList<Channel> &channels);
+    void           setChannels(const QList<Channel> &channels);
 
-    int packetHeaderOverhead(const QHostAddress &addr, int port) const;
+    int packetHeaderOverhead(const TransportAddress &addr) const;
 
-    QByteArray encode(const QByteArray &datagram, const QHostAddress &addr, int port);
-    QByteArray decode(const QByteArray &encoded, QHostAddress *addr = 0, int *port = 0);
-    QByteArray decode(const StunMessage &encoded, QHostAddress *addr = 0, int *port = 0);
+    QByteArray encode(const QByteArray &datagram, const TransportAddress &addr);
+    QByteArray decode(const QByteArray &encoded, TransportAddress &addr);
+    QByteArray decode(const StunMessage &encoded, TransportAddress &addr);
 
     QString errorString() const;
 
-    static bool containsChannelData(const quint8 *data, int size);
+    static bool       containsChannelData(const quint8 *data, int size);
     static QByteArray readChannelData(const quint8 *data, int size);
 
 signals:
@@ -127,7 +100,6 @@ private:
     friend class Private;
     Private *d;
 };
+} // namespace XMPP
 
-}
-
-#endif
+#endif // STUNALLOCATE_H

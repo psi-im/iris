@@ -19,27 +19,26 @@
 #ifndef TURNCLIENT_H
 #define TURNCLIENT_H
 
-#include <QObject>
 #include <QByteArray>
-#include <QString>
 #include <QHostAddress>
+#include <QObject>
+#include <QString>
+
+#include "transportaddress.h"
 
 namespace QCA {
-    class SecureArray;
+class SecureArray;
 }
 
 namespace XMPP {
-
-class StunTransactionPool;
 class StunAllocate;
+class StunTransactionPool;
 
-class TurnClient : public QObject
-{
+class TurnClient : public QObject {
     Q_OBJECT
 
 public:
-    enum Error
-    {
+    enum Error {
         ErrorGeneric,
         ErrorHostNotFound,
         ErrorConnect,
@@ -67,34 +66,19 @@ public:
         ErrorMismatch
     };
 
-    enum Mode
-    {
-        PlainMode,
-        TlsMode
-    };
+    enum Mode { PlainMode, TlsMode };
 
-    enum DebugLevel
-    {
-        DL_None,
-        DL_Info,
-        DL_Packet
-    };
+    enum DebugLevel { DL_None, DL_Info, DL_Packet };
 
     // adapted from XMPP::AdvancedConnector
-    class Proxy
-    {
+    class Proxy {
     public:
-        enum
-        {
-            None,
-            HttpConnect,
-            Socks
-        };
+        enum { None, HttpConnect, Socks };
 
         Proxy();
         ~Proxy();
 
-        int type() const;
+        int     type() const;
         QString host() const;
         quint16 port() const;
         QString user() const;
@@ -105,13 +89,13 @@ public:
         void setUserPass(const QString &user, const QString &pass);
 
     private:
-        int t;
+        int     t;
         QString v_host;
-        quint16 v_port;
+        quint16 v_port = 0;
         QString v_user, v_pass;
     };
 
-    TurnClient(QObject *parent = 0);
+    TurnClient(QObject *parent = nullptr);
     ~TurnClient();
 
     void setProxy(const Proxy &proxy);
@@ -123,56 +107,59 @@ public:
     //   outgoingDatagramsWritten().  authentication happens through the
     //   pool and not through this class.  the turn addr/port is optional,
     //   and used only for addr association with the pool
-    void connectToHost(StunTransactionPool *pool, const QHostAddress &addr = QHostAddress(), int port = -1);
+    void connectToHost(StunTransactionPool *pool, const TransportAddress &addr = TransportAddress());
 
     // for TCP and TCP-TLS
-    void connectToHost(const QHostAddress &addr, int port, Mode mode = PlainMode);
+    void connectToHost(const TransportAddress &addr, Mode mode = PlainMode);
+
+    const TransportAddress &serverAddress() const;
 
     // for UDP, use this function to process incoming packets instead of
     //   read().
-    QByteArray processIncomingDatagram(const QByteArray &buf, bool notStun, QHostAddress *addr, int *port);
+    QByteArray processIncomingDatagram(const QByteArray &buf, bool notStun, TransportAddress &addr);
 
     // call after writing datagrams from outgoingDatagram.  not DOR-DS safe
     void outgoingDatagramsWritten(int count);
 
     QString realm() const;
-    void setUsername(const QString &username);
-    void setPassword(const QCA::SecureArray &password);
-    void setRealm(const QString &realm);
-    void continueAfterParams();
+    void    setUsername(const QString &username);
+    void    setPassword(const QCA::SecureArray &password);
+    void    setRealm(const QString &realm);
+    void    continueAfterParams(const TransportAddress &addr);
 
     void close();
 
     StunAllocate *stunAllocate();
 
-    void addChannelPeer(const QHostAddress &addr, int port);
+    void addChannelPeer(const TransportAddress &addr);
 
     int packetsToRead() const;
     int packetsToWrite() const;
 
     // TCP mode only
-    QByteArray read(QHostAddress *addr, int *port);
+    QByteArray read(TransportAddress &addr);
 
     // for UDP, this call may emit outgoingDatagram() immediately (not
     //   DOR-DS safe)
-    void write(const QByteArray &buf, const QHostAddress &addr, int port);
+    void write(const QByteArray &buf, const TransportAddress &addr);
 
     QString errorString() const;
 
     void setDebugLevel(DebugLevel level); // default DL_None
+    void changeThread(QThread *thread);
 
 signals:
     void connected(); // tcp connected
     void tlsHandshaken();
     void closed();
-    void needAuthParams();
-    void retrying(); // mismatch error received, starting all over
+    void needAuthParams(const TransportAddress &addr);
+    void retrying();  // mismatch error received, starting all over
     void activated(); // ready for read/write
 
     // TCP mode only
     void readyRead();
 
-    void packetsWritten(int count, const QHostAddress &addr, int port);
+    void packetsWritten(int count, const TransportAddress &addr);
     void error(XMPP::TurnClient::Error e);
 
     // data packets to be sent to the TURN server, UDP mode only
@@ -186,7 +173,6 @@ private:
     friend class Private;
     Private *d;
 };
+} // namespace XMPP
 
-}
-
-#endif
+#endif // TURNCLIENT_H

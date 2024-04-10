@@ -1,6 +1,6 @@
 /*
  * ndns.h - native DNS resolution
- * Copyright (C) 2001, 2002  Justin Karneges
+ * Copyright (C) 2001-2002  Justin Karneges
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -20,17 +20,16 @@
 #ifndef CS_NDNS_H
 #define CS_NDNS_H
 
-#include <QtCore>
-#include <QtNetwork>
 #include "netnames.h"
 
-// CS_NAMESPACE_BEGIN
+#include <QtCore>
+#include <QtNetwork>
 
-class NDns : public QObject
-{
+// CS_NAMESPACE_BEGIN
+class NDns : public QObject {
     Q_OBJECT
 public:
-    NDns(QObject *parent=0);
+    NDns(QObject *parent = nullptr);
     ~NDns();
 
     void resolve(const QString &);
@@ -38,7 +37,7 @@ public:
     bool isBusy() const;
 
     QHostAddress result() const;
-    QString resultString() const;
+    QString      resultString() const;
 
 signals:
     void resultsReady();
@@ -49,10 +48,10 @@ private slots:
 
 private:
     XMPP::NameResolver dns;
-    bool busy;
-    QHostAddress addr;
+    bool               busy;
+    QHostAddress       addr;
 };
 
 // CS_NAMESPACE_END
 
-#endif
+#endif // CS_NDNS_H

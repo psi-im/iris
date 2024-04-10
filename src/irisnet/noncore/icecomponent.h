@@ -19,77 +19,45 @@
 #ifndef ICECOMPONENT_H
 #define ICECOMPONENT_H
 
-#include <QList>
-#include "turnclient.h"
-#include "icetransport.h"
 #include "ice176.h"
+#include "icetransport.h"
+#include "turnclient.h"
+
+#include <QList>
 
 class QUdpSocket;
 
 namespace XMPP {
-
 class UdpPortReserver;
 
-class IceComponent : public QObject
-{
+class IceComponent : public QObject {
     Q_OBJECT
 
 public:
-    enum CandidateType
-    {
-        HostType,
-        PeerReflexiveType,
-        ServerReflexiveType,
-        RelayedType
-    };
+    enum CandidateType { HostType, PeerReflexiveType, ServerReflexiveType, RelayedType };
 
-    class TransportAddress
-    {
+    class CandidateInfo {
     public:
-        QHostAddress addr;
-        int port;
+        using Ptr = QSharedPointer<CandidateInfo>;
 
-        TransportAddress() :
-            port(-1)
-        {
-        }
-
-        TransportAddress(const QHostAddress &_addr, int _port) :
-            addr(_addr),
-            port(_port)
-        {
-        }
-
-        bool operator==(const TransportAddress &other) const
-        {
-            if(addr == other.addr && port == other.port)
-                return true;
-            else
-                return false;
-        }
-
-        inline bool operator!=(const TransportAddress &other) const
-        {
-            return !operator==(other);
-        }
-    };
-
-    class CandidateInfo
-    {
-    public:
-        TransportAddress addr;
         CandidateType type;
-        int priority;
+        int           priority;
+        int           componentId;
+        int           network;
+
+        TransportAddress addr;    // address according to candidate type
+        TransportAddress base;    // network interface address
+        TransportAddress related; // not used in agent but usefule for diagnostics
+
         QString foundation;
-        int componentId;
-        TransportAddress base;
-        TransportAddress related;
         QString id;
-        int network;
+
+        static Ptr  makeRemotePrflx(int componentId, const TransportAddress &fromAddr, quint32 priority);
+        inline bool operator==(const CandidateInfo &o) const { return addr == o.addr && componentId == o.componentId; }
+        inline bool operator==(CandidateInfo::Ptr o) const { return *this == *o; }
     };
 
-    class Candidate
-    {
+    class Candidate {
     public:
         // unique across all candidates within this component
         int id;
@@ -99,29 +67,26 @@ public:
         //   is up to the user to create the candidate id.
         // info.foundation is also unset, since awareness of all
         //   components and candidates is needed to calculate it.
-        CandidateInfo info;
+        CandidateInfo::Ptr info;
 
         // note that these may be the same for multiple candidates
-        IceTransport *iceTransport;
-        int path;
+        QSharedPointer<IceTransport> iceTransport;
+        int                          path;
     };
 
-    enum DebugLevel
-    {
-        DL_None,
-        DL_Info,
-        DL_Packet
-    };
+    enum DebugLevel { DL_None, DL_Info, DL_Packet };
 
-    IceComponent(int id, QObject *parent = 0);
+    IceComponent(int id, QObject *parent = nullptr);
     ~IceComponent();
 
-    int id() const;
+    int  id() const;
+    bool isGatheringComplete() const;
 
     void setClientSoftwareNameAndVersion(const QString &str);
     void setProxy(const TurnClient::Proxy &proxy);
 
-    void setPortReserver(UdpPortReserver *portReserver);
+    void             setPortReserver(UdpPortReserver *portReserver);
+    UdpPortReserver *portReserver() const;
 
     // can be set once, but later changes are ignored
     void setLocalAddresses(const QList<Ice176::LocalAddress> &addrs);
@@ -131,25 +96,32 @@ public:
     void setExternalAddresses(const QList<Ice176::ExternalAddress> &addrs);
 
     // can be set at any time, but only once.  later changes are ignored
-    void setStunBindService(const QHostAddress &addr, int port);
-    void setStunRelayUdpService(const QHostAddress &addr, int port, const QString &user, const QCA::SecureArray &pass);
-    void setStunRelayTcpService(const QHostAddress &addr, int port, const QString &user, const QCA::SecureArray &pass);
+    void setStunBindService(const TransportAddress &addr);
+    void setStunRelayUdpService(const TransportAddress &addr, const QString &user, const QCA::SecureArray &pass);
+    void setStunRelayTcpService(const TransportAddress &addr, const QString &user, const QCA::SecureArray &pass);
 
     // these all start out enabled, but can be disabled for diagnostic
     //   purposes
-    void setUseLocal(bool enabled);
+    void setUseLocal(bool enabled); // where to make local host candidates
     void setUseStunBind(bool enabled);
     void setUseStunRelayUdp(bool enabled);
     void setUseStunRelayTcp(bool enabled);
 
-    // if socketList is not null then port reserver must be set
-    void update(QList<QUdpSocket*> *socketList = 0);
+    /**
+     * @brief update component with local listening sockets
+     * @param socketList
+     * If socketList is not null then port reserver must be set.
+     * If the pool doesn't have enough sockets, the component will allocate its own.
+     */
+    void update(QList<QUdpSocket *> *socketList = nullptr);
     void stop();
 
     // prflx priority to use when replying from this transport/path
-    int peerReflexivePriority(const IceTransport *iceTransport, int path) const;
+    int peerReflexivePriority(QSharedPointer<IceTransport> iceTransport, int path) const;
 
-    void flagPathAsLowOverhead(int id, const QHostAddress &addr, int port);
+    void addLocalPeerReflexiveCandidate(const TransportAddress &addr, CandidateInfo::Ptr base, quint32 priority);
+
+    void flagPathAsLowOverhead(int id, const TransportAddress &addr);
 
     void setDebugLevel(DebugLevel level);
 
@@ -165,6 +137,9 @@ signals:
     //   note that it is possible there are no HostType candidates.
     void localFinished();
 
+    // no more candidates will be emitted unless network candidition changes
+    void gatheringComplete();
+
     void stopped();
 
     // reports debug of iceTransports as well.  not DOR-SS/DS safe
@@ -176,11 +151,6 @@ private:
     Private *d;
 };
 
-inline uint qHash(const XMPP::IceComponent::TransportAddress &key, uint seed = 0)
-{
-    return ::qHash(key.addr, seed) ^ ::qHash(key.port, seed);
-}
+} // namespace XMPP
 
-} //namespace XMPP
-
-#endif
+#endif // ICECOMPONENT_H

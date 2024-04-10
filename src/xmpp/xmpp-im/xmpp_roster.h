@@ -19,29 +19,34 @@
 #ifndef XMPP_ROSTER_H
 #define XMPP_ROSTER_H
 
-#include <QList>
-
 #include "xmpp_rosteritem.h"
+
+#include <QList>
 
 class QDomDocument;
 class QDomElement;
 
-namespace XMPP
-{
-    class Jid;
-    class Roster : public QList<RosterItem>
-    {
-    public:
-        Roster();
-        ~Roster();
+namespace XMPP {
+class Jid;
 
-        Roster::Iterator find(const Jid &);
-        Roster::ConstIterator find(const Jid &) const;
+class Roster : public QList<RosterItem> {
+public:
+    Roster();
+    Roster(const Roster &other);
+    ~Roster();
 
-    private:
-        class RosterPrivate;
-        RosterPrivate *d = nullptr;
-    };
-}
+    Roster &operator=(const Roster &other);
 
-#endif
+    Roster::Iterator      find(const Jid &);
+    Roster::ConstIterator find(const Jid &) const;
+
+    void    setGroupsDelimiter(const QString &groupsDelimiter);
+    QString groupsDelimiter() const;
+
+private:
+    class Private;
+    Private *d = nullptr;
+};
+} // namespace XMPP
+
+#endif // XMPP_ROSTER_H

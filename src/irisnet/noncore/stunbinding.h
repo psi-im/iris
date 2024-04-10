@@ -21,34 +21,26 @@
 
 #include <QObject>
 
-class QHostAddress;
-
 namespace XMPP {
-
 class StunTransactionPool;
+class TransportAddress;
 
-class StunBinding : public QObject
-{
+class StunBinding : public QObject {
     Q_OBJECT
 
 public:
-    enum Error
-    {
-        ErrorGeneric,
-        ErrorTimeout,
-        ErrorRejected,
-        ErrorProtocol,
-        ErrorConflict
-    };
+    enum Error { ErrorGeneric, ErrorTimeout, ErrorRejected, ErrorProtocol, ErrorConflict };
 
     StunBinding(StunTransactionPool *pool);
     ~StunBinding();
 
     // for ICE-use only
-    void setPriority(quint32 i);
-    void setUseCandidate(bool enabled);
-    void setIceControlling(quint64 i);
-    void setIceControlled(quint64 i);
+    void    setPriority(quint32 i);
+    quint32 priority() const;
+    void    setUseCandidate(bool enabled);
+    bool    useCandidate() const;
+    void    setIceControlling(quint64 i);
+    void    setIceControlled(quint64 i);
 
     void setShortTermUsername(const QString &username);
     void setShortTermPassword(const QString &password);
@@ -56,10 +48,10 @@ public:
     void setFingerprintRequired(bool enabled);
 
     void start();
-    void start(const QHostAddress &addr, int port); // use addr association
+    void start(const XMPP::TransportAddress &addr); // use addr association
+    void cancel();
 
-    QHostAddress reflexiveAddress() const;
-    int reflexivePort() const;
+    const TransportAddress &reflexiveAddress() const;
 
     // non-translatable diagnostic string for convenience
     QString errorString() const;
@@ -75,7 +67,6 @@ private:
     friend class Private;
     Private *d;
 };
+} // namespace XMPP
 
-}
-
-#endif
+#endif // STUNBINDING_H

@@ -1,20 +1,47 @@
-cmake_minimum_required(VERSION 3.1.0)
-include_directories(
-    ${CMAKE_CURRENT_BINARY_DIR}
-    corelib
-    noncore
-    noncore/cutestuff
-    noncore/legacy
-    ${QCA_INCLUDES}
-)
+cmake_minimum_required(VERSION 3.10.0)
 
-set( CMAKE_MODULE_PATH
-    "${CMAKE_MODULE_PATH}"
+list(APPEND CMAKE_MODULE_PATH
+    "${CMAKE_SOURCE_DIR}/cmake/modules"
     "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/modules"
 )
 
-set(SOURCES
+add_library(irisnet STATIC)
+
+set(IRISNET_CORELIB_HEADERS
+    corelib/addressresolver.h
+    corelib/irisnetexport.h
+    corelib/irisnetglobal.h
+    corelib/irisnetplugin.h
+    corelib/netavailability.h
+    corelib/netinterface.h
+    corelib/netnames.h
+    corelib/objectsession.h
+)
+set(IRISNET_NONCORE_HEADERS
+    noncore/cutestuff/bsocket.h
+    noncore/cutestuff/bytestream.h
+    noncore/cutestuff/httpconnect.h
+    noncore/cutestuff/httppoll.h
+    noncore/cutestuff/socks.h
+    noncore/dtls.h
+    noncore/ice176.h
+    noncore/iceabstractstundisco.h
+    noncore/iceagent.h
+    noncore/legacy/ndns.h
+    noncore/legacy/srvresolver.h
+    noncore/processquit.h
+    noncore/stunallocate.h
+    noncore/stunbinding.h
+    noncore/stunmessage.h
+    noncore/stuntransaction.h
+    noncore/tcpportreserver.h
+    noncore/turnclient.h
+    noncore/udpportreserver.h
+)
+
+target_sources(irisnet PRIVATE
+    ${IRISNET_CORELIB_HEADERS}
+    ${IRISNET_NONCORE_HEADERS}
     corelib/irisnetglobal.cpp
     corelib/irisnetplugin.cpp
 
@@ -34,10 +61,12 @@ set(SOURCES
     corelib/addressresolver.cpp
     corelib/netavailability.cpp
     corelib/netinterface.cpp
-    corelib/netinterface_qtnet.cpp
     corelib/netnames.cpp
     corelib/objectsession.cpp
+    corelib/netinterface_qtname.cpp
+    corelib/netinterface_qtnet.cpp
 
+    noncore/iceagent.cpp
     noncore/ice176.cpp
     noncore/icecomponent.cpp
     noncore/icelocaltransport.cpp
@@ -48,67 +77,70 @@ set(SOURCES
     noncore/stuntransaction.cpp
     noncore/turnclient.cpp
     noncore/udpportreserver.cpp
+    noncore/tcpportreserver.cpp
+    noncore/dtls.cpp
 
     noncore/cutestuff/bsocket.cpp
 )
 
 if(UNIX)
-    list(APPEND SOURCES corelib/netinterface_unix.cpp)
+    target_sources(irisnet PRIVATE
+        corelib/netinterface_unix.cpp
+    )
 endif()
 
-if(NOT USE_QJDNS)
-    list(APPEND SOURCES corelib/netinterface_qtname.cpp)
-else()
-    list(APPEND SOURCES corelib/netnames_jdns.cpp)
+if(IRIS_ENABLE_JINGLE_SCTP)
+    target_sources(irisnet PRIVATE
+        noncore/sctp/SctpAssociation.cpp
+        noncore/sctp/DepUsrSCTP.cpp
+    )
 endif()
 
-set(HEADERS
-    corelib/irisnetexport.h
-    corelib/irisnetglobal.h
-    corelib/irisnetglobal_p.h
+if(IRIS_BUNDLED_QCA)
+    add_dependencies(irisnet QcaProject)
+endif()
 
-    noncore/stunmessage.h
-    noncore/stuntypes.h
-    noncore/stunutil.h
+if(IRIS_ENABLE_JINGLE_SCTP AND IRIS_BUNDLED_USRSCTP)
+    add_dependencies(irisnet UsrSCTPProject)
+endif()
 
-    corelib/addressresolver.h
-    corelib/irisnetplugin.h
-    corelib/netavailability.h
-    corelib/netinterface.h
-    corelib/netnames.h
-    corelib/objectsession.h
-
-    noncore/ice176.h
-    noncore/icecomponent.h
-    noncore/icelocaltransport.h
-    noncore/icetransport.h
-    noncore/iceturntransport.h
-    noncore/processquit.h
-    noncore/stunallocate.h
-    noncore/stunbinding.h
-    noncore/stuntransaction.h
-    noncore/turnclient.h
-    noncore/udpportreserver.h
-
-    noncore/cutestuff/bsocket.h
-    noncore/cutestuff/bytestream.h
-    noncore/cutestuff/httpconnect.h
-    noncore/cutestuff/httppoll.h
-    noncore/cutestuff/socks.h
-
-    noncore/legacy/ndns.h
-    noncore/legacy/srvresolver.h
+target_include_directories(irisnet
+    PRIVATE
+        ${iris_SOURCE_DIR}/include/iris
+        ${iris_SOURCE_DIR}/src
+        ${Qca_INCLUDE_DIR}
+    PUBLIC
+        ${USRSCTP_INCLUDES}
 )
 
-add_library(irisnet STATIC ${SOURCES} ${HEADERS} )
+target_compile_definitions(irisnet PRIVATE IRISNET_STATIC HAVE_QTNET)
 
-if(WIN32 AND (SEPARATE_QJDNS OR (NOT USE_QJDNS)))
-    set(EXTRA_LDFLAGS ws2_32)
+if(WIN32)
+    set(EXTRA_LDFLAGS ws2_32 iphlpapi)
 endif()
 
-if(NOT USE_QJDNS)
-    set(QJDns_LIBRARY "")
+# UsrSCTP requires pthread
+if(NOT WIN32)
+    find_package(Threads)
+    target_link_libraries(irisnet PUBLIC Threads::Threads)
 endif()
 
-target_link_libraries(irisnet ${QJDns_LIBRARY} ${EXTRA_LDFLAGS})
-target_link_libraries(irisnet Qt5::Core Qt5::Network Qt5::Xml ${qca_LIB})
+target_link_libraries(irisnet PUBLIC
+    ${Qca_LIBRARY} ${USRSCTP_LIBRARY}
+)
+
+if(QT_DEFAULT_MAJOR_VERSION LESS 6)
+    target_link_libraries(irisnet PUBLIC Qt5::Core Qt5::Network Qt5::Xml)
+else()
+    target_link_libraries(irisnet PUBLIC Qt6::Core Qt6::Network Qt6::Xml)
+endif()
+target_link_libraries(irisnet PUBLIC ${EXTRA_LDFLAGS})
+
+if(IRIS_ENABLE_INSTALL)
+    install(FILES ${IRISNET_CORELIB_HEADERS}
+        DESTINATION ${IRIS_INSTALL_INCLUDEDIR}/irisnet/corelib
+    )
+    install(FILES ${IRISNET_NONCORE_HEADERS}
+        DESTINATION ${IRIS_INSTALL_INCLUDEDIR}/irisnet/noncore
+    )
+endif()

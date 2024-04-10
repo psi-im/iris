@@ -19,24 +19,32 @@
 #ifndef XMPP_LIVEROSTER_H
 #define XMPP_LIVEROSTER_H
 
-#include <QList>
-
 #include "xmpp_liverosteritem.h"
 
-namespace XMPP
-{
-    class Jid;
+#include <QList>
 
-    class LiveRoster : public QList<LiveRosterItem>
-    {
-    public:
-        LiveRoster();
-        ~LiveRoster();
+namespace XMPP {
+class Jid;
 
-        void flagAllForDelete();
-        LiveRoster::Iterator find(const Jid &, bool compareRes=true);
-        LiveRoster::ConstIterator find(const Jid &, bool compareRes=true) const;
-    };
-}
+class LiveRoster : public QList<LiveRosterItem> {
+public:
+    LiveRoster();
+    LiveRoster(const LiveRoster &other);
+    ~LiveRoster();
 
-#endif
+    LiveRoster &operator=(const LiveRoster &other);
+
+    void                      flagAllForDelete();
+    LiveRoster::Iterator      find(const Jid &, bool compareRes = true);
+    LiveRoster::ConstIterator find(const Jid &, bool compareRes = true) const;
+
+    void    setGroupsDelimiter(const QString &groupsDelimiter);
+    QString groupsDelimiter() const;
+
+private:
+    class Private;
+    Private *d;
+};
+} // namespace XMPP
+
+#endif // XMPP_LIVEROSTER_H

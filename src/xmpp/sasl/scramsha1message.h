@@ -22,26 +22,19 @@
 #include <QByteArray>
 #include <QString>
 
-#include "xmpp/base/randomnumbergenerator.h"
-
 namespace XMPP {
-    class SCRAMSHA1Message
-    {
-        public:
-            SCRAMSHA1Message(const QString& authzid, const QString& authcid, const QByteArray& cnonce, const RandomNumberGenerator& rand);
+class SCRAMSHA1Message {
+public:
+    SCRAMSHA1Message(const QString &authzid, const QString &authcid, const QByteArray &cnonce);
 
-            const QByteArray& getValue() {
-                return value_;
-            }
+    const QByteArray &getValue() { return value_; }
 
-            bool isValid() const {
-                return isValid_;
-            }
+    bool isValid() const { return isValid_; }
 
-        private:
-            QByteArray value_;
-            bool isValid_;
-    };
-}
+private:
+    QByteArray value_;
+    bool       isValid_;
+};
+} // namespace XMPP
 
-#endif
+#endif // SCRAMSHA1MESSAGE_H

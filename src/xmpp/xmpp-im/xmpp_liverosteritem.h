@@ -19,39 +19,38 @@
 #ifndef XMPP_LIVEROSTERITEM_H
 #define XMPP_LIVEROSTERITEM_H
 
-#include "xmpp_status.h"
 #include "xmpp_resourcelist.h"
 #include "xmpp_rosteritem.h"
+#include "xmpp_status.h"
 
-namespace XMPP
-{
-    class LiveRosterItem : public RosterItem
-    {
-    public:
-        LiveRosterItem(const Jid &j="");
-        LiveRosterItem(const RosterItem &);
-        ~LiveRosterItem();
+namespace XMPP {
+class LiveRosterItem : public RosterItem {
+public:
+    LiveRosterItem(const Jid &j = "");
+    LiveRosterItem(const RosterItem &);
+    ~LiveRosterItem();
+    LiveRosterItem &operator=(const LiveRosterItem &other) = default;
 
-        void setRosterItem(const RosterItem &);
+    void setRosterItem(const RosterItem &);
 
-        ResourceList & resourceList();
-        ResourceList::Iterator priority();
+    ResourceList          &resourceList();
+    ResourceList::Iterator priority();
 
-        const ResourceList & resourceList() const;
-        ResourceList::ConstIterator priority() const;
+    const ResourceList         &resourceList() const;
+    ResourceList::ConstIterator priority() const;
 
-        bool isAvailable() const;
-        const Status & lastUnavailableStatus() const;
-        bool flagForDelete() const;
+    bool          isAvailable() const;
+    const Status &lastUnavailableStatus() const;
+    bool          flagForDelete() const;
 
-        void setLastUnavailableStatus(const Status &);
-        void setFlagForDelete(bool);
+    void setLastUnavailableStatus(const Status &);
+    void setFlagForDelete(bool);
 
-    private:
-        ResourceList v_resourceList;
-        Status v_lastUnavailableStatus;
-        bool v_flagForDelete;
-    };
-}
+private:
+    ResourceList v_resourceList;
+    Status       v_lastUnavailableStatus;
+    bool         v_flagForDelete;
+};
+} // namespace XMPP
 
-#endif
+#endif // XMPP_LIVEROSTERITEM_H

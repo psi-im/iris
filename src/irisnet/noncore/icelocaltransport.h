@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009,2010  Barracuda Networks, Inc.
+ * Copyright (C) 2009-2010  Barracuda Networks, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -19,34 +19,31 @@
 #ifndef ICELOCALTRANSPORT_H
 #define ICELOCALTRANSPORT_H
 
-#include <QObject>
-#include <QByteArray>
 #include "icetransport.h"
+
+#include <QByteArray>
+#include <QEnableSharedFromThis>
+#include <QObject>
 
 class QHostAddress;
 class QUdpSocket;
 
 namespace QCA {
-    class SecureArray;
+class SecureArray;
 }
 
 namespace XMPP {
-
 // this class manages a single port on a single interface, including the
 //   relationship with an associated STUN/TURN server.  if TURN is used, this
 //   class offers two paths (0=direct and 1=relayed), otherwise it offers
 //   just one path (0=direct)
-class IceLocalTransport : public IceTransport
-{
+class IceLocalTransport : public IceTransport, public QEnableSharedFromThis<IceLocalTransport> {
     Q_OBJECT
 
 public:
-    enum Error
-    {
-        ErrorBind = ErrorCustom
-    };
+    enum Error { ErrorBind = ErrorCustom, ErrorStun, ErrorTurn };
 
-    IceLocalTransport(QObject *parent = 0);
+    IceLocalTransport(QObject *parent = nullptr);
     ~IceLocalTransport();
 
     void setClientSoftwareNameAndVersion(const QString &str);
@@ -59,28 +56,31 @@ public:
     //   retries
     void start(const QHostAddress &addr);
 
-    void setStunBindService(const QHostAddress &addr, int port);
-    void setStunRelayService(const QHostAddress &addr, int port, const QString &user, const QCA::SecureArray &pass);
+    void setStunBindService(const TransportAddress &addr);
+    void setStunRelayService(const TransportAddress &addr, const QString &user, const QCA::SecureArray &pass);
+
+    const TransportAddress &stunBindServiceAddress() const;
+    const TransportAddress &stunRelayServiceAddress() const;
 
     // obtain relay / reflexive
     void stunStart();
 
-    QHostAddress localAddress() const;
-    int localPort() const;
+    const TransportAddress &localAddress() const;
+    const TransportAddress &serverReflexiveAddress() const;
+    QHostAddress            reflexiveAddressSource() const; // address of stun/turn server provided the srflx
+    const TransportAddress &relayedAddress() const;
 
-    QHostAddress serverReflexiveAddress() const;
-    int serverReflexivePort() const;
-
-    QHostAddress relayedAddress() const;
-    int relayedPort() const;
+    bool isStunAlive() const;
+    bool isTurnAlive() const;
 
     // reimplemented
-    virtual void stop();
-    virtual bool hasPendingDatagrams(int path) const;
-    virtual QByteArray readDatagram(int path, QHostAddress *addr, int *port);
-    virtual void writeDatagram(int path, const QByteArray &buf, const QHostAddress &addr, int port);
-    virtual void addChannelPeer(const QHostAddress &addr, int port);
-    virtual void setDebugLevel(DebugLevel level);
+    void       stop() override;
+    bool       hasPendingDatagrams(int path) const override;
+    QByteArray readDatagram(int path, TransportAddress &addr) override;
+    void       writeDatagram(int path, const QByteArray &buf, const TransportAddress &addr) override;
+    void       addChannelPeer(const TransportAddress &addr) override;
+    void       setDebugLevel(DebugLevel level) override;
+    void       changeThread(QThread *thread) override;
 
 signals:
     // may be emitted multiple times.
@@ -95,7 +95,6 @@ private:
     friend class Private;
     Private *d;
 };
+} // namespace XMPP
 
-}
-
-#endif
+#endif // ICELOCALTRANSPORT_H

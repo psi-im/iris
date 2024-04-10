@@ -19,28 +19,26 @@
 #ifndef XMPP_RESOURCE_H
 #define XMPP_RESOURCE_H
 
-#include <QString>
-
 #include "xmpp_status.h"
 
-namespace XMPP
-{
-    class Resource
-    {
-    public:
-        Resource(const QString &name="", const Status &s=Status());
+#include <QString>
 
-        const QString & name() const;
-        int priority() const;
-        const Status & status() const;
+namespace XMPP {
+class Resource {
+public:
+    Resource(const QString &name = "", const Status &s = Status());
 
-        void setName(const QString &);
-        void setStatus(const Status &);
+    const QString &name() const;
+    int            priority() const;
+    const Status  &status() const;
 
-    private:
-        QString v_name;
-        Status v_status;
-    };
-}
+    void setName(const QString &);
+    void setStatus(const Status &);
 
-#endif
+private:
+    QString v_name;
+    Status  v_status;
+};
+} // namespace XMPP
+
+#endif // XMPP_RESOURCE_H

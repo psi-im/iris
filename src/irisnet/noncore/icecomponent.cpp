@@ -18,16 +18,21 @@
 
 #include "icecomponent.h"
 
-#include <stdlib.h>
-#include <QUdpSocket>
-#include <QtCrypto>
-#include "objectsession.h"
-#include "udpportreserver.h"
+#include "iceagent.h"
 #include "icelocaltransport.h"
 #include "iceturntransport.h"
+#include "objectsession.h"
+#include "udpportreserver.h"
+
+#include <QTimer>
+#include <QUdpSocket>
+#include <QUuid>
+#include <QtCrypto>
+#include <stdlib.h>
+
+template <class T> constexpr std::add_const_t<T> &as_const(T &t) noexcept { return t; }
 
 namespace XMPP {
-
 static int calc_priority(int typePref, int localPref, int componentId)
 {
     Q_ASSERT(typePref >= 0 && typePref <= 126);
@@ -40,307 +45,235 @@ static int calc_priority(int typePref, int localPref, int componentId)
     return priority;
 }
 
-class IceComponent::Private : public QObject
-{
+class IceComponent::Private : public QObject {
     Q_OBJECT
 
 public:
-    class Config
-    {
+    class Config {
     public:
         QList<Ice176::LocalAddress> localAddrs;
+
+        // for example manually provided external address mapped to every local
         QList<Ice176::ExternalAddress> extAddrs;
 
-        QHostAddress stunBindAddr;
-        int stunBindPort;
+        TransportAddress stunBindAddr;
 
-        QHostAddress stunRelayUdpAddr;
-        int stunRelayUdpPort;
-        QString stunRelayUdpUser;
+        TransportAddress stunRelayUdpAddr;
+        QString          stunRelayUdpUser;
         QCA::SecureArray stunRelayUdpPass;
 
-        QHostAddress stunRelayTcpAddr;
-        int stunRelayTcpPort;
-        QString stunRelayTcpUser;
+        TransportAddress stunRelayTcpAddr;
+        QString          stunRelayTcpUser;
         QCA::SecureArray stunRelayTcpPass;
     };
 
-    class LocalTransport
-    {
+    class LocalTransport {
     public:
-        QUdpSocket *qsock;
-        bool borrowedSocket;
-        QHostAddress addr;
-        IceLocalTransport *sock;
-        int network;
-        bool isVpn;
-        bool started;
-        bool stun_started;
-        bool stun_finished, turn_finished;
-        QHostAddress extAddr;
-        bool ext_finished;
+        QUdpSocket                       *qsock;
+        QHostAddress                      addr;
+        QSharedPointer<IceLocalTransport> sock;
+        int                               network;
+        bool                              isVpn;
+        bool                              started;
+        bool                              stun_started;
+        bool                              stun_finished, turn_finished; // candidates emitted
+        QHostAddress                      extAddr;
+        bool                              ext_finished;
+        bool                              borrowed = false;
 
         LocalTransport() :
-            qsock(0),
-            borrowedSocket(false),
-            sock(0),
-            network(-1),
-            isVpn(false),
-            started(false),
-            stun_started(false),
-            stun_finished(false),
-            turn_finished(false),
+            network(-1), isVpn(false), started(false), stun_started(false), stun_finished(false), turn_finished(false),
             ext_finished(false)
         {
         }
     };
 
-    IceComponent *q;
-    ObjectSession sess;
-    int id;
-    QString clientSoftware;
-    TurnClient::Proxy proxy;
-    UdpPortReserver *portReserver;
-    Config pending;
-    Config config;
-    bool stopping;
-    QList<LocalTransport*> localLeap;
-    QList<LocalTransport*> localStun;
-    IceTurnTransport *tt;
-    QList<Candidate> localCandidates;
-    QHash<int, QSet<TransportAddress> > channelPeers;
-    bool useLocal;
-    bool useStunBind;
-    bool useStunRelayUdp;
-    bool useStunRelayTcp;
-    bool local_finished;
-    int debugLevel;
+    IceComponent                      *q;
+    ObjectSession                      sess;
+    int                                id;
+    QString                            clientSoftware;
+    TurnClient::Proxy                  proxy;
+    UdpPortReserver                   *portReserver = nullptr;
+    Config                             pending;
+    Config                             config;
+    bool                               stopping = false;
+    QList<LocalTransport *>            udpTransports; // transport for local host-only candidates
+    QSharedPointer<IceTurnTransport>   tcpTurn;       // tcp relay candidate
+    QList<Candidate>                   localCandidates;
+    QHash<int, QSet<TransportAddress>> channelPeers;
+    bool                               useLocal        = true; // use local host candidates
+    bool                               useStunBind     = true;
+    bool                               useStunRelayUdp = true;
+    bool                               useStunRelayTcp = true;
+    bool                               localFinished   = false;
+    // bool                               stunFinished      = false;
+    bool gatheringComplete = false;
+    int  debugLevel        = DL_Packet;
 
-    Private(IceComponent *_q) :
-        QObject(_q),
-        q(_q),
-        sess(this),
-        portReserver(0),
-        stopping(false),
-        tt(0),
-        useLocal(true),
-        useStunBind(true),
-        useStunRelayUdp(true),
-        useStunRelayTcp(true),
-        local_finished(false),
-        debugLevel(DL_None)
+    Private(IceComponent *_q) : QObject(_q), q(_q), sess(this) { }
+
+    ~Private() { qDeleteAll(udpTransports); }
+
+    LocalTransport *createLocalTransport(QUdpSocket *socket, const Ice176::LocalAddress &la)
     {
+        auto lt   = new LocalTransport;
+        lt->qsock = socket;
+        lt->addr  = la.addr;
+        lt->sock  = QSharedPointer<IceLocalTransport>::create();
+        lt->sock->setDebugLevel(IceTransport::DebugLevel(debugLevel));
+        lt->network = la.network;
+        lt->isVpn   = la.isVpn;
+        connect(lt->sock.data(), &IceLocalTransport::started, this, &Private::lt_started);
+        connect(lt->sock.data(), &IceLocalTransport::stopped, this, [this, lt]() {
+            if (eraseLocalTransport(lt))
+                tryStopped();
+        });
+        connect(lt->sock.data(), &IceLocalTransport::addressesChanged, this, &Private::lt_addressesChanged);
+        connect(lt->sock.data(), &IceLocalTransport::error, this, [this, lt](int error) {
+            if (error == IceLocalTransport::ErrorStun) {
+                lt->stun_finished = true;
+                tryGatheringComplete();
+            } else if (error == IceLocalTransport::ErrorTurn) {
+                lt->turn_finished = true;
+                tryGatheringComplete();
+            } else if (eraseLocalTransport(lt))
+                tryGatheringComplete();
+        });
+        connect(lt->sock.data(), &IceLocalTransport::debugLine, this, &Private::lt_debugLine);
+        return lt;
     }
 
-    ~Private()
-    {
-        QList<QUdpSocket*> socketsToReturn;
-
-        for(int n = 0; n < localLeap.count(); ++n)
-        {
-            delete localLeap[n]->sock;
-
-            if(localLeap[n]->borrowedSocket)
-                socketsToReturn += localLeap[n]->qsock;
-            else
-                localLeap[n]->qsock->deleteLater();
-        }
-
-        if(!socketsToReturn.isEmpty())
-            portReserver->returnSockets(socketsToReturn);
-
-        qDeleteAll(localLeap);
-
-        for(int n = 0; n < localStun.count(); ++n)
-            delete localStun[n]->sock;
-
-        qDeleteAll(localStun);
-
-        delete tt;
-    }
-
-    void update(QList<QUdpSocket*> *socketList)
+    void update(QList<QUdpSocket *> *socketList)
     {
         Q_ASSERT(!stopping);
 
-        // for now, only allow setting localAddrs once
-        if(!pending.localAddrs.isEmpty() && config.localAddrs.isEmpty())
-        {
-            foreach(const Ice176::LocalAddress &la, pending.localAddrs)
-            {
-                // skip duplicate addrs
-                if(findLocalAddr(la.addr) != -1)
-                    continue;
-
-                if(!useLocal)
-                {
-                    // skip out, but log the address in
-                    //   case we need it for stun
-                    config.localAddrs += la;
-                    continue;
-                }
-
-                QUdpSocket *qsock = 0;
-                if(socketList)
-                    qsock = takeFromSocketList(socketList, la.addr, this);
-
-                bool borrowedSocket;
-                if(qsock)
-                {
-                    borrowedSocket = true;
-                }
-                else
-                {
-                    // otherwise, bind to random
-                    qsock = new QUdpSocket(this);
-                    if(!qsock->bind(la.addr, 0))
-                    {
-                        delete qsock;
-                        emit q->debugLine("Warning: unable to bind to random port.");
-                        continue;
-                    }
-
-                    borrowedSocket = false;
-                }
-
-                int port = qsock->localPort();
-
-                config.localAddrs += la;
-
-                LocalTransport *lt = new LocalTransport;
-                lt->addr = la.addr;
-                lt->qsock = qsock;
-                lt->borrowedSocket = borrowedSocket;
-                lt->sock = new IceLocalTransport(this);
-                lt->sock->setDebugLevel((IceTransport::DebugLevel)debugLevel);
-                lt->network = la.network;
-                lt->isVpn = la.isVpn;
-                connect(lt->sock, SIGNAL(started()), SLOT(lt_started()));
-                connect(lt->sock, SIGNAL(stopped()), SLOT(lt_stopped()));
-                connect(lt->sock, SIGNAL(addressesChanged()), SLOT(lt_addressesChanged()));
-                connect(lt->sock, SIGNAL(error(int)), SLOT(lt_error(int)));
-                connect(lt->sock, SIGNAL(debugLine(QString)), SLOT(lt_debugLine(QString)));
-                localLeap += lt;
-
-                lt->sock->start(qsock);
-                emit q->debugLine(QString("starting transport ") + la.addr.toString() + ';' + QString::number(port) + " for component " + QString::number(id));
-            }
-        }
-
-        // extAddrs created on demand if present, but only once
-        if(!pending.extAddrs.isEmpty() && config.extAddrs.isEmpty())
-        {
-            config.extAddrs = pending.extAddrs;
-
-            bool need_doExt = false;
-
-            foreach(LocalTransport *lt, localLeap)
-            {
-                // already assigned an ext address?  skip
-                if(!lt->extAddr.isNull())
-                    continue;
-
-                QHostAddress laddr = lt->sock->localAddress();
-                int lport = lt->sock->localPort();
-
-                int at = -1;
-                for(int n = 0; n < config.extAddrs.count(); ++n)
-                {
-                    const Ice176::ExternalAddress &ea = config.extAddrs[n];
-                    if(laddr.protocol() != QAbstractSocket::IPv6Protocol && ea.base.addr == laddr && (ea.portBase == -1 || ea.portBase == lport))
-                    {
-                        at = n;
-                        break;
-                    }
-                }
-
-                if(at != -1)
-                {
-                    lt->extAddr = config.extAddrs[at].addr;
-                    if(lt->started)
-                        need_doExt = true;
-                }
-            }
-
-            if(need_doExt)
-                sess.defer(this, "doExt");
-        }
-
         // only allow setting stun stuff once
-        if(!pending.stunBindAddr.isNull() && config.stunBindAddr.isNull())
-        {
-            config.stunBindAddr = pending.stunBindAddr;
-            config.stunBindPort = pending.stunBindPort;
+        if ((pending.stunBindAddr.isValid() && !config.stunBindAddr.isValid())
+            || (pending.stunRelayUdpAddr.isValid() && !config.stunRelayUdpAddr.isValid())
+            || (pending.stunRelayTcpAddr.isValid() && !config.stunRelayTcpAddr.isValid())) {
+            config.stunBindAddr     = pending.stunBindAddr;
             config.stunRelayUdpAddr = pending.stunRelayUdpAddr;
-            config.stunRelayUdpPort = pending.stunRelayUdpPort;
             config.stunRelayUdpUser = pending.stunRelayUdpUser;
             config.stunRelayUdpPass = pending.stunRelayUdpPass;
             config.stunRelayTcpAddr = pending.stunRelayTcpAddr;
-            config.stunRelayTcpPort = pending.stunRelayTcpPort;
             config.stunRelayTcpUser = pending.stunRelayTcpUser;
             config.stunRelayTcpPass = pending.stunRelayTcpPass;
         }
 
-        // localStun sockets created on demand if stun settings are
-        //   present, but only once (cannot be changed, for now)
-        if(((useStunBind && !config.stunBindAddr.isNull()) || (useStunRelayUdp && !config.stunRelayUdpAddr.isNull() && !config.stunRelayUdpUser.isEmpty())) && !config.localAddrs.isEmpty() && localStun.isEmpty())
-        {
-            foreach(const Ice176::LocalAddress &la, config.localAddrs)
-            {
-                // don't setup stun ports for ipv6
-                if(la.addr.protocol() == QAbstractSocket::IPv6Protocol)
+        // for now, only allow setting localAddrs once
+        if (!pending.localAddrs.isEmpty() && config.localAddrs.isEmpty()) {
+            for (const Ice176::LocalAddress &la : as_const(pending.localAddrs)) {
+                // skip duplicate addrs
+                if (findLocalAddr(la.addr) != -1)
                     continue;
 
-                LocalTransport *lt = new LocalTransport;
-                lt->addr = la.addr;
-                lt->sock = new IceLocalTransport(this);
-                lt->sock->setDebugLevel((IceTransport::DebugLevel)debugLevel);
-                lt->network = la.network;
-                lt->isVpn = la.isVpn;
-                connect(lt->sock, SIGNAL(started()), SLOT(lt_started()));
-                connect(lt->sock, SIGNAL(stopped()), SLOT(lt_stopped()));
-                connect(lt->sock, SIGNAL(addressesChanged()), SLOT(lt_addressesChanged()));
-                connect(lt->sock, SIGNAL(error(int)), SLOT(lt_error(int)));
-                connect(lt->sock, SIGNAL(debugLine(QString)), SLOT(lt_debugLine(QString)));
-                localStun += lt;
+                QUdpSocket *qsock = nullptr;
+                if (useLocal && socketList) {
+                    qsock = takeFromSocketList(socketList, la.addr, this);
+                }
+                bool borrowedSocket = qsock != nullptr;
+                if (!qsock) {
+                    // otherwise, bind to random
+                    qsock = new QUdpSocket(this);
+                    if (!qsock->bind(la.addr, 0)) {
+                        delete qsock;
+                        emit q->debugLine("Warning: unable to bind to random port.");
+                        continue;
+                    }
+                }
 
-                lt->sock->setClientSoftwareNameAndVersion(clientSoftware);
-                lt->sock->start(la.addr);
-                emit q->debugLine(QString("starting transport ") + la.addr.toString() + ";(dyn)" + " for component " + QString::number(id));
+                config.localAddrs += la;
+                auto lt      = createLocalTransport(qsock, la);
+                lt->borrowed = borrowedSocket;
+                udpTransports += lt;
+
+                if (lt->addr.protocol() != QAbstractSocket::IPv6Protocol) {
+                    lt->sock->setClientSoftwareNameAndVersion(clientSoftware);
+                    if (useStunBind && config.stunBindAddr.isValid()) {
+                        lt->sock->setStunBindService(config.stunBindAddr);
+                    }
+                    if (useStunRelayUdp && config.stunRelayUdpAddr.isValid() && !config.stunRelayUdpUser.isEmpty()) {
+                        lt->sock->setStunRelayService(config.stunRelayUdpAddr, config.stunRelayUdpUser,
+                                                      config.stunRelayUdpPass);
+                    }
+                }
+
+                int port = qsock->localPort();
+                lt->sock->start(qsock);
+                emit q->debugLine(QString("starting transport ") + la.addr.toString() + ';' + QString::number(port)
+                                  + " for component " + QString::number(id));
             }
         }
 
-        if((!config.stunBindAddr.isNull() || !config.stunRelayUdpAddr.isNull()) && !localStun.isEmpty())
-        {
-            for(int n = 0; n < localStun.count(); ++n)
-            {
-                if(localStun[n]->started && !localStun[n]->stun_started)
-                    tryStun(n);
+        // extAddrs created on demand if present, but only once
+        if (!pending.extAddrs.isEmpty() && config.extAddrs.isEmpty()) {
+            config.extAddrs = pending.extAddrs;
+
+            bool need_doExt = false;
+
+            for (auto lt : as_const(udpTransports)) {
+                // already assigned an ext address?  skip
+                if (!lt->extAddr.isNull())
+                    continue;
+
+                auto laddr = lt->sock->localAddress();
+                if (laddr.addr.protocol() == QAbstractSocket::IPv6Protocol)
+                    continue;
+
+                // find external address by address of local socket (external has to be configured that way)
+                auto eaIt = std::find_if(config.extAddrs.constBegin(), config.extAddrs.constEnd(), [&](auto const &ea) {
+                    return ea.base.addr == laddr.addr && (ea.portBase == -1 || ea.portBase == laddr.port);
+                });
+
+                if (eaIt != config.extAddrs.constEnd()) {
+                    lt->extAddr = eaIt->addr;
+                    if (lt->started)
+                        need_doExt = true;
+                }
             }
+
+            if (need_doExt)
+                QTimer::singleShot(0, this, [this]() {
+                    if (stopping)
+                        return;
+
+                    ObjectSessionWatcher watch(&sess);
+
+                    for (auto lt : as_const(udpTransports)) {
+                        if (lt->started) {
+                            int addrAt = findLocalAddr(lt->addr);
+                            Q_ASSERT(addrAt != -1);
+
+                            ensureExt(lt, addrAt); // will emit candidateAdded if everything goes well
+                            if (!watch.isValid())
+                                return;
+                        }
+                    }
+                });
         }
 
-        if(useStunRelayTcp && !config.stunRelayTcpAddr.isNull() && !config.stunRelayTcpUser.isEmpty() && !tt)
-        {
-            tt = new IceTurnTransport(this);
-            tt->setDebugLevel((IceTransport::DebugLevel)debugLevel);
-            connect(tt, SIGNAL(started()), SLOT(tt_started()));
-            connect(tt, SIGNAL(stopped()), SLOT(tt_stopped()));
-            connect(tt, SIGNAL(error(int)), SLOT(tt_error(int)));
-            connect(tt, SIGNAL(debugLine(QString)), SLOT(tt_debugLine(QString)));
-            tt->setClientSoftwareNameAndVersion(clientSoftware);
-            tt->setProxy(proxy);
-            tt->setUsername(config.stunRelayTcpUser);
-            tt->setPassword(config.stunRelayTcpPass);
-            tt->start(config.stunRelayTcpAddr, config.stunRelayTcpPort);
+        if (useStunRelayTcp && config.stunRelayTcpAddr.isValid() && !config.stunRelayTcpUser.isEmpty() && !tcpTurn) {
+            tcpTurn = QSharedPointer<IceTurnTransport>::create();
+            tcpTurn->setDebugLevel(IceTransport::DebugLevel(debugLevel));
+            connect(tcpTurn.data(), &IceTurnTransport::started, this, &Private::tt_started);
+            connect(tcpTurn.data(), &IceTurnTransport::stopped, this, &Private::tt_stopped);
+            connect(tcpTurn.data(), &IceTurnTransport::error, this, &Private::tt_error);
+            connect(tcpTurn.data(), &IceTurnTransport::debugLine, this, &Private::tt_debugLine);
+            tcpTurn->setClientSoftwareNameAndVersion(clientSoftware);
+            tcpTurn->setProxy(proxy);
+            tcpTurn->setUsername(config.stunRelayTcpUser);
+            tcpTurn->setPassword(config.stunRelayTcpPass);
+            tcpTurn->start(config.stunRelayTcpAddr);
 
-            emit q->debugLine(QString("starting TURN transport with server ") + config.stunRelayTcpAddr.toString() + ';' + QString::number(config.stunRelayTcpPort) + " for component " + QString::number(id));
+            emit q->debugLine(QLatin1String("starting TURN transport with server ") + config.stunRelayTcpAddr
+                              + " for component " + QString::number(id));
         }
 
-        if(localLeap.isEmpty() && localStun.isEmpty() && !local_finished)
-        {
-            local_finished = true;
+        if (udpTransports.isEmpty() && !localFinished) {
+            localFinished = true;
             sess.defer(q, "localFinished");
         }
+        sess.defer(this, "tryGatheringComplete");
     }
 
     void stop()
@@ -350,54 +283,44 @@ public:
         stopping = true;
 
         // nothing to stop?
-        if(allStopped())
-        {
+        if (allStopped()) {
             sess.defer(this, "postStop");
             return;
         }
 
-        foreach(LocalTransport *lt, localLeap)
+        for (LocalTransport *lt : as_const(udpTransports))
             lt->sock->stop();
 
-        foreach(LocalTransport *lt, localStun)
-            lt->sock->stop();
-
-        if(tt)
-            tt->stop();
+        if (tcpTurn)
+            tcpTurn->stop();
     }
 
-    int peerReflexivePriority(const IceTransport *iceTransport, int path) const
+    int peerReflexivePriority(QSharedPointer<IceTransport> iceTransport, int path) const
     {
-        int addrAt = -1;
-        const IceLocalTransport *lt = qobject_cast<const IceLocalTransport*>(iceTransport);
-        if(lt)
-        {
-            bool isLocalLeap = false;
-            addrAt = findLocalTransport(lt, &isLocalLeap);
-            if(addrAt != -1 && path == 1)
-            {
+        int                      addrAt = -1;
+        const IceLocalTransport *lt     = qobject_cast<const IceLocalTransport *>(iceTransport.data());
+        if (lt) {
+            auto it = std::find_if(udpTransports.begin(), udpTransports.end(),
+                                   [&](auto const &a) { return a->sock == lt; });
+            Q_ASSERT(it != udpTransports.end());
+            addrAt = int(std::distance(udpTransports.begin(), it));
+            if (path == 1) {
                 // lower priority, but not as far as IceTurnTransport
                 addrAt += 512;
             }
-        }
-        else if(qobject_cast<const IceTurnTransport*>(iceTransport) == tt)
-        {
+        } else if (qobject_cast<const IceTurnTransport *>(iceTransport) == tcpTurn) {
             // lower priority by making it seem like the last nic
             addrAt = 1024;
         }
 
-        Q_ASSERT(addrAt != -1);
-
         return choose_default_priority(PeerReflexiveType, 65535 - addrAt, false, id);
     }
 
-    void flagPathAsLowOverhead(int id, const QHostAddress &addr, int port)
+    void flagPathAsLowOverhead(int id, const TransportAddress &addr)
     {
         int at = -1;
-        for(int n = 0; n < localCandidates.count(); ++n)
-        {
-            if(localCandidates[n].id == id)
-            {
+        for (int n = 0; n < localCandidates.count(); ++n) {
+            if (localCandidates[n].id == id) {
                 at = n;
                 break;
             }
@@ -410,13 +333,41 @@ public:
 
         Candidate &c = localCandidates[at];
 
-        TransportAddress ta(addr, port);
         QSet<TransportAddress> &addrs = channelPeers[c.id];
-        if(!addrs.contains(ta))
-        {
-            addrs += ta;
-            c.iceTransport->addChannelPeer(ta.addr, ta.port);
+        if (!addrs.contains(addr)) {
+            addrs += addr;
+            c.iceTransport->addChannelPeer(addr);
         }
+    }
+
+    void addLocalPeerReflexiveCandidate(const TransportAddress &addr, IceComponent::CandidateInfo::Ptr base,
+                                        quint32 priority)
+    {
+        auto ci  = IceComponent::CandidateInfo::Ptr::create();
+        ci->addr = addr;
+        ci->addr.addr.setScopeId(QString());
+        ci->related     = base->addr;
+        ci->base        = base->addr;
+        ci->type        = IceComponent::PeerReflexiveType;
+        ci->priority    = priority;
+        ci->foundation  = IceAgent::instance()->foundation(IceComponent::PeerReflexiveType, ci->base.addr);
+        ci->componentId = base->componentId;
+        ci->network     = base->network;
+
+        auto baseCand = std::find_if(localCandidates.begin(), localCandidates.end(), [&](auto const &c) {
+            return c.info->base == base->base && c.info->type == HostType;
+        });
+        Q_ASSERT(baseCand != localCandidates.end());
+
+        Candidate c;
+        c.id           = getId();
+        c.info         = ci;
+        c.iceTransport = baseCand->iceTransport;
+        c.path         = 0;
+
+        localCandidates += c;
+
+        emit q->candidateAdded(c);
     }
 
 private:
@@ -427,16 +378,14 @@ private:
     static int choose_default_priority(CandidateType type, int localPref, bool isVpn, int componentId)
     {
         int typePref;
-        if(type == HostType)
-        {
-            if(isVpn)
+        if (type == HostType) {
+            if (isVpn)
                 typePref = 0;
             else
                 typePref = 126;
-        }
-        else if(type == PeerReflexiveType)
+        } else if (type == PeerReflexiveType)
             typePref = 110;
-        else if(type == ServerReflexiveType)
+        else if (type == ServerReflexiveType)
             typePref = 100;
         else // RelayedType
             typePref = 0;
@@ -444,180 +393,156 @@ private:
         return calc_priority(typePref, localPref, componentId);
     }
 
-    static QUdpSocket *takeFromSocketList(QList<QUdpSocket*> *socketList, const QHostAddress &addr, QObject *parent = 0)
+    static QUdpSocket *takeFromSocketList(QList<QUdpSocket *> *socketList, const QHostAddress &addr,
+                                          QObject *parent = nullptr)
     {
-        for(int n = 0; n < socketList->count(); ++n)
-        {
-            if((*socketList)[n]->localAddress() == addr)
-            {
+        for (int n = 0; n < socketList->count(); ++n) {
+            if ((*socketList)[n]->localAddress() == addr) {
                 QUdpSocket *sock = socketList->takeAt(n);
                 sock->setParent(parent);
                 return sock;
             }
         }
 
-        return 0;
+        return nullptr;
     }
 
     int getId() const
     {
-        for(int n = 0;; ++n)
-        {
+        for (int n = 0;; ++n) {
             bool found = false;
-            foreach(const Candidate &c, localCandidates)
-            {
-                if(c.id == n)
-                {
+            for (const Candidate &c : localCandidates) {
+                if (c.id == n) {
                     found = true;
                     break;
                 }
             }
 
-            if(!found)
+            if (!found)
                 return n;
         }
     }
 
     int findLocalAddr(const QHostAddress &addr)
     {
-        for(int n = 0; n < config.localAddrs.count(); ++n)
-        {
-            if(config.localAddrs[n].addr == addr)
+        for (int n = 0; n < config.localAddrs.count(); ++n) {
+            if (config.localAddrs[n].addr == addr)
                 return n;
         }
 
         return -1;
-    }
-
-    int findLocalTransport(const IceLocalTransport *sock, bool *isLocalLeap) const
-    {
-        for(int n = 0; n < localLeap.count(); ++n)
-        {
-            if(localLeap[n]->sock == sock)
-            {
-                *isLocalLeap = true;
-                return n;
-            }
-        }
-
-        for(int n = 0; n < localStun.count(); ++n)
-        {
-            if(localStun[n]->sock == sock)
-            {
-                *isLocalLeap = false;
-                return n;
-            }
-        }
-
-        return -1;
-    }
-
-    void tryStun(int at)
-    {
-        LocalTransport *lt = localStun[at];
-
-        bool atLeastOne = false;
-        if(useStunBind && !config.stunBindAddr.isNull())
-        {
-            atLeastOne = true;
-            lt->sock->setStunBindService(config.stunBindAddr, config.stunBindPort);
-        }
-        if(useStunRelayUdp && !config.stunRelayUdpAddr.isNull() && !config.stunRelayUdpUser.isEmpty())
-        {
-            atLeastOne = true;
-            lt->sock->setStunRelayService(config.stunRelayUdpAddr, config.stunRelayUdpPort, config.stunRelayUdpUser, config.stunRelayUdpPass);
-        }
-
-        Q_ASSERT(atLeastOne);
-        if(!atLeastOne)
-            abort();
-
-        lt->stun_started = true;
-        lt->sock->stunStart();
     }
 
     void ensureExt(LocalTransport *lt, int addrAt)
     {
-        if(!lt->extAddr.isNull() && !lt->ext_finished)
-        {
-            CandidateInfo ci;
-            ci.addr.addr = lt->extAddr;
-            ci.addr.port = lt->sock->localPort();
-            ci.type = ServerReflexiveType;
-            ci.componentId = id;
-            ci.priority = choose_default_priority(ci.type, 65535 - addrAt, lt->isVpn, ci.componentId);
-            ci.base.addr = lt->sock->localAddress();
-            ci.base.port = lt->sock->localPort();
-            ci.network = lt->network;
+        if (!lt->extAddr.isNull() && !lt->ext_finished) {
+            auto ci         = CandidateInfo::Ptr::create();
+            ci->addr.addr   = lt->extAddr;
+            ci->addr.port   = lt->sock->localAddress().port;
+            ci->type        = ServerReflexiveType;
+            ci->componentId = id;
+            ci->priority    = choose_default_priority(ci->type, 65535 - addrAt, lt->isVpn, ci->componentId);
+            ci->base        = lt->sock->localAddress();
+            ci->related     = ci->base;
+            ci->network     = lt->network;
+            ci->foundation  = IceAgent::instance()->foundation(ServerReflexiveType, ci->base.addr);
 
             Candidate c;
-            c.id = getId();
-            c.info = ci;
+            c.id           = getId();
+            c.info         = ci;
             c.iceTransport = lt->sock;
-            c.path = 0;
+            c.path         = 0;
 
-            localCandidates += c;
             lt->ext_finished = true;
 
-            emit q->candidateAdded(c);
+            storeLocalNotReduntantCandidate(c);
         }
     }
 
-    void removeLocalCandidates(const IceTransport *sock)
+    void removeLocalCandidates(const QSharedPointer<IceTransport> sock)
     {
         ObjectSessionWatcher watch(&sess);
 
-        for(int n = 0; n < localCandidates.count(); ++n)
-        {
+        for (int n = 0; n < localCandidates.count(); ++n) {
             Candidate &c = localCandidates[n];
 
-            if(c.iceTransport == sock)
-            {
+            if (c.iceTransport == sock) {
                 Candidate tmp = localCandidates.takeAt(n);
                 --n; // adjust position
 
                 channelPeers.remove(tmp.id);
 
                 emit q->candidateRemoved(tmp);
-                if(!watch.isValid())
+                if (!watch.isValid())
                     return;
             }
         }
     }
 
-    bool allStopped() const
+    void storeLocalNotReduntantCandidate(const Candidate &c)
     {
-        if(localLeap.isEmpty() && localStun.isEmpty() && !tt)
-            return true;
-        else
-            return false;
+        ObjectSessionWatcher watch(&sess);
+        // RFC8445 5.1.3.  Eliminating Redundant Candidates
+        auto it = std::find_if(localCandidates.begin(), localCandidates.end(), [&](const Candidate &cc) {
+            return cc.info->addr == c.info->addr && cc.info->base == c.info->base
+                && cc.info->priority >= c.info->priority;
+        });
+        if (it == localCandidates.end()) { // not reduntant
+            localCandidates += c;
+            emit q->candidateAdded(c);
+        }
     }
+
+    bool allStopped() const { return udpTransports.isEmpty() && !tcpTurn; }
 
     void tryStopped()
     {
-        if(allStopped())
+        if (allStopped())
             postStop();
     }
 
-private slots:
-    void doExt()
+    // return true if component is still alive after transport removal
+    bool eraseLocalTransport(LocalTransport *lt)
     {
-        if(stopping)
-            return;
-
         ObjectSessionWatcher watch(&sess);
 
-        foreach(LocalTransport *lt, localLeap)
-        {
-            if(lt->started)
-            {
-                int addrAt = findLocalAddr(lt->addr);
-                Q_ASSERT(addrAt != -1);
+        emit q->debugLine(QLatin1String("Stopping local transport: ") + lt->sock->localAddress());
+        removeLocalCandidates(lt->sock);
+        if (!watch.isValid())
+            return false;
 
-                ensureExt(lt, addrAt);
-                if(!watch.isValid())
-                    return;
+        lt->sock->disconnect(this);
+        if (lt->borrowed) {
+            lt->qsock->disconnect(this);
+            portReserver->returnSockets({ lt->qsock });
+        }
+        delete lt;
+        udpTransports.removeOne(lt);
+        return true;
+    }
+
+private slots:
+    void tryGatheringComplete()
+    {
+        if (gatheringComplete || (tcpTurn && !tcpTurn->isStarted()))
+            return;
+
+        auto checkFinished = [&](const LocalTransport *lt) {
+            return lt->started && (!lt->sock->stunBindServiceAddress().isValid() || lt->stun_finished)
+                && (!lt->sock->stunRelayServiceAddress().isValid() || lt->turn_finished);
+        };
+
+        bool allFinished = true;
+        for (const LocalTransport *lt : as_const(udpTransports)) {
+            if (!checkFinished(lt)) {
+                allFinished = false;
+                break;
             }
+        }
+
+        if (allFinished) {
+            gatheringComplete = true;
+            emit q->gatheringComplete();
         }
     }
 
@@ -631,15 +556,11 @@ private slots:
     void lt_started()
     {
         IceLocalTransport *sock = static_cast<IceLocalTransport *>(sender());
-        bool isLocalLeap = false;
-        int at = findLocalTransport(sock, &isLocalLeap);
-        Q_ASSERT(at != -1);
 
-        LocalTransport *lt;
-        if(isLocalLeap)
-            lt = localLeap[at];
-        else
-            lt = localStun[at];
+        auto it
+            = std::find_if(udpTransports.begin(), udpTransports.end(), [&](auto const &a) { return a->sock == sock; });
+        Q_ASSERT(it != udpTransports.end());
+        LocalTransport *lt = *it;
 
         lt->started = true;
 
@@ -648,413 +569,303 @@ private slots:
 
         ObjectSessionWatcher watch(&sess);
 
-        if(useLocal && isLocalLeap)
-        {
-            CandidateInfo ci;
-            ci.addr.addr = lt->sock->localAddress();
-            ci.addr.port = lt->sock->localPort();
-            ci.type = HostType;
-            ci.componentId = id;
-            ci.priority = choose_default_priority(ci.type, 65535 - addrAt, lt->isVpn, ci.componentId);
-            ci.base = ci.addr;
-            ci.network = lt->network;
+        if (useLocal) {
+            auto ci         = CandidateInfo::Ptr::create();
+            ci->addr        = lt->sock->localAddress();
+            ci->type        = HostType;
+            ci->componentId = id;
+            ci->priority    = choose_default_priority(ci->type, 65535 - addrAt, lt->isVpn, ci->componentId);
+            ci->base        = ci->addr;
+            ci->network     = lt->network;
+            ci->foundation  = IceAgent::instance()->foundation(HostType, ci->base.addr);
 
             Candidate c;
-            c.id = getId();
-            c.info = ci;
-            c.iceTransport = sock;
-            c.path = 0;
+            c.id           = getId();
+            c.info         = ci;
+            c.iceTransport = sock->sharedFromThis();
+            c.path         = 0;
 
             localCandidates += c;
 
             emit q->candidateAdded(c);
-            if(!watch.isValid())
+            if (!watch.isValid())
                 return;
 
             ensureExt(lt, addrAt);
-            if(!watch.isValid())
+            if (!watch.isValid())
                 return;
         }
 
-        if(!isLocalLeap && !lt->stun_started)
-            tryStun(at);
-
-        bool allFinished = true;
-        foreach(const LocalTransport *lt, localLeap)
-        {
-            if(!lt->started)
-            {
-                allFinished = false;
-                break;
+        if (!lt->stun_started) {
+            lt->stun_started = true;
+            if (useStunBind
+                && (lt->sock->stunBindServiceAddress().isValid() || lt->sock->stunRelayServiceAddress().isValid())) {
+                lt->sock->stunStart();
+                if (!watch.isValid())
+                    return;
+            } else {
+                lt->stun_finished = true;
+                lt->turn_finished = true;
             }
         }
-        if(allFinished)
-        {
-            foreach(const LocalTransport *lt, localStun)
-            {
-                if(!lt->started)
-                {
-                    allFinished = false;
+
+        // check completeness of various stuff
+        if (!localFinished) {
+            bool allStarted = true;
+            for (const LocalTransport *lt : as_const(udpTransports)) {
+                if (!lt->started) {
+                    allStarted = false;
                     break;
                 }
             }
+            if (allStarted) {
+                localFinished = true;
+                emit q->localFinished();
+                if (!watch.isValid())
+                    return;
+            }
         }
 
-        if(allFinished && !local_finished)
-        {
-            local_finished = true;
-            emit q->localFinished();
-        }
-    }
-
-    void lt_stopped()
-    {
-        IceLocalTransport *sock = static_cast<IceLocalTransport *>(sender());
-        bool isLocalLeap = false;
-        int at = findLocalTransport(sock, &isLocalLeap);
-        Q_ASSERT(at != -1);
-
-        LocalTransport *lt;
-        if(isLocalLeap)
-            lt = localLeap[at];
-        else
-            lt = localStun[at];
-
-        ObjectSessionWatcher watch(&sess);
-
-        removeLocalCandidates(lt->sock);
-        if(!watch.isValid())
-            return;
-
-        delete lt->sock;
-        lt->sock = 0;
-
-        if(isLocalLeap)
-        {
-            if(lt->borrowedSocket)
-                portReserver->returnSockets(QList<QUdpSocket*>() << lt->qsock);
-            else
-                lt->qsock->deleteLater();
-
-            delete lt;
-            localLeap.removeAt(at);
-        }
-        else
-        {
-            delete lt;
-            localStun.removeAt(at);
-        }
-
-        tryStopped();
+        tryGatheringComplete();
     }
 
     void lt_addressesChanged()
     {
         IceLocalTransport *sock = static_cast<IceLocalTransport *>(sender());
-        bool isLocalLeap = false;
-        int at = findLocalTransport(sock, &isLocalLeap);
-        Q_ASSERT(at != -1);
+        auto               it
+            = std::find_if(udpTransports.begin(), udpTransports.end(), [&](auto const &a) { return a->sock == sock; });
 
-        // leap does not use stun, so we should not get this signal
-        Q_ASSERT(!isLocalLeap);
-
-        LocalTransport *lt = localStun[at];
+        Q_ASSERT(it != udpTransports.end());
+        LocalTransport *lt = *it;
 
         int addrAt = findLocalAddr(lt->addr);
         Q_ASSERT(addrAt != -1);
 
         ObjectSessionWatcher watch(&sess);
 
-        if(useStunBind && !lt->sock->serverReflexiveAddress().isNull() && !lt->stun_finished)
-        {
+        if (useStunBind && lt->sock->serverReflexiveAddress().isValid() && !lt->stun_finished) {
             // automatically assign ext to related leaps, if possible
-            foreach(LocalTransport *i, localLeap)
-            {
-                if(i->extAddr.isNull() && i->sock->localAddress() == lt->sock->localAddress())
-                {
-                    i->extAddr = lt->sock->serverReflexiveAddress();
-                    if(i->started)
-                    {
+            for (LocalTransport *i : as_const(udpTransports)) {
+                if (i->extAddr.isNull() && i->sock->localAddress() == lt->sock->localAddress()) {
+                    i->extAddr = lt->sock->serverReflexiveAddress().addr;
+                    if (i->started) {
                         ensureExt(i, addrAt);
-                        if(!watch.isValid())
+                        if (!watch.isValid())
                             return;
                     }
                 }
             }
 
-            CandidateInfo ci;
-            ci.addr.addr = lt->sock->serverReflexiveAddress();
-            ci.addr.port = lt->sock->serverReflexivePort();
-            ci.type = ServerReflexiveType;
-            ci.componentId = id;
-            ci.priority = choose_default_priority(ci.type, 65535 - addrAt, lt->isVpn, ci.componentId);
-            // stun is only used on non-leap sockets, but we don't
-            //   announce non-leap local candidates, so make the
-            //   base the same as the srflx
-            //ci.base.addr = lt->sock->localAddress();
-            //ci.base.port = lt->sock->localPort();
-            ci.base = ci.addr;
-            ci.network = lt->network;
+            auto ci         = CandidateInfo::Ptr::create();
+            ci->addr        = lt->sock->serverReflexiveAddress();
+            ci->base        = lt->sock->localAddress();
+            ci->related     = ci->base;
+            ci->type        = ServerReflexiveType;
+            ci->componentId = id;
+            ci->priority    = choose_default_priority(ci->type, 65535 - addrAt, lt->isVpn, ci->componentId);
+            ci->network     = lt->network;
+            ci->foundation  = IceAgent::instance()->foundation(
+                ServerReflexiveType, ci->base.addr, lt->sock->reflexiveAddressSource(), QAbstractSocket::UdpSocket);
 
             Candidate c;
-            c.id = getId();
-            c.info = ci;
-            c.iceTransport = sock;
-            c.path = 0;
+            c.id           = getId();
+            c.info         = ci;
+            c.iceTransport = sock->sharedFromThis();
+            c.path         = 0;
 
-            localCandidates += c;
             lt->stun_finished = true;
 
-            emit q->candidateAdded(c);
-            if(!watch.isValid())
-                return;
+            storeLocalNotReduntantCandidate(c);
+        } else if (useStunBind && !lt->sock->isStunAlive() && !lt->stun_finished) {
+            lt->stun_finished = true;
         }
 
-        if(!lt->sock->relayedAddress().isNull() && !lt->turn_finished)
-        {
-            CandidateInfo ci;
-            ci.addr.addr = lt->sock->relayedAddress();
-            ci.addr.port = lt->sock->relayedPort();
-            ci.type = RelayedType;
-            ci.componentId = id;
-            ci.priority = choose_default_priority(ci.type, 65535 - addrAt, lt->isVpn, ci.componentId);
-            ci.base.addr = lt->sock->serverReflexiveAddress();
-            ci.base.port = lt->sock->serverReflexivePort();
-            ci.network = lt->network;
+        if (lt->sock->relayedAddress().isValid() && !lt->turn_finished) {
+            auto ci         = CandidateInfo::Ptr::create();
+            ci->addr        = lt->sock->relayedAddress();
+            ci->base        = ci->addr;
+            ci->related     = lt->sock->serverReflexiveAddress();
+            ci->type        = RelayedType;
+            ci->componentId = id;
+            ci->priority    = choose_default_priority(ci->type, 65535 - addrAt, lt->isVpn, ci->componentId);
+            ci->network     = lt->network;
+            ci->foundation  = IceAgent::instance()->foundation(
+                RelayedType, ci->base.addr, lt->sock->stunRelayServiceAddress().addr, QAbstractSocket::UdpSocket);
 
             Candidate c;
-            c.id = getId();
-            c.info = ci;
-            c.iceTransport = sock;
-            c.path = 1;
+            c.id           = getId();
+            c.info         = ci;
+            c.iceTransport = sock->sharedFromThis();
+            c.path         = 1;
 
-            localCandidates += c;
             lt->turn_finished = true;
 
-            emit q->candidateAdded(c);
+            storeLocalNotReduntantCandidate(c);
+        } else if (!lt->sock->isTurnAlive() && !lt->turn_finished) {
+            lt->turn_finished = true;
         }
-    }
-
-    void lt_error(int e)
-    {
-        Q_UNUSED(e);
-
-        IceLocalTransport *sock = static_cast<IceLocalTransport *>(sender());
-        bool isLocalLeap = false;
-        int at = findLocalTransport(sock, &isLocalLeap);
-        Q_ASSERT(at != -1);
-
-        LocalTransport *lt;
-        if(isLocalLeap)
-            lt = localLeap[at];
-        else
-            lt = localStun[at];
-
-        ObjectSessionWatcher watch(&sess);
-
-        removeLocalCandidates(lt->sock);
-        if(!watch.isValid())
+        if (!watch.isValid())
             return;
 
-        delete lt->sock;
-        lt->sock = 0;
-
-        if(isLocalLeap)
-        {
-            if(lt->borrowedSocket)
-                portReserver->returnSockets(QList<QUdpSocket*>() << lt->qsock);
-            else
-                lt->qsock->deleteLater();
-
-            delete lt;
-            localLeap.removeAt(at);
-        }
-        else
-        {
-            delete lt;
-            localStun.removeAt(at);
-        }
+        tryGatheringComplete();
     }
 
-    void lt_debugLine(const QString &line)
-    {
-        emit q->debugLine(line);
-    }
+    void lt_debugLine(const QString &line) { emit q->debugLine(line); }
 
     void tt_started()
     {
         // lower priority by making it seem like the last nic
         int addrAt = 1024;
 
-        CandidateInfo ci;
-        ci.addr.addr = tt->relayedAddress();
-        ci.addr.port = tt->relayedPort();
-        ci.type = RelayedType;
-        ci.componentId = id;
-        ci.priority = choose_default_priority(ci.type, 65535 - addrAt, false, ci.componentId);
-        ci.base = ci.addr;
-        ci.network = 0; // not relevant
+        auto ci         = CandidateInfo::Ptr::create();
+        ci->addr        = tcpTurn->relayedAddress();
+        ci->related     = tcpTurn->reflexiveAddress();
+        ci->type        = RelayedType;
+        ci->componentId = id;
+        ci->priority    = choose_default_priority(ci->type, 65535 - addrAt, false, ci->componentId);
+        ci->base        = ci->addr;
+        ci->network     = 0; // not relevant
+        ci->foundation  = IceAgent::instance()->foundation(RelayedType, ci->base.addr, config.stunRelayTcpAddr.addr,
+                                                           QAbstractSocket::TcpSocket);
 
         Candidate c;
-        c.id = getId();
-        c.info = ci;
-        c.iceTransport = tt;
-        c.path = 0;
+        c.id           = getId();
+        c.info         = ci;
+        c.iceTransport = tcpTurn->sharedFromThis();
+        c.path         = 0;
 
         localCandidates += c;
 
         emit q->candidateAdded(c);
+
+        tryGatheringComplete();
     }
 
     void tt_stopped()
     {
         ObjectSessionWatcher watch(&sess);
 
-        removeLocalCandidates(tt);
-        if(!watch.isValid())
+        removeLocalCandidates(tcpTurn->sharedFromThis());
+        if (!watch.isValid())
             return;
 
-        delete tt;
-        tt = 0;
+        tcpTurn->disconnect(this);
+        tcpTurn.reset();
 
         tryStopped();
     }
 
     void tt_error(int e)
     {
-        Q_UNUSED(e);
+        Q_UNUSED(e)
 
         ObjectSessionWatcher watch(&sess);
 
-        removeLocalCandidates(tt);
-        if(!watch.isValid())
+        removeLocalCandidates(tcpTurn);
+        if (!watch.isValid())
             return;
 
-        delete tt;
-        tt = 0;
+        tcpTurn->disconnect(this);
+        tcpTurn.reset();
+        tryGatheringComplete();
     }
 
-    void tt_debugLine(const QString &line)
-    {
-        emit q->debugLine(line);
-    }
+    void tt_debugLine(const QString &line) { emit q->debugLine(line); }
 };
 
-IceComponent::IceComponent(int id, QObject *parent) :
-    QObject(parent)
+IceComponent::IceComponent(int id, QObject *parent) : QObject(parent)
 {
-    d = new Private(this);
+    d     = new Private(this);
     d->id = id;
 }
 
-IceComponent::~IceComponent()
-{
-    delete d;
-}
+IceComponent::~IceComponent() { delete d; }
 
-int IceComponent::id() const
-{
-    return d->id;
-}
+int IceComponent::id() const { return d->id; }
 
-void IceComponent::setClientSoftwareNameAndVersion(const QString &str)
-{
-    d->clientSoftware = str;
-}
+bool IceComponent::isGatheringComplete() const { return d->gatheringComplete; }
 
-void IceComponent::setProxy(const TurnClient::Proxy &proxy)
-{
-    d->proxy = proxy;
-}
+void IceComponent::setClientSoftwareNameAndVersion(const QString &str) { d->clientSoftware = str; }
 
-void IceComponent::setPortReserver(UdpPortReserver *portReserver)
-{
-    d->portReserver = portReserver;
-}
+void IceComponent::setProxy(const TurnClient::Proxy &proxy) { d->proxy = proxy; }
 
-void IceComponent::setLocalAddresses(const QList<Ice176::LocalAddress> &addrs)
-{
-    d->pending.localAddrs = addrs;
-}
+void IceComponent::setPortReserver(UdpPortReserver *portReserver) { d->portReserver = portReserver; }
 
-void IceComponent::setExternalAddresses(const QList<Ice176::ExternalAddress> &addrs)
-{
-    d->pending.extAddrs = addrs;
-}
+UdpPortReserver *IceComponent::portReserver() const { return d->portReserver; }
 
-void IceComponent::setStunBindService(const QHostAddress &addr, int port)
-{
-    d->pending.stunBindAddr = addr;
-    d->pending.stunBindPort = port;
-}
+void IceComponent::setLocalAddresses(const QList<Ice176::LocalAddress> &addrs) { d->pending.localAddrs = addrs; }
 
-void IceComponent::setStunRelayUdpService(const QHostAddress &addr, int port, const QString &user, const QCA::SecureArray &pass)
+void IceComponent::setExternalAddresses(const QList<Ice176::ExternalAddress> &addrs) { d->pending.extAddrs = addrs; }
+
+void IceComponent::setStunBindService(const TransportAddress &addr) { d->pending.stunBindAddr = addr; }
+
+void IceComponent::setStunRelayUdpService(const TransportAddress &addr, const QString &user,
+                                          const QCA::SecureArray &pass)
 {
     d->pending.stunRelayUdpAddr = addr;
-    d->pending.stunRelayUdpPort = port;
     d->pending.stunRelayUdpUser = user;
     d->pending.stunRelayUdpPass = pass;
 }
 
-void IceComponent::setStunRelayTcpService(const QHostAddress &addr, int port, const QString &user, const QCA::SecureArray &pass)
+void IceComponent::setStunRelayTcpService(const TransportAddress &addr, const QString &user,
+                                          const QCA::SecureArray &pass)
 {
     d->pending.stunRelayTcpAddr = addr;
-    d->pending.stunRelayTcpPort = port;
     d->pending.stunRelayTcpUser = user;
     d->pending.stunRelayTcpPass = pass;
 }
 
-void IceComponent::setUseLocal(bool enabled)
-{
-    d->useLocal = enabled;
-}
+void IceComponent::setUseLocal(bool enabled) { d->useLocal = enabled; }
 
-void IceComponent::setUseStunBind(bool enabled)
-{
-    d->useStunBind = enabled;
-}
+void IceComponent::setUseStunBind(bool enabled) { d->useStunBind = enabled; }
 
-void IceComponent::setUseStunRelayUdp(bool enabled)
-{
-    d->useStunRelayUdp = enabled;
-}
+void IceComponent::setUseStunRelayUdp(bool enabled) { d->useStunRelayUdp = enabled; }
 
-void IceComponent::setUseStunRelayTcp(bool enabled)
-{
-    d->useStunRelayTcp = enabled;
-}
+void IceComponent::setUseStunRelayTcp(bool enabled) { d->useStunRelayTcp = enabled; }
 
-void IceComponent::update(QList<QUdpSocket*> *socketList)
-{
-    d->update(socketList);
-}
+void IceComponent::update(QList<QUdpSocket *> *socketList) { d->update(socketList); }
 
-void IceComponent::stop()
-{
-    d->stop();
-}
+void IceComponent::stop() { d->stop(); }
 
-int IceComponent::peerReflexivePriority(const IceTransport *iceTransport, int path) const
+int IceComponent::peerReflexivePriority(QSharedPointer<IceTransport> iceTransport, int path) const
 {
     return d->peerReflexivePriority(iceTransport, path);
 }
 
-void IceComponent::flagPathAsLowOverhead(int id, const QHostAddress &addr, int port)
+void IceComponent::addLocalPeerReflexiveCandidate(const TransportAddress &addr, IceComponent::CandidateInfo::Ptr base,
+                                                  quint32 priority)
 {
-    return d->flagPathAsLowOverhead(id, addr, port);
+    d->addLocalPeerReflexiveCandidate(addr, base, priority);
+}
+
+void IceComponent::flagPathAsLowOverhead(int id, const TransportAddress &addr)
+{
+    return d->flagPathAsLowOverhead(id, addr);
 }
 
 void IceComponent::setDebugLevel(DebugLevel level)
 {
     d->debugLevel = level;
-    foreach(const Private::LocalTransport *lt, d->localLeap)
-        lt->sock->setDebugLevel((IceTransport::DebugLevel)level);
-    foreach(const Private::LocalTransport *lt, d->localStun)
-        lt->sock->setDebugLevel((IceTransport::DebugLevel)level);
-    if(d->tt)
-        d->tt->setDebugLevel((IceTransport::DebugLevel)level);
+    for (const Private::LocalTransport *lt : as_const(d->udpTransports))
+        lt->sock->setDebugLevel(IceTransport::DebugLevel(level));
+    if (d->tcpTurn)
+        d->tcpTurn->setDebugLevel((IceTransport::DebugLevel)level);
 }
 
+IceComponent::CandidateInfo::Ptr
+IceComponent::CandidateInfo::makeRemotePrflx(int componentId, const TransportAddress &fromAddr, quint32 priority)
+{
+    auto c  = IceComponent::CandidateInfo::Ptr::create();
+    c->addr = fromAddr;
+    c->addr.addr.setScopeId(QString());
+    c->type        = PeerReflexiveType;
+    c->priority    = priority;
+    c->foundation  = QUuid::createUuid().toString();
+    c->componentId = componentId;
+    c->network     = -1;
+    return c;
 }
+
+} // namespace XMPP
 
 #include "icecomponent.moc"

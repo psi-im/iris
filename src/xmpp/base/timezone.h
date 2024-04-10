@@ -19,14 +19,15 @@
 #ifndef IRIS_TIMEZONE_H
 #define IRIS_TIMEZONE_H
 
+// TODO <5.2.0 code was stripped away. remaining has to be put to some common utils
+
 #include <QObject>
 
-class TimeZone
-{
+class TimeZone {
 public:
-    static int offsetFromUtc(); // in minutes
+    static int     offsetFromUtc(); // in minutes
     static QString abbreviation();
-    static int tzdToInt(const QString &tzd);
+    static int     tzdToInt(const QString &tzd);
 };
 
 #endif // IRIS_TIMEZONE_H

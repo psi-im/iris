@@ -1,5 +1,5 @@
 #=============================================================================
-# Copyright 2016-2017 Psi+ Project, Vitaly Tonkacheyev
+# Copyright 2016-2020 Psi+ Project, Vitaly Tonkacheyev
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -31,13 +31,14 @@ endif()
 if (Qca_INCLUDE_DIR AND Qca_LIBRARY)
     # in cache already
     set(Qca_FIND_QUIETLY TRUE)
-endif ()
+endif()
 
 set(EXTRA_PATH_SUFFIXES
-    qt5/Qca-qt5/QtCrypto
-    Qca-qt5/QtCrypto
+    qt5/Qca-qt${QT_DEFAULT_MAJOR_VERSION}/QtCrypto
+    Qca-qt${QT_DEFAULT_MAJOR_VERSION}/QtCrypto
     qt5/QtCrypto
-    qt/Qca-qt5/QtCrypto
+    qt/Qca-qt${QT_DEFAULT_MAJOR_VERSION}/QtCrypto
+    lib/qca-qt${QT_DEFAULT_MAJOR_VERSION}.framework/Versions/2/Headers
 )
 
 find_path(
@@ -51,11 +52,12 @@ find_path(
 
 find_library(
     Qca_LIBRARY
-    NAMES qca-qt5${D}
-    HINTS 
+    NAMES qca-qt${QT_DEFAULT_MAJOR_VERSION}${D}
+    HINTS
     ${QCA_DIR}/lib
     ${QCA_DIR}/bin
 )
+
 include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(
                 Qca
@@ -63,10 +65,10 @@ find_package_handle_standard_args(
                 Qca_LIBRARY
                 Qca_INCLUDE_DIR
 )
+
 if (Qca_FOUND)
     set ( Qca_LIBRARIES ${Qca_LIBRARY} )
     set ( Qca_INCLUDE_DIRS ${Qca_INCLUDE_DIR} )
-endif(Qca_FOUND)
+endif()
 
 mark_as_advanced( Qca_INCLUDE_DIR Qca_LIBRARY )
-

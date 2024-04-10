@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019  Sergey Ilinykh
+ * Copyright (C) 2019-2021  Sergey Ilinykh
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -19,53 +19,95 @@
 #ifndef XMPP_HASH_H
 #define XMPP_HASH_H
 
-#include "xmpp_stanza.h"
-
+#include <QHash>
 #include <QString>
-#include <QFuture>
-#define XMPP_HASH_NS "urn:xmpp:hashes:2" // TODO make nsdb.cpp/h with static declarations of all ns
+
+#include <memory>
 
 class QDomElement;
+class QFileInfo;
+class QIODevice;
+class QDomDocument;
 
-namespace XMPP
-{
-    class Features;
+namespace XMPP {
 
-    class Hash
-    {
-    public:
-        enum Type { // XEP-0300 Version 0.5.3 (2018-02-14)
-            Unknown,    // not standard, just a default
-            Sha1,       // SHOULD NOT
-            Sha256,     // MUST
-            Sha512,     // SHOULD
-            Sha3_256,   // MUST
-            Sha3_512,   // SHOULD
-            Blake2b256, // MUST
-            Blake2b512, // SHOULD
-            LastType = Blake2b512
-        };
+extern QString HASH_NS;
+class Features;
 
-        inline Hash(Type type = Type::Unknown) : v_type(type) {}
-        Hash(const QDomElement&);
-
-        inline bool isValid() const { return v_type > Unknown && v_type <= LastType; }
-
-        inline Type type() const { return v_type; }
-        inline void setType(Type t) { v_type = t; }
-
-        inline QByteArray data() const { return v_data; }
-        inline void setData(const QByteArray &d) { v_data = d; } // sets already computed hash
-        bool computeFromData(const QByteArray &); // computes hash from passed data
-        bool computeFromDevice(QIODevice *dev);
-
-        QDomElement toXml(QDomDocument *doc) const;
-        static void populateFeatures(XMPP::Features &);
-
-    private:
-        Type v_type = Type::Unknown;
-        QByteArray v_data;
+class Hash {
+public:
+    // NB: keep this in sync with Hash::fastestHash() and with hashTypes in cpp the file!
+    enum Type {     // XEP-0300 Version 0.5.3 (2018-02-14)
+        Unknown,    // not standard, just a default
+        Sha1,       // SHOULD NOT
+        Sha256,     // MUST
+        Sha512,     // SHOULD
+        Sha3_256,   // MUST
+        Sha3_512,   // SHOULD
+        Blake2b256, // MUST
+        Blake2b512, // SHOULD
+        LastType = Blake2b512
     };
+
+    inline Hash(Type type = Type::Unknown) : v_type(type) { }
+    inline Hash(Type type, const QByteArray &data) : v_type(type), v_data(data) { }
+    inline Hash(const QStringView &algo) : v_type(parseType(algo)) { }
+    Hash(const QDomElement &);
+
+    inline bool operator==(const Hash &other) const { return v_type == other.v_type && v_data == other.v_data; }
+
+    inline bool isValid() const { return v_type > Unknown && v_type <= LastType; }
+    inline      operator bool() const { return isValid(); }
+
+    inline Type type() const { return v_type; }
+    inline void setType(Type t) { v_type = t; }
+    QString     stringType() const;
+    static Type parseType(const QStringView &algo);
+
+    inline QByteArray data() const { return v_data; }
+    inline void       setData(const QByteArray &d) { v_data = d; } // sets already computed hash
+    inline QByteArray toHex() const { return v_data.toHex(); }
+    inline QByteArray toBase64() const { return v_data.toBase64(); }
+    inline QString toString() const { return QString("%1+%2").arg(stringType(), QString::fromLatin1(v_data.toHex())); }
+    bool           compute(const QByteArray &); // computes hash from passed data
+    bool           compute(QIODevice *dev);     // reads all the device and computes hash from the data
+
+    QDomElement toXml(QDomDocument *doc) const;
+    static void populateFeatures(XMPP::Features &);
+    static Hash from(Type t, const QByteArray &fileData);
+    static Hash from(XMPP::Hash::Type t, QIODevice *dev);
+    static Hash from(XMPP::Hash::Type t, const QFileInfo &file);
+    static Hash from(const QStringView &str); // e.g. sha1+aabccddeeffaabbcc232387539465923645
+    static Hash fastestHash(const Features &features);
+
+private:
+    Type       v_type = Type::Unknown;
+    QByteArray v_data;
+};
+
+class StreamHashPrivate;
+class StreamHash {
+public:
+    StreamHash(Hash::Type type);
+    ~StreamHash();
+    bool addData(const QByteArray &data);
+    Hash final();
+    void restart();
+
+private:
+    friend class StreamHashPrivate;
+    std::unique_ptr<StreamHashPrivate> d;
+};
+
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+Q_DECL_PURE_FUNCTION inline uint qHash(const Hash &hash, uint seed = 0) Q_DECL_NOTHROW
+#else
+Q_DECL_PURE_FUNCTION inline size_t qHash(const Hash &hash, size_t seed = 0) Q_DECL_NOTHROW
+#endif
+{
+    return qHash(hash.data(), seed);
 }
 
-#endif
+} // namespace XMPP
+
+#endif // XMPP_HASH_H

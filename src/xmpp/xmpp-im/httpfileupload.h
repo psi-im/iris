@@ -20,31 +20,34 @@
 #ifndef XMPP_HTTPFILEUPLOAD_H
 #define XMPP_HTTPFILEUPLOAD_H
 
-#include <memory>
-#include <functional>
+#include "xmpp/jid/jid.h"
+#include "xmpp_task.h"
 
+#include <functional>
+#include <memory>
+
+class QIODevice;
 class QNetworkAccessManager;
 
-#include "im.h"
-
-namespace XMPP
-{
-
+namespace XMPP {
+class Client;
 namespace XEP0363 {
-enum version { vUnknown, v0_2_5, v0_3_1 };
-struct HttpHeader { QString name; QString value; };
-typedef QList<HttpHeader> HttpHeaders;
+    enum version { vUnknown, v0_2_5, v0_3_1 };
+    struct HttpHeader {
+        QString name;
+        QString value;
+    };
+    typedef QList<HttpHeader> HttpHeaders;
 }
 
-class HttpFileUpload : public QObject
-{
+class HttpFileUpload : public QObject {
     Q_OBJECT
 public:
     enum HostPropFlag {
         SecureGet = 1, // 0.2.5 of the xep didn't require that
         SecurePut = 2, // 0.2.5 of the xep didn't require that
         NewestVer = 4,
-        Failure   = 8  // had some failure (no/unexpected response to slot request, early http errors)
+        Failure   = 8 // had some failure (no/unexpected response to slot request, early http errors)
     };
     Q_DECLARE_FLAGS(HostProps, HostPropFlag)
 
@@ -62,7 +65,7 @@ public:
             QString url;
         } get;
         struct {
-            QString url;
+            QString                    url;
             QList<XEP0363::HttpHeader> headers;
         } put;
         struct {
@@ -72,13 +75,13 @@ public:
 
     struct HttpHost {
         XEP0363::version ver;
-        Jid jid;
-        quint64 sizeLimit;
-        HostProps props;
+        Jid              jid;
+        quint64          sizeLimit;
+        HostProps        props;
     };
 
     HttpFileUpload(Client *client, QIODevice *source, size_t fsize, const QString &dstFilename,
-                   const QString &mType = QString::null);
+                   const QString &mType = QString());
     HttpFileUpload(const HttpFileUpload &) = delete;
     ~HttpFileUpload();
 
@@ -92,10 +95,10 @@ public:
      */
     void setNetworkAccessManager(QNetworkAccessManager *qnam);
 
-    bool success() const;
-    ErrorCode statusCode() const;
-    const QString & statusString() const;
-    HttpSlot getHttpSlot();
+    bool           success() const;
+    ErrorCode      statusCode() const;
+    const QString &statusString() const;
+    HttpSlot       getHttpSlot();
 
 public slots:
     void start();
@@ -103,6 +106,7 @@ public slots:
 signals:
     void stateChanged();
     void finished();
+    void progress(qint64 bytesReceived, qint64 bytesTotal);
 
 private:
     enum State { None, GettingSlot, HttpRequest, Success, Error };
@@ -119,18 +123,18 @@ private:
 };
 Q_DECLARE_OPERATORS_FOR_FLAGS(HttpFileUpload::HostProps)
 
-class JT_HTTPFileUpload : public Task
-{
+class JT_HTTPFileUpload : public Task {
     Q_OBJECT
 public:
     enum UrlType { GetUrl = 0, PutUrl = 1 };
-    enum { ErrInvalidResponse = int(HttpFileUpload::ErrorCode::SlotReceiveFailed) - 1 }; // -1 to be mapped to ErrDisc, ErrTimeout, ...
+    enum {
+        ErrInvalidResponse = int(HttpFileUpload::ErrorCode::SlotReceiveFailed) - 1
+    }; // -1 to be mapped to ErrDisc, ErrTimeout, ...
 
     JT_HTTPFileUpload(Task *parent);
     ~JT_HTTPFileUpload();
 
-    void request(const Jid &to, const QString &fname,
-                 quint64 fsize, const QString &ftype, XEP0363::version ver);
+    void    request(const Jid &to, const QString &fname, quint64 fsize, const QString &ftype, XEP0363::version ver);
     QString url(UrlType t) const;
     XEP0363::HttpHeaders headers() const;
 
@@ -142,13 +146,18 @@ private:
     Private *d;
 };
 
-class HttpFileUploadManager : public QObject
-{
+class HttpFileUploadManager : public QObject {
     Q_OBJECT
 public:
-    typedef std::function<void(bool,const QString &)> Callback; // params: success, detail. where detail could be a "get" url
+    enum { DiscoNone = 0x0, DiscoNotFound = 0x1, DiscoFound = 0x2 };
+
+    typedef std::function<void(bool, const QString &)>
+        Callback; // params: success, detail. where detail could be a "get" url
 
     HttpFileUploadManager(Client *parent);
+    ~HttpFileUploadManager();
+
+    int discoveryStatus() const;
 
     /**
      * @brief setNetworkAccessManager sets network access manager to do http requests.
@@ -170,8 +179,8 @@ public:
      * @param mType meta type. image/png for example
      * @return returns a handler object which will signal "finished" when ready
      */
-    HttpFileUpload* upload(const QString &srcFilename, const QString &dstFilename = QString::null,
-                           const QString &mType = QString::null);
+    HttpFileUpload *upload(const QString &srcFilename, const QString &dstFilename = QString(),
+                           const QString &mType = QString());
 
     /**
      * @brief uploads data of given size from the given to remote server
@@ -181,14 +190,17 @@ public:
      * @param mType - meta type
      * @return returns a handler object which will signal "finished" when ready
      */
-    HttpFileUpload* upload(QIODevice *source, size_t fsize, const QString &dstFilename,
-                           const QString &mType = QString::null);
+    HttpFileUpload *upload(QIODevice *source, quint64 fsize, const QString &dstFilename,
+                           const QString &mType = QString());
 
 private:
+    friend class HttpFileUpload;
+    const QList<HttpFileUpload::HttpHost> &discoHosts() const;
+    void                                   setDiscoHosts(const QList<HttpFileUpload::HttpHost> &hosts);
+
     class Private;
     Private *d;
 };
+} // namespace XMPP
 
-}
-
-#endif
+#endif // XMPP_HTTPFILEUPLOAD_H

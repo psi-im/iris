@@ -18,42 +18,34 @@
 
 #include "udpportreserver.h"
 
-#include <stdlib.h>
 #include <QUdpSocket>
+#include <stdlib.h>
 
 namespace XMPP {
-
-class UdpPortReserver::Private : public QObject
-{
+class UdpPortReserver::Private : public QObject {
     Q_OBJECT
 
 public:
-    class Item
-    {
+    class Item {
     public:
-        int port; // port to reserve
+        int  port; // port to reserve
         bool lent;
 
         // list of sockets for this port, one socket per address.
         //   note that we may have sockets bound for addresses
         //   we no longer care about, if we are currently lending
         //   them out
-        QList<QUdpSocket*> sockList;
+        QList<QUdpSocket *> sockList;
 
         // keep track of which addresses we lent out
         QList<QHostAddress> lentAddrs;
 
-        Item() :
-            port(-1),
-            lent(false)
-        {
-        }
+        Item() : port(-1), lent(false) { }
 
         bool haveAddress(const QHostAddress &addr) const
         {
-            foreach(const QUdpSocket *sock, sockList)
-            {
-                if(sock->localAddress() == addr)
+            for (const QUdpSocket *sock : sockList) {
+                if (sock->localAddress() == addr)
                     return true;
             }
 
@@ -61,36 +53,32 @@ public:
         }
     };
 
-    UdpPortReserver *q;
+    UdpPortReserver    *q;
     QList<QHostAddress> addrs;
-    QList<int> ports; // sorted
-    QList<Item> items; // in order sorted by port
+    QList<int>          ports; // sorted.
 
-    Private(UdpPortReserver *_q) :
-        QObject(_q),
-        q(_q)
-    {
-    }
+    // addrs * ports = all available sockets
+
+    /**
+     * @brief items kind of ports slice over all provided addresses.
+     * When we request binding on one port it means it will be bound on one item (all its addresses).
+     * The items are sorted by port.
+     */
+    QList<Item> items;
+
+    Private(UdpPortReserver *_q) : QObject(_q), q(_q) { }
 
     ~Private()
     {
-        bool lendingAny = false;
-        foreach(const Item &i, items)
-        {
-            if(i.lent)
-            {
-                lendingAny = true;
-                break;
-            }
-        }
+
+        bool lendingAny = std::any_of(items.begin(), items.end(), [](auto const &i) { return i.lent; });
 
         Q_ASSERT(!lendingAny);
-        if(lendingAny)
+        if (lendingAny)
             abort();
 
-        foreach(const Item &i, items)
-        {
-            foreach(QUdpSocket *sock, i.sockList)
+        for (const Item &i : std::as_const(items)) {
+            for (QUdpSocket *sock : i.sockList)
                 sock->deleteLater();
         }
     }
@@ -106,34 +94,28 @@ public:
     void updatePorts(const QList<int> &newPorts)
     {
         QList<int> added;
-        foreach(int x, newPorts)
-        {
+        for (int x : newPorts) {
             bool found = false;
-            foreach(const Item &i, items)
-            {
-                if(i.port == x)
-                {
+            for (const Item &i : std::as_const(items)) {
+                if (i.port == x) {
                     found = true;
                     break;
                 }
             }
 
-            if(!found)
+            if (!found)
                 added += x;
         }
 
         ports = newPorts;
 
         // keep ports in sorted order
-        qSort(ports);
+        std::sort(ports.begin(), ports.end());
 
-        foreach(int x, added)
-        {
+        for (int x : std::as_const(added)) {
             int insert_before = items.count();
-            for(int n = 0; n < items.count(); ++n)
-            {
-                if(x < items[n].port)
-                {
+            for (int n = 0; n < items.count(); ++n) {
+                if (x < items[n].port) {
                     insert_before = n;
                     break;
                 }
@@ -151,14 +133,12 @@ public:
     bool reservedAll() const
     {
         bool ok = true;
-        foreach(const Item &i, items)
-        {
+        for (const Item &i : items) {
             // skip ports we don't care about
-            if(!ports.contains(i.port))
+            if (!ports.contains(i.port))
                 continue;
 
-            if(!isReserved(i))
-            {
+            if (!isReserved(i)) {
                 ok = false;
                 break;
             }
@@ -167,59 +147,50 @@ public:
         return ok;
     }
 
-    QList<QUdpSocket*> borrowSockets(int portCount, QObject *parent)
+    QList<QUdpSocket *> borrowSockets(int portCount, QObject *parent)
     {
         Q_ASSERT(portCount > 0);
 
-        QList<QUdpSocket*> out;
+        QList<QUdpSocket *> out;
 
-        if(portCount > 1)
-        {
+        if (portCount > 1) {
             // first try to see if we can find something all in a
             //   row, starting with best alignment to worst
-            for(int align = portCount; align >= 2; align /= 2)
-            {
+            for (int align = portCount; align >= 2; align /= 2) {
                 int at = findConsecutive(portCount, align);
-                if(at != -1)
-                {
-                    for(int n = 0; n < portCount; ++n)
+                if (at != -1) {
+                    for (int n = 0; n < portCount; ++n)
                         out += lendItem(&items[at + n], parent);
 
                     break;
                 }
             }
 
-            if(out.isEmpty())
-            {
+            if (out.isEmpty()) {
                 // otherwise, try splitting them up into
                 //   smaller consecutive chunks
                 int chunks[2];
                 chunks[0] = portCount / 2 + (portCount % 2);
                 chunks[1] = portCount / 2;
-                for(int n = 0; n < 2; ++n)
+                for (int n = 0; n < 2; ++n)
                     out += borrowSockets(chunks[n], parent);
             }
-        }
-        else
-        {
+        } else {
             // take the next available port
             int at = findConsecutive(1, 1);
-            if(at != -1)
+            if (at != -1)
                 out += lendItem(&items[at], parent);
         }
 
         return out;
     }
 
-    void returnSockets(const QList<QUdpSocket*> &sockList)
+    void returnSockets(const QList<QUdpSocket *> &sockList)
     {
-        foreach(QUdpSocket *sock, sockList)
-        {
+        for (QUdpSocket *sock : sockList) {
             int at = -1;
-            for(int n = 0; n < items.count(); ++n)
-            {
-                if(items[n].sockList.contains(sock))
-                {
+            for (int n = 0; n < items.count(); ++n) {
+                if (items[n].sockList.contains(sock)) {
                     at = n;
                     break;
                 }
@@ -241,7 +212,7 @@ public:
             connect(sock, SIGNAL(readyRead()), SLOT(sock_readyRead()));
 
             i.lentAddrs.removeAll(a);
-            if(i.lentAddrs.isEmpty())
+            if (i.lentAddrs.isEmpty())
                 i.lent = false;
         }
 
@@ -254,34 +225,30 @@ private slots:
         QUdpSocket *sock = static_cast<QUdpSocket *>(sender());
 
         // eat all packets
-        while(sock->hasPendingDatagrams())
-            sock->readDatagram(0, 0);
+        while (sock->hasPendingDatagrams())
+            sock->readDatagram(nullptr, 0);
     }
 
 private:
     void tryBind()
     {
-        for(int n = 0; n < items.count(); ++n)
-        {
+        for (int n = 0; n < items.count(); ++n) {
             Item &i = items[n];
 
             // skip ports we don't care about
-            if(!ports.contains(i.port))
+            if (!ports.contains(i.port))
                 continue;
 
             QList<QHostAddress> neededAddrs;
-            foreach(const QHostAddress &a, addrs)
-            {
-                if(!i.haveAddress(a))
+            for (const QHostAddress &a : std::as_const(addrs)) {
+                if (!i.haveAddress(a))
                     neededAddrs += a;
             }
 
-            foreach(const QHostAddress &a, neededAddrs)
-            {
+            for (const QHostAddress &a : std::as_const(neededAddrs)) {
                 QUdpSocket *sock = new QUdpSocket(q);
 
-                if(!sock->bind(a, i.port))
-                {
+                if (!sock->bind(a, quint16(i.port))) {
                     delete sock;
                     continue;
                 }
@@ -295,14 +262,12 @@ private:
 
     void tryCleanup()
     {
-        for(int n = 0; n < items.count(); ++n)
-        {
+        for (int n = 0; n < items.count(); ++n) {
             Item &i = items[n];
 
             // don't care about this port anymore?
-            if(!i.lent && !ports.contains(i.port))
-            {
-                foreach(QUdpSocket *sock, i.sockList)
+            if (!i.lent && !ports.contains(i.port)) {
+                for (QUdpSocket *sock : std::as_const(i.sockList))
                     sock->deleteLater();
 
                 items.removeAt(n);
@@ -311,14 +276,12 @@ private:
             }
 
             // any addresses we don't care about?
-            for(int k = 0; k < i.sockList.count(); ++k)
-            {
+            for (int k = 0; k < i.sockList.count(); ++k) {
                 QUdpSocket *sock = i.sockList[k];
 
                 QHostAddress a = sock->localAddress();
 
-                if(!addrs.contains(a) && !i.lentAddrs.contains(a))
-                {
+                if (!addrs.contains(a) && !i.lentAddrs.contains(a)) {
                     sock->deleteLater();
                     i.sockList.removeAt(k);
                     --k; // adjust position
@@ -331,12 +294,11 @@ private:
     bool isReserved(const Item &i) const
     {
         // must have desired addrs to consider a port reserved
-        if(addrs.isEmpty())
+        if (addrs.isEmpty())
             return false;
 
-        foreach(const QHostAddress &a, addrs)
-        {
-            if(!i.haveAddress(a))
+        for (const QHostAddress &a : addrs) {
+            if (!i.haveAddress(a))
                 return false;
         }
 
@@ -345,17 +307,16 @@ private:
 
     bool isConsecutive(int at, int count) const
     {
-        if(at + count > items.count())
+        if (at + count > items.count())
             return false;
 
-        for(int n = 0; n < count; ++n)
-        {
+        for (int n = 0; n < count; ++n) {
             const Item &i = items[at + n];
 
-            if(i.lent || !isReserved(i))
+            if (i.lent || !isReserved(i))
                 return false;
 
-            if(n > 0 && (i.port != items[at + n - 1].port + 1))
+            if (n > 0 && (i.port != items[at + n - 1].port + 1))
                 return false;
         }
 
@@ -364,22 +325,20 @@ private:
 
     int findConsecutive(int count, int align) const
     {
-        for(int n = 0; n < items.count(); n += align)
-        {
-            if(isConsecutive(n, count))
+        for (int n = 0; n < items.count(); n += align) {
+            if (isConsecutive(n, count))
                 return n;
         }
 
         return -1;
     }
 
-    QList<QUdpSocket*> lendItem(Item *i, QObject *parent)
+    QList<QUdpSocket *> lendItem(Item *i, QObject *parent)
     {
-        QList<QUdpSocket*> out;
+        QList<QUdpSocket *> out;
 
         i->lent = true;
-        foreach(QUdpSocket *sock, i->sockList)
-        {
+        for (QUdpSocket *sock : std::as_const(i->sockList)) {
             i->lentAddrs += sock->localAddress();
             sock->disconnect(this);
             sock->setParent(parent);
@@ -390,50 +349,30 @@ private:
     }
 };
 
-UdpPortReserver::UdpPortReserver(QObject *parent) :
-    QObject(parent)
-{
-    d = new Private(this);
-}
+UdpPortReserver::UdpPortReserver(QObject *parent) : QObject(parent) { d = new Private(this); }
 
-UdpPortReserver::~UdpPortReserver()
-{
-    delete d;
-}
+UdpPortReserver::~UdpPortReserver() { delete d; }
 
-void UdpPortReserver::setAddresses(const QList<QHostAddress> &addrs)
-{
-    d->updateAddresses(addrs);
-}
+void UdpPortReserver::setAddresses(const QList<QHostAddress> &addrs) { d->updateAddresses(addrs); }
 
 void UdpPortReserver::setPorts(int start, int len)
 {
     QList<int> ports;
-    for(int n = 0; n < len; ++n)
+    for (int n = 0; n < len; ++n)
         ports += start + n;
     setPorts(ports);
 }
 
-void UdpPortReserver::setPorts(const QList<int> &ports)
-{
-    d->updatePorts(ports);
-}
+void UdpPortReserver::setPorts(const QList<int> &ports) { d->updatePorts(ports); }
 
-bool UdpPortReserver::reservedAll() const
-{
-    return d->reservedAll();
-}
+bool UdpPortReserver::reservedAll() const { return d->reservedAll(); }
 
-QList<QUdpSocket*> UdpPortReserver::borrowSockets(int portCount, QObject *parent)
+QList<QUdpSocket *> UdpPortReserver::borrowSockets(int portCount, QObject *parent)
 {
     return d->borrowSockets(portCount, parent);
 }
 
-void UdpPortReserver::returnSockets(const QList<QUdpSocket*> &sockList)
-{
-    d->returnSockets(sockList);
-}
-
-}
+void UdpPortReserver::returnSockets(const QList<QUdpSocket *> &sockList) { d->returnSockets(sockList); }
+} // namespace XMPP
 
 #include "udpportreserver.moc"

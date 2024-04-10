@@ -20,113 +20,33 @@
 #ifndef XMPP_IM_H
 #define XMPP_IM_H
 
-#include <qdatetime.h>
-//Added by qt3to4:
-#include <QList>
+#include "iris/xmpp.h"
+#include "iris/xmpp_address.h"
+#include "iris/xmpp_agentitem.h"
+#include "iris/xmpp_chatstate.h"
+#include "iris/xmpp_client.h"
+#include "iris/xmpp_discoitem.h"
+#include "iris/xmpp_features.h"
+#include "iris/xmpp_form.h"
+#include "iris/xmpp_hash.h"
+#include "iris/xmpp_htmlelement.h"
+#include "iris/xmpp_httpauthrequest.h"
+#include "iris/xmpp_jid.h"
+#include "iris/xmpp_liveroster.h"
+#include "iris/xmpp_liverosteritem.h"
+#include "iris/xmpp_message.h"
+#include "iris/xmpp_muc.h"
+#include "iris/xmpp_pubsubitem.h"
+#include "iris/xmpp_pubsubretraction.h"
+#include "iris/xmpp_resource.h"
+#include "iris/xmpp_resourcelist.h"
+#include "iris/xmpp_roster.h"
+#include "iris/xmpp_rosteritem.h"
+#include "iris/xmpp_rosterx.h"
+#include "iris/xmpp_status.h"
+#include "iris/xmpp_task.h"
+#include "iris/xmpp_thumbs.h"
+#include "iris/xmpp_url.h"
+#include "iris/xmpp_xdata.h"
 
-#include "xmpp.h"
-#include "xmpp/jid/jid.h"
-#include "xmpp_muc.h"
-#include "xmpp_message.h"
-#include "xmpp_chatstate.h"
-#include "xmpp_status.h"
-#include "xmpp_htmlelement.h"
-#include "xmpp_features.h"
-#include "xmpp_httpauthrequest.h"
-#include "xmpp_url.h"
-#include "xmpp_task.h"
-#include "xmpp_resource.h"
-#include "xmpp_resourcelist.h"
-#include "xmpp_roster.h"
-#include "xmpp_rosteritem.h"
-#include "xmpp_liverosteritem.h"
-#include "xmpp_liveroster.h"
-#include "xmpp_rosterx.h"
-#include "xmpp_xdata.h"
-#include "xmpp_discoitem.h"
-#include "xmpp_agentitem.h"
-#include "xmpp_client.h"
-#include "xmpp_address.h"
-#include "xmpp_hash.h"
-#include "xmpp_thumbs.h"
-#include "xmpp_pubsubitem.h"
-#include "xmpp_pubsubretraction.h"
-
-namespace XMPP
-{
-    typedef QList<AgentItem> AgentList;
-    typedef QList<DiscoItem> DiscoList;
-
-    class FormField
-    {
-    public:
-        enum { username, nick, password, name, first, last, email, address, city, state, zip, phone, url, date, misc };
-        FormField(const QString &type="", const QString &value="");
-        ~FormField();
-
-        int type() const;
-        QString fieldName() const;
-        QString realName() const;
-        bool isSecret() const;
-        const QString & value() const;
-        void setType(int);
-        bool setType(const QString &);
-        void setValue(const QString &);
-
-    private:
-        int tagNameToType(const QString &) const;
-        QString typeToTagName(int) const;
-
-        int v_type;
-        QString v_value;
-
-        class Private;
-        Private *d = nullptr;
-    };
-
-    class Form : public QList<FormField>
-    {
-    public:
-        Form(const Jid &j="");
-        ~Form();
-
-        Jid jid() const;
-        QString instructions() const;
-        QString key() const;
-        void setJid(const Jid &);
-        void setInstructions(const QString &);
-        void setKey(const QString &);
-
-    private:
-        Jid v_jid;
-        QString v_instructions, v_key;
-
-        class Private;
-        Private *d = nullptr;
-    };
-
-    class SearchResult
-    {
-    public:
-        SearchResult(const Jid &jid="");
-        ~SearchResult();
-
-        const Jid & jid() const;
-        const QString & nick() const;
-        const QString & first() const;
-        const QString & last() const;
-        const QString & email() const;
-
-        void setJid(const Jid &);
-        void setNick(const QString &);
-        void setFirst(const QString &);
-        void setLast(const QString &);
-        void setEmail(const QString &);
-
-    private:
-        Jid v_jid;
-        QString v_nick, v_first, v_last, v_email;
-    };
-}
-
-#endif
+#endif // XMPP_IM_H

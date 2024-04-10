@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009,2010  Barracuda Networks, Inc.
+ * Copyright (C) 2009-2010  Barracuda Networks, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -19,93 +19,69 @@
 #ifndef ICE176_H
 #define ICE176_H
 
-#include <QObject>
-#include <QString>
-#include <QHostAddress>
 #include "turnclient.h"
 
+#include <QHostAddress>
+#include <QObject>
+#include <QString>
+
 namespace QCA {
-    class SecureArray;
+class SecureArray;
 }
 
 namespace XMPP {
-
 class UdpPortReserver;
+class AbstractStunDisco;
 
-class Ice176 : public QObject
-{
+class Ice176 : public QObject {
     Q_OBJECT
 
 public:
-    enum Error
-    {
-        ErrorGeneric
-    };
+    enum Error { ErrorGeneric, ErrorDisconnected };
 
-    enum Mode
-    {
-        Initiator,
-        Responder
-    };
+    enum Mode { Initiator, Responder };
 
-    class LocalAddress
-    {
+    class LocalAddress {
     public:
         QHostAddress addr;
-        int network; // -1 = unknown
-        bool isVpn;
-
-        LocalAddress() :
-            network(-1),
-            isVpn(false)
-        {
-        }
+        int          network = -1; // -1 = unknown
+        bool         isVpn   = false;
     };
 
-    class ExternalAddress
-    {
+    class ExternalAddress {
     public:
         LocalAddress base;
         QHostAddress addr;
-        int portBase; // -1 = same as base
+        int          portBase; // -1 = same as base
 
-        ExternalAddress() :
-            portBase(-1)
-        {
-        }
+        ExternalAddress() : portBase(-1) { }
     };
 
-    class Candidate
-    {
+    class Candidate {
     public:
-        int component;
-        QString foundation;
-        int generation;
-        QString id;
+        int          component = -1;
+        QString      foundation;
+        int          generation = -1;
+        QString      id;
         QHostAddress ip;
-        int network; // -1 = unknown
-        int port;
-        int priority;
-        QString protocol;
+        int          network  = -1; // -1 = unknown
+        int          port     = -1;
+        int          priority = -1;
+        QString      protocol;
         QHostAddress rel_addr;
-        int rel_port;
+        int          rel_port = -1;
         QHostAddress rem_addr;
-        int rem_port;
-        QString type;
-
-        Candidate() :
-            component(-1),
-            generation(-1),
-            network(-1),
-            port(-1),
-            priority(-1),
-            rel_port(-1),
-            rem_port(-1)
-        {
-        }
+        int          rem_port = -1;
+        QString      type;
     };
 
-    Ice176(QObject *parent = 0);
+    struct SelectedCandidate {
+        QHostAddress ip;
+        int          port        = -1;
+        int          componentId = -1;
+    };
+
+    Ice176(QObject *parent = nullptr);
     ~Ice176();
 
     void reset();
@@ -122,9 +98,11 @@ public:
     // one per local address.  you must set local addresses first.
     void setExternalAddresses(const QList<ExternalAddress> &addrs);
 
-    void setStunBindService(const QHostAddress &addr, int port);
-    void setStunRelayUdpService(const QHostAddress &addr, int port, const QString &user, const QCA::SecureArray &pass);
-    void setStunRelayTcpService(const QHostAddress &addr, int port, const QString &user, const QCA::SecureArray &pass);
+    void setStunBindService(const QHostAddress &addr, quint16 port); // REVIEW if we need both v4 and v6?
+    void setStunRelayUdpService(const QHostAddress &addr, quint16 port, const QString &user,
+                                const QCA::SecureArray &pass);
+    void setStunRelayTcpService(const QHostAddress &addr, quint16 port, const QString &user,
+                                const QCA::SecureArray &pass);
 
     // these all start out enabled, but can be disabled for diagnostic
     //   purposes
@@ -132,24 +110,40 @@ public:
     void setUseStunBind(bool enabled);
     void setUseStunRelayUdp(bool enabled);
     void setUseStunRelayTcp(bool enabled);
+    void setAllowIpExposure(bool enabled);
+    void setStunDiscoverer(AbstractStunDisco *discoverer);
 
     void setComponentCount(int count);
-    void setLocalCandidateTrickle(bool enabled); // default false
 
-    void start(Mode mode);
+    enum Feature {
+        Trickle              = 0x1, // additional candidates will be sent later when discovered
+        AggressiveNomination = 0x2, // all the candidates are nominated. so select by priority
+        NotNominatedData     = 0x4, // Data on valid but not nominated candidates is allowed
+        RTPOptimization      = 0x8, // Different formula for RTO, not used in RFC8445
+        GatheringComplete    = 0x10 // Looks MUST in XEP-0371 but missed in XEP-0176
+    };
+    Q_DECLARE_FLAGS(Features, Feature)
+
+    void setLocalFeatures(const Features &features);
+    void setRemoteFeatures(const Features &features);
+
+    void start(Mode mode); // init everything and prepare candidates
     void stop();
+    bool isStopped() const;
+    void startChecks(); // actually start doing checks when connection is accepted
 
     QString localUfrag() const;
     QString localPassword() const;
 
-    void setPeerUfrag(const QString &ufrag);
-    void setPeerPassword(const QString &pass);
-
+    void setRemoteCredentials(const QString &ufrag, const QString &pass);
     void addRemoteCandidates(const QList<Candidate> &list);
+    void setRemoteGatheringComplete();
+    void setRemoteSelectedCandidadates(const QList<SelectedCandidate> &list);
 
-    bool hasPendingDatagrams(int componentIndex) const;
+    bool       canSendMedia() const;
+    bool       hasPendingDatagrams(int componentIndex) const;
     QByteArray readDatagram(int componentIndex);
-    void writeDatagram(int componentIndex, const QByteArray &datagram);
+    void       writeDatagram(int componentIndex, const QByteArray &datagram);
 
     // this call will ensure that TURN headers are minimized on this
     //   component, with the drawback that packets might not be able to
@@ -162,6 +156,15 @@ public:
     // FIXME: this should probably be in netinterface.h or such
     static bool isIPv6LinkLocalAddress(const QHostAddress &addr);
 
+    void changeThread(QThread *thread);
+
+    bool isLocalGatheringComplete() const;
+    bool isActive() const;
+
+    QList<SelectedCandidate> selectedCandidates() const;
+
+    static QList<QHostAddress> availableNetworkAddresses();
+
 signals:
     // indicates that the ice engine is started and is ready to receive
     //   peer creds and remote candidates
@@ -171,7 +174,10 @@ signals:
     void error(XMPP::Ice176::Error e);
 
     void localCandidatesReady(const QList<XMPP::Ice176::Candidate> &list);
-    void componentReady(int index);
+    void localGatheringComplete();
+    void readyToSendMedia();        // Has at least one valid candidate for each component
+    void componentReady(int index); // has valid nominated candidate for component with index
+    void iceFinished();             // Final nominated candidates are selected for all components
 
     void readyRead(int componentIndex);
     void datagramsWritten(int componentIndex, int count);
@@ -182,6 +188,7 @@ private:
     Private *d;
 };
 
-}
+Q_DECLARE_OPERATORS_FOR_FLAGS(Ice176::Features)
+} // namespace XMPP
 
-#endif
+#endif // ICE176_H

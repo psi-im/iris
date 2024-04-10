@@ -18,27 +18,27 @@
  */
 
 #include "xmpp_subsets.h"
+
 #include "xmpp_xmlcommon.h"
 
 using namespace XMPP;
 
 static QLatin1String xmlns_ns_rsm("http://jabber.org/protocol/rsm");
 
-class SubsetsClientManager::Private
-{
+class SubsetsClientManager::Private {
 public:
     enum QueryType { None, Count, First, Last, Next, Previous, Index };
     struct {
         QueryType type;
-        int max;
-        int index;
+        int       max;
+        int       index;
     } query;
     struct {
-        int  count;
-        int  index;
-        bool first;
-        bool last;
-        int  itemsCount;
+        int     count;
+        int     index;
+        bool    first;
+        bool    last;
+        int     itemsCount;
         QString firstId;
         QString lastId;
     } result;
@@ -46,18 +46,17 @@ public:
 
     void resetResult()
     {
-        result.count = -1;
-        result.index = -1;
-        result.first = false;
-        result.last  = false;
+        result.count      = -1;
+        result.index      = -1;
+        result.first      = false;
+        result.last       = false;
         result.itemsCount = 0;
-        valid        = false;
+        valid             = false;
     }
 
     QDomElement mainElement(QDomDocument *doc)
     {
-        QDomElement e = doc->createElement(QStringLiteral("set"));
-        e.setAttribute(QStringLiteral("xmlns"), xmlns_ns_rsm);
+        QDomElement e = doc->createElementNS(xmlns_ns_rsm, QStringLiteral("set"));
         return e;
     }
 
@@ -86,16 +85,16 @@ public:
 
     bool updateFromElement(const QDomElement &el)
     {
-        valid = true;
-        bool ok = false;
-        QDomElement e = el.firstChildElement(QLatin1String("count"));
+        valid          = true;
+        bool        ok = false;
+        QDomElement e  = el.firstChildElement(QLatin1String("count"));
         if (!e.isNull())
             result.count = tagContent(e).toInt(&ok);
         if (!ok || result.count < 0)
             result.count = -1;
 
         result.index = -1;
-        e = el.firstChildElement(QLatin1String("first"));
+        e            = el.firstChildElement(QLatin1String("first"));
         if (!e.isNull()) {
             result.firstId = tagContent(e);
             if (result.firstId.isEmpty())
@@ -103,8 +102,7 @@ public:
             int i = e.attribute(QLatin1String("index")).toInt(&ok);
             if (ok && i >= 0)
                 result.index = i;
-        }
-        else
+        } else
             result.firstId = "";
 
         e = el.firstChildElement(QLatin1String("last"));
@@ -112,18 +110,17 @@ public:
             result.lastId = tagContent(e);
             if (result.lastId.isEmpty())
                 valid = false;
-        }
-        else
+        } else
             result.lastId = "";
 
         if (result.firstId.isEmpty() != result.lastId.isEmpty())
             valid = false;
 
-        result.first = query.type == First || result.index == 0 ||
-                (result.itemsCount == 0 && result.index == -1 && (query.type == Last || query.type == Previous));
-        result.last = query.type == Last ||
-                (result.index != -1 && result.count != -1 && result.count - result.itemsCount <= result.index) ||
-                (result.itemsCount == 0 && result.index == -1 && (query.type == First || query.type == Next));
+        result.first = query.type == First || result.index == 0
+            || (result.itemsCount == 0 && result.index == -1 && (query.type == Last || query.type == Previous));
+        result.last = query.type == Last
+            || (result.index != -1 && result.count != -1 && result.count - result.itemsCount <= result.index)
+            || (result.itemsCount == 0 && result.index == -1 && (query.type == First || query.type == Next));
         if (result.firstId.isEmpty() && result.lastId.isEmpty()) {
             switch (query.type) {
             case Previous:
@@ -147,55 +144,37 @@ SubsetsClientManager::SubsetsClientManager()
     reset();
 }
 
-SubsetsClientManager::~SubsetsClientManager()
-{
-    delete d;
-}
+SubsetsClientManager::~SubsetsClientManager() { delete d; }
 
 void SubsetsClientManager::reset()
 {
     d->query.type     = Private::None;
     d->query.max      = 50;
     d->query.index    = -1;
-    d->result.firstId = QString::null;
-    d->result.lastId  = QString::null;
+    d->result.firstId = QString();
+    d->result.lastId  = QString();
     d->resetResult();
 }
 
-bool SubsetsClientManager::isValid() const
-{
-    return d->valid;
-}
+bool SubsetsClientManager::isValid() const { return d->valid; }
 
-bool SubsetsClientManager::isFirst() const
-{
-    return d->result.first;
-}
+bool SubsetsClientManager::isFirst() const { return d->result.first; }
 
-bool SubsetsClientManager::isLast() const
-{
-    return d->result.last;
-}
+bool SubsetsClientManager::isLast() const { return d->result.last; }
 
-int SubsetsClientManager::count() const
-{
-    return d->result.count;
-}
+int SubsetsClientManager::count() const { return d->result.count; }
 
-void SubsetsClientManager::setMax(int max)
-{
-    d->query.max = max;
-}
+void SubsetsClientManager::setMax(int max) { d->query.max = max; }
 
 QDomElement SubsetsClientManager::findElement(const QDomElement &el, bool child)
 {
-    if (el.tagName() == QLatin1String("set") && el.attribute(QLatin1String("xmlns")) == xmlns_ns_rsm)
+    if (el.tagName() == QLatin1String("set") && el.namespaceURI() == xmlns_ns_rsm)
         return el;
 
     if (child) {
         QDomElement e = el.firstChildElement(QLatin1String("set"));
         while (!e.isNull()) {
-            if (e.attribute(QLatin1String("xmlns")) == xmlns_ns_rsm) {
+            if (e.namespaceURI() == xmlns_ns_rsm) {
                 return e;
             }
             e = e.nextSiblingElement(QLatin1String("set"));
@@ -260,7 +239,7 @@ QDomElement SubsetsClientManager::makeQueryElement(QDomDocument *doc) const
         d->insertMaxElement(doc, &e, 0);
         break;
     case Private::Last:
-        d->insertBeforeElement(doc, &e, QString::null);
+        d->insertBeforeElement(doc, &e, QString());
         break;
     case Private::Next:
         d->insertAfterElement(doc, &e, d->result.lastId);

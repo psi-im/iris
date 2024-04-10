@@ -18,14 +18,16 @@
  */
 
 #include "xmpp_xdata.h"
-#include "xmpp_xmlcommon.h"
+
 #include "xmpp/jid/jid.h"
+#include "xmpp_xmlcommon.h"
 
 #include <QList>
+#include <QRegularExpression>
 #include <QSharedDataPointer>
 
-using namespace XMPP;
 using namespace XMLHelper;
+using namespace XMPP;
 
 // TODO: report, item
 
@@ -33,127 +35,78 @@ using namespace XMLHelper;
 // XData::Field
 //----------------------------------------------------------------------------
 
-QString XData::Field::desc() const
-{
-    return _desc;
-}
+QString XData::Field::desc() const { return _desc; }
 
-void XData::Field::setDesc(const QString &d)
-{
-    _desc = d;
-}
+void XData::Field::setDesc(const QString &d) { _desc = d; }
 
-XData::Field::OptionList XData::Field::options() const
-{
-    return _options;
-}
+XData::Field::OptionList XData::Field::options() const { return _options; }
 
-void XData::Field::setOptions(XData::Field::OptionList o)
-{
-    _options = o;
-}
+void XData::Field::setOptions(XData::Field::OptionList o) { _options = o; }
 
-XData::Field::MediaElement XData::Field::mediaElement() const
-{
-    return _mediaElement;
-}
+XData::Field::MediaElement XData::Field::mediaElement() const { return _mediaElement; }
 
-void XData::Field::setMediaElement(const XData::Field::MediaElement &el)
-{
-    _mediaElement = el;
-}
+void XData::Field::setMediaElement(const XData::Field::MediaElement &el) { _mediaElement = el; }
 
-bool XData::Field::required() const
-{
-    return _required;
-}
+bool XData::Field::required() const { return _required; }
 
-void XData::Field::setRequired(bool r)
-{
-    _required = r;
-}
+void XData::Field::setRequired(bool r) { _required = r; }
 
-QString XData::Field::label() const
-{
-    return _label;
-}
+QString XData::Field::label() const { return _label; }
 
-void XData::Field::setLabel(const QString &l)
-{
-    _label = l;
-}
+void XData::Field::setLabel(const QString &l) { _label = l; }
 
-QString XData::Field::var() const
-{
-    return _var;
-}
+QString XData::Field::var() const { return _var; }
 
-void XData::Field::setVar(const QString &v)
-{
-    _var = v;
-}
+void XData::Field::setVar(const QString &v) { _var = v; }
 
-QStringList XData::Field::value() const
-{
-    return _value;
-}
+QStringList XData::Field::value() const { return _value; }
 
-void XData::Field::setValue(const QStringList &v)
-{
-    _value = v;
-}
+void XData::Field::setValue(const QStringList &v) { _value = v; }
 
-XData::Field::Type XData::Field::type() const
-{
-    return _type;
-}
+XData::Field::Type XData::Field::type() const { return _type; }
 
-void XData::Field::setType(XData::Field::Type t)
-{
-    _type = t;
-}
+void XData::Field::setType(XData::Field::Type t) { _type = t; }
 
 bool XData::Field::isValid() const
 {
-    if ( _required && _value.isEmpty() )
+    if (_required && _value.isEmpty())
         return false;
 
-    if ( _type == Field_Hidden || _type == Field_Fixed) {
+    if (_type == Field_Hidden || _type == Field_Fixed) {
         return true;
     }
-    if ( _type == Field_Boolean ) {
-        if ( _value.count() != 1 )
+    if (_type == Field_Boolean) {
+        if (_value.count() != 1)
             return false;
 
         QString str = _value.first();
-        if ( str == "0" || str == "1" || str == "true" || str == "false" || str == "yes" || str == "no" )
+        if (str == "0" || str == "1" || str == "true" || str == "false" || str == "yes" || str == "no")
             return true;
     }
-    if ( _type == Field_TextSingle || _type == Field_TextPrivate ) {
-        if ( _value.count() == 1 )
+    if (_type == Field_TextSingle || _type == Field_TextPrivate) {
+        if (_value.count() == 1)
             return true;
     }
-    if ( _type == Field_TextMulti ) {
-        //no particular test. empty/required case already caught (see above)
+    if (_type == Field_TextMulti) {
+        // no particular test. empty/required case already caught (see above)
         return true;
     }
-    if ( _type == Field_ListSingle || _type == Field_ListMulti ) {
-        //no particular test. empty/required case already caught (see above)
+    if (_type == Field_ListSingle || _type == Field_ListMulti) {
+        // no particular test. empty/required case already caught (see above)
         return true;
     }
-    if ( _type == Field_JidSingle ) {
-        if ( _value.count() != 1 )
+    if (_type == Field_JidSingle) {
+        if (_value.count() != 1)
             return false;
 
-        Jid j( _value.first() );
+        Jid j(_value.first());
         return j.isValid();
     }
-    if ( _type == Field_JidMulti ) {
-        QStringList::ConstIterator it = _value.begin();
+    if (_type == Field_JidMulti) {
         bool allValid = true;
-        for ( ; it != _value.end(); ++it) {
-            Jid j(*it);
-            if ( !j.isValid() ) {
+        for (const auto &it : _value) {
+            Jid j(it);
+            if (!j.isValid()) {
                 allValid = false;
                 break;
             }
@@ -166,61 +119,60 @@ bool XData::Field::isValid() const
 
 void XData::Field::fromXml(const QDomElement &e)
 {
-    if ( e.tagName() != "field" )
+    if (e.tagName() != "field")
         return;
 
-    _var = e.attribute("var");
+    _var   = e.attribute("var");
     _label = e.attribute("label");
 
     QString type = e.attribute("type");
-    if ( type == "boolean" )
+    if (type == "boolean")
         _type = Field_Boolean;
-    else if ( type == "fixed" )
+    else if (type == "fixed")
         _type = Field_Fixed;
-    else if ( type == "hidden" )
+    else if (type == "hidden")
         _type = Field_Hidden;
-    else if ( type == "jid-multi" )
+    else if (type == "jid-multi")
         _type = Field_JidMulti;
-    else if ( type == "jid-single" )
+    else if (type == "jid-single")
         _type = Field_JidSingle;
-    else if ( type == "list-multi" )
+    else if (type == "list-multi")
         _type = Field_ListMulti;
-    else if ( type == "list-single" )
+    else if (type == "list-single")
         _type = Field_ListSingle;
-    else if ( type == "text-multi" )
+    else if (type == "text-multi")
         _type = Field_TextMulti;
-    else if ( type == "text-private" )
+    else if (type == "text-private")
         _type = Field_TextPrivate;
     else
         _type = Field_TextSingle;
 
     _required = false;
-    _desc     = QString::null;
+    _desc     = QString();
     _options.clear();
     _value.clear();
 
     QDomNode n = e.firstChild();
-    for ( ; !n.isNull(); n = n.nextSibling() ) {
+    for (; !n.isNull(); n = n.nextSibling()) {
         QDomElement i = n.toElement();
-        if ( i.isNull() )
+        if (i.isNull())
             continue;
 
         QString tag = i.tagName();
-        if ( tag == "required" )
+        if (tag == "required")
             _required = true;
-        else if ( tag == "desc" )
+        else if (tag == "desc")
             _desc = i.text().trimmed();
-        else if ( tag == "option" ) {
+        else if (tag == "option") {
             Option o;
             o.label = i.attribute("label");
             o.value = subTagText(i, "value");
             _options.append(o);
-        }
-        else if ( tag == "value" ) {
+        } else if (tag == "value") {
             _value.append(i.text());
-        }
-        else if (tag == "media" && (i.namespaceURI() == "urn:xmpp:media-element"
-                 || i.attribute("xmlns") == "urn:xmpp:media-element")) { // allow only one media element
+        } else if (tag == "media"
+                   && (i.namespaceURI() == "urn:xmpp:media-element"
+                       || i.namespaceURI() == "urn:xmpp:media-element")) { // allow only one media element
             QSize s;
             if (i.hasAttribute("width")) {
                 s.setWidth(i.attribute("width").toInt());
@@ -229,16 +181,16 @@ void XData::Field::fromXml(const QDomElement &e)
                 s.setHeight(i.attribute("height").toInt());
             }
             _mediaElement.setMediaSize(s);
-            for(QDomNode un = i.firstChild(); !un.isNull(); un = un.nextSibling()) {
+            for (QDomNode un = i.firstChild(); !un.isNull(); un = un.nextSibling()) {
                 QDomElement uel = un.toElement();
-                if(uel.isNull() || uel.tagName() != "uri") {
+                if (uel.isNull() || uel.tagName() != "uri") {
                     continue;
                 }
-                QStringList type = uel.attribute("type").split(';');
-                QHash<QString,QString> params;
+                QStringList             type = uel.attribute("type").split(';');
+                QHash<QString, QString> params;
                 for (int i = 1; i < type.size(); ++i) {
-                    QStringList p = type.value(i).split('=');
-                    QString key = p[0].trimmed();
+                    QStringList p   = type.value(i).split('=');
+                    QString     key = p[0].trimmed();
                     if (!key.isEmpty()) {
                         params[key] = p.value(1).trimmed();
                     }
@@ -254,69 +206,69 @@ QDomElement XData::Field::toXml(QDomDocument *doc, bool submitForm) const
     QDomElement f = doc->createElement("field");
 
     // setting attributes...
-    if ( !_var.isEmpty() )
+    if (!_var.isEmpty())
         f.setAttribute("var", _var);
-    if ( !submitForm && !_label.isEmpty() )
+    if (!submitForm && !_label.isEmpty())
         f.setAttribute("label", _label);
 
     // now we're gonna get the 'type'
     QString type = "text-single";
-    if ( _type == Field_Boolean )
+    if (_type == Field_Boolean)
         type = "boolean";
-    else if ( _type == Field_Fixed )
+    else if (_type == Field_Fixed)
         type = "fixed";
-    else if ( _type == Field_Hidden )
+    else if (_type == Field_Hidden)
         type = "hidden";
-    else if ( _type == Field_JidMulti )
+    else if (_type == Field_JidMulti)
         type = "jid-multi";
-    else if ( _type == Field_JidSingle )
+    else if (_type == Field_JidSingle)
         type = "jid-single";
-    else if ( _type == Field_ListMulti )
+    else if (_type == Field_ListMulti)
         type = "list-multi";
-    else if ( _type == Field_ListSingle )
+    else if (_type == Field_ListSingle)
         type = "list-single";
-    else if ( _type == Field_TextMulti )
+    else if (_type == Field_TextMulti)
         type = "text-multi";
-    else if ( _type == Field_TextPrivate )
+    else if (_type == Field_TextPrivate)
         type = "text-private";
 
     f.setAttribute("type", type);
 
     // now, setting nested tags...
-    if ( !submitForm && _required )
-        f.appendChild( emptyTag(doc, "required") );
+    if (!submitForm && _required)
+        f.appendChild(emptyTag(doc, "required"));
 
-    if ( !submitForm && !_desc.isEmpty() )
-        f.appendChild( textTag(doc, "desc", _desc) );
+    if (!submitForm && !_desc.isEmpty())
+        f.appendChild(textTag(doc, "desc", _desc));
 
-    if ( !submitForm && !_options.isEmpty() ) {
-        OptionList::ConstIterator it = _options.begin();
-        for ( ; it != _options.end(); ++it) {
+    if (!submitForm && !_options.isEmpty()) {
+        for (const auto &it : _options) {
             QDomElement o = doc->createElement("option");
-            o.appendChild(textTag(doc, "value", (*it).value));
-            if ( !(*it).label.isEmpty() )
-                o.setAttribute("label", (*it).label);
+            o.appendChild(textTag(doc, "value", it.value));
+            if (!it.label.isEmpty())
+                o.setAttribute("label", it.label);
             f.appendChild(o);
         }
     }
 
-    if ( !_value.isEmpty() ) {
-        QStringList::ConstIterator it = _value.begin();
-        for ( ; it != _value.end(); ++it)
-            f.appendChild( textTag(doc, "value", *it) );
+    if (!_value.isEmpty()) {
+
+        for (const auto &it : _value)
+            f.appendChild(textTag(doc, "value", it));
     }
 
-    if ( !_mediaElement.isEmpty() ) {
+    if (!_mediaElement.isEmpty()) {
         QDomElement media = doc->createElementNS("urn:xmpp:media-element", "media");
-        QSize s = _mediaElement.mediaSize();
+        QSize       s     = _mediaElement.mediaSize();
         if (!s.isEmpty()) {
             media.setAttribute("width", s.width());
             media.setAttribute("height", s.height());
         }
-        foreach(const MediaUri &uri, _mediaElement) {
-            QDomElement uriEl = doc->createElement("uri");
-            QString type = uri.mimeType;
-            foreach (const QString &k, uri.params.keys()) {
+        for (const MediaUri &uri : _mediaElement) {
+            QDomElement        uriEl = doc->createElement("uri");
+            QString            type  = uri.mimeType;
+            const QStringList &klist = uri.params.keys();
+            for (const QString &k : klist) {
                 type += ";" + k + "=" + uri.params[k];
             }
             uriEl.setAttribute("type", type);
@@ -329,39 +281,34 @@ QDomElement XData::Field::toXml(QDomDocument *doc, bool submitForm) const
     return f;
 }
 
-
-
-
 //----------------------------------------------------------------------------
 // MediaElement
 //----------------------------------------------------------------------------
 
-void XData::Field::MediaElement::append(const QString &type, const QString &uri,
-                                        QHash<QString,QString> params)
+void XData::Field::MediaElement::append(const QString &type, const QString &uri, QHash<QString, QString> params)
 {
     XData::Field::MediaUri u;
     u.mimeType = type;
-    u.uri = uri;
-    u.params = params;
+    u.uri      = uri;
+    u.params   = params;
     QList<XData::Field::MediaUri>::append(u);
 }
 
-void XData::Field::MediaElement::setMediaSize(const QSize &size)
-{
-    _size = size;
-}
+void XData::Field::MediaElement::setMediaSize(const QSize &size) { _size = size; }
 
-QSize XData::Field::MediaElement::mediaSize() const
-{
-    return _size;
-}
+QSize XData::Field::MediaElement::mediaSize() const { return _size; }
 
 bool XData::Field::MediaElement::checkSupport(const QStringList &wildcards)
 {
-    foreach (const XData::Field::MediaUri &uri, *this) {
-        foreach (const QString &wildcard, wildcards) {
-            if (QRegExp(wildcard, Qt::CaseSensitive, QRegExp::Wildcard)
-                    .exactMatch(uri.mimeType)) {
+    for (const XData::Field::MediaUri &uri : std::as_const(*this)) {
+        for (const QString &wildcard : wildcards) {
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+            if (QRegExp(wildcard, Qt::CaseSensitive, QRegExp::Wildcard).exactMatch(uri.mimeType)) {
+#else
+            if (QRegularExpression::fromWildcard(QLatin1Char('^') + wildcard + QLatin1Char('$'), Qt::CaseSensitive)
+                    .match(uri.mimeType)
+                    .hasMatch()) {
+#endif
                 return true;
             }
         }
@@ -369,64 +316,33 @@ bool XData::Field::MediaElement::checkSupport(const QStringList &wildcards)
     return false;
 }
 
-
-
-
 //----------------------------------------------------------------------------
 // XData
 //----------------------------------------------------------------------------
 
-XData::XData() :
-    d(new Private)
-{
-    d->type = Data_Form;
-}
+XData::XData(Type type) : d(new Private) { d->type = type; }
 
-QString XData::title() const
-{
-    return d->title;
-}
+QString XData::title() const { return d->title; }
 
-void XData::setTitle(const QString &t)
-{
-    d->title = t;
-}
+void XData::setTitle(const QString &t) { d->title = t; }
 
-QString XData::instructions() const
-{
-    return d->instructions;
-}
+QString XData::instructions() const { return d->instructions; }
 
-void XData::setInstructions(const QString &i)
-{
-    d->instructions = i;
-}
+void XData::setInstructions(const QString &i) { d->instructions = i; }
 
-XData::Type XData::type() const
-{
-    return d->type;
-}
+XData::Type XData::type() const { return d->type; }
 
-void XData::setType(Type t)
-{
-    d->type = t;
-}
+void XData::setType(Type t) { d->type = t; }
 
-QString XData::registrarType() const
-{
-    return d->registrarType;
-}
+QString XData::registrarType() const { return d->registrarType; }
 
-XData::FieldList XData::fields() const
-{
-    return d->fields;
-}
+const XData::FieldList &XData::fields() const { return d->fields; }
 
 XData::Field XData::getField(const QString &var) const
 {
-    if ( !d->fields.isEmpty() ) {
+    if (!d->fields.isEmpty()) {
         FieldList::ConstIterator it = d->fields.begin();
-        for ( ; it != d->fields.end(); ++it) {
+        for (; it != d->fields.end(); ++it) {
             Field f = *it;
             if (f.isValid() && f.var() == var)
                 return f;
@@ -438,7 +354,7 @@ XData::Field XData::getField(const QString &var) const
 XData::Field &XData::fieldRef(const QString &var)
 {
     FieldList::Iterator it = d->fields.begin();
-    for ( ; it != d->fields.end(); ++it) {
+    for (; it != d->fields.end(); ++it) {
         if (it->isValid() && it->var() == var)
             break;
     }
@@ -448,7 +364,7 @@ XData::Field &XData::fieldRef(const QString &var)
 void XData::setFields(const FieldList &fl)
 {
     d->fields = fl;
-    foreach (const Field &f, fl) {
+    for (const Field &f : fl) {
         if (f.type() == Field::Field_Hidden && f.var() == "FORM_TYPE") {
             d->registrarType = f.value().value(0);
         }
@@ -457,15 +373,15 @@ void XData::setFields(const FieldList &fl)
 
 void XData::fromXml(const QDomElement &e)
 {
-    if ( (e.attribute("xmlns") != "jabber:x:data") && (e.namespaceURI() != "jabber:x:data") )
+    if (e.namespaceURI() != "jabber:x:data")
         return;
 
     QString type = e.attribute("type");
-    if ( type == "result" )
+    if (type == "result")
         d->type = Data_Result;
-    else if ( type == "submit" )
+    else if (type == "submit")
         d->type = Data_Submit;
-    else if ( type == "cancel" )
+    else if (type == "cancel")
         d->type = Data_Cancel;
     else
         d->type = Data_Form;
@@ -476,49 +392,47 @@ void XData::fromXml(const QDomElement &e)
     d->fields.clear();
 
     QDomNode n = e.firstChild();
-    for ( ; !n.isNull(); n = n.nextSibling() ) {
+    for (; !n.isNull(); n = n.nextSibling()) {
         QDomElement i = n.toElement();
-        if ( i.isNull() )
+        if (i.isNull())
             continue;
 
-        if ( i.tagName() == "field" ) {
+        if (i.tagName() == "field") {
             Field f;
             f.fromXml(i);
             d->fields.append(f);
             if (f.type() == Field::Field_Hidden && f.var() == "FORM_TYPE") {
                 d->registrarType = f.value().value(0);
             }
-        }
-        else if ( i.tagName() == "reported" ) {
+        } else if (i.tagName() == "reported") {
             d->report.clear();
             d->reportItems.clear();
 
             QDomNode nn = i.firstChild();
-            for ( ; !nn.isNull(); nn = nn.nextSibling() ) {
+            for (; !nn.isNull(); nn = nn.nextSibling()) {
                 QDomElement ii = nn.toElement();
-                if ( ii.isNull() )
+                if (ii.isNull())
                     continue;
 
-                if ( ii.tagName() == "field" ) {
-                    d->report.append( ReportField( ii.attribute("label"), ii.attribute("var") ) );
+                if (ii.tagName() == "field") {
+                    d->report.append(ReportField(ii.attribute("label"), ii.attribute("var")));
                 }
             }
-        }
-        else if ( i.tagName() == "item" ) {
+        } else if (i.tagName() == "item") {
             ReportItem item;
 
             QDomNode nn = i.firstChild();
-            for ( ; !nn.isNull(); nn = nn.nextSibling() ) {
+            for (; !nn.isNull(); nn = nn.nextSibling()) {
                 QDomElement ii = nn.toElement();
-                if ( ii.isNull() )
+                if (ii.isNull())
                     continue;
 
-                if ( ii.tagName() == "field" ) {
+                if (ii.tagName() == "field") {
                     item.insert(ii.attribute("var"), subTagText(ii, "value"));
                 }
             }
 
-            d->reportItems.append( item );
+            d->reportItems.append(item);
         }
     }
 }
@@ -526,48 +440,42 @@ void XData::fromXml(const QDomElement &e)
 QDomElement XData::toXml(QDomDocument *doc, bool submitForm) const
 {
     QDomElement x = doc->createElementNS("jabber:x:data", "x");
-    x.setAttribute("xmlns", "jabber:x:data");
 
     QString type = "form";
-    if ( d->type == Data_Result )
+    if (d->type == Data_Result)
         type = "result";
-    else if ( d->type == Data_Submit )
+    else if (d->type == Data_Submit)
         type = "submit";
-    else if ( d->type == Data_Cancel )
+    else if (d->type == Data_Cancel)
         type = "cancel";
 
     x.setAttribute("type", type);
 
-    if ( !submitForm && !d->title.isEmpty() )
-        x.appendChild( textTag(doc, "title", d->title) );
-    if ( !submitForm && !d->instructions.isEmpty() )
-        x.appendChild( textTag(doc, "instructions", d->instructions) );
+    if (!submitForm && !d->title.isEmpty())
+        x.appendChild(textTag(doc, "title", d->title));
+    if (!submitForm && !d->instructions.isEmpty())
+        x.appendChild(textTag(doc, "instructions", d->instructions));
 
-    if ( !d->fields.isEmpty() ) {
-        FieldList::ConstIterator it = d->fields.begin();
-        for ( ; it != d->fields.end(); ++it) {
-            Field f = *it;
-            if ( !(submitForm && f.var().isEmpty()) )
-                x.appendChild( f.toXml(doc, submitForm) );
+    if (!d->fields.isEmpty()) {
+        for (const auto &f : std::as_const(d->fields)) {
+            if (!(submitForm && f.var().isEmpty()))
+                x.appendChild(f.toXml(doc, submitForm));
         }
     }
 
     return x;
 }
 
-const QList<XData::ReportField> &XData::report() const
-{
-    return d->report;
-}
+const QList<XData::ReportField> &XData::report() const { return d->report; }
 
-const QList<XData::ReportItem> &XData::reportItems() const
-{
-    return d->reportItems;
-}
+const QList<XData::ReportItem> &XData::reportItems() const { return d->reportItems; }
 
 bool XData::isValid() const
 {
-    foreach(const Field &f, d->fields) {
+    if (d->type == Data_Invalid)
+        return false;
+
+    for (const Field &f : d->fields) {
         if (!f.isValid())
             return false;
     }

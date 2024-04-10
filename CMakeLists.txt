@@ -1,125 +1,162 @@
+cmake_minimum_required(VERSION 3.10.0)
+
+project(iris
+    DESCRIPTION "XMPP network library"
+    LANGUAGES C CXX
+)
+
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Release")
 endif()
 
-project(iris)
-cmake_minimum_required(VERSION 3.1.0)
-
-if(POLICY CMP0071)
-    cmake_policy(SET CMP0071 OLD)
+# Set 'd' prefix for Windows OS debug builds
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    if(WIN32)
+        set(D "d")
+    elseif(APPLE)
+        set(D "_debug")
+    endif()
 endif()
-if(POLICY CMP0074)
-    cmake_policy(SET CMP0074 NEW)
-endif()
 
-set( IRIS_LIB_VERSION_MAJOR 1 )
-set( IRIS_LIB_VERSION_MINOR 0 )
-set( IRIS_LIB_VERSION_PATCH 0 )
-set( IRIS_LIB_VERSION_STRING
+# Check if Iris is a subproject
+get_directory_property(IS_SUBPROJECT PARENT_DIRECTORY)
+
+set(IRIS_LIB_VERSION_MAJOR 1)
+set(IRIS_LIB_VERSION_MINOR 0)
+set(IRIS_LIB_VERSION_PATCH 0)
+set(IRIS_LIB_VERSION_STRING
     ${IRIS_LIB_VERSION_MAJOR}.${IRIS_LIB_VERSION_MINOR}.${IRIS_LIB_VERSION_PATCH}
-    )
-
-set( CMAKE_MODULE_PATH
-    "${CMAKE_MODULE_PATH}"
-    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/modules"
-    "${PROJECT_SOURCE_DIR}/cmake/modules"
-    "${PROJECT_SOURCE_DIR}/../cmake/modules"
-    )
-
-option( USE_QJDNS "Use qjdns/jdns library. Disabled by default for Qt5" OFF )
-option( SEPARATE_QJDNS "Build qjdns with iris library" OFF )
-
-set(CMAKE_CXX_STANDARD 14)
-
-include_directories(${PROJECT_SOURCE_DIR} ${PROJECT_BINARY_DIR})
-include_directories(include/iris)
-
-set(CMAKE_AUTOMOC ON)
-
-find_package(Qt5 COMPONENTS Core Gui Xml Network REQUIRED)
-if(USE_QJDNS)
-    message(WARNING "USE_QJDNS flag is enabled with Qt5. If you have problems with connection please disable this flag")
-endif()
-
-if(USE_QJDNS)
-    add_definitions(-DNEED_JDNS)
-endif()
-
-find_package(Qca REQUIRED)
-set(QCA_INCLUDES ${Qca_INCLUDE_DIR})
-set(qca_LIB ${Qca_LIBRARY})
-
-include_directories(
-    ${QCA_INCLUDES}
 )
 
-if(NOT USE_QJDNS AND SEPARATE_QJDNS)
-    message(WARNING "SEPARATE_QJDNS flag enabled, but USE_QJDNS flag disabled. Both flags will be disabled")
-    set(SEPARATE_QJDNS OFF)
-endif()
+list(APPEND CMAKE_MODULE_PATH
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules"
+    "${CMAKE_SOURCE_DIR}/cmake/modules"
+)
 
-if(USE_QJDNS AND (NOT SEPARATE_QJDNS))
-    add_definitions(-DJDNS_STATIC)
-    set(QJDns_LIBRARY qjdns)
-    include_directories(
-        src/jdns/include/jdns
-        )
-    set(jdns_SRCS
-        src/jdns/src/jdns/jdns.c
-        src/jdns/src/jdns/jdns_mdnsd.c
-        src/jdns/src/jdns/jdns_packet.c
-        src/jdns/src/jdns/jdns_sys.c
-        src/jdns/src/jdns/jdns_util.c
-        )
-    set(jdns_PUBLIC_HEADERS
-        src/jdns/include/jdns/jdns.h
-        src/jdns/include/jdns/jdns_export.h
-        )
-    set(jdns_HEADERS
-        src/jdns/src/jdns/jdns_packet.h
-        src/jdns/src/jdns/jdns_mdnsd.h
-        src/jdns/src/jdns/jdns_p.h
-        )
-    add_library(jdns STATIC ${jdns_SRCS} ${jdns_HEADERS} ${jdns_PUBLIC_HEADERS})
-    if(WIN32)
-        target_link_libraries(jdns ws2_32 advapi32)
+include(policyRules)
+
+set(CMAKE_AUTOMOC ON)
+set(CMAKE_INCLUDE_CURRENT_DIR ON)
+set(CMAKE_CXX_STANDARD 11)
+
+# Detect MXE cross-compilation
+set(IRIS_DEFAULT_BUNDLED_USRSCTP OFF)
+if(NOT DEFINED USE_MXE AND (EXISTS "${CMAKE_TOOLCHAIN_FILE}"))
+    option(USE_MXE "Use MXE (cross-compilation build environment for MS Windows)" OFF)
+    string(TOLOWER ${CMAKE_TOOLCHAIN_FILE} TOOLCHAIN_FILE)
+    string(REGEX MATCH "mxe-conf" MXE_DETECTED "${TOOLCHAIN_FILE}")
+    if(MXE_DETECTED)
+        message(STATUS "MXE environment detected")
+        message(STATUS "MXE toolchain: ${CMAKE_TOOLCHAIN_FILE}")
+        message(STATUS "MXE root path: ${CMAKE_PREFIX_PATH}")
+        set(USE_MXE ON)
+        set(IRIS_DEFAULT_BUNDLED_USRSCTP ON)
     endif()
-    set(qjdns_MOC_HDRS
-        src/jdns/include/jdns/qjdns.h
-        src/jdns/include/jdns/qjdnsshared.h
-        src/jdns/src/qjdns/qjdns_p.h
-        src/jdns/src/qjdns/qjdnsshared_p.h
-        )
-
-    qt_wrap_cpp(qjdns_MOC_SRCS ${qjdns_MOC_HDRS})
-
-    set(qjdns_SRCS
-        src/jdns/src/qjdns/qjdns.cpp
-        src/jdns/src/qjdns/qjdns_sock.cpp
-        src/jdns/src/qjdns/qjdnsshared.cpp
-        )
-
-    set(qjdns_PUBLIC_HEADERS
-        src/jdns/include/jdns/qjdns.h
-        src/jdns/include/jdns/qjdnsshared.h
-        )
-    set(qjdns_HEADERS
-        src/jdns/src/qjdns/qjdns_sock.h
-        )
-    add_library(${QJDns_LIBRARY} STATIC ${qjdns_SRCS} ${qjdns_MOC_SRCS} ${qjdns_MOC_HDRS} ${qjdns_PUBLIC_HEADERS})
-    target_link_libraries(${QJDns_LIBRARY} Qt5::Core Qt5::Network)
-    target_link_libraries(${QJDns_LIBRARY} jdns)
-elseif(USE_QJDNS)
-    set(QJDns_SUFFIX -qt5)
-    find_package(QJDns REQUIRED)
-    set(QJDns_LIBRARY ${QJDns_LIBRARY} PARENT_SCOPE)
-    include_directories( ${QJDns_INCLUDE_DIR} )
 endif()
 
-find_package(IDN REQUIRED)
+set(IRIS_DEFAULT_BUNDLED_QCA OFF)
+if(APPLE OR (MSVC OR USE_MXE))
+    set(IRIS_DEFAULT_BUNDLED_QCA ON)
+endif()
 
-add_definitions(-DIRISNET_STATIC)
+option(IRIS_ENABLE_INSTALL "Enable installation" ON)
+option(IRIS_ENABLE_JINGLE_SCTP "Enable SCTP over ICE Jingle transport / data channels" ON)
+option(IRIS_BUNDLED_QCA "Adds: DTLS, Blake2b and other useful for XMPP crypto-stuff" ${IRIS_DEFAULT_BUNDLED_QCA})
+option(IRIS_BUNDLED_USRSCTP "Compile compatible UsrSCTP lib (required for datachannel Jingle transport)" ${IRIS_DEFAULT_BUNDLED_USRSCTP})
+option(IRIS_BUILD_TOOLS "Build tools and examples" OFF)
+option(IRIS_ENABLE_DEBUG "Enable debugging code paths" OFF)
 
+set(IRIS_INSTALL_INCLUDEDIR ${CMAKE_INSTALL_INCLUDEDIR}/xmpp/iris)
+
+set(CMAKE_CXX_STANDARD 17)
+
+if("${CMAKE_BUILD_TYPE}" STREQUAL "Debug" OR ("${CMAKE_BUILD_TYPE}" STREQUAL "RelWithDebInfo"))
+    include(debug-definitions)
+endif()
+
+if("${QT_DEFAULT_MAJOR_VERSION}" STREQUAL "")
+    set(QT_DEFAULT_MAJOR_VERSION 5)
+endif()
+
+if(QT_DEFAULT_MAJOR_VERSION LESS 6)
+    find_package(Qt5 5.10 REQUIRED COMPONENTS Core Gui Xml Network)
+else()
+    find_package(Qt6 REQUIRED COMPONENTS Core Gui Xml Network)
+endif()
+message(STATUS "Qt${QT_DEFAULT_MAJOR_VERSION} found, version ${Qt${QT_DEFAULT_MAJOR_VERSION}Core_VERSION}")
+
+# Find QCA package or use bundled if enabled
+include(IrisQCA)
+
+set(STDINT_FOUND OFF)
+find_file(STDINT_INCLUDE stdint.h)
+
+if(NOT ${STDINT_INCLUDE} STREQUAL "STDINT_INCLUDE-NOTFOUND")
+    message(STATUS "StdInt include found: ${STDINT_INCLUDE}")
+    set(STDINT_FOUND ON)
+endif()
+
+# Find SCTP package or use bundled if enabled
+if(IRIS_ENABLE_JINGLE_SCTP)
+    include(IrisSCTP)
+endif()
+
+if(NOT IRIS_BUNDLED_QCA)
+    find_package(B2 QUIET)
+    if(B2_FOUND)
+        message(STATUS "Found B2: ${B2_LIBRARY}")
+    endif()
+endif()
+
+add_subdirectory(3rdparty/stringprep)
 add_subdirectory(src/irisnet)
 add_subdirectory(src/xmpp)
+
+if(IRIS_BUILD_TOOLS)
+    if(NOT IRIS_BUNDLED_QCA)
+        message(FATAL_ERROR "Bundled Qca is needed to build tools")
+    endif()
+    add_subdirectory(tools)
+endif()
+
+if(NOT IS_SUBPROJECT)
+    include(fix-codestyle)
+endif()
+
+if(IRIS_ENABLE_INSTALL)
+    include(CMakePackageConfigHelpers)
+    include(GNUInstallDirs)
+
+    write_basic_package_version_file(
+        ${CMAKE_CURRENT_BINARY_DIR}/IrisConfigVersion.cmake
+        VERSION ${IRIS_LIB_VERSION_STRING}
+        COMPATIBILITY SameMajorVersion
+    )
+    configure_file(
+        iris.pc.in
+        ${CMAKE_CURRENT_BINARY_DIR}/iris.pc
+        @ONLY
+    )
+
+    install(TARGETS iris
+        EXPORT iris
+        LIBRARY DESTINATION  ${CMAKE_INSTALL_LIBDIR}
+        ARCHIVE DESTINATION  ${CMAKE_INSTALL_LIBDIR}
+    )
+    install(EXPORT iris
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Iris
+        NAMESPACE iris::
+        FILE IrisConfig.cmake
+    )
+    install(FILES ${CMAKE_CURRENT_BINARY_DIR}/IrisConfigVersion.cmake
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Iris
+    )
+    install(FILES ${CMAKE_CURRENT_BINARY_DIR}/iris.pc
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig
+    )
+
+    install(DIRECTORY include/iris
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/xmpp
+        FILES_MATCHING PATTERN "*.h"
+    )
+endif()

@@ -1,6 +1,6 @@
 /*
  * xmpp_serverinfomanager.cpp
- * Copyright (C) 2006,2019  Remko Troncon, Sergey Ilinykh
+ * Copyright (C) 2006-2019  Remko Troncon, Sergey Ilinykh
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -18,19 +18,18 @@
  */
 
 #include "xmpp_serverinfomanager.h"
-#include "xmpp_tasks.h"
+
 #include "xmpp_caps.h"
+#include "xmpp_client.h"
+#include "xmpp_tasks.h"
 
 namespace XMPP {
-
-ServerInfoManager::ServerInfoManager(Client* client):
-    QObject(client),
-    _client(client),
-    _canMessageCarbons(false)
+ServerInfoManager::ServerInfoManager(Client *client) : QObject(client), _client(client), _canMessageCarbons(false)
 {
     deinitialize();
     // NOTE we can use this class for any server, but for this we shouldn't use roster signal here
-    connect(_client, SIGNAL(rosterRequestFinished(bool, int, const QString &)), SLOT(initialize()), Qt::QueuedConnection);
+    connect(_client, SIGNAL(rosterRequestFinished(bool, int, const QString &)), SLOT(initialize()),
+            Qt::QueuedConnection);
 }
 
 void ServerInfoManager::reset()
@@ -59,39 +58,31 @@ void ServerInfoManager::deinitialize()
     emit featuresChanged();
 }
 
-const QString& ServerInfoManager::multicastService() const
-{
-    return _multicastService;
-}
+const QString &ServerInfoManager::multicastService() const { return _multicastService; }
 
-bool ServerInfoManager::hasPEP() const
-{
-    return _hasPEP;
-}
+bool ServerInfoManager::hasPEP() const { return _hasPEP; }
 
-bool ServerInfoManager::canMessageCarbons() const
-{
-    return _canMessageCarbons;
-}
+bool ServerInfoManager::canMessageCarbons() const { return _canMessageCarbons; }
 
 void ServerInfoManager::queryServicesList()
 {
     _servicesListState = ST_InProgress;
-    auto jtitems = new JT_DiscoItems(_client->rootTask());
-    connect(jtitems, &JT_DiscoItems::finished, this, [=]()
-    {
-        _servicesInfo.clear(); //
-        if (jtitems->success()) {
-            _servicesListState = ST_Ready;
-            for (const auto &item: jtitems->items()) {
-                _servicesInfo.insert(item.jid().full(), {ST_NotQueried, item, QMap<QString,QVariant>()});
+    auto jtitems       = new JT_DiscoItems(_client->rootTask());
+    connect(
+        jtitems, &JT_DiscoItems::finished, this,
+        [=]() {
+            _servicesInfo.clear(); //
+            if (jtitems->success()) {
+                _servicesListState = ST_Ready;
+                for (const auto &item : jtitems->items()) {
+                    _servicesInfo.insert(item.jid().full(), { ST_NotQueried, item, QMap<QString, QVariant>() });
+                }
+            } else {
+                _servicesListState = ST_Failed;
             }
-        }
-        else {
-            _servicesListState = ST_Failed;
-        }
-        checkPendingServiceQueries();
-    }, Qt::QueuedConnection);
+            checkPendingServiceQueries();
+        },
+        Qt::QueuedConnection);
     jtitems->get(_client->jid().domain());
     jtitems->go(true);
 }
@@ -103,7 +94,7 @@ void ServerInfoManager::checkPendingServiceQueries()
         if (_servicesListState == ST_Failed) {
             const auto sqs = _serviceQueries;
             _serviceQueries.clear();
-            for (const auto &q: sqs) {
+            for (const auto &q : sqs) {
                 q.callback(QList<DiscoItem>());
             }
         }
@@ -112,30 +103,30 @@ void ServerInfoManager::checkPendingServiceQueries()
 
     // services list is ready here and we can start checking it and sending disco#info to not cached entries
     auto sqIt = _serviceQueries.begin();
-    while(sqIt != _serviceQueries.end()) {
+    while (sqIt != _serviceQueries.end()) {
 
         // populate services to query for this service request
         if (!sqIt->servicesToQueryDefined) {
             sqIt->spareServicesToQuery.clear();
             // grep all suitble service jids. moving forward preferred ones
-            QMapIterator<QString,ServiceInfo> si(_servicesInfo);
+            QMapIterator<QString, ServiceInfo> si(_servicesInfo);
             while (si.hasNext()) {
                 si.next();
-                if (!sqIt->nameHint.isEmpty()) {
-                    if (sqIt->nameHint.isEmpty() || sqIt->nameHint.exactMatch(si.key())) {
-                        sqIt->servicesToQuery.append(si.key());
+                if (sqIt->nameHint.isValid()) {
+                    if (!sqIt->nameHint.isValid() || sqIt->nameHint.match(si.key()).hasMatch()) {
+                        sqIt->servicesToQuery.push_back(si.key());
                     } else if (sqIt->options & SQ_CheckAllOnNoMatch) {
-                        sqIt->spareServicesToQuery.append(si.key());
+                        sqIt->spareServicesToQuery.push_back(si.key());
                     }
                 } else {
-                    sqIt->servicesToQuery.append(si.key());
+                    sqIt->servicesToQuery.push_back(si.key());
                 }
             }
-            if (sqIt->servicesToQuery.isEmpty()) {
+            if (sqIt->servicesToQuery.empty()) {
                 sqIt->servicesToQuery = sqIt->spareServicesToQuery;
                 sqIt->spareServicesToQuery.clear();
             }
-            if (sqIt->servicesToQuery.isEmpty()) {
+            if (sqIt->servicesToQuery.empty()) {
                 sqIt->callback(QList<DiscoItem>());
                 _serviceQueries.erase(sqIt++);
                 continue;
@@ -145,33 +136,31 @@ void ServerInfoManager::checkPendingServiceQueries()
 
         // now `sqIt->servicesToQuery` definitely has something to check. maybe some info is already in cache.
         bool hasInProgress = false;
-        auto jidIt = sqIt->servicesToQuery.begin();
-        //bool foundMatch = false;
+        auto jidIt         = sqIt->servicesToQuery.begin();
+        // bool foundMatch = false;
         while (jidIt != sqIt->servicesToQuery.end()) {
             auto si = _servicesInfo.find(*jidIt); // find cached service corresponding to one of matched jids
             if (si == _servicesInfo.end() || si->state == ST_Failed) {
                 // the map was updated after the first service list request, or info request failed.
                 sqIt->servicesToQuery.erase(jidIt++);
                 continue;
-            } else
-            if (si->state == ST_Ready) { // disco info finished successfully for current jid from `servicesToQuery`
+            } else if (si->state
+                       == ST_Ready) { // disco info finished successfully for current jid from `servicesToQuery`
                 bool foundIdentity = sqIt->category.isEmpty() && sqIt->type.isEmpty();
                 if (!foundIdentity) {
-                    for (auto &i: si->item.identities()) {
-                        if ((sqIt->category.isEmpty() || sqIt->category == i.category) &&
-                                (sqIt->type.isEmpty() || sqIt->type == i.type))
-                        {
+                    for (auto &i : si->item.identities()) {
+                        if ((sqIt->category.isEmpty() || sqIt->category == i.category)
+                            && (sqIt->type.isEmpty() || sqIt->type == i.type)) {
                             foundIdentity = true;
                             break;
                         }
                     }
                 }
-                if (foundIdentity && (sqIt->features.isEmpty() || std::accumulate(sqIt->features.constBegin(),
-                                                                  sqIt->features.constEnd(), false,
-                                                                  [&si](bool a, const QSet<QString> &b) {
-                                                                     return a || si->item.features().test(b);
-                                                                  })))
-                {
+                if (foundIdentity
+                    && (sqIt->features.isEmpty()
+                        || std::accumulate(
+                            sqIt->features.constBegin(), sqIt->features.constEnd(), false,
+                            [&si](bool a, const QSet<QString> &b) { return a || si->item.features().test(b); }))) {
                     sqIt->result.append(si->item);
                     if (sqIt->options & SQ_FinishOnFirstMatch) {
                         break;
@@ -185,14 +174,14 @@ void ServerInfoManager::checkPendingServiceQueries()
             Q_ASSERT(si->state == ST_NotQueried || si->state == ST_InProgress);
             hasInProgress = true;
             if (si->state == ST_NotQueried) { // if not queried then let's query
-                si->state = ST_InProgress;
+                si->state   = ST_InProgress;
                 auto jtinfo = new JT_DiscoInfo(_client->rootTask());
-                connect(jtinfo, &DiscoInfoTask::finished, this, [this, jtinfo](){
+                connect(jtinfo, &DiscoInfoTask::finished, this, [this, jtinfo]() {
                     auto si = _servicesInfo.find(jtinfo->jid().full());
                     if (si != _servicesInfo.end()) {
                         if (jtinfo->success()) {
                             si.value().state = ST_Ready;
-                            si.value().item = jtinfo->item();
+                            si.value().item  = jtinfo->item();
                         } else {
                             si.value().state = ST_Failed;
                         }
@@ -205,8 +194,9 @@ void ServerInfoManager::checkPendingServiceQueries()
             ++jidIt;
         }
 
-        if (sqIt->result.isEmpty() && !hasInProgress && !sqIt->spareServicesToQuery.isEmpty()) {
-            // we don't check sqIt->servicesToQuery.isEmpty() since it comes from other conditions (sqIt->result.isEmpty() && !hasInProgress)
+        if (sqIt->result.isEmpty() && !hasInProgress && !sqIt->spareServicesToQuery.empty()) {
+            // we don't check sqIt->servicesToQuery.isEmpty() since it comes from other conditions
+            // (sqIt->result.isEmpty() && !hasInProgress)
             sqIt->servicesToQuery = sqIt->spareServicesToQuery;
             sqIt->spareServicesToQuery.clear();
             continue; // continue with the same ServiceQuery but with different jids list
@@ -217,7 +207,7 @@ void ServerInfoManager::checkPendingServiceQueries()
         // if nothing in progress then we have full result set or nothing found even in spare list
         if (forceFinish || !hasInProgress) { // self explanatory
             auto callback = std::move(sqIt->callback);
-            auto result = sqIt->result;
+            auto result   = sqIt->result;
             _serviceQueries.erase(sqIt++);
             callback(result);
         } else {
@@ -239,8 +229,9 @@ void ServerInfoManager::appendQuery(const ServiceQuery &q)
     }
 }
 
-void ServerInfoManager::queryServiceInfo(const QString &category, const QString &type, const QList<QSet<QString>> &features,
-                                     const QRegExp &nameHint, SQOptions options, std::function<void (const QList<DiscoItem> &items)> callback)
+void ServerInfoManager::queryServiceInfo(const QString &category, const QString &type,
+                                         const QList<QSet<QString>> &features, const QRegularExpression &nameHint,
+                                         SQOptions options, std::function<void(const QList<DiscoItem> &items)> callback)
 {
     appendQuery(ServiceQuery(type, category, features, nameHint, options, std::move(callback)));
 }
@@ -275,17 +266,17 @@ void ServerInfoManager::disco_finished()
 
         // Identities
         DiscoItem::Identities is = jt->item().identities();
-        foreach(DiscoItem::Identity i, is) {
+        for (const DiscoItem::Identity &i : is) {
             if (i.category == "pubsub" && i.type == "pep")
                 _hasPEP = true;
         }
 
-        for (const auto &x: jt->item().extensions()) {
-            if (x.type() == XData::Data_Result && x.registrarType() == QLatin1String("http://jabber.org/network/serverinfo")) {
-                for (const auto &f: x.fields()) {
-                    if (f.type() == XData::Field::Field_ListMulti) {
-                        _extraServerInfo.insert(f.var(), f.value()); // covers XEP-0157
-                    }
+        auto servInfo
+            = jt->item().findExtension(XData::Data_Result, QLatin1String("http://jabber.org/network/serverinfo"));
+        if (servInfo.isValid()) {
+            for (const auto &f : servInfo.fields()) {
+                if (f.type() == XData::Field::Field_ListMulti) {
+                    _extraServerInfo.insert(f.var(), f.value()); // covers XEP-0157
                 }
             }
         }
@@ -293,5 +284,4 @@ void ServerInfoManager::disco_finished()
         emit featuresChanged();
     }
 }
-
 } // namespace XMPP

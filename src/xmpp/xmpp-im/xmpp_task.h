@@ -20,7 +20,7 @@
 #ifndef XMPP_TASK_H
 #define XMPP_TASK_H
 
-#include "xmpp_stanza.h"
+#include "iris/xmpp_stanza.h"
 
 #include <QObject>
 #include <QString>
@@ -29,61 +29,61 @@ class QDomDocument;
 class QDomElement;
 
 namespace XMPP {
-    class Client;
-    class Jid;
+class Client;
+class Jid;
 
-    class Task : public QObject
-    {
-        Q_OBJECT
-    public:
-        enum { ErrDisc, ErrTimeout };
-        Task(Task *parent);
-        Task(Client *, bool isRoot);
-        virtual ~Task();
+class Task : public QObject {
+    Q_OBJECT
+public:
+    enum { ErrDisc, ErrTimeout };
+    Task(Task *parent);
+    Task(Client *, bool isRoot);
+    virtual ~Task();
 
-        Task *parent() const;
-        Client *client() const;
-        QDomDocument *doc() const;
-        QString id() const;
+    Task         *parent() const;
+    Client       *client() const;
+    QDomDocument *doc() const;
+    QString       id() const;
 
-        bool success() const;
-        int statusCode() const;
-        const QString & statusString() const;
-        const Stanza::Error & error() const;
+    bool                 success() const;
+    int                  statusCode() const;
+    const QString       &statusString() const;
+    const Stanza::Error &error() const;
 
-        void setTimeout(int seconds) const;
-        int timeout();
+    void setTimeout(int seconds) const;
+    int  timeout();
 
-        void go(bool autoDelete=false);
-        virtual bool take(const QDomElement &);
-        void safeDelete();
+    void         go(bool autoDelete = false);
+    virtual bool take(const QDomElement &);
+    void         safeDelete();
 
-    signals:
-        void finished();
+signals:
+    void finished();
 
-    protected:
-        virtual void onGo();
-        virtual void onDisconnect();
-        virtual void onTimeout();
-        void send(const QDomElement &);
-        void setSuccess(int code=0, const QString &str="");
-        void setError(const QDomElement &);
-        void setError(int code=0, const QString &str="");
-        void debug(const char *, ...);
-        void debug(const QString &);
-        bool iqVerify(const QDomElement &x, const Jid &to, const QString &id, const QString &xmlns="");
+protected:
+    virtual void onGo();
+    virtual void onDisconnect();
+    virtual void onTimeout();
+    void         send(const QDomElement &);
+    void         setSuccess(int code = 0, const QString &str = "");
+    void         setError(const QDomElement &);
+    void         setError(int code = 0, const QString &str = "");
+    void         debug(const char *, ...);
+    void         debug(const QString &);
+    bool         iqVerify(const QDomElement &x, const Jid &to, const QString &id, const QString &xmlns = "");
+    QString      encryptionProtocol(const QDomElement &) const;
 
-    private slots:
-        void clientDisconnected();
-        void timeoutFinished();
-        void done();
+private slots:
+    void clientDisconnected();
+    void timeoutFinished();
+    void done();
 
-    private:
-        void init();
+private:
+    void init();
 
-        class TaskPrivate;
-        TaskPrivate *d;
-    };
-}
+    class TaskPrivate;
+    TaskPrivate *d;
+};
+} // namespace XMPP
 
-#endif
+#endif // XMPP_TASK_H

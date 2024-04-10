@@ -19,21 +19,21 @@
 #ifndef STUNTRANSACTION_H
 #define STUNTRANSACTION_H
 
-#include <QObject>
 #include <QByteArray>
-#include <QHostAddress>
+#include <QEnableSharedFromThis>
+#include <QObject>
+
+#include "transportaddress.h"
 
 namespace QCA {
-    class SecureArray;
+class SecureArray;
 }
 
 namespace XMPP {
-
 class StunMessage;
-
-class StunTransactionPrivate;
 class StunTransactionPool;
 class StunTransactionPoolPrivate;
+class StunTransactionPrivate;
 
 // Notes:
 //
@@ -59,31 +59,26 @@ class StunTransactionPoolPrivate;
 // - if short term or long term auth is used, then the request is authenticated
 //   and the response is required to be authenticated.
 
-class StunTransaction : public QObject
-{
+class StunTransaction : public QObject {
     Q_OBJECT
 
 public:
-    enum Mode
-    {
+    enum Mode {
         Udp, // handle retransmissions
         Tcp  // send once
     };
 
-    enum Error
-    {
-        ErrorGeneric,
-        ErrorTimeout
-    };
+    enum Error { ErrorGeneric, ErrorTimeout };
 
-    StunTransaction(QObject *parent = 0);
+    StunTransaction(QObject *parent = nullptr);
     ~StunTransaction();
 
     // toAddress/toPort are optional, to associate this request to a
     //   specific endpoint
     // note: not DOR-DS safe.  this function will cause the pool's
     //   outgoingMessage() signal to be emitted.
-    void start(StunTransactionPool *pool, const QHostAddress &toAddress = QHostAddress(), int toPort = -1);
+    void start(StunTransactionPool *pool, const TransportAddress &toAddress = TransportAddress());
+    void cancel();
 
     // pass message with class unset.  use transaction id from the
     //   createMessage signal.
@@ -128,19 +123,15 @@ private:
 //   emitted as a direct result of calling certain member functions of this
 //   class as well as any other class that might use it (such as StunBinding).
 //   so, be careful with what you do in your retransmit slot.
-class StunTransactionPool : public QObject
-{
+class StunTransactionPool : public QObject, public QEnableSharedFromThis<StunTransactionPool> {
     Q_OBJECT
 
 public:
-    enum DebugLevel
-    {
-        DL_None,
-        DL_Info,
-        DL_Packet
-    };
+    using Ptr = QSharedPointer<StunTransactionPool>;
 
-    StunTransactionPool(StunTransaction::Mode mode, QObject *parent = 0);
+    enum DebugLevel { DL_None, DL_Info, DL_Packet };
+
+    StunTransactionPool(StunTransaction::Mode mode);
     ~StunTransactionPool();
 
     StunTransaction::Mode mode() const;
@@ -149,7 +140,7 @@ public:
     //   may cause a transaction to emit finished() or error() signals.
 
     // returns true if the message is owned by the pool, else false.
-    bool writeIncomingMessage(const StunMessage &msg, const QHostAddress &addr = QHostAddress(), int port = -1);
+    bool writeIncomingMessage(const StunMessage &msg, const TransportAddress &addr = TransportAddress());
 
     // returns true if the packet is surely a STUN message and owned by the
     //   pool, else false.  a packet must be owned by the pool to be
@@ -157,15 +148,16 @@ public:
     //   not be a STUN message.  *notStun will be set to true if the packet
     //   is surely not STUN, or set to false if it is unclear whether the
     //   packet is STUN or not.
-    bool writeIncomingMessage(const QByteArray &packet, bool *notStun = 0, const QHostAddress &addr = QHostAddress(), int port = -1);
+    bool writeIncomingMessage(const QByteArray &packet, bool *notStun = nullptr,
+                              const TransportAddress &addr = TransportAddress());
 
     void setLongTermAuthEnabled(bool enabled);
 
     QString realm() const;
-    void setUsername(const QString &username);
-    void setPassword(const QCA::SecureArray &password);
-    void setRealm(const QString &realm);
-    void continueAfterParams();
+    void    setUsername(const QString &username);
+    void    setPassword(const QCA::SecureArray &password);
+    void    setRealm(const QString &realm);
+    void    continueAfterParams(const TransportAddress &addr);
 
     // for use with stun indications
     QByteArray generateId() const;
@@ -183,9 +175,9 @@ signals:
     //   writeIncomingMessage() during outgoingMessage() could cause
     //   a transaction's finished() or error() signals to emit during
     //   start(), which would violate DOR-DS.
-    void outgoingMessage(const QByteArray &packet, const QHostAddress &addr, int port);
+    void outgoingMessage(const QByteArray &packet, const TransportAddress &addr);
 
-    void needAuthParams();
+    void needAuthParams(const TransportAddress &);
 
     // not DOR-SS/DS safe
     void debugLine(const QString &line);
@@ -199,7 +191,6 @@ private:
     friend class StunTransactionPoolPrivate;
     StunTransactionPoolPrivate *d;
 };
+} // namespace XMPP
 
-}
-
-#endif
+#endif // STUNTRANSACTION_H
