@@ -246,9 +246,9 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
             }
         }
 
-        inline qint64 getBlockSize()
+        inline std::size_t getBlockSize()
         {
-            auto sz = qint64(connection->blockSize());
+            auto sz = connection->blockSize();
             return sz ? sz : 8192;
         }
 
@@ -266,13 +266,13 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
                 expectReceived();
                 return; // everything is written
             }
-            auto sz = getBlockSize();
+            quint64 sz = getBlockSize();
             if (bytesLeft && sz > *bytesLeft) {
                 sz = *bytesLeft;
             }
             QByteArray data;
             if (device->isSequential()) {
-                sz = qMin(sz, device->bytesAvailable());
+                sz = qMin(sz, quint64(device->bytesAvailable()));
                 if (!sz)
                     return; // we will come back on readyRead
             }
@@ -322,14 +322,14 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
 
         void readNextBlockFromTransport()
         {
-            qint64 bytesAvail;
+            quint64 bytesAvail;
             while ((!bytesLeft || *bytesLeft > 0)
                    && ((bytesAvail = connection->bytesAvailable()) || (connection->hasPendingDatagrams()))) {
                 QByteArray data;
                 if (connection->features() & TransportFeature::MessageOriented) {
                     data = connection->readDatagram().data();
                 } else {
-                    qint64 sz = 65536; // shall we respect transport->blockSize() ?
+                    quint64 sz = 65536; // shall we respect transport->blockSize() ?
                     if (bytesLeft && sz > *bytesLeft) {
                         sz = *bytesLeft;
                     }
@@ -372,6 +372,14 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
             lastReason = Reason();
             lastError.reset();
 
+            if (acceptFile.range().isValid()) {
+                if (acceptFile.range().length) {
+                    bytesLeft = acceptFile.range().length;
+                }
+            } else {
+                bytesLeft = acceptFile.size();
+            }
+
             if (streamingMode) {
                 qDebug("jingle-ft: streaming mode is active for %s",
                        qUtf8Printable(q->pad()->session()->peer().full()));
@@ -382,7 +390,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
                             hasher->addData(QByteArray::fromRawData(buf, size));
                         }
                         if (bytesLeft) {
-                            *bytesLeft -= size;
+                            *bytesLeft -= quint64(size);
                         }
                         if (bytesLeft && *bytesLeft == 0) {
                             tryFinalizeIncoming();
@@ -427,21 +435,16 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
 
             setState(State::Active);
             if (acceptFile.range().isValid()) {
-                if (acceptFile.range().length) {
-                    bytesLeft = acceptFile.range().length;
-                }
                 emit q->deviceRequested(acceptFile.range().offset, bytesLeft);
             } else {
-                bytesLeft = acceptFile.size();
                 emit q->deviceRequested(0, bytesLeft);
             }
         }
 
         void tryFinalizeIncoming()
         {
-            if (q->_state == State::Finished || outgoingReceived || streamingMode)
-                return;
-            if (connection->isOpen() && (!bytesLeft || *bytesLeft > 0))
+            auto moreBytesExpected = bytesLeft && *bytesLeft > 0;
+            if (q->_state == State::Finished || outgoingReceived || (connection->isOpen() && moreBytesExpected))
                 return;
 
             // data read finished. check other stuff
@@ -609,6 +612,8 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
 
     File Application::acceptFile() const { return d->acceptFile; }
 
+    void Application::setAcceptFile(const File &file) const { d->acceptFile = file; }
+
     bool Application::isTransportReplaceEnabled() const { return _state < State::Active; }
 
     void Application::prepareTransport()
@@ -659,8 +664,10 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
             if (d->outgoingReceived) {
                 d->outgoingReceived = false;
                 Received received(creator(), _contentName);
-                return OutgoingUpdate { QList<QDomElement>() << received.toXml(doc),
-                                        [this](bool) { d->setState(State::Finished); } };
+                return OutgoingUpdate { QList<QDomElement>() << received.toXml(doc), [this](bool) {
+                                           d->lastReason = Reason(Reason::Condition::Success);
+                                           d->setState(State::Finished);
+                                       } };
             }
             if (!d->outgoingChecksum.isEmpty()) {
                 ContentBase cb(_pad->session()->role(), _contentName);
@@ -718,6 +725,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
 
         if (_creator == _pad->session()->role() && _state <= State::ApprovedToSend) {
             // local content, not yet sent to remote
+            d->lastReason = _terminationReason;
             setState(State::Finished);
             return;
         }
