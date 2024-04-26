@@ -363,7 +363,7 @@ bool Stanza::Error::fromXml(const QDomElement &e, const QString &baseNS)
         condition = ErrorCond(-1);
     }
 
-    by = e.attribute(QLatin1String("by"));
+    by = e.attribute(QStringLiteral("by"));
     QString textTag(QStringLiteral("text"));
     for (auto t = e.firstChildElement(); !t.isNull(); t = t.nextSiblingElement()) {
         if (t.namespaceURI() == NS_STANZAS) {
@@ -464,11 +464,11 @@ class Stanza::Private {
 public:
     static int stringToKind(const QString &s)
     {
-        if (s == QLatin1String("message"))
+        if (s == QStringLiteral("message"))
             return Message;
-        else if (s == QLatin1String("presence"))
+        else if (s == QStringLiteral("presence"))
             return Presence;
-        else if (s == QLatin1String("iq"))
+        else if (s == QStringLiteral("iq"))
             return IQ;
         else
             return -1;
@@ -477,11 +477,11 @@ public:
     static QString kindToString(Kind k)
     {
         if (k == Message)
-            return QLatin1String("message");
+            return QStringLiteral("message");
         else if (k == Presence)
-            return QLatin1String("presence");
+            return QStringLiteral("presence");
         else
-            return QLatin1String("iq");
+            return QStringLiteral("iq");
     }
 
     Stream                      *s;
