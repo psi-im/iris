@@ -87,14 +87,14 @@ Stanza::Error::Error(ErrorType _type, ErrorCond _condition, const QString &_text
 class Stanza::Error::Private {
 public:
     struct ErrorTypeEntry {
-        const char *str;
-        ErrorType   type;
+        QString   str;
+        ErrorType type;
     };
     static std::array<ErrorTypeEntry, 5> errorTypeTable;
 
     struct ErrorCondEntry {
-        const char *str;
-        ErrorCond   cond;
+        QString   str;
+        ErrorCond cond;
     };
     static std::array<ErrorCondEntry, 22> errorCondTable;
 
@@ -179,36 +179,36 @@ public:
 };
 
 std::array<Stanza::Error::Private::ErrorTypeEntry, 5> Stanza::Error::Private::errorTypeTable {
-    { { "cancel", ErrorType::Cancel },
-      { "continue", ErrorType::Continue },
-      { "modify", ErrorType::Modify },
-      { "auth", ErrorType::Auth },
-      { "wait", ErrorType::Wait } }
+    { { QStringLiteral("cancel"), ErrorType::Cancel },
+      { QStringLiteral("continue"), ErrorType::Continue },
+      { QStringLiteral("modify"), ErrorType::Modify },
+      { QStringLiteral("auth"), ErrorType::Auth },
+      { QStringLiteral("wait"), ErrorType::Wait } }
 };
 
 std::array<Stanza::Error::Private::ErrorCondEntry, 22> Stanza::Error::Private::errorCondTable { {
-    { "bad-request", ErrorCond::BadRequest },
-    { "conflict", ErrorCond::Conflict },
-    { "feature-not-implemented", ErrorCond::FeatureNotImplemented },
-    { "forbidden", ErrorCond::Forbidden },
-    { "gone", ErrorCond::Gone },
-    { "internal-server-error", ErrorCond::InternalServerError },
-    { "item-not-found", ErrorCond::ItemNotFound },
-    { "jid-malformed", ErrorCond::JidMalformed },
-    { "not-acceptable", ErrorCond::NotAcceptable },
-    { "not-allowed", ErrorCond::NotAllowed },
-    { "not-authorized", ErrorCond::NotAuthorized },
-    { "policy-violation", ErrorCond::PolicyViolation },
-    { "recipient-unavailable", ErrorCond::RecipientUnavailable },
-    { "redirect", ErrorCond::Redirect },
-    { "registration-required", ErrorCond::RegistrationRequired },
-    { "remote-server-not-found", ErrorCond::RemoteServerNotFound },
-    { "remote-server-timeout", ErrorCond::RemoteServerTimeout },
-    { "resource-constraint", ErrorCond::ResourceConstraint },
-    { "service-unavailable", ErrorCond::ServiceUnavailable },
-    { "subscription-required", ErrorCond::SubscriptionRequired },
-    { "undefined-condition", ErrorCond::UndefinedCondition },
-    { "unexpected-request", ErrorCond::UnexpectedRequest },
+    { QStringLiteral("bad-request"), ErrorCond::BadRequest },
+    { QStringLiteral("conflict"), ErrorCond::Conflict },
+    { QStringLiteral("feature-not-implemented"), ErrorCond::FeatureNotImplemented },
+    { QStringLiteral("forbidden"), ErrorCond::Forbidden },
+    { QStringLiteral("gone"), ErrorCond::Gone },
+    { QStringLiteral("internal-server-error"), ErrorCond::InternalServerError },
+    { QStringLiteral("item-not-found"), ErrorCond::ItemNotFound },
+    { QStringLiteral("jid-malformed"), ErrorCond::JidMalformed },
+    { QStringLiteral("not-acceptable"), ErrorCond::NotAcceptable },
+    { QStringLiteral("not-allowed"), ErrorCond::NotAllowed },
+    { QStringLiteral("not-authorized"), ErrorCond::NotAuthorized },
+    { QStringLiteral("policy-violation"), ErrorCond::PolicyViolation },
+    { QStringLiteral("recipient-unavailable"), ErrorCond::RecipientUnavailable },
+    { QStringLiteral("redirect"), ErrorCond::Redirect },
+    { QStringLiteral("registration-required"), ErrorCond::RegistrationRequired },
+    { QStringLiteral("remote-server-not-found"), ErrorCond::RemoteServerNotFound },
+    { QStringLiteral("remote-server-timeout"), ErrorCond::RemoteServerTimeout },
+    { QStringLiteral("resource-constraint"), ErrorCond::ResourceConstraint },
+    { QStringLiteral("service-unavailable"), ErrorCond::ServiceUnavailable },
+    { QStringLiteral("subscription-required"), ErrorCond::SubscriptionRequired },
+    { QStringLiteral("undefined-condition"), ErrorCond::UndefinedCondition },
+    { QStringLiteral("unexpected-request"), ErrorCond::UnexpectedRequest },
 } };
 
 std::array<Stanza::Error::Private::ErrorCodeEntry, 22> Stanza::Error::Private::errorCodeTable { {
