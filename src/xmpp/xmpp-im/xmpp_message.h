@@ -19,7 +19,6 @@
 #ifndef XMPP_MESSAGE_H
 #define XMPP_MESSAGE_H
 
-#include "iris/xmpp_stanza.h"
 #include "xmpp_address.h"
 #include "xmpp_chatstate.h"
 #include "xmpp_muc.h"
@@ -35,6 +34,7 @@ class QString;
 
 namespace XMPP {
 class BoBData;
+class Forwarding;
 class HTMLElement;
 class HttpAuthRequest;
 class IBBData;
@@ -49,12 +49,6 @@ typedef enum { OfflineEvent, DeliveredEvent, DisplayedEvent, ComposingEvent, Can
 
 class Message {
 public:
-    enum CarbonDir : quint8 {
-        NoCarbon,
-        Received, // other party messages are sent to another own client
-        Sent      // own messages are sent from other clients
-    };
-
     // XEP-0334
     enum ProcessingHint { NoPermanentStore = 1, NoStore = 2, NoCopy = 4, Store = 8 };
     Q_DECLARE_FLAGS(ProcessingHints, ProcessingHint)
@@ -78,7 +72,7 @@ public:
     QString       id() const;
     QString       type() const;
     QString       lang() const;
-    QString       subject(const QString &lang = QString()) const;
+    QString       subject(const QString &lang = {}) const;
     QString       subject(const QLocale &lang) const;
     StringMap     subjectMap() const;
     QString       body(const QString &lang = "") const;
@@ -91,8 +85,8 @@ public:
     void setId(const QString &s);
     void setType(const QString &s);
     void setLang(const QString &s);
-    void setSubject(const QString &s, const QString &lang = "");
-    void setBody(const QString &s, const QString &lang = "");
+    void setSubject(const QString &s, const QString &lang = {});
+    void setBody(const QString &s, const QString &lang = {});
     void setThread(const QString &s, bool send = false);
     void setError(const Stanza::Error &err);
 
@@ -106,8 +100,8 @@ public:
     void      setTimeStamp(const QDateTime &ts, bool send = false);
 
     // XEP-0071
-    HTMLElement html(const QString &lang = "") const;
-    void        setHTML(const HTMLElement &s, const QString &lang = "");
+    HTMLElement html(const QString &lang = {}) const;
+    void        setHTML(const HTMLElement &s, const QString &lang = {});
     bool        containsHTML() const;
 
     // XEP-0066
@@ -174,14 +168,15 @@ public:
     IBBData ibbData() const;
 
     // XEP-0280 Message Carbons
-    void      setDisabledCarbons(bool disabled);
-    bool      isDisabledCarbons() const;
-    void      setCarbonDirection(CarbonDir);
-    CarbonDir carbonDirection() const;
+    Jid     displayJid() const;
+    Message displayMessage() const;
+    void    setCarbonsPrivate(bool enable);
+    bool    carbonsPrivate() const;
 
     // XEP-0297
-    void setForwardedFrom(const Jid &jid);
-    Jid  forwardedFrom() const;
+    void setForwarded(const Forwarding &frw);
+    // note, the next method has to be called only on not-null message
+    const Forwarding &forwarded() const;
 
     // XEP-0308
     QString replaceId() const;
