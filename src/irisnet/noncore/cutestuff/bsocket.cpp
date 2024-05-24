@@ -195,7 +195,7 @@ public:
         sd.resolver->setProtocol(XMPP::ServiceResolver::HappyEyeballs);
         connect(sd.resolver, &XMPP::ServiceResolver::srvReady, this, &HappyEyeballsConnector::splitSrvResolvers);
         // we don't care about special handling of fail. we have fallback host there anyway
-        connect(sd.resolver, &XMPP::ServiceResolver::error, this, &HappyEyeballsConnector::splitSrvResolvers);
+        connect(sd.resolver, &XMPP::ServiceResolver::srvFailed, this, &HappyEyeballsConnector::splitSrvResolvers);
         sd.state = Resolve;
         sd.resolver->start(services, transport, domain, port);
     }
