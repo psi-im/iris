@@ -71,6 +71,33 @@ namespace {
             return result;
         }
 
+        static void serialize(QDomElement parent, const PHistorical &historical, const char *tagName)
+        {
+            std::visit(
+                [&](auto const &v) mutable {
+                    if (v.isNull()) {
+                        return;
+                    }
+                    auto doc  = parent.ownerDocument();
+                    auto bday = parent.appendChild(doc.createElement(QLatin1String(tagName))).toElement();
+                    historical.first.addTo(bday);
+                    using Tv = std::decay_t<decltype(v)>;
+                    if constexpr (std::is_same_v<Tv, QString>) {
+                        VCardHelper::addTextElement(doc, bday, QLatin1String("text"), QStringList { v });
+                    } else if constexpr (std::is_same_v<Tv, QDate>) {
+                        VCardHelper::addTextElement(doc, bday, QLatin1String("date"),
+                                                    QStringList { v.toString(Qt::ISODate) });
+                    } else if constexpr (std::is_same_v<Tv, QDateTime>) {
+                        VCardHelper::addTextElement(doc, bday, QLatin1String("date-time"),
+                                                    QStringList { v.toString(Qt::ISODate) });
+                    } else if constexpr (std::is_same_v<Tv, QTime>) {
+                        VCardHelper::addTextElement(doc, bday, QLatin1String("time"),
+                                                    QStringList { v.toString(Qt::ISODate) });
+                    }
+                },
+                historical.second);
+        }
+
         template <typename ListType>
         static void addTextElement(QDomDocument &document, QDomElement &parent, const QString &tagName,
                                    const ListType &texts)
@@ -86,10 +113,10 @@ namespace {
         }
 
         template <typename T>
-        static void serializeList(QDomDocument &document, QDomElement &parent,
-                                  const QList<std::pair<Parameters, T>> &list, const QString &tagName,
-                                  const QString &innerTagName = QLatin1String("text"))
+        static void serializeList(QDomElement &parent, const QList<std::pair<Parameters, T>> &list,
+                                  const QString &tagName, const QString &innerTagName = QLatin1String("text"))
         {
+            auto document = parent.ownerDocument();
             for (const auto &entry : list) {
                 QDomElement element = document.createElement(tagName);
                 entry.first.addTo(element);
@@ -219,6 +246,36 @@ namespace {
                 }
             }
         };
+
+        static void unserialize(const QDomElement &parent, const char *tagName, PHistorical &to)
+        {
+            QDomElement source = parent.firstChildElement(QLatin1String(tagName));
+            if (source.isNull()) {
+                return;
+            }
+            to.first = Parameters(source.firstChildElement(QLatin1String("parameters")));
+            auto v   = VCardHelper::extractText(source, "date");
+            if (v.isNull()) {
+                v = VCardHelper::extractText(source, "date-time");
+                if (v.isNull()) {
+                    v = VCardHelper::extractText(source, "time");
+                    if (v.isNull()) {
+                        to.second = VCardHelper::extractText(source, "text");
+                    } else {
+                        to.second = QTime::fromString(v, Qt::ISODate);
+                    }
+                } else {
+                    to.second = QDateTime::fromString(v, Qt::ISODate);
+                }
+            } else {
+                to.second = QDate::fromString(v, Qt::ISODate);
+            }
+        }
+
+        static bool isNull(const PHistorical &h)
+        {
+            return std::visit([](auto const &v) { return v.isNull(); }, h.second);
+        }
     };
 
 } // namespace
@@ -417,8 +474,8 @@ public:
     PNames         names;    // at most 1
     PStringLists   nickname;
     PAdvUris       photo;
-    PDate          bday;        // at most 1
-    PDate          anniversary; // at most 1
+    PHistorical    bday;        // at most 1
+    PHistorical    anniversary; // at most 1
     VCard4::Gender gender;
     QString        genderComment;
 
@@ -495,17 +552,8 @@ public:
         VCardHelper::fillContainer(element, "email", emails);
         VCardHelper::fillContainer(element, "key", key);
 
-        QDomElement bdayElement = element.firstChildElement(QLatin1String("bday"));
-        if (!bdayElement.isNull()) {
-            bday.first  = Parameters(bdayElement.firstChildElement(QLatin1String("parameters")));
-            bday.second = QDate::fromString(VCardHelper::extractText(bdayElement, "date"), Qt::ISODate);
-        }
-
-        QDomElement anniversaryElement = element.firstChildElement(QLatin1String("anniversary"));
-        if (!anniversaryElement.isNull()) {
-            anniversary.first  = Parameters(anniversaryElement.firstChildElement(QLatin1String("parameters")));
-            anniversary.second = QDate::fromString(VCardHelper::extractText(anniversaryElement, "date"), Qt::ISODate);
-        }
+        VCardHelper::unserialize(element, "bday", bday);
+        VCardHelper::unserialize(element, "anniversary", anniversary);
 
         QDomElement genderElement = element.firstChildElement(QLatin1String("sex"));
         if (!genderElement.isNull()) {
@@ -559,7 +607,7 @@ public:
     {
         return fullName.isEmpty() && names.second.isEmpty() && nickname.isEmpty() && emails.isEmpty() && tels.isEmpty()
             && org.isEmpty() && title.isEmpty() && role.isEmpty() && note.isEmpty() && urls.isEmpty()
-            && bday.second.isNull() && anniversary.second.isNull() && gender == VCard4::Gender::Undefined
+            && VCardHelper::isNull(bday) && VCardHelper::isNull(anniversary) && gender == VCard4::Gender::Undefined
             && uid.isEmpty() && kind.isEmpty() && categories.isEmpty() && busyTimeUrl.isEmpty()
             && calendarRequestUri.isEmpty() && calendarUri.isEmpty() && clientPidMap.isEmpty() && geo.isEmpty()
             && impp.isEmpty() && key.isEmpty() && lang.isEmpty() && logo.isEmpty() && member.isEmpty()
@@ -591,34 +639,22 @@ QDomElement VCard::toXmlElement(QDomDocument &document) const
 
     QDomElement vCardElement = document.createElement(QLatin1String("vcard"));
 
-    VCardHelper::serializeList(document, vCardElement, d->fullName, QLatin1String("fn"));
+    VCardHelper::serializeList(vCardElement, d->fullName, QLatin1String("fn"));
     if (!d->names.second.isEmpty()) {
         auto e = vCardElement.appendChild(d->names.second.toXmlElement(document)).toElement();
         d->names.first.addTo(e);
     }
-    VCardHelper::serializeList(document, vCardElement, d->nickname, QLatin1String("nickname"), QLatin1String("text"));
-    VCardHelper::serializeList(document, vCardElement, d->emails, QLatin1String("email"), QLatin1String("text"));
-    VCardHelper::serializeList(document, vCardElement, d->tels, QLatin1String("tel"), QLatin1String("uri"));
-    VCardHelper::serializeList(document, vCardElement, d->org, QLatin1String("org"), QLatin1String("text"));
-    VCardHelper::serializeList(document, vCardElement, d->title, QLatin1String("title"), QLatin1String("text"));
-    VCardHelper::serializeList(document, vCardElement, d->role, QLatin1String("role"), QLatin1String("text"));
-    VCardHelper::serializeList(document, vCardElement, d->note, QLatin1String("note"), QLatin1String("text"));
-    VCardHelper::serializeList(document, vCardElement, d->urls, QLatin1String("url"), QLatin1String("uri"));
+    VCardHelper::serializeList(vCardElement, d->nickname, QLatin1String("nickname"), QLatin1String("text"));
+    VCardHelper::serializeList(vCardElement, d->emails, QLatin1String("email"), QLatin1String("text"));
+    VCardHelper::serializeList(vCardElement, d->tels, QLatin1String("tel"), QLatin1String("uri"));
+    VCardHelper::serializeList(vCardElement, d->org, QLatin1String("org"), QLatin1String("text"));
+    VCardHelper::serializeList(vCardElement, d->title, QLatin1String("title"), QLatin1String("text"));
+    VCardHelper::serializeList(vCardElement, d->role, QLatin1String("role"), QLatin1String("text"));
+    VCardHelper::serializeList(vCardElement, d->note, QLatin1String("note"), QLatin1String("text"));
+    VCardHelper::serializeList(vCardElement, d->urls, QLatin1String("url"), QLatin1String("uri"));
 
-    if (!d->bday.second.isNull()) {
-        QDomElement bdayElement = document.createElement(QLatin1String("bday"));
-        d->bday.first.addTo(bdayElement);
-        VCardHelper::addTextElement(document, bdayElement, QLatin1String("date"), d->bday.second.toString(Qt::ISODate));
-        vCardElement.appendChild(bdayElement);
-    }
-
-    if (!d->anniversary.second.isNull()) {
-        QDomElement anniversaryElement = document.createElement(QLatin1String("anniversary"));
-        d->anniversary.first.addTo(anniversaryElement);
-        VCardHelper::addTextElement(document, anniversaryElement, QLatin1String("date"),
-                                    d->anniversary.second.toString(Qt::ISODate));
-        vCardElement.appendChild(anniversaryElement);
-    }
+    VCardHelper::serialize(vCardElement, d->bday, "bday");
+    VCardHelper::serialize(vCardElement, d->bday, "anniversary");
 
     if (d->gender != VCard4::Gender::Undefined) {
         QDomElement genderElement = document.createElement(QLatin1String("gender"));
@@ -629,29 +665,27 @@ QDomElement VCard::toXmlElement(QDomDocument &document) const
         vCardElement.appendChild(genderElement);
     }
 
-    VCardHelper::serializeList(document, vCardElement, d->categories, QLatin1String("categories"),
-                               QLatin1String("text"));
-    VCardHelper::serializeList(document, vCardElement, d->busyTimeUrl, QLatin1String("fburl"), QLatin1String("uri"));
-    VCardHelper::serializeList(document, vCardElement, d->calendarRequestUri, QLatin1String("caladruri"),
-                               QLatin1String("uri"));
-    VCardHelper::serializeList(document, vCardElement, d->calendarUri, QLatin1String("caluri"), QLatin1String("uri"));
+    VCardHelper::serializeList(vCardElement, d->categories, QLatin1String("categories"), QLatin1String("text"));
+    VCardHelper::serializeList(vCardElement, d->busyTimeUrl, QLatin1String("fburl"), QLatin1String("uri"));
+    VCardHelper::serializeList(vCardElement, d->calendarRequestUri, QLatin1String("caladruri"), QLatin1String("uri"));
+    VCardHelper::serializeList(vCardElement, d->calendarUri, QLatin1String("caluri"), QLatin1String("uri"));
     for (auto it = d->clientPidMap.cbegin(); it != d->clientPidMap.cend(); ++it) {
         auto m = vCardElement.appendChild(document.createElement(QLatin1String("clientpidmap")));
         m.appendChild(document.createElement(QLatin1String("sourceid")))
             .appendChild(document.createTextNode(QString::number(it.key())));
         m.appendChild(document.createElement(QLatin1String("uri"))).appendChild(document.createTextNode(it.value()));
     }
-    VCardHelper::serializeList(document, vCardElement, d->geo, QLatin1String("geo"), QLatin1String("uri"));
-    VCardHelper::serializeList(document, vCardElement, d->impp, QLatin1String("impp"), QLatin1String("uri"));
-    VCardHelper::serializeList(document, vCardElement, d->key, QLatin1String("key"), QLatin1String("uri"));
-    VCardHelper::serializeList(document, vCardElement, d->lang, QLatin1String("lang"), QLatin1String("language-tag"));
-    VCardHelper::serializeList(document, vCardElement, d->logo, QLatin1String("logo"), QLatin1String("uri"));
-    VCardHelper::serializeList(document, vCardElement, d->member, QLatin1String("member"), QLatin1String("uri"));
-    VCardHelper::serializeList(document, vCardElement, d->photo, QLatin1String("photo"), QLatin1String("uri"));
-    VCardHelper::serializeList(document, vCardElement, d->related, QLatin1String("related"), QLatin1String("text"));
-    VCardHelper::serializeList(document, vCardElement, d->timeZone, QLatin1String("tz"), QLatin1String("text"));
-    VCardHelper::serializeList(document, vCardElement, d->sound, QLatin1String("sound"), QLatin1String("uri"));
-    VCardHelper::serializeList(document, vCardElement, d->source, QLatin1String("source"), QLatin1String("uri"));
+    VCardHelper::serializeList(vCardElement, d->geo, QLatin1String("geo"), QLatin1String("uri"));
+    VCardHelper::serializeList(vCardElement, d->impp, QLatin1String("impp"), QLatin1String("uri"));
+    VCardHelper::serializeList(vCardElement, d->key, QLatin1String("key"), QLatin1String("uri"));
+    VCardHelper::serializeList(vCardElement, d->lang, QLatin1String("lang"), QLatin1String("language-tag"));
+    VCardHelper::serializeList(vCardElement, d->logo, QLatin1String("logo"), QLatin1String("uri"));
+    VCardHelper::serializeList(vCardElement, d->member, QLatin1String("member"), QLatin1String("uri"));
+    VCardHelper::serializeList(vCardElement, d->photo, QLatin1String("photo"), QLatin1String("uri"));
+    VCardHelper::serializeList(vCardElement, d->related, QLatin1String("related"), QLatin1String("text"));
+    VCardHelper::serializeList(vCardElement, d->timeZone, QLatin1String("tz"), QLatin1String("text"));
+    VCardHelper::serializeList(vCardElement, d->sound, QLatin1String("sound"), QLatin1String("uri"));
+    VCardHelper::serializeList(vCardElement, d->source, QLatin1String("source"), QLatin1String("uri"));
 
     if (d->rev.isValid()) {
         auto revE = vCardElement.appendChild(document.createElement(QLatin1String("rev")))
@@ -805,17 +839,17 @@ void VCard::setUrls(const PUris &urls)
     d->urls = urls;
 }
 
-PDate VCard::bday() const { return d ? d->bday : PDate(); }
+PHistorical VCard::bday() const { return d ? d->bday : PHistorical(); }
 
-void VCard::setBday(const PDate &bday)
+void VCard::setBday(const PHistorical &bday)
 {
     INIT_D();
     d->bday = bday;
 }
 
-PDate VCard::anniversary() const { return d ? d->anniversary : PDate(); }
+PHistorical VCard::anniversary() const { return d ? d->anniversary : PHistorical(); }
 
-void VCard::setAnniversary(const PDate &anniversary)
+void VCard::setAnniversary(const PHistorical &anniversary)
 {
     INIT_D();
     d->anniversary = anniversary;

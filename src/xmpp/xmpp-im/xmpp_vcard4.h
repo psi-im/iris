@@ -17,8 +17,8 @@
  *
  */
 
-#ifndef VCARD_H
-#define VCARD_H
+#ifndef XMPP_VCARD4_H
+#define XMPP_VCARD4_H
 
 #include <QDate>
 #include <QDateTime>
@@ -47,7 +47,6 @@ public:
     void addTo(QDomElement parent) const;
     bool isEmpty() const;
 
-private:
     QStringList type;
     QString     language;
     QString     altid;
@@ -101,8 +100,9 @@ public:
     QString    mediaType;
 };
 
-using UriOrText = std::variant<QUrl, QString>;
-using TimeZone  = std::variant<QUrl, QString, int>;
+using UriOrText  = std::variant<QUrl, QString>;
+using TimeZone   = std::variant<QUrl, QString, int>;
+using Historical = std::variant<QDateTime, QDate, QTime, QString>;
 
 using PStringList = std::pair<Parameters, QStringList>;
 using PString     = std::pair<Parameters, QString>;
@@ -113,6 +113,7 @@ using PAddress    = std::pair<Parameters, Address>;
 using PNames      = std::pair<Parameters, Names>;
 using PUriOrText  = std::pair<Parameters, UriOrText>;
 using PTimeZone   = std::pair<Parameters, TimeZone>;
+using PHistorical = std::pair<Parameters, Historical>;
 
 using PStringLists = QList<PStringList>;
 using PStrings     = QList<PString>;
@@ -167,11 +168,11 @@ public:
     PUris urls() const;
     void  setUrls(const PUris &urls);
 
-    PDate bday() const;
-    void  setBday(const PDate &bday);
+    PHistorical bday() const;
+    void        setBday(const PHistorical &bday);
 
-    PDate anniversary() const;
-    void  setAnniversary(const PDate &anniversary);
+    PHistorical anniversary() const;
+    void        setAnniversary(const PHistorical &anniversary);
 
     Gender gender() const;
     void   setGender(Gender gender);
@@ -249,4 +250,4 @@ private:
 
 } // namespace VCard4
 
-#endif // VCARD_H
+#endif // XMPP_VCARD4_H
