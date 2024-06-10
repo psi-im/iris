@@ -20,6 +20,8 @@
 #ifndef XMPP_VCARD4_H
 #define XMPP_VCARD4_H
 
+#include "xmpp_vcard.h"
+
 #include <QDate>
 #include <QDateTime>
 #include <QDomElement>
@@ -32,6 +34,8 @@
 
 #include <algorithm>
 #include <variant>
+
+class QFile;
 
 /**
  * This code represents implementation of RFC 6351/6350 as well as XEP-0292
@@ -76,11 +80,17 @@ class Address {
 public:
     Address() = default;
     Address(const QDomElement &element);
+    Address(const XMPP::VCard::Address &legacyAddress) :
+        pobox({ legacyAddress.pobox }), extaddr({ legacyAddress.extaddr }), street({ legacyAddress.street }),
+        locality({ legacyAddress.locality }), region({ legacyAddress.region }), code({ legacyAddress.pcode }),
+        country({ legacyAddress.country })
+    {
+    }
     QDomElement toXmlElement(QDomDocument &document) const;
     bool        isEmpty() const noexcept;
 
     QStringList pobox;
-    QStringList ext;
+    QStringList extaddr;
     QStringList street;
     QStringList locality;
     QStringList region;
@@ -185,6 +195,25 @@ public:
     }
 };
 
+template <> class TaggedList<PAdvUri> : public QList<PAdvUri> {
+public:
+    using item_type = PAdvUri;
+
+    operator QByteArray() const
+    {
+        // take first preferred data uri and its data
+        if (this->empty()) {
+            return {};
+        }
+        return std::ranges::max_element(*this,
+                                        [](auto const &a, auto const &b) {
+                                            return ((int(!a.data.data.isEmpty()) << 8) + a.parameters.pref)
+                                                > ((int(!b.data.data.isEmpty()) << 8) + b.parameters.pref);
+                                        })
+            ->data.data;
+    }
+};
+
 using PStringLists = TaggedList<PStringList>;
 using PStrings     = TaggedList<PString>;
 using PUris        = TaggedList<PUri>;
@@ -205,7 +234,11 @@ public:
     QDomElement toXmlElement(QDomDocument &document) const;
 
     static VCard fromFile(const QString &filename);
+    static VCard fromFile(QFile &file);
     bool         save(const QString &filename) const;
+
+    void        fromVCardTemp(const XMPP::VCard &tempVCard);
+    XMPP::VCard toVCardTemp() const;
 
     // Getters and setters
     PStrings fullName() const;
