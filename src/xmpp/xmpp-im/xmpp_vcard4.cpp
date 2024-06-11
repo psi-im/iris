@@ -115,7 +115,7 @@ namespace {
         }
 
         template <typename T>
-        static void serializeList(QDomElement &parent, const TaggedList<T> &list, const QString &tagName,
+        static void serializeList(QDomElement &parent, const TaggedList<Item<T>> &list, const QString &tagName,
                                   const QString &innerTagName = QLatin1String("text"))
         {
             auto document = parent.ownerDocument();
@@ -619,6 +619,14 @@ public:
 
 VCard::VCard() : d(nullptr) { }
 
+VCard::VCard(const VCard &other) : d(other.d) { }
+
+VCard &VCard::operator=(const VCard &other)
+{
+    d = other.d;
+    return *this;
+}
+
 VCard::VCard(const QDomElement &element) : d(new VCardData(element)) { }
 
 VCard::~VCard() = default;
@@ -629,8 +637,6 @@ bool VCard::isEmpty() const
         return true;
     return d->isEmpty();
 }
-
-VCard::operator bool() const { return d != nullptr; }
 
 QDomElement VCard::toXmlElement(QDomDocument &document) const
 {
@@ -799,7 +805,7 @@ void VCard::fromVCardTemp(const XMPP::VCard &tempVCard)
     setNames(names);
 
     // Nickname
-    setNickname({ { PStringList { Parameters(), { tempVCard.nickName() } } } });
+    setNickName({ { { PStringList { Parameters(), { tempVCard.nickName() } } } } });
 
     // Photo
     if (!tempVCard.photo().isEmpty()) {
@@ -902,7 +908,7 @@ void VCard::fromVCardTemp(const XMPP::VCard &tempVCard)
     setOrg(org);
 
     // Categories
-    setCategories({ { PStringList { Parameters(), tempVCard.categories() } } });
+    setCategories({ { { PStringList { Parameters(), tempVCard.categories() } } } });
 
     // Note
     setNote({ { PString { Parameters(), tempVCard.note() } } });
@@ -1069,9 +1075,9 @@ void VCard::setNames(const PNames &names)
     d->names = names;
 }
 
-PStringLists VCard::nickname() const { return d ? d->nickname : PStringLists(); }
+PStringLists VCard::nickName() const { return d ? d->nickname : PStringLists(); }
 
-void VCard::setNickname(const PStringLists &nickname)
+void VCard::setNickName(const PStringLists &nickname)
 {
     INIT_D();
     d->nickname = nickname;

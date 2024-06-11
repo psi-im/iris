@@ -133,6 +133,11 @@ template <> struct Item<QDateTime> : public ItemBase {
     operator QDate() const { return data.date(); }
 };
 
+template <> struct Item<QStringList> : public ItemBase {
+    QStringList data;
+    operator QString() const { return data.value(0); }
+};
+
 using UriOrText  = std::variant<QUrl, QString>;
 using TimeZone   = std::variant<QUrl, QString, int>;
 using Historical = std::variant<QDateTime, QDate, QTime, QString>;
@@ -193,6 +198,8 @@ public:
         return *std::ranges::max_element(
             *this, [](auto const &a, auto const &b) { return a.parameters.pref > b.parameters.pref; });
     }
+
+    operator QString() const { return preferred().data; }
 };
 
 template <> class TaggedList<PAdvUri> : public QList<PAdvUri> {
@@ -214,7 +221,12 @@ public:
     }
 };
 
-using PStringLists = TaggedList<PStringList>;
+class TaggedListStringList : public TaggedList<PStringList> {
+public:
+    operator QString() const { return preferred().data.value(0); }
+};
+
+using PStringLists = TaggedListStringList;
 using PStrings     = TaggedList<PString>;
 using PUris        = TaggedList<PUri>;
 using PAdvUris     = TaggedList<PAdvUri>;
@@ -226,10 +238,16 @@ class VCard {
 public:
     VCard();
     VCard(const QDomElement &element);
+    VCard(const VCard &other);
+
     ~VCard();
 
-    bool     isEmpty() const;
-    explicit operator bool() const;
+    VCard &operator=(const VCard &);
+
+    bool isEmpty() const;
+
+    inline bool     isNull() const { return d != nullptr; }
+    inline explicit operator bool() const { return isNull(); }
 
     QDomElement toXmlElement(QDomDocument &document) const;
 
@@ -247,8 +265,8 @@ public:
     const PNames &names() const;
     void          setNames(const PNames &names);
 
-    PStringLists nickname() const;
-    void         setNickname(const PStringLists &nickname);
+    PStringLists nickName() const;
+    void         setNickName(const PStringLists &nickname);
 
     PStrings emails() const;
     void     setEmails(const PStrings &emails);
