@@ -661,7 +661,7 @@ QDomElement VCard::toXmlElement(QDomDocument &document) const
     VCardHelper::serializeList(vCardElement, d->urls, QLatin1String("url"), QLatin1String("uri"));
 
     VCardHelper::serialize(vCardElement, d->bday, "bday");
-    VCardHelper::serialize(vCardElement, d->bday, "anniversary");
+    VCardHelper::serialize(vCardElement, d->anniversary, "anniversary");
 
     if (d->gender != VCard4::Gender::Undefined) {
         QDomElement genderElement = document.createElement(QLatin1String("gender"));
