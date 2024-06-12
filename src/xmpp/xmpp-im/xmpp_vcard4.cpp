@@ -715,29 +715,29 @@ VCard VCard::fromFile(const QString &filename)
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
         return VCard();
 
-    return fromFile(file);
+    auto vcard = fromDevice(&file);
+    file.close();
+    return vcard;
 }
 
-VCard VCard::fromFile(QFile &file)
+VCard VCard::fromDevice(QIODevice *dev)
 {
     QDomDocument doc;
 #if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
-    if (!doc.setContent(&file, true)) {
+    if (!doc.setContent(dev, true)) {
 #else
-    if (!doc.setContent(&file, QDomDocument::ParseOption::UseNamespaceProcessing)) {
+    if (!doc.setContent(dev, QDomDocument::ParseOption::UseNamespaceProcessing)) {
 #endif
-        file.close();
-        return VCard();
+        return {};
     }
-    file.close();
 
     QDomElement root = doc.documentElement();
     if (root.tagName() != QLatin1String("vcards") || root.namespaceURI() != VCARD_NAMESPACE)
-        return VCard();
+        return {};
 
     QDomElement vCardElement = root.firstChildElement(QLatin1String("vcard"));
     if (vCardElement.isNull())
-        return VCard();
+        return {};
 
     return VCard(vCardElement);
 }
