@@ -483,7 +483,7 @@ public:
     PAdvUris       photo;
     PHistorical    bday;        // at most 1
     PHistorical    anniversary; // at most 1
-    VCard4::Gender gender;
+    VCard4::Gender gender = Gender::Undefined;
     QString        genderComment;
 
     // Delivery Addressing Properties
