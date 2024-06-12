@@ -268,41 +268,53 @@ public:
     XMPP::VCard toVCardTemp() const;
 
     // Getters and setters
-    PStrings fullName() const;
-    void     setFullName(const PStrings &fullName);
+    PStrings       fullName() const;
+    void           setFullName(const PStrings &fullName);
+    Item<QString> &setFullName(const QString &fullName);
 
-    PNames names() const;
-    void   setNames(const PNames &names);
+    PNames       names() const;
+    void         setNames(const PNames &names);
+    Item<Names> &setNames(const Names &names);
 
-    PStringLists nickName() const;
-    void         setNickName(const PStringLists &nickname);
+    PStringLists       nickName() const;
+    void               setNickName(const PStringLists &nickname);
+    Item<QStringList> &setNickName(const QStringList &nickname);
 
-    PStrings emails() const;
-    void     setEmails(const PStrings &emails);
+    PStrings       emails() const;
+    void           setEmails(const PStrings &emails);
+    Item<QString> &setEmails(const QString &email);
 
-    PUrisOrTexts phones() const;
-    void         setPhones(const PUrisOrTexts &tels);
+    PUrisOrTexts     phones() const;
+    void             setPhones(const PUrisOrTexts &tels);
+    Item<UriOrText> &setPhones(const UriOrText &phone);
 
-    PStringLists org() const;
-    void         setOrg(const PStringLists &org);
+    PStringLists       org() const;
+    void               setOrg(const PStringLists &org);
+    Item<QStringList> &setOrg(const QStringList &org);
 
-    PStrings title() const;
-    void     setTitle(const PStrings &title);
+    PStrings       title() const;
+    void           setTitle(const PStrings &title);
+    Item<QString> &setTitle(const QString &title);
 
-    PStrings role() const;
-    void     setRole(const PStrings &role);
+    PStrings       role() const;
+    void           setRole(const PStrings &role);
+    Item<QString> &setRole(const QString &role);
 
-    PStrings note() const;
-    void     setNote(const PStrings &note);
+    PStrings       note() const;
+    void           setNote(const PStrings &note);
+    Item<QString> &setNote(const QString &note);
 
-    PUris urls() const;
-    void  setUrls(const PUris &urls);
+    PUris       urls() const;
+    void        setUrls(const PUris &urls);
+    Item<QUrl> &setUrls(const QUrl &url);
 
-    PHistorical bday() const;
-    void        setBday(const PHistorical &bday);
+    PHistorical       bday() const;
+    void              setBday(const PHistorical &bday);
+    Item<Historical> &setBday(const Historical &bday);
 
-    PHistorical anniversary() const;
-    void        setAnniversary(const PHistorical &anniversary);
+    PHistorical       anniversary() const;
+    void              setAnniversary(const PHistorical &anniversary);
+    Item<Historical> &setAnniversary(const Historical &anniversary);
 
     Gender gender() const;
     void   setGender(Gender gender);
@@ -316,62 +328,78 @@ public:
     QString kind() const;
     void    setKind(const QString &kind);
 
-    PStringLists categories() const;
-    void         setCategories(const PStringLists &categories);
+    PStringLists       categories() const;
+    void               setCategories(const PStringLists &categories);
+    Item<QStringList> &setCategories(const QStringList &categories);
 
-    PUris busyTimeUrl() const;
-    void  setBusyTimeUrl(const PUris &busyTimeUrl);
+    PUris       busyTimeUrl() const;
+    void        setBusyTimeUrl(const PUris &busyTimeUrl);
+    Item<QUrl> &setBusyTimeUrl(const QUrl &url);
 
-    PUris calendarRequestUri() const;
-    void  setCalendarRequestUri(const PUris &calendarRequestUri);
+    PUris       calendarRequestUri() const;
+    void        setCalendarRequestUri(const PUris &calendarRequestUri);
+    Item<QUrl> &setCalendarRequestUri(const QUrl &url);
 
-    PUris calendarUri() const;
-    void  setCalendarUri(const PUris &calendarUri);
+    PUris       calendarUri() const;
+    void        setCalendarUri(const PUris &calendarUri);
+    Item<QUrl> &setCalendarUri(const QUrl &url);
 
     QHash<int, QString> clientPidMap() const;
     void                setClientPidMap(const QHash<int, QString> &clientPidMap);
 
-    PUris geo() const;
-    void  setGeo(const PUris &geo);
+    PUris       geo() const;
+    void        setGeo(const PUris &geo);
+    Item<QUrl> &setGeo(const QUrl &url);
 
-    PUris impp() const;
-    void  setImpp(const PUris &impp);
+    PUris       impp() const;
+    void        setImpp(const PUris &impp);
+    Item<QUrl> &setImpp(const QUrl &url);
 
-    PUrisOrTexts key() const;
-    void         setKey(const PUrisOrTexts &key);
+    PUrisOrTexts     key() const;
+    void             setKey(const PUrisOrTexts &key);
+    Item<UriOrText> &setKey(const UriOrText &key);
 
-    PStrings languages() const;
-    void     setLanguages(const PStrings &lang);
+    PStrings       languages() const;
+    void           setLanguages(const PStrings &lang);
+    Item<QString> &setLanguages(const QString &lang);
 
-    PAdvUris logo() const;
-    void     setLogo(const PAdvUris &logo);
+    PAdvUris        logo() const;
+    void            setLogo(const PAdvUris &logo);
+    Item<UriValue> &setLogo(const UriValue &logo);
 
-    PUris member() const;
-    void  setMember(const PUris &member);
+    PUris       member() const;
+    void        setMember(const PUris &member);
+    Item<QUrl> &setMember(const QUrl &member);
 
-    PAdvUris photo() const;
-    void     setPhoto(const PAdvUris &photo);
+    PAdvUris        photo() const;
+    void            setPhoto(const PAdvUris &photo);
+    Item<UriValue> &setPhoto(const UriValue &photo);
 
     QString prodid() const;
     void    setProdid(const QString &prodid);
 
-    PUrisOrTexts related() const;
-    void         setRelated(const PUrisOrTexts &related);
+    PUrisOrTexts     related() const;
+    void             setRelated(const PUrisOrTexts &related);
+    Item<UriOrText> &setRelated(const UriOrText &related);
 
     QDateTime rev() const;
     void      setRev(const QDateTime &rev);
 
-    PAdvUris sound() const;
-    void     setSound(const PAdvUris &sound);
+    PAdvUris        sound() const;
+    void            setSound(const PAdvUris &sound);
+    Item<UriValue> &setSound(const UriValue &sound);
 
-    PUris source() const;
-    void  setSource(const PUris &source);
+    PUris       source() const;
+    void        setSource(const PUris &source);
+    Item<QUrl> &setSource(const QUrl &source);
 
-    PTimeZones timeZone() const;
-    void       setTimeZone(const PTimeZones &timeZone);
+    PTimeZones      timeZone() const;
+    void            setTimeZone(const PTimeZones &timeZone);
+    Item<TimeZone> &setTimeZone(const TimeZone &timeZone);
 
-    PAddresses addresses() const;
-    void       setAddresses(const PAddresses &addresses);
+    PAddresses     addresses() const;
+    void           setAddresses(const PAddresses &addresses);
+    Item<Address> &setAddresses(const Address &addresses);
 
 private:
     class VCardData;
