@@ -111,50 +111,36 @@ public:
     QString    mediaType;
 };
 
-struct ItemBase {
-    Parameters parameters;
-};
-
-template <typename T> struct Item : public ItemBase {
-    T data;
-    operator QString() const { return data; }
-    operator QDate() const { return {}; }
-};
-
-template <> struct Item<QDate> : public ItemBase {
-    QDate data;
-    operator QString() const { return data.toString(Qt::ISODate); }
-    operator QDate() const { return data; }
-};
-
-template <> struct Item<QDateTime> : public ItemBase {
-    QDateTime data;
-    operator QString() const { return data.toString(Qt::ISODate); }
-    operator QDate() const { return data.date(); }
-};
-
-template <> struct Item<QStringList> : public ItemBase {
-    QStringList data;
-    operator QString() const { return data.value(0); }
-};
-
 using UriOrText  = std::variant<QUrl, QString>;
 using TimeZone   = std::variant<QUrl, QString, int>;
 using Historical = std::variant<QDateTime, QDate, QTime, QString>;
 
-using PStringList = Item<QStringList>;
-using PString     = Item<QString>;
-using PUri        = Item<QUrl>;
-using PDate       = Item<QDate>;
-using PAdvUri     = Item<UriValue>;
-using PAddress    = Item<Address>;
-using PNames      = Item<Names>;
-using PUriOrText  = Item<UriOrText>;
-using PTimeZone   = Item<TimeZone>;
-using PHistorical = Item<Historical>;
+template <typename T> struct ItemBase {
+    Parameters parameters;
+    T          data;
+};
 
-template <> struct Item<Historical> : public ItemBase {
-    Historical data;
+template <typename T> struct Item : public ItemBase<T> {
+    operator QString() const { return this->data; } // maybe convertible by Qt means
+    operator QDate() const { return QDate(this->data); }
+    operator QUrl() const { return QUrl(this->data); }
+};
+
+template <> struct Item<QDate> : public ItemBase<QDate> {
+    operator QString() const { return data.toString(Qt::ISODate); }
+    operator QDate() const { return data; }
+};
+
+template <> struct Item<QDateTime> : public ItemBase<QDateTime> {
+    operator QString() const { return data.toString(Qt::ISODate); }
+    operator QDate() const { return data.date(); }
+};
+
+template <> struct Item<QStringList> : public ItemBase<QStringList> {
+    operator QString() const { return data.value(0); }
+};
+
+template <> struct Item<Historical> : public ItemBase<Historical> {
     operator QString() const
     {
         return std::visit(
@@ -186,6 +172,33 @@ template <> struct Item<Historical> : public ItemBase {
     }
 };
 
+template <> struct Item<UriOrText> : public ItemBase<UriOrText> {
+    operator QString() const
+    {
+        return std::visit(
+            [this](auto const &v) {
+                using Tv = std::decay_t<decltype(v)>;
+                if constexpr (std::is_same_v<Tv, QString>) {
+                    return v;
+                } else {
+                    return v.toString();
+                }
+            },
+            data);
+    }
+};
+
+using PStringList = Item<QStringList>;
+using PString     = Item<QString>;
+using PUri        = Item<QUrl>;
+using PDate       = Item<QDate>;
+using PAdvUri     = Item<UriValue>;
+using PAddress    = Item<Address>;
+using PNames      = Item<Names>;
+using PUriOrText  = Item<UriOrText>;
+using PTimeZone   = Item<TimeZone>;
+using PHistorical = Item<Historical>;
+
 template <typename T> class TaggedList : public QList<T> {
 public:
     using item_type = T;
@@ -199,7 +212,8 @@ public:
             *this, [](auto const &a, auto const &b) { return a.parameters.pref > b.parameters.pref; });
     }
 
-    operator QString() const { return preferred().data; }
+    operator QString() const { return preferred(); }
+    operator QUrl() const { return preferred(); }
 };
 
 template <> class TaggedList<PAdvUri> : public QList<PAdvUri> {
@@ -221,12 +235,7 @@ public:
     }
 };
 
-class TaggedListStringList : public TaggedList<PStringList> {
-public:
-    operator QString() const { return preferred().data.value(0); }
-};
-
-using PStringLists = TaggedListStringList;
+using PStringLists = TaggedList<PStringList>;
 using PStrings     = TaggedList<PString>;
 using PUris        = TaggedList<PUri>;
 using PAdvUris     = TaggedList<PAdvUri>;

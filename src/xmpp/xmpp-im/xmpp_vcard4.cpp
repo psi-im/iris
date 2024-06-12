@@ -825,9 +825,9 @@ void VCard::fromVCardTemp(const XMPP::VCard &tempVCard)
 
     // Birthday
     if (!tempVCard.bday().isNull()) {
-        setBday({ { PDate { Parameters(), tempVCard.bday() } } });
+        setBday({ { Parameters(), tempVCard.bday() } });
     } else {
-        setBday({ { PDate { Parameters(), QDate::fromString(tempVCard.bdayStr(), Qt::ISODate) } } });
+        setBday({ { Parameters(), tempVCard.bdayStr() } });
     }
 
     // Addresses
