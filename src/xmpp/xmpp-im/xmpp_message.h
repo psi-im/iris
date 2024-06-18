@@ -30,6 +30,8 @@
 
 #include <QExplicitlySharedDataPointer>
 
+#include <optional>
+
 class QDateTime;
 class QString;
 
@@ -219,6 +221,10 @@ public:
     QList<Reference> references() const;
     void             addReference(const Reference &r);
     void             setReferences(const QList<Reference> &r);
+
+    // XEP-0444 message reaction
+    void                       setReactions(const QStringList &reactions);
+    std::optional<QStringList> reactions() const;
 
     // Obsolete invitation
     QString invite() const;

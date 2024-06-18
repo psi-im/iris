@@ -749,6 +749,8 @@ public:
     QString                  encryptionProtocol; // XEP-0380
     Message::StanzaId        stanzaId;           // XEP-0359
     QList<Reference>         references;         // XEP-0385 and XEP-0372
+
+    std::optional<QStringList> reactions; // XEP-0444
 };
 
 #define MessageD() (d ? d : (d = new Private))
@@ -1096,6 +1098,10 @@ void Message::addReference(const Reference &r) { MessageD()->references.append(r
 
 void Message::setReferences(const QList<Reference> &r) { MessageD()->references = r; }
 
+void Message::setReactions(const QStringList &reactions) { MessageD()->reactions = reactions; }
+
+std::optional<QStringList> Message::reactions() const { return d ? d->reactions : QStringList {}; }
+
 QString Message::invite() const { return d ? d->invite : QString(); }
 
 void Message::setInvite(const QString &s) { MessageD()->invite = s; }
@@ -1431,6 +1437,16 @@ Stanza Message::toStanza(Stream *stream) const
     // XEP-0372 and XEP-0385
     for (auto const &r : std::as_const(d->references)) {
         s.appendChild(r.toXml(&s.doc()));
+    }
+
+    // XEP-0444
+    auto reactionsNS = QStringLiteral("urn:xmpp:reactions:0");
+    if (d->reactions) {
+        auto e = s.createElement(reactionsNS, QStringLiteral("reactions"));
+        for (const QString &reaction : *d->reactions) {
+            e.appendChild(s.createTextElement(reactionsNS, QStringLiteral("reaction"), reaction));
+        }
+        s.appendChild(e);
     }
 
     return s;
@@ -1783,6 +1799,20 @@ bool Message::fromStanza(const Stanza &s, bool useTimeZoneOffset, int timeZoneOf
         if (r.fromXml(references.at(i).toElement())) {
             d->references.append(r);
         }
+    }
+
+    // XEP-0444 message reactions
+    auto reactionStanza
+        = childElementsByTagNameNS(root, "urn:xmpp:reactions:0", QStringLiteral("reactions")).item(0).toElement();
+    if (!reactionStanza.isNull()) {
+        auto        reactionTag = QStringLiteral("reaction");
+        QStringList reactions;
+        auto        reaction = reactionStanza.firstChildElement(reactionTag);
+        while (!reaction.isNull()) {
+            reactions.append(reaction.text().trimmed());
+            reaction = reaction.nextSiblingElement(reactionTag);
+        }
+        d->reactions = reactions;
     }
 
     return true;
