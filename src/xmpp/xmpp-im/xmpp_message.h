@@ -68,6 +68,11 @@ public:
         QString id;
     };
 
+    struct Reactions {
+        QString     targetId;
+        QStringList reactions;
+    };
+
     Message();
     Message(const Jid &to);
     Message(const Message &from);
@@ -223,8 +228,8 @@ public:
     void             setReferences(const QList<Reference> &r);
 
     // XEP-0444 message reaction
-    void                       setReactions(const QStringList &reactions);
-    std::optional<QStringList> reactions() const;
+    void      setReactions(const Reactions &reactions);
+    Reactions reactions() const;
 
     // Obsolete invitation
     QString invite() const;
