@@ -188,7 +188,7 @@ void CarbonsManager::setEnabled(bool enable)
         JT_MessageCarbons *jt = new JT_MessageCarbons(d->push_m->client()->rootTask());
         connect(
             jt, &JT_MessageCarbons::finished, this,
-            [=]() {
+            [this, jt]() {
                 if (jt->success())
                     d->enable = true;
                 else
@@ -202,7 +202,7 @@ void CarbonsManager::setEnabled(bool enable)
         JT_MessageCarbons *jt = new JT_MessageCarbons(d->push_m->client()->rootTask());
         connect(
             jt, &JT_MessageCarbons::finished, this,
-            [=]() {
+            [this]() {
                 d->enable = false;
                 d->unsubscribe();
                 emit finished();
