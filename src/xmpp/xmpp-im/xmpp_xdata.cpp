@@ -305,9 +305,7 @@ bool XData::Field::MediaElement::checkSupport(const QStringList &wildcards)
 #if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
             if (QRegExp(wildcard, Qt::CaseSensitive, QRegExp::Wildcard).exactMatch(uri.mimeType)) {
 #else
-            if (QRegularExpression::fromWildcard(QLatin1Char('^') + wildcard + QLatin1Char('$'), Qt::CaseSensitive)
-                    .match(uri.mimeType)
-                    .hasMatch()) {
+            if (QRegularExpression::fromWildcard(wildcard, Qt::CaseSensitive).match(uri.mimeType).hasMatch()) {
 #endif
                 return true;
             }
@@ -335,6 +333,8 @@ XData::Type XData::type() const { return d->type; }
 void XData::setType(Type t) { d->type = t; }
 
 QString XData::registrarType() const { return d->registrarType; }
+
+void XData::setRegistrarType(const QString &registrarType) { d->registrarType = registrarType; }
 
 const XData::FieldList &XData::fields() const { return d->fields; }
 
@@ -455,6 +455,13 @@ QDomElement XData::toXml(QDomDocument *doc, bool submitForm) const
         x.appendChild(textTag(doc, "title", d->title));
     if (!submitForm && !d->instructions.isEmpty())
         x.appendChild(textTag(doc, "instructions", d->instructions));
+    if (!d->registrarType.isEmpty()) {
+        XData::Field f;
+        f.setType(Field::Field_Hidden);
+        f.setVar(QLatin1String("FORM_TYPE"));
+        f.setValue({ d->registrarType });
+        x.appendChild(f.toXml(doc, submitForm));
+    }
 
     if (!d->fields.isEmpty()) {
         for (const auto &f : std::as_const(d->fields)) {

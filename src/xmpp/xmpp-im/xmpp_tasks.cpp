@@ -614,9 +614,9 @@ void JT_Presence::pres(const Status &s)
             tag.appendChild(m);
         }
 
-        if (s.hasPhotoHash()) {
+        if (s.photoHash().has_value()) {
             QDomElement m = doc()->createElementNS("vcard-temp:x:update", "x");
-            m.appendChild(textTag(doc(), "photo", QString::fromLatin1(s.photoHash().toHex())));
+            m.appendChild(textTag(doc(), "photo", QString::fromLatin1(s.photoHash()->toHex())));
             tag.appendChild(m);
         }
 
@@ -755,7 +755,7 @@ bool JT_PushPresence::take(const QDomElement &e)
             if (!t.isNull())
                 p.setPhotoHash(
                     QByteArray::fromHex(tagContent(t).toLatin1())); // if hash is empty this may mean photo removal
-            // else vcard.hasPhotoHash() returns false and that's mean user is not yet ready to advertise his image
+            // else vcard.photoHash() returns false and that's mean user is not yet ready to advertise his image
         } else if (i.tagName() == "x" && i.namespaceURI() == "http://jabber.org/protocol/muc#user") {
             for (QDomElement muc_e = i.firstChildElement(); !muc_e.isNull(); muc_e = muc_e.nextSiblingElement()) {
                 if (muc_e.tagName() == "item")
@@ -790,43 +790,6 @@ bool JT_PushPresence::take(const QDomElement &e)
 //----------------------------------------------------------------------------
 // JT_Message
 //----------------------------------------------------------------------------
-static QDomElement oldStyleNS(const QDomElement &e)
-{
-    // find closest parent with a namespace
-    QDomNode par = e.parentNode();
-    while (!par.isNull() && par.namespaceURI().isNull())
-        par = par.parentNode();
-    bool noShowNS = false;
-    if (!par.isNull() && par.namespaceURI() == e.namespaceURI())
-        noShowNS = true;
-
-    QDomElement i;
-    int         x;
-    // if(noShowNS)
-    i = e.ownerDocument().createElement(e.tagName());
-    // else
-    //    i = e.ownerDocument().createElementNS(e.namespaceURI(), e.tagName());
-
-    // copy attributes
-    QDomNamedNodeMap al = e.attributes();
-    for (x = 0; x < al.count(); ++x)
-        i.setAttributeNode(al.item(x).cloneNode().toAttr());
-
-    if (!noShowNS)
-        i.setAttribute("xmlns", e.namespaceURI());
-
-    // copy children
-    QDomNodeList nl = e.childNodes();
-    for (x = 0; x < nl.count(); ++x) {
-        QDomNode n = nl.item(x);
-        if (n.isElement())
-            i.appendChild(oldStyleNS(n.toElement()));
-        else
-            i.appendChild(n.cloneNode());
-    }
-    return i;
-}
-
 JT_Message::JT_Message(Task *parent, Message &msg) : Task(parent), m(msg)
 {
     if (msg.id().isEmpty())
@@ -839,7 +802,7 @@ void JT_Message::onGo()
 {
 
     Stanza      s = m.toStanza(&(client()->stream()));
-    QDomElement e = s.element(); // oldStyleNS(s.element());
+    QDomElement e = s.element();
 
     if (auto encryptionHandler = client()->encryptionHandler()) {
         Q_UNUSED(encryptionHandler->encryptMessageElement(e));
@@ -1702,7 +1665,7 @@ bool JT_BoBServer::take(const QDomElement &e)
         BoBData     bd = client()->bobManager()->bobData(data.attribute("cid"));
         if (bd.isNull()) {
             iq = createIQ(client()->doc(), "error", e.attribute("from"), e.attribute("id"));
-            Stanza::Error error(Stanza::Error::Cancel, Stanza::Error::ItemNotFound);
+            Stanza::Error error(Stanza::Error::ErrorType::Cancel, Stanza::Error::ErrorCond::ItemNotFound);
             iq.appendChild(error.toXml(*doc(), client()->stream().baseNS()));
         } else {
             iq = createIQ(doc(), "result", e.attribute("from"), e.attribute("id"));
@@ -1877,12 +1840,12 @@ bool JT_CaptchaChallenger::take(const QDomElement &x)
     } else {
         Stanza::Error::ErrorCond ec;
         if (r == CaptchaChallenge::Unavailable) {
-            ec = Stanza::Error::ServiceUnavailable;
+            ec = Stanza::Error::ErrorCond::ServiceUnavailable;
         } else {
-            ec = Stanza::Error::NotAcceptable;
+            ec = Stanza::Error::ErrorCond::NotAcceptable;
         }
         iq = createIQ(doc(), "error", d->j.full(), rid);
-        Stanza::Error error(Stanza::Error::Cancel, ec);
+        Stanza::Error error(Stanza::Error::ErrorType::Cancel, ec);
         iq.appendChild(error.toXml(*doc(), client()->stream().baseNS()));
     }
     send(iq);

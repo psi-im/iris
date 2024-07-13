@@ -28,6 +28,7 @@
 #include "xmpp_url.h"
 
 #include <QExplicitlySharedDataPointer>
+#include <QSet>
 
 class QDateTime;
 class QString;
@@ -49,6 +50,8 @@ typedef enum { OfflineEvent, DeliveredEvent, DisplayedEvent, ComposingEvent, Can
 
 class Message {
 public:
+    enum class Type { Chat, Error, Groupchat, Headline, Normal };
+
     // XEP-0334
     enum ProcessingHint { NoPermanentStore = 1, NoStore = 2, NoCopy = 4, Store = 8 };
     Q_DECLARE_FLAGS(ProcessingHints, ProcessingHint)
@@ -56,6 +59,11 @@ public:
     struct StanzaId {
         Jid     by;
         QString id;
+    };
+
+    struct Reactions {
+        QString       targetId;
+        QSet<QString> reactions;
     };
 
     Message();
@@ -70,7 +78,8 @@ public:
     Jid           to() const;
     Jid           from() const;
     QString       id() const;
-    QString       type() const;
+    Type          type() const;
+    QString       typeStr() const;
     QString       lang() const;
     QString       subject(const QString &lang = {}) const;
     QString       subject(const QLocale &lang) const;
@@ -83,7 +92,7 @@ public:
     void setTo(const Jid &j);
     void setFrom(const Jid &j);
     void setId(const QString &s);
-    void setType(const QString &s);
+    void setType(Type type);
     void setLang(const QString &s);
     void setSubject(const QString &s, const QString &lang = {});
     void setBody(const QString &s, const QString &lang = {});
@@ -211,6 +220,13 @@ public:
     QList<Reference> references() const;
     void             addReference(const Reference &r);
     void             setReferences(const QList<Reference> &r);
+
+    // XEP-0444 message reaction
+    void      setReactions(const Reactions &reactions);
+    Reactions reactions() const;
+
+    void    setRetraction(const QString &retractedMessageId);
+    QString retraction() const;
 
     // Obsolete invitation
     QString invite() const;

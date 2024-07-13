@@ -56,6 +56,7 @@ set(XMPP_IM_HEADERS
     xmpp-im/xmpp_subsets.h
     xmpp-im/xmpp_url.h
     xmpp-im/xmpp_vcard.h
+    xmpp-im/xmpp_vcard4.h
     xmpp-im/xmpp_xdata.h
     xmpp-im/xmpp_xmlcommon.h
     xmpp-im/xmpp_encryption.h
@@ -97,7 +98,6 @@ set(XMPP_HEADERS_PRIVATE
     sasl/scramsha1signature.h
     zlib/zlibcompressor.h
     zlib/zlibdecompressor.h
-    blake2/blake2qt.h
     base/timezone.h
 )
 
@@ -135,6 +135,7 @@ target_sources(iris PRIVATE
     xmpp-im/xmpp_task.cpp
     xmpp-im/xmpp_tasks.cpp
     xmpp-im/xmpp_vcard.cpp
+    xmpp-im/xmpp_vcard4.cpp
     xmpp-im/xmpp_xdata.cpp
     xmpp-im/xmpp_xmlcommon.cpp
     xmpp-im/xmpp_encryption.cpp
@@ -157,8 +158,6 @@ target_sources(iris PRIVATE
 
     zlib/zlibcompressor.cpp
     zlib/zlibdecompressor.cpp
-
-    blake2/blake2qt.cpp
 
     jid/jid.cpp
 
@@ -187,17 +186,20 @@ if(IRIS_ENABLE_JINGLE_SCTP)
     )
 endif()
 
-if(B2_FOUND)
-    message(STATUS "Building with system blake2 library")
-    target_link_libraries(iris PRIVATE ${B2_LIBRARY})
-else()
-    if(NOT IRIS_BUNDLED_QCA)
-        message(STATUS "No system blake2 and bundled QCA is disabled. Expect slow hashing.")
+if(QT_DEFAULT_MAJOR_VERSION LESS 6)
+    target_sources(iris PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/blake2/blake2qt.cpp ${CMAKE_CURRENT_SOURCE_DIR}/blake2/blake2qt.h)
+    if(B2_FOUND)
+        message(STATUS "Building with system blake2 library")
+        target_link_libraries(iris PRIVATE ${B2_LIBRARY})
+    else()
+        if(NOT IRIS_BUNDLED_QCA)
+            message(STATUS "No system blake2 and bundled QCA is disabled. Expect slow hashing.")
+        endif()
+        target_sources(iris PRIVATE
+            blake2/blake2b-ref.c
+            blake2/blake2s-ref.c
+        )
     endif()
-    target_sources(iris PRIVATE
-        blake2/blake2b-ref.c
-        blake2/blake2s-ref.c
-    )
 endif()
 
 target_link_libraries(iris
@@ -212,7 +214,10 @@ target_link_libraries(iris
 
 if(IRIS_BUNDLED_QCA)
     add_dependencies(iris QcaProject)
-    target_include_directories(iris PUBLIC ${Qca_INCLUDE_DIR})
+    target_include_directories(iris PUBLIC
+        "$<BUILD_INTERFACE:${Qca_INCLUDE_DIR}>"
+        "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/iris/qca>"
+    )
     target_link_libraries(iris PUBLIC OpenSSL::SSL)
 endif()
 

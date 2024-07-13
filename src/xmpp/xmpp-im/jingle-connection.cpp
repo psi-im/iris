@@ -23,14 +23,14 @@ namespace XMPP { namespace Jingle {
 
     bool Connection::hasPendingDatagrams() const { return false; }
 
-    NetworkDatagram Connection::readDatagram(qint64 maxSize)
+    QNetworkDatagram Connection::readDatagram(qint64 maxSize)
     {
         qCritical("Calling unimplemented function receiveDatagram");
         Q_UNUSED(maxSize)
-        return NetworkDatagram();
+        return QNetworkDatagram();
     }
 
-    bool Connection::writeDatagram(const NetworkDatagram &)
+    bool Connection::writeDatagram(const QNetworkDatagram &)
     {
         qCritical("Calling unimplemented function sendDatagram");
         return false;
@@ -42,10 +42,13 @@ namespace XMPP { namespace Jingle {
         return 0;
     }
 
-    qint64 Connection::readData(char *, qint64)
+    qint64 Connection::readData(char *buf, qint64 maxSize)
     {
-        qCritical("Calling unimplemented function readData");
-        return 0;
+        auto sz = readDataInternal(buf, maxSize);
+        if (sz != -1 && _readHook) {
+            _readHook(buf, sz);
+        }
+        return sz;
     }
 
     size_t Connection::blockSize() const

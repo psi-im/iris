@@ -362,9 +362,9 @@ namespace XMPP { namespace Jingle { namespace ICE {
 
         enum DisconnectReason { None, DtlsClosed };
 
-        QList<NetworkDatagram> datagrams;
-        DisconnectReason       disconnectReason = None;
-        quint8                 componentIndex   = 0;
+        QList<QNetworkDatagram> datagrams;
+        DisconnectReason        disconnectReason = None;
+        quint8                  componentIndex   = 0;
 
         RawConnection(quint8 componentIndex) : componentIndex(componentIndex) {};
 
@@ -378,10 +378,10 @@ namespace XMPP { namespace Jingle { namespace ICE {
 
         bool hasPendingDatagrams() const override { return datagrams.size() > 0; }
 
-        NetworkDatagram readDatagram(qint64 maxSize = -1) override
+        QNetworkDatagram readDatagram(qint64 maxSize = -1) override
         {
             Q_UNUSED(maxSize) // TODO or not?
-            return datagrams.size() ? datagrams.takeFirst() : NetworkDatagram();
+            return datagrams.size() ? datagrams.takeFirst() : QNetworkDatagram();
         }
 
         qint64 bytesAvailable() const override { return 0; }
@@ -389,6 +389,12 @@ namespace XMPP { namespace Jingle { namespace ICE {
         qint64 bytesToWrite() const override { return 0; /*client->bytesToWrite();*/ }
 
         void close() override { XMPP::Jingle::Connection::close(); }
+
+        qint64 readDataInternal(char *, qint64) override
+        {
+            qWarning("jingle-ice: called unsupported RawConnection::readDataInternal");
+            return -1;
+        }
 
     private:
         friend class Transport;
@@ -412,7 +418,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
 
         void enqueueIncomingUDP(const QByteArray &data)
         {
-            datagrams.append(NetworkDatagram { data });
+            datagrams.append(QNetworkDatagram { data });
             emit readyRead();
         }
     };
@@ -523,7 +529,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
             if (componentIndex == 0) { // for other components it's the same but we don't need multiple fingerprints
                 dtls->connect(
                     dtls, &Dtls::needRestart, q,
-                    [this, componentIndex]() {
+                    [this]() {
                         pendingActions |= NewFingerprint;
                         remoteAcceptedFingerprint = false;
                         emit q->updated();
@@ -536,6 +542,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
                 auto  d         = component.dtls->readDatagram();
 #ifdef JINGLE_SCTP
                 if (component.sctp) {
+                    // qDebug("sctp write incoming");
                     component.sctp->writeIncoming(d);
                 }
 #endif
@@ -544,6 +551,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
                 ice->writeDatagram(componentIndex, components[componentIndex].dtls->readOutgoingDatagram());
             });
             dtls->connect(dtls, &Dtls::connected, q, [this, componentIndex, dtls]() {
+                qDebug("Dtls::connected");
                 auto &c = components[componentIndex];
 #ifdef JINGLE_SCTP
                 if (c.sctp) {
@@ -726,7 +734,6 @@ namespace XMPP { namespace Jingle { namespace ICE {
                 },
                 Qt::QueuedConnection); // signal is not DOR-SS
             q->connect(ice, &Ice176::readyRead, q, [this](int componentIndex) {
-                // qDebug("ICE readyRead");
                 auto  buf       = ice->readDatagram(componentIndex);
                 auto &component = components[componentIndex];
                 if (component.dtls) {

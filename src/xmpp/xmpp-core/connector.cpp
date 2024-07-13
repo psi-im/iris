@@ -51,6 +51,7 @@ using namespace XMPP;
 static const int   XMPP_DEFAULT_PORT     = 5222;
 static const int   XMPP_LEGACY_PORT      = 5223;
 static const char *XMPP_CLIENT_SRV       = "xmpp-client";
+static const char *XMPP_CLIENT_TLS_SRV   = "xmpps-client";
 static const char *XMPP_CLIENT_TRANSPORT = "tcp";
 
 //----------------------------------------------------------------------------
@@ -148,39 +149,33 @@ AdvancedConnector::Proxy::operator QNetworkProxy()
 // AdvancedConnector
 //----------------------------------------------------------------------------
 typedef enum { Idle, Connecting, Connected } Mode;
-typedef enum { Force, Probe, Never } LegacySSL;
+typedef enum : char { Force, Never } DirectTLS;
 
 class AdvancedConnector::Private {
 public:
-    ByteStream *bs; //!< Socket to use
+    ByteStream *bs = nullptr; //!< Socket to use
 
     /* configuration values / "options" */
-    QString   opt_host; //!< explicit host from config
-    quint16   opt_port; //!< explicit port from config
-    LegacySSL opt_ssl;  //!< Whether to use legacy SSL support
-    Proxy     proxy;    //!< Proxy configuration
+    QString opt_host;              //!< explicit host from config
+    quint16 opt_port;              //!< explicit port from config
+    bool    opt_directtls = false; //!< Whether to use direct TLS support
+    bool    opt_srvtls    = true;  //!< Whether to lookup tls port from SRV
+    Proxy   proxy;                 //!< Proxy configuration
 
     /* State tracking values */
-    Mode    mode;      //!< Idle, Connecting, Connected
-    QString host;      //!< Host we currently try to connect to, set from connectToServer()
-    int     port;      //!< Port we currently try to connect to, set from connectToServer() and bs_error()
-    int     errorCode; //!< Current error, if any
+    Mode    mode;          //!< Idle, Connecting, Connected
+    QString host;          //!< Host we currently try to connect to, set from connectToServer()
+    int     port;          //!< Port we currently try to connect to, set from connectToServer() and bs_error()
+    int     errorCode = 0; //!< Current error, if any
 };
 
-AdvancedConnector::AdvancedConnector(QObject *parent) : Connector(parent)
+AdvancedConnector::AdvancedConnector(QObject *parent) : Connector(parent), d(new Private)
 {
-    d          = new Private;
-    d->bs      = nullptr;
-    d->opt_ssl = Never;
     cleanup();
     d->errorCode = 0;
 }
 
-AdvancedConnector::~AdvancedConnector()
-{
-    cleanup();
-    delete d;
-}
+AdvancedConnector::~AdvancedConnector() { cleanup(); }
 
 void AdvancedConnector::cleanup()
 {
@@ -219,17 +214,6 @@ void AdvancedConnector::setOptHostPort(const QString &_host, quint16 _port)
     d->opt_port = _port;
 }
 
-void AdvancedConnector::setOptProbe(bool b)
-{
-#ifdef XMPP_DEBUG
-    XDEBUG << "b:" << b;
-#endif
-
-    if (d->mode != Idle)
-        return;
-    d->opt_ssl = (b ? Probe : Never);
-}
-
 void AdvancedConnector::setOptSSL(bool b)
 {
 #ifdef XMPP_DEBUG
@@ -238,7 +222,17 @@ void AdvancedConnector::setOptSSL(bool b)
 
     if (d->mode != Idle)
         return;
-    d->opt_ssl = (b ? Force : Never);
+    d->opt_directtls = b;
+}
+
+void AdvancedConnector::setOptTlsSrv(bool value)
+{
+#ifdef XMPP_DEBUG
+    XDEBUG << "b:" << b;
+#endif
+    if (d->mode != Idle)
+        return;
+    d->opt_srvtls = value;
 }
 
 void AdvancedConnector::connectToServer(const QString &server)
@@ -262,13 +256,6 @@ void AdvancedConnector::connectToServer(const QString &server)
         d->host = server;
     }
     d->port = XMPP_DEFAULT_PORT;
-
-    if (d->opt_ssl == Probe && (d->proxy.type() != Proxy::None || !d->opt_host.isEmpty())) {
-#ifdef XMPP_DEBUG
-        XDEBUG << "Don't probe ssl port because of incompatible params";
-#endif
-        d->opt_ssl = Never; // probe is possible only with direct connect
-    }
 
     if (d->proxy.type() == Proxy::HttpPoll) {
         HttpPoll *s = new HttpPoll;
@@ -326,7 +313,12 @@ void AdvancedConnector::connectToServer(const QString &server)
         XDEBUG << "Adding socket:" << s;
 #endif
 
-        connect(s, SIGNAL(connected()), SLOT(bs_connected()));
+        connect(s, &BSocket::connected, this, [this, s]() {
+            if (!useSSL()) {
+                setUseSSL(s->service() == QLatin1String(XMPP_CLIENT_TLS_SRV));
+            }
+            bs_connected();
+        });
         connect(s, SIGNAL(error(int)), SLOT(bs_error(int)));
 
         if (!d->opt_host.isEmpty()) { /* if custom host:port */
@@ -334,11 +326,17 @@ void AdvancedConnector::connectToServer(const QString &server)
             d->port = d->opt_port;
             s->connectToHost(d->host, quint16(d->port));
             return;
-        } else if (d->opt_ssl != Never) { /* if ssl forced or should be probed */
-            d->port = XMPP_LEGACY_PORT;
         }
 
-        s->connectToHost(XMPP_CLIENT_SRV, XMPP_CLIENT_TRANSPORT, d->host, quint16(d->port));
+        QStringList services;
+        if (!d->opt_directtls && d->opt_srvtls) {
+            services << XMPP_CLIENT_TLS_SRV;
+        }
+        services << XMPP_CLIENT_SRV;
+        if (d->opt_directtls) {
+            d->port = XMPP_LEGACY_PORT;
+        }
+        s->connectToHost(services, XMPP_CLIENT_TRANSPORT, d->host, quint16(d->port));
     }
 }
 
@@ -373,11 +371,9 @@ void AdvancedConnector::bs_connected()
         setPeerAddress(h, p);
     }
 
-    // We won't use ssl with HttpPoll since it has ow tls handler enabled for https.
+    // We won't use ssl with HttpPoll since it has own tls handler enabled for https.
     // The only variant for ssl is legacy port in probing or forced mde.
-    if (d->proxy.type() != Proxy::HttpPoll
-        && (d->opt_ssl == Force || (d->opt_ssl == Probe && peerPort() == XMPP_LEGACY_PORT))) {
-        // in case of Probe it's ok to check actual peer "port" since we are sure Proxy=None
+    if (d->proxy.type() != Proxy::HttpPoll && (d->opt_directtls || peerPort() == XMPP_LEGACY_PORT)) {
         setUseSSL(true);
     }
 
@@ -466,28 +462,12 @@ void AdvancedConnector::bs_error(int x)
         return;
     }
 
-    /*
-        if we shall probe the ssl legacy port, and we just did that (port=legacy),
-        then try to connect to the normal port instead
-    */
-    if (d->opt_ssl == Probe && d->port == XMPP_LEGACY_PORT) {
 #ifdef XMPP_DEBUG
-        qDebug("bse1.2");
+    qDebug("bse1.3");
 #endif
-        BSocket *s = static_cast<BSocket *>(d->bs);
-        d->port    = XMPP_DEFAULT_PORT;
-        // at this moment we already tried everything from srv. so just try the host itself
-        s->connectToHost(d->host, quint16(d->port));
-    }
-    /* otherwise we have no fallbacks and must have failed to connect */
-    else {
-#ifdef XMPP_DEBUG
-        qDebug("bse1.3");
-#endif
-        cleanup();
-        d->errorCode = ErrConnectionRefused;
-        emit error();
-    }
+    cleanup();
+    d->errorCode = ErrConnectionRefused;
+    emit error();
 }
 
 void AdvancedConnector::http_syncStarted() { emit httpSyncStarted(); }

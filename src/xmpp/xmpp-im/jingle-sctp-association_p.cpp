@@ -91,7 +91,12 @@ namespace XMPP { namespace Jingle { namespace SCTP {
                                   Q_ARG(quint32, ppid));
     }
 
-    void AssociationPrivate::OnSctpAssociationBufferedAmount(RTC::SctpAssociation *sctpAssociation, uint32_t len)
+    /**
+     * @brief AssociationPrivate::OnSctpAssociationBufferedAmount
+     * @param sctpAssociation
+     * @param len - number of bytes currently buffered in usrsctp. not more than MAX_SEND_BUFFER_SIZE
+     */
+    void AssociationPrivate::OnSctpAssociationBufferedAmount(RTC::SctpAssociation *sctpAssociation, size_t len)
     {
         // qDebug("jignle-sctp: on buffered data: %d", len);
         Q_UNUSED(sctpAssociation);
@@ -157,9 +162,8 @@ namespace XMPP { namespace Jingle { namespace SCTP {
         consumer.sctpParameters.maxPacketLifeTime = reliable == PartialTimers ? reliability : 0;
         consumer.sctpParameters.maxRetransmits    = reliable == PartialRexmit ? reliability : 0;
         bool success;
-        assoc.SendSctpMessage(
-            &consumer, ppid, reinterpret_cast<const uint8_t *>(data.data()), data.size(),
-            new std::function<void(bool)>([this, &success](bool cb_success) { success = cb_success; }));
+        assoc.SendSctpMessage(&consumer, ppid, reinterpret_cast<const uint8_t *>(data.data()), data.size(),
+                              new std::function<void(bool)>([&success](bool cb_success) { success = cb_success; }));
         return success;
     }
 

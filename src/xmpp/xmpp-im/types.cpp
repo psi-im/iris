@@ -31,6 +31,8 @@
 #include <QList>
 #include <QMap>
 
+#include <optional>
+
 #define NS_XML "http://www.w3.org/XML/1998/namespace"
 
 namespace XMPP {
@@ -666,8 +668,9 @@ void HTMLElement::filterOutUnwantedRecursive(QDomElement &el, bool strict)
 {
     Q_UNUSED(strict) // TODO filter out not xhtml-im elements
 
-    static QSet<QString> unwanted = QSet<QString>() << "script" << "iframe";
-    QDomNode             child    = el.firstChild();
+    static QSet<QString> unwanted = QSet<QString>() << "script"
+                                                    << "iframe";
+    QDomNode child = el.firstChild();
     while (!child.isNull()) {
         QDomNode sibling = child.nextSibling();
         if (child.isElement()) {
@@ -699,13 +702,14 @@ void HTMLElement::filterOutUnwantedRecursive(QDomElement &el, bool strict)
 //----------------------------------------------------------------------------
 class Message::Private : public QSharedData {
 public:
-    Jid     to, from;
-    QString id, type, lang;
+    Jid           to, from;
+    QString       id, lang;
+    Message::Type type = Message::Type::Normal;
 
-    StringMap     subject, body;
-    QString       thread;
     bool          threadSend  = false;
     bool          pureSubject = false; // set during parsing is subject exists body doesn't
+    StringMap     subject, body;
+    QString       thread;
     Stanza::Error error;
 
     // extensions
@@ -748,6 +752,8 @@ public:
     Message::StanzaId        stanzaId;           // XEP-0359
     QList<Reference>         references;         // XEP-0385 and XEP-0372
     Forwarding               forwarding;         // XEP-0297
+    Message::Reactions       reactions;          // XEP-0444
+    QString                  retraction;         // XEP-0424
 };
 
 #define MessageD() (d ? d : (d = new Private))
@@ -790,7 +796,27 @@ Jid Message::from() const { return d ? d->from : Jid(); }
 QString Message::id() const { return d ? d->id : QString(); }
 
 //! \brief Return type information
-QString Message::type() const { return d ? d->type : QString(); }
+Message::Type Message::type() const { return d ? d->type : Type::Normal; }
+
+QString Message::typeStr() const
+{
+    if (d) {
+        switch (d->type) {
+        case Type::Chat:
+            return QStringLiteral("chat");
+        case Type::Error:
+            return QStringLiteral("error");
+        case Type::Groupchat:
+            return QStringLiteral("groupchat");
+        case Type::Headline:
+            return QStringLiteral("headline");
+        case Type::Normal:
+        default:
+            break;
+        }
+    }
+    return {};
+}
 
 QString Message::lang() const { return d ? d->lang : QString(); }
 
@@ -880,9 +906,9 @@ void Message::setId(const QString &s)
 //! \brief Set Type of message
 //!
 //! \param type - type of message your going to send
-void Message::setType(const QString &s)
+void Message::setType(Type type)
 {
-    MessageD()->type = s;
+    MessageD()->type = type;
     // d->flag = false;
 }
 
@@ -1055,7 +1081,7 @@ QString Message::mucPassword() const { return d ? d->mucPassword : QString(); }
 
 void Message::setMUCPassword(const QString &p) { MessageD()->mucPassword = p; }
 
-bool Message::hasMUCUser() const { return d & d->hasMUCUser; }
+bool Message::hasMUCUser() const { return d && d->hasMUCUser; }
 
 Message::StanzaId Message::stanzaId() const { return d ? d->stanzaId : StanzaId(); }
 
@@ -1074,6 +1100,14 @@ QList<Reference> Message::references() const { return d ? d->references : QList<
 void Message::addReference(const Reference &r) { MessageD()->references.append(r); }
 
 void Message::setReferences(const QList<Reference> &r) { MessageD()->references = r; }
+
+void Message::setReactions(const XMPP::Message::Reactions &reactions) { MessageD()->reactions = reactions; }
+
+XMPP::Message::Reactions Message::reactions() const { return d ? d->reactions : Reactions {}; }
+
+void Message::setRetraction(const QString &retractedMessageId) { MessageD()->retraction = retractedMessageId; }
+
+QString Message::retraction() const { return d ? d->retraction : QString {}; }
 
 QString Message::invite() const { return d ? d->invite : QString(); }
 
@@ -1161,7 +1195,8 @@ Stanza Message::toStanza(Stream *stream) const
     if (!d) {
         return Stanza();
     }
-    Stanza s = stream->createStanza(Stanza::Message, d->to, d->type);
+
+    Stanza s = stream->createStanza(Stanza::Message, d->to, typeStr());
     if (!d->from.isEmpty())
         s.setFrom(d->from);
     if (!d->id.isEmpty())
@@ -1197,7 +1232,7 @@ Stanza Message::toStanza(Stream *stream) const
         }
     }
 
-    if (d->type == "error")
+    if (d->type == Type::Error)
         s.setError(d->error);
 
     // thread
@@ -1442,6 +1477,26 @@ Stanza Message::toStanza(Stream *stream) const
         s.appendChild(r.toXml(&s.doc()));
     }
 
+    // XEP-0444
+    auto reactionsNS = QStringLiteral("urn:xmpp:reactions:0");
+    if (!d->reactions.targetId.isEmpty()) {
+        auto e = s.createElement(reactionsNS, QStringLiteral("reactions"));
+        e.setAttribute(QLatin1String("id"), d->reactions.targetId);
+        for (const QString &reaction : d->reactions.reactions) {
+            e.appendChild(s.createTextElement(reactionsNS, QStringLiteral("reaction"), reaction));
+        }
+        s.appendChild(e);
+        s.appendChild(s.createElement(QStringLiteral("urn:xmpp:hints"), QStringLiteral("store")));
+    }
+
+    // XEP-0424
+    if (!d->retraction.isEmpty()) {
+        auto e = s.createElement("urn:xmpp:message-retract:1", QStringLiteral("retract"));
+        e.setAttribute(QLatin1String("id"), d->retraction);
+        s.appendChild(e);
+        s.appendChild(s.createElement(QStringLiteral("urn:xmpp:hints"), QStringLiteral("store")));
+    }
+
     return s;
 }
 
@@ -1472,8 +1527,20 @@ bool Message::fromStanza(const Stanza &s, bool useTimeZoneOffset, int timeZoneOf
     setTo(s.to());
     setFrom(s.from());
     setId(s.id());
-    setType(s.type());
     setLang(s.lang());
+
+    auto typeStr = s.type();
+    if (typeStr == "chat") {
+        setType(Type::Chat);
+    } else if (typeStr == "error") {
+        setType(Type::Error);
+    } else if (typeStr == "groupchat") {
+        setType(Type::Groupchat);
+    } else if (typeStr == "headline") {
+        setType(Type::Headline);
+    } else {
+        setType(Type::Normal); // everything unknown is normal by rfc6121
+    }
 
     d->subject.clear();
     d->body.clear();
@@ -1782,13 +1849,34 @@ bool Message::fromStanza(const Stanza &s, bool useTimeZoneOffset, int timeZoneOf
         }
     }
 
+    // XEP-0444 message reactions
+    auto reactions
+        = childElementsByTagNameNS(root, "urn:xmpp:reactions:0", QStringLiteral("reactions")).item(0).toElement();
+    if (!reactions.isNull()) {
+        d->reactions.targetId = reactions.attribute(QLatin1String("id"));
+        if (!d->reactions.targetId.isEmpty()) {
+            auto reactionTag = QStringLiteral("reaction");
+            auto reaction    = reactions.firstChildElement(reactionTag);
+            while (!reaction.isNull()) {
+                d->reactions.reactions.insert(reaction.text().trimmed());
+                reaction = reaction.nextSiblingElement(reactionTag);
+            }
+            d->reactions.reactions.squeeze();
+        }
+    }
+
+    // XEP-0424 message retraction
+    d->retraction = childElementsByTagNameNS(root, "urn:xmpp:message-retract:1", QStringLiteral("retract"))
+                        .item(0)
+                        .toElement()
+                        .attribute(QLatin1String("id"));
     return true;
 }
 
 /*!
     Error object used to deny a request.
 */
-Stanza::Error HttpAuthRequest::denyError(Stanza::Error::Auth, Stanza::Error::NotAuthorized);
+Stanza::Error HttpAuthRequest::denyError(Stanza::Error::ErrorType::Auth, Stanza::Error::ErrorCond::NotAuthorized);
 
 /*!
     Constructs request of resource URL \a u, made by method \a m, with transaction id \a i.
@@ -2064,13 +2152,13 @@ class StatusPrivate : public QSharedData {
 public:
     StatusPrivate() = default;
 
-    int        priority = 0;
-    QString    show, status, key;
-    QDateTime  timeStamp;
-    bool       isAvailable = false;
-    bool       isInvisible = false;
-    QByteArray photoHash;
-    bool       hasPhotoHash = false;
+    int       priority = 0;
+    QString   show, status, key;
+    QDateTime timeStamp;
+    bool      isAvailable = false;
+    bool      isInvisible = false;
+
+    std::optional<QByteArray> photoHash;
 
     QString xsigned;
     // gabber song extension
@@ -2227,15 +2315,9 @@ void Status::setMUCHistory(int maxchars, int maxstanzas, int seconds, const QDat
     d->mucHistorySince      = since;
 }
 
-const QByteArray &Status::photoHash() const { return d->photoHash; }
+const std::optional<QByteArray> &Status::photoHash() const { return d->photoHash; }
 
-void Status::setPhotoHash(const QByteArray &h)
-{
-    d->photoHash    = h;
-    d->hasPhotoHash = true;
-}
-
-bool Status::hasPhotoHash() const { return d->hasPhotoHash; }
+void Status::setPhotoHash(const QByteArray &h) { d->photoHash = h; }
 
 void Status::addBoBData(const BoBData &bob) { d->bobDataList.append(bob); }
 

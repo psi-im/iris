@@ -31,6 +31,8 @@
 #include <QUrl>
 #include <QtCrypto> // For QCA::SASL::Params
 
+#include <memory>
+
 #ifndef CS_XMPP
 class ByteStream;
 #endif
@@ -76,7 +78,6 @@ public:
     quint16      peerPort() const;
 
     virtual QString host() const;
-
 signals:
     void connected();
     void error();
@@ -85,6 +86,7 @@ protected:
     void setUseSSL(bool b);
     void setPeerAddressNone();
     void setPeerAddress(const QHostAddress &addr, quint16 port);
+    void setRequireDirectTLS(bool require);
 
 private:
     bool         ssl; // a flag to start ssl handshake immediately
@@ -133,8 +135,8 @@ public:
     };
 
     void setProxy(const Proxy &proxy);
-    void setOptProbe(bool);
     void setOptSSL(bool);
+    void setOptTlsSrv(bool);
 
     void changePollInterval(int secs);
 
@@ -162,7 +164,7 @@ private slots:
 
 private:
     class Private;
-    Private *d;
+    std::unique_ptr<Private> d;
 
     void cleanup();
 };

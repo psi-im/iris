@@ -50,9 +50,9 @@ namespace XMPP { namespace Jingle { namespace S5B {
     class Connection : public XMPP::Jingle::Connection {
         Q_OBJECT
 
-        QList<NetworkDatagram> datagrams;
-        SocksClient           *client = nullptr;
-        Transport::Mode        mode   = Transport::Tcp;
+        QList<QNetworkDatagram> datagrams;
+        SocksClient            *client = nullptr;
+        Transport::Mode         mode   = Transport::Tcp;
 
     public:
         void setSocksClient(SocksClient *client, Transport::Mode mode)
@@ -80,10 +80,10 @@ namespace XMPP { namespace Jingle { namespace S5B {
 
         bool hasPendingDatagrams() const { return datagrams.size() > 0; }
 
-        NetworkDatagram readDatagram(qint64 maxSize = -1)
+        QNetworkDatagram readDatagram(qint64 maxSize = -1)
         {
             Q_UNUSED(maxSize) // TODO or not?
-            return datagrams.size() ? datagrams.takeFirst() : NetworkDatagram();
+            return datagrams.size() ? datagrams.takeFirst() : QNetworkDatagram();
         }
 
         qint64 bytesAvailable() const
@@ -113,22 +113,22 @@ namespace XMPP { namespace Jingle { namespace S5B {
         {
             if (mode == Transport::Tcp)
                 return client->write(data, maxSize);
-            return 0;
+            return -1;
         }
 
-        qint64 readData(char *data, qint64 maxSize)
+        qint64 readDataInternal(char *data, qint64 maxSize)
         {
-            if (client)
+            if (client) {
                 return client->read(data, maxSize);
-            else
-                return 0;
+            } else
+                return -1;
         }
 
     private:
         friend class Transport;
         void enqueueIncomingUDP(const QByteArray &data)
         {
-            datagrams.append(NetworkDatagram { data });
+            datagrams.append(QNetworkDatagram { data });
             emit readyRead();
         }
     };
@@ -698,42 +698,42 @@ namespace XMPP { namespace Jingle { namespace S5B {
 
             proxyDiscoveryInProgress            = true;
             QList<QSet<QString>> featureOptions = { { "http://jabber.org/protocol/bytestreams" } };
-            q->_pad->session()->manager()->client()->serverInfoManager()->queryServiceInfo(
+            auto                 query = q->_pad->session()->manager()->client()->serverInfoManager()->queryServiceInfo(
                 QStringLiteral("proxy"), QStringLiteral("bytestreams"), featureOptions,
-                QRegularExpression("proxy.*|socks.*|stream.*|s5b.*"), ServerInfoManager::SQ_CheckAllOnNoMatch,
-                [this](const QList<DiscoItem> &items) {
-                    if (!proxyDiscoveryInProgress) { // check if new results are ever/still expected
-                        // seems like we have successful connection via higher priority channel. so nobody cares
-                        // about proxy
-                        return;
-                    }
-                    auto m         = static_cast<Manager *>(q->_pad->manager());
-                    Jid  userProxy = m->userProxy();
+                QRegularExpression("proxy.*|socks.*|stream.*|s5b.*"), ServiceInfoQuery::CheckAllOnNoMatch);
+            q->connect(query, &ServiceInfoQuery::finished, q, [this](const QList<DiscoItem> &items) {
+                if (!proxyDiscoveryInProgress) { // check if new results are ever/still expected
+                    // seems like we have successful connection via higher priority channel. so nobody cares
+                    // about proxy
+                    return;
+                }
+                auto m         = static_cast<Manager *>(q->_pad->manager());
+                Jid  userProxy = m->userProxy();
 
-                    bool userProxyFound = !userProxy.isValid();
-                    for (const auto &i : items) {
-                        quint16 localPref = 0;
-                        if (!userProxyFound && i.jid() == userProxy) {
-                            localPref      = 1;
-                            userProxyFound = true;
-                            continue;
-                        }
-                        Candidate c(q, i.jid(), generateCid(), localPref);
-                        localCandidates.emplace(c.cid(), c);
-                        qDebug("new local candidate: %s", qPrintable(c.toString()));
-                        queryS5BProxy(i.jid(), c.cid());
+                bool userProxyFound = !userProxy.isValid();
+                for (const auto &i : items) {
+                    quint16 localPref = 0;
+                    if (!userProxyFound && i.jid() == userProxy) {
+                        localPref      = 1;
+                        userProxyFound = true;
+                        continue;
                     }
-                    if (!userProxyFound) {
-                        Candidate c(q, userProxy, generateCid(), 1);
-                        localCandidates.emplace(c.cid(), c);
-                        qDebug("new local candidate: %s", qPrintable(c.toString()));
-                        queryS5BProxy(userProxy, c.cid());
-                    } else if (items.count() == 0) {
-                        // seems like we don't have any proxy
-                        proxyDiscoveryInProgress = false;
-                        checkAndFinishNegotiation();
-                    }
-                });
+                    Candidate c(q, i.jid(), generateCid(), localPref);
+                    localCandidates.emplace(c.cid(), c);
+                    qDebug("new local candidate: %s", qPrintable(c.toString()));
+                    queryS5BProxy(i.jid(), c.cid());
+                }
+                if (!userProxyFound) {
+                    Candidate c(q, userProxy, generateCid(), 1);
+                    localCandidates.emplace(c.cid(), c);
+                    qDebug("new local candidate: %s", qPrintable(c.toString()));
+                    queryS5BProxy(userProxy, c.cid());
+                } else if (items.count() == 0) {
+                    // seems like we don't have any proxy
+                    proxyDiscoveryInProgress = false;
+                    checkAndFinishNegotiation();
+                }
+            });
         }
 
         void tryConnectToRemoteCandidate()
@@ -1234,7 +1234,7 @@ namespace XMPP { namespace Jingle { namespace S5B {
                  ce             = ce.nextSiblingElement(candidateTag)) {
                 Candidate c(q, ce);
                 if (!c) {
-                    throw Stanza::Error(Stanza::Error::Cancel, Stanza::Error::BadRequest);
+                    throw Stanza::Error(Stanza::Error::ErrorType::Cancel, Stanza::Error::ErrorCond::BadRequest);
                 }
                 if (!p2pAllowed && c.type() != Candidate::Proxy) {
                     qDebug("new remote candidate discarded with forbidden p2p: %s", qPrintable(c));
@@ -1262,14 +1262,14 @@ namespace XMPP { namespace Jingle { namespace S5B {
                 if (it == localCandidates.end()) {
                     if (localCandidatesTrack.contains(cid))
                         return true; // likely discarded as not needed anymore
-                    throw Stanza::Error(Stanza::Error::Cancel, Stanza::Error::ItemNotFound,
+                    throw Stanza::Error(Stanza::Error::ErrorType::Cancel, Stanza::Error::ErrorCond::ItemNotFound,
                                         QString("failed to find incoming candidate-used candidate %1").arg(cid));
                 }
                 auto &cUsed = it->second;
                 if (cUsed.state() == Candidate::Pending) {
                     if (cUsed.type() != Candidate::Proxy && !cUsed.isConnected()) {
                         throw Stanza::Error(
-                            Stanza::Error::Cancel, Stanza::Error::NotAcceptable,
+                            Stanza::Error::ErrorType::Cancel, Stanza::Error::ErrorCond::NotAcceptable,
                             QString("incoming candidate-used refers a candidate w/o active socks connection: %1")
                                 .arg(QString(cUsed)));
                     }
@@ -1313,7 +1313,7 @@ namespace XMPP { namespace Jingle { namespace S5B {
             if (!el.isNull()) {
                 QString cid = el.attribute(QStringLiteral("cid"));
                 if (cid.isEmpty()) {
-                    throw Stanza::Error(Stanza::Error::Cancel, Stanza::Error::ItemNotFound,
+                    throw Stanza::Error(Stanza::Error::ErrorType::Cancel, Stanza::Error::ErrorCond::ItemNotFound,
                                         "failed to find incoming activated candidate");
                 }
                 auto c = remoteUsedCandidate;
@@ -1334,7 +1334,7 @@ namespace XMPP { namespace Jingle { namespace S5B {
             if (!el.isNull()) {
                 auto it = localCandidates.find(el.attribute(QStringLiteral("cid")));
                 if (it == localCandidates.end()) {
-                    throw Stanza::Error(Stanza::Error::Cancel, Stanza::Error::ItemNotFound,
+                    throw Stanza::Error(Stanza::Error::ErrorType::Cancel, Stanza::Error::ErrorCond::ItemNotFound,
                                         "failed to find incoming proxy-error candidate");
                 }
                 auto &c = it->second;
@@ -1561,7 +1561,7 @@ namespace XMPP { namespace Jingle { namespace S5B {
                 tel.setAttribute(QStringLiteral("dstaddr"), dstaddr);
             }
             if (!candidatesToSend.isEmpty()) {
-                upd = makeUpdate(tel, false, [this, candidatesToSend, initial](Task *jt) mutable {
+                upd = makeUpdate(tel, false, [this, candidatesToSend](Task *jt) mutable {
                     if (jt->success()) {
                         for (auto &c : candidatesToSend) {
                             if (c.state() == Candidate::Unacked) {

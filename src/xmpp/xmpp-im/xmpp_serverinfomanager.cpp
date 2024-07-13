@@ -43,12 +43,21 @@ void ServerInfoManager::reset()
 
 void ServerInfoManager::initialize()
 {
-    connect(_client, SIGNAL(disconnected()), SLOT(deinitialize()));
-    JT_DiscoInfo *jt = new JT_DiscoInfo(_client->rootTask());
-    connect(jt, SIGNAL(finished()), SLOT(disco_finished()));
-    jt->get(_client->jid().domain());
-    jt->go(true);
+    connect(_client, &XMPP::Client::disconnected, this, &ServerInfoManager::deinitialize);
 
+    {
+        JT_DiscoInfo *jt = new JT_DiscoInfo(_client->rootTask());
+        connect(jt, &JT_DiscoInfo::finished, this, &ServerInfoManager::server_disco_finished);
+        jt->get(_client->jid().domain());
+        jt->go(true);
+    }
+
+    {
+        JT_DiscoInfo *jt = new JT_DiscoInfo(_client->rootTask());
+        connect(jt, &JT_DiscoInfo::finished, this, &ServerInfoManager::account_disco_finished);
+        jt->get(_client->jid().bare());
+        jt->go(true);
+    }
     queryServicesList();
 }
 
@@ -60,8 +69,6 @@ void ServerInfoManager::deinitialize()
 
 const QString &ServerInfoManager::multicastService() const { return _multicastService; }
 
-bool ServerInfoManager::hasPEP() const { return _hasPEP; }
-
 bool ServerInfoManager::canMessageCarbons() const { return _canMessageCarbons; }
 
 void ServerInfoManager::queryServicesList()
@@ -70,7 +77,7 @@ void ServerInfoManager::queryServicesList()
     auto jtitems       = new JT_DiscoItems(_client->rootTask());
     connect(
         jtitems, &JT_DiscoItems::finished, this,
-        [=]() {
+        [this, jtitems]() {
             _servicesInfo.clear(); //
             if (jtitems->success()) {
                 _servicesListState = ST_Ready;
@@ -87,6 +94,14 @@ void ServerInfoManager::queryServicesList()
     jtitems->go(true);
 }
 
+void ServerInfoManager::finish(ServiceInfoQuery *q, const QList<DiscoItem> &items)
+{
+    emit q->finished(items);
+    if (q->parent() == this) {
+        q->deleteLater();
+    }
+}
+
 void ServerInfoManager::checkPendingServiceQueries()
 {
     // if services list is not ready yet we have to exit. if it's failed we have to finish all pending queries
@@ -95,17 +110,18 @@ void ServerInfoManager::checkPendingServiceQueries()
             const auto sqs = _serviceQueries;
             _serviceQueries.clear();
             for (const auto &q : sqs) {
-                q.callback(QList<DiscoItem>());
+                finish(q);
             }
         }
         return;
     }
 
     // services list is ready here and we can start checking it and sending disco#info to not cached entries
-    auto sqIt = _serviceQueries.begin();
-    while (sqIt != _serviceQueries.end()) {
+    auto queryIt = _serviceQueries.begin();
+    while (queryIt != _serviceQueries.end()) {
 
         // populate services to query for this service request
+        auto sqIt = *queryIt;
         if (!sqIt->servicesToQueryDefined) {
             sqIt->spareServicesToQuery.clear();
             // grep all suitble service jids. moving forward preferred ones
@@ -115,7 +131,7 @@ void ServerInfoManager::checkPendingServiceQueries()
                 if (sqIt->nameHint.isValid()) {
                     if (!sqIt->nameHint.isValid() || sqIt->nameHint.match(si.key()).hasMatch()) {
                         sqIt->servicesToQuery.push_back(si.key());
-                    } else if (sqIt->options & SQ_CheckAllOnNoMatch) {
+                    } else if (sqIt->options & ServiceInfoQuery::CheckAllOnNoMatch) {
                         sqIt->spareServicesToQuery.push_back(si.key());
                     }
                 } else {
@@ -127,8 +143,8 @@ void ServerInfoManager::checkPendingServiceQueries()
                 sqIt->spareServicesToQuery.clear();
             }
             if (sqIt->servicesToQuery.empty()) {
-                sqIt->callback(QList<DiscoItem>());
-                _serviceQueries.erase(sqIt++);
+                finish(sqIt);
+                _serviceQueries.erase(queryIt++);
                 continue;
             }
             sqIt->servicesToQueryDefined = true;
@@ -162,7 +178,7 @@ void ServerInfoManager::checkPendingServiceQueries()
                             sqIt->features.constBegin(), sqIt->features.constEnd(), false,
                             [&si](bool a, const QSet<QString> &b) { return a || si->item.features().test(b); }))) {
                     sqIt->result.append(si->item);
-                    if (sqIt->options & SQ_FinishOnFirstMatch) {
+                    if (sqIt->options & ServiceInfoQuery::FinishOnFirstMatch) {
                         break;
                     }
                 }
@@ -203,20 +219,19 @@ void ServerInfoManager::checkPendingServiceQueries()
         }
 
         // if has at least one sufficient result
-        auto forceFinish = (!sqIt->result.isEmpty() && (sqIt->options & SQ_FinishOnFirstMatch)); // stop on first found
+        auto forceFinish = (!sqIt->result.isEmpty()
+                            && (sqIt->options & ServiceInfoQuery::FinishOnFirstMatch)); // stop on first found
         // if nothing in progress then we have full result set or nothing found even in spare list
         if (forceFinish || !hasInProgress) { // self explanatory
-            auto callback = std::move(sqIt->callback);
-            auto result   = sqIt->result;
-            _serviceQueries.erase(sqIt++);
-            callback(result);
+            _serviceQueries.erase(queryIt++);
+            finish(sqIt, sqIt->result);
         } else {
-            ++sqIt;
+            ++queryIt;
         }
     }
 }
 
-void ServerInfoManager::appendQuery(const ServiceQuery &q)
+void ServerInfoManager::appendQuery(ServiceInfoQuery *q)
 {
     _serviceQueries.push_back(q);
     if (_servicesListState == ST_InProgress) {
@@ -229,11 +244,14 @@ void ServerInfoManager::appendQuery(const ServiceQuery &q)
     }
 }
 
-void ServerInfoManager::queryServiceInfo(const QString &category, const QString &type,
-                                         const QList<QSet<QString>> &features, const QRegularExpression &nameHint,
-                                         SQOptions options, std::function<void(const QList<DiscoItem> &items)> callback)
+ServiceInfoQuery *ServerInfoManager::queryServiceInfo(const QString &category, const QString &type,
+                                                      const QList<QSet<QString>> &features,
+                                                      const QRegularExpression   &nameHint,
+                                                      ServiceInfoQuery::Options   options)
 {
-    appendQuery(ServiceQuery(type, category, features, nameHint, options, std::move(callback)));
+    auto query = new ServiceInfoQuery(type, category, features, nameHint, options, this);
+    appendQuery(query);
+    return query;
 }
 
 void ServerInfoManager::setServiceMeta(const Jid &service, const QString &key, const QVariant &value)
@@ -253,23 +271,16 @@ QVariant ServerInfoManager::serviceMeta(const Jid &service, const QString &key)
     return QVariant();
 }
 
-void ServerInfoManager::disco_finished()
+void ServerInfoManager::server_disco_finished()
 {
     JT_DiscoInfo *jt = static_cast<JT_DiscoInfo *>(sender());
     if (jt->success()) {
-        _features = jt->item().features();
+        _serverFeatures = jt->item().features();
 
-        if (_features.hasMulticast())
+        if (_serverFeatures.hasMulticast())
             _multicastService = _client->jid().domain();
 
-        _canMessageCarbons = _features.hasMessageCarbons();
-
-        // Identities
-        DiscoItem::Identities is = jt->item().identities();
-        for (const DiscoItem::Identity &i : is) {
-            if (i.category == "pubsub" && i.type == "pep")
-                _hasPEP = true;
-        }
+        _canMessageCarbons = _serverFeatures.hasMessageCarbons();
 
         auto servInfo
             = jt->item().findExtension(XData::Data_Result, QLatin1String("http://jabber.org/network/serverinfo"));
@@ -280,6 +291,24 @@ void ServerInfoManager::disco_finished()
                 }
             }
         }
+
+        emit featuresChanged();
+    }
+}
+
+void ServerInfoManager::account_disco_finished()
+{
+    JT_DiscoInfo *jt = static_cast<JT_DiscoInfo *>(sender());
+    if (jt->success()) {
+        // Identities
+        DiscoItem::Identities is = jt->item().identities();
+        for (const DiscoItem::Identity &i : is) {
+            if (i.category == "pubsub" && i.type == "pep") {
+                _hasPEP = true;
+            }
+        }
+        _hasPersistentStorage = jt->item().hasPersistentStorage();
+        _accountFeatures      = jt->item().features();
 
         emit featuresChanged();
     }

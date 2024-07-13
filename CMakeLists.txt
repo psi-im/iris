@@ -37,7 +37,7 @@ include(policyRules)
 
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 20)
 
 # Detect MXE cross-compilation
 set(IRIS_DEFAULT_BUNDLED_USRSCTP OFF)
@@ -61,14 +61,13 @@ endif()
 
 option(IRIS_ENABLE_INSTALL "Enable installation" ON)
 option(IRIS_ENABLE_JINGLE_SCTP "Enable SCTP over ICE Jingle transport / data channels" ON)
-option(IRIS_BUNDLED_QCA "Adds: DTLS, Blake2b and other useful for XMPP crypto-stuff" ${IRIS_DEFAULT_BUNDLED_QCA})
+# note Blake2b is needed only with Qt5. Qt6 has its own implementation
+option(IRIS_BUNDLED_QCA "Adds: DTLS, Blake2b (needed with Qt5) and other useful for XMPP crypto-stuff" ${IRIS_DEFAULT_BUNDLED_QCA})
 option(IRIS_BUNDLED_USRSCTP "Compile compatible UsrSCTP lib (required for datachannel Jingle transport)" ${IRIS_DEFAULT_BUNDLED_USRSCTP})
 option(IRIS_BUILD_TOOLS "Build tools and examples" OFF)
 option(IRIS_ENABLE_DEBUG "Enable debugging code paths" OFF)
 
 set(IRIS_INSTALL_INCLUDEDIR ${CMAKE_INSTALL_INCLUDEDIR}/xmpp/iris)
-
-set(CMAKE_CXX_STANDARD 17)
 
 if("${CMAKE_BUILD_TYPE}" STREQUAL "Debug" OR ("${CMAKE_BUILD_TYPE}" STREQUAL "RelWithDebInfo"))
     include(debug-definitions)
@@ -101,7 +100,7 @@ if(IRIS_ENABLE_JINGLE_SCTP)
     include(IrisSCTP)
 endif()
 
-if(NOT IRIS_BUNDLED_QCA)
+if(NOT IRIS_BUNDLED_QCA AND QT_DEFAULT_MAJOR_VERSION LESS 6)
     find_package(B2 QUIET)
     if(B2_FOUND)
         message(STATUS "Found B2: ${B2_LIBRARY}")

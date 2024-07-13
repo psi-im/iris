@@ -290,7 +290,7 @@ void Client::setCapsOptimizationAllowed(bool allowed) { d->capsOptimization = al
 
 bool Client::capsOptimizationAllowed() const
 {
-    if (d->capsOptimization && d->active && d->serverInfoManager->features().hasCapsOptimize()) {
+    if (d->capsOptimization && d->active && d->serverInfoManager->serverFeatures().hasCapsOptimize()) {
         auto it = d->resourceList.find(d->resource);
         return it != d->resourceList.end() && it->status().isAvailable();
     }
@@ -533,7 +533,7 @@ void Client::streamReadyRead()
         debug(QString("Client: incoming: [\n%1]\n").arg(out));
         emit xmlIncoming(out);
 
-        QDomElement x = s.element(); // oldStyleNS(s.element());
+        QDomElement x = s.element();
         distribute(x);
     }
 }
@@ -870,7 +870,7 @@ void Client::pmMessage(const Message &m)
         d->ibbman->takeIncomingData(m.from(), m.id(), m.ibbData(), Stanza::Message);
     }
 
-    if (m.type() == "groupchat") {
+    if (m.type() == Message::Type::Groupchat) {
         for (QList<GroupChat>::Iterator it = d->groupChatList.begin(); it != d->groupChatList.end(); it++) {
             const GroupChat &i = *it;
 
