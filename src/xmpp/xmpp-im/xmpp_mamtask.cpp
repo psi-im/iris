@@ -24,21 +24,21 @@ using namespace XMPP;
 
 class MAMTask::Private {
 public:
-    int       mamPageSize;    // TODO: this is the max page size for MAM request. Should be made into a config option
-    int       mamMaxMessages; // maximum mam pages total, also should be config
-    int       messagesFetched;
-    bool      flipPages;
-    bool      backwards;
-    bool      allowMUCArchives;
-    bool      metadataFetched;
-    Jid       j;
-    QString   firstID;
-    QString   lastID;
-    QString   lastArchiveID;
-    QString   from_id;
-    QString   to_id;
-    QDateTime from;
-    QDateTime to;
+    int     mamPageSize; // TODO: this is the max page size for MAM request. Should be made into a config option in Psi+
+    int     mamMaxMessages; // maximum mam pages total, also should be config
+    int     messagesFetched;
+    bool    flipPages;
+    bool    backwards;
+    bool    allowMUCArchives;
+    bool    metadataFetched;
+    Jid     j;
+    QString firstID;
+    QString lastID;
+    QString lastArchiveID;
+    QString from_id;
+    QString to_id;
+    QDateTime          from;
+    QDateTime          to;
     QList<QDomElement> archive;
 
     void  getPage(MAMTask *t);
@@ -53,7 +53,7 @@ XData MAMTask::Private::makeMAMFilter()
     XData::Field with;
     with.setType(XData::Field::Field_JidSingle);
     with.setVar(QLatin1String("with"));
-    with.setValue(QStringList(j.bare()));
+    with.setValue(QStringList(j.full()));
     fl.append(with);
 
     XData::Field includeGroupchat;
@@ -155,6 +155,9 @@ MAMTask::~MAMTask() { delete d; }
 
 const QList<QDomElement> &MAMTask::archive() const { return d->archive; }
 
+// Note: Set `j` to a resource if you just want to query that resource
+// if you want to query all resources, set `j` to the bare JID
+
 // Filter by time range
 void MAMTask::get(const Jid &j, const QDateTime &from = {}, const QDateTime &to = {},
                   const bool allowMUCArchives = true, int mamPageSize = 10, int mamMaxMessages = 100,
@@ -198,10 +201,21 @@ void MAMTask::onGo() { d->getArchiveMetadata(this); }
 bool MAMTask::take(const QDomElement &x)
 {
     if (d->metadataFetched) {
-        if (iqVerify(x, QString(), id()))
+        if (iqVerify(x, QString(), id())) {
+            if (!x.elementsByTagNameNS(QLatin1String("urn:ietf:params:xml:ns:xmpp-stanzas"),
+                                       QLatin1String("item-not-found"))
+                     .isEmpty()) {
+                setError(2, "First or last stanza UID of filter was not found in the archive");
+                return true;
+            } else if (!x.elementsByTagNameNS(XMPP_MAM_NAMESPACE, QLatin1String("fin")).isEmpty()) {
+                // We are done?
+                setSuccess();
+                return true;
+            }
+            // Probably ignore it
             return false;
+        }
 
-        // TODO: only save messages directed at the correct resource?
         d->archive.append(x);
         d->lastArchiveID   = x.attribute(QLatin1String("id"));
         d->messagesFetched = d->messagesFetched + 1;
@@ -212,10 +226,15 @@ bool MAMTask::take(const QDomElement &x)
         } else if (d->messagesFetched % d->mamPageSize == 0) {
             d->getPage(this);
         }
-        // TODO: handle server not sending all MAM stuff gracefully (such as handling 0 messagesFetched)
     } else {
-        if (!iqVerify(x, QString(), id()))
+        if (!iqVerify(x, QString(), id()) || x.elementsByTagName(QLatin1String("metadata")).isEmpty())
             return false;
+
+        // Return if the archive is empty
+        if (!x.elementsByTagName(QLatin1String("metadata")).at(0).hasChildNodes()) {
+            setError(1, QLatin1String("Archive is empty"));
+            return true;
+        }
 
         if (x.elementsByTagName(QLatin1String("start")).at(0).isNull()
             || x.elementsByTagName(QLatin1String("end")).at(0).isNull())
