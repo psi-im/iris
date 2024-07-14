@@ -35,10 +35,10 @@ public:
     QString   firstID;
     QString   lastID;
     QString   lastArchiveID;
-    QDateTime from;
-    QDateTime to;
     QString   from_id;
     QString   to_id;
+    QDateTime from;
+    QDateTime to;
     QList<QDomElement> archive;
 
     void  getPage(MAMTask *t);
@@ -80,7 +80,7 @@ XData MAMTask::Private::makeMAMFilter()
         fl.append(end);
     }
 
-    if(!from_id.isNull()) {
+    if (!from_id.isNull()) {
         XData::Field start_id;
         start_id.setType(XData::Field::Field_TextSingle);
         start_id.setVar(QLatin1String("after-id"));
@@ -88,7 +88,7 @@ XData MAMTask::Private::makeMAMFilter()
         fl.append(start_id);
     }
 
-    if(!to_id.isNull()) {
+    if (!to_id.isNull()) {
         XData::Field end_id;
         end_id.setType(XData::Field::Field_TextSingle);
         end_id.setVar(QLatin1String("before-id"));
@@ -103,39 +103,6 @@ XData MAMTask::Private::makeMAMFilter()
 
     return x;
 }
-
-// TODO: use iris rsm implementation
-/*
-void MAMTask::Private::getPage(MAMTask* t)
-{
-    QDomElement iq = createIQ(t->doc(), "set", QString(), t->id());
-
-    QDomElement query = t->doc()->createElementNS(XMPP_MAM_NAMESPACE, "query");
-
-    XData            x = makeMAMFilter();
-
-    QDomElement rsmSet = t->doc()->createElementNS("http://jabber.org/protocol/rsm", "set");
-    rsmSet.appendChild(textTag(t->doc(), "max", QString::number(mamMaxMessages)));
-
-    if(flipPages) rsmSet.appendChild(emptyTag(t->doc(), "flip-page"));
-    if(backwards) {
-        if(lastArchiveID.isNull()) {
-            rsmSet.appendChild(emptyTag(t->doc(), "before"));
-        } else {
-            rsmSet.appendChild(textTag(t->doc(), "before", lastArchiveID));
-        }
-    } else {
-        if(!lastArchiveID.isNull()) {
-            rsmSet.appendChild(textTag(t->doc(), "after", lastArchiveID));
-        }
-    }
-
-    query.appendChild(x.toXml(t->doc()));
-    query.appendChild(rsmSet);
-    iq.appendChild(query);
-    t->send(iq);
-}
-*/
 
 void MAMTask::Private::getPage(MAMTask *t)
 {
