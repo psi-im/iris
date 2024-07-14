@@ -71,6 +71,7 @@ set(XMPP_IM_HEADERS
     xmpp-im/xmpp_bytestream.h
     xmpp-im/xmpp_client.h
     xmpp-im/xmpp_discoinfotask.h
+    xmpp-im/xmpp_mamtask.h
     xmpp-im/xmpp_ibb.h
     xmpp-im/xmpp_serverinfomanager.h
     xmpp-im/xmpp_task.h
@@ -129,6 +130,7 @@ target_sources(iris PRIVATE
     xmpp-im/xmpp_hash.cpp
     xmpp-im/xmpp_ibb.cpp
     xmpp-im/xmpp_forwarding.cpp
+    xmpp-im/xmpp_mamtask.cpp
     xmpp-im/xmpp_reference.cpp
     xmpp-im/xmpp_serverinfomanager.cpp
     xmpp-im/xmpp_subsets.cpp

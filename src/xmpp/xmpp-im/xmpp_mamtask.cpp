@@ -159,9 +159,8 @@ const QList<QDomElement> &MAMTask::archive() const { return d->archive; }
 // if you want to query all resources, set `j` to the bare JID
 
 // Filter by time range
-void MAMTask::get(const Jid &j, const QDateTime &from = {}, const QDateTime &to = {},
-                  const bool allowMUCArchives = true, int mamPageSize = 10, int mamMaxMessages = 100,
-                  bool flipPages = true, bool backwards = true)
+void MAMTask::get(const Jid &j, const QDateTime &from, const QDateTime &to, const bool allowMUCArchives,
+                  int mamPageSize, int mamMaxMessages, bool flipPages, bool backwards)
 {
     d->archive         = {};
     d->messagesFetched = 0;
@@ -178,9 +177,8 @@ void MAMTask::get(const Jid &j, const QDateTime &from = {}, const QDateTime &to 
 }
 
 // Filter by id range
-void MAMTask::get(const Jid &j, const QString &from_id = {}, const QString &to_id = {},
-                  const bool allowMUCArchives = true, int mamPageSize = 10, int mamMaxMessages = 100,
-                  bool flipPages = true, bool backwards = true)
+void MAMTask::get(const Jid &j, const QString &from_id, const QString &to_id, const bool allowMUCArchives,
+                  int mamPageSize, int mamMaxMessages, bool flipPages, bool backwards)
 {
     d->archive         = {};
     d->messagesFetched = 0;
