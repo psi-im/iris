@@ -80,7 +80,21 @@ XData MAMTask::Private::makeMAMFilter()
         fl.append(end);
     }
 
-    // TODO: ID filters?
+    if(!from_id.isNull()) {
+        XData::Field start_id;
+        start_id.setType(XData::Field::Field_TextSingle);
+        start_id.setVar(QLatin1String("after-id"));
+        start_id.setValue(QStringList(from_id));
+        fl.append(start_id);
+    }
+
+    if(!to_id.isNull()) {
+        XData::Field end_id;
+        end_id.setType(XData::Field::Field_TextSingle);
+        end_id.setVar(QLatin1String("before-id"));
+        end_id.setValue(QStringList(to_id));
+        fl.append(end_id);
+    }
 
     XData x;
     x.setType(XData::Data_Submit);
