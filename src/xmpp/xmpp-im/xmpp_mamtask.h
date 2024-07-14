@@ -44,7 +44,13 @@ public:
 
     const QList<QDomElement> &archive() const;
 
+    // Time filter
     void get(const Jid &j, const QDateTime &from = QDateTime(), const QDateTime &to = QDateTime(),
+             const bool allowMUCArchives = true, int mamPageSize = 10, int mamMaxMessages = 100, bool flipPages = true,
+             bool backwards = true);
+
+    // ID Filter
+    void get(const Jid &j, const QString &from_id = QString(), const QString &to_id = QString(),
              const bool allowMUCArchives = true, int mamPageSize = 10, int mamMaxMessages = 100, bool flipPages = true,
              bool backwards = true);
 
