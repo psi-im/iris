@@ -1,5 +1,5 @@
 /*
- * xmpp_mam.cpp - XEP-0313 Message Archive Management
+ * xmpp_mamtask.h - XEP-0313 Message Archive Management
  * Copyright (C) 2024 mcneb10
  *
  * This library is free software; you can redistribute it and/or
@@ -40,18 +40,19 @@ class MAMTask : public Task {
     Q_OBJECT
 public:
     MAMTask(Task *);
+    MAMTask(const MAMTask &x);
     ~MAMTask();
 
     const QList<QDomElement> &archive() const;
 
     // Time filter
     void get(const Jid &j, const QDateTime &from = QDateTime(), const QDateTime &to = QDateTime(),
-             const bool allowMUCArchives = true, int mamPageSize = 10, int mamMaxMessages = 100, bool flipPages = true,
+             const bool allowMUCArchives = true, int mamPageSize = 10, int mamMaxMessages = 0, bool flipPages = true,
              bool backwards = true);
 
     // ID Filter
     void get(const Jid &j, const QString &from_id = QString(), const QString &to_id = QString(),
-             const bool allowMUCArchives = true, int mamPageSize = 10, int mamMaxMessages = 100, bool flipPages = true,
+             const bool allowMUCArchives = true, int mamPageSize = 10, int mamMaxMessages = 0, bool flipPages = true,
              bool backwards = true);
 
     void onGo();

@@ -1,5 +1,5 @@
 /*
- * xmpp_mam.cpp - XEP-0313 Message Archive Management
+ * xmpp_mamtask.cpp - XEP-0313 Message Archive Management
  * Copyright (C) 2024 mcneb10
  *
  * This library is free software; you can redistribute it and/or
@@ -25,7 +25,7 @@ using namespace XMPP;
 class MAMTask::Private {
 public:
     int     mamPageSize; // TODO: this is the max page size for MAM request. Should be made into a config option in Psi+
-    int     mamMaxMessages; // maximum mam pages total, also should be config
+    int     mamMaxMessages; // maximum mam pages total, also should be config. zero means unlimited
     int     messagesFetched;
     bool    flipPages;
     bool    backwards;
@@ -45,6 +45,13 @@ public:
     void  getArchiveMetadata(MAMTask *t);
     XData makeMAMFilter();
 };
+
+
+MAMTask::MAMTask(Task *parent) : Task(parent) { d = new Private; }
+MAMTask::MAMTask(const MAMTask& x) : Task(x.parent()) { d = x.d; }
+MAMTask::~MAMTask() { delete d; }
+
+const QList<QDomElement> &MAMTask::archive() const { return d->archive; }
 
 XData MAMTask::Private::makeMAMFilter()
 {
@@ -149,11 +156,6 @@ void MAMTask::Private::getArchiveMetadata(MAMTask *t)
 
     t->send(iq);
 }
-
-MAMTask::MAMTask(Task *parent) : Task(parent) { d = new Private; }
-MAMTask::~MAMTask() { delete d; }
-
-const QList<QDomElement> &MAMTask::archive() const { return d->archive; }
 
 // Note: Set `j` to a resource if you just want to query that resource
 // if you want to query all resources, set `j` to the bare JID
