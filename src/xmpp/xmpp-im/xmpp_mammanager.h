@@ -30,12 +30,17 @@ namespace XMPP {
 class MAMManager : public QObject {
     Q_OBJECT
 public:
-    MAMManager(Client* client, int mamPageSize = 10, int mamMaxMessages = 0, bool flipPages = true, bool backwards = true);
+    MAMManager(Client *client, int mamPageSize = 10, int mamMaxMessages = 0, bool flipPages = true,
+               bool backwards = true);
     ~MAMManager();
 
-    void getFullArchiveByIDRange(void (*archiveHandler)(QList<QDomElement>), const Jid &j, const bool allowMUCArchives = true);
-    void getArchiveByIDRange(void (*archiveHandler)(QList<QDomElement>), const Jid &j, const QString &from_id, const QString &to_id, const bool allowMUCArchives = true);
-    void getArchiveByTimeRange(void (*archiveHandler)(QList<QDomElement>), const Jid &j, const QDateTime &from, const QDateTime &to, const bool allowMUCArchives = true);
+    void getFullArchive(void (*archiveHandler)(QList<QDomElement>), const Jid &j, const bool allowMUCArchives = true);
+    void getArchiveByIDRange(void (*archiveHandler)(QList<QDomElement>), const Jid &j, const QString &from_id,
+                             const QString &to_id, const bool allowMUCArchives = true);
+    void getArchiveByTimeRange(void (*archiveHandler)(QList<QDomElement>), const Jid &j, const QDateTime &from,
+                               const QDateTime &to, const bool allowMUCArchives = true);
+    void getLatestMessagesFromArchive(void (*archiveHandler)(QList<QDomElement>), const Jid &j,
+                                      const bool allowMUCArchives = true, const QString &from_id, int amount = 100);
 
 private:
     class Private;

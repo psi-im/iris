@@ -22,47 +22,55 @@
 using namespace XMPP;
 
 class MAMManager::Private {
-    public:
-        int mamPageSize;
-        int mamMaxMessages;
-        bool flipPages;
-        bool backwards;
-        Client* client;
+public:
+    int     mamPageSize;
+    int     mamMaxMessages;
+    bool    flipPages;
+    bool    backwards;
+    Client *client;
 };
 
-MAMManager::MAMManager(Client* client, int mamPageSize, int mamMaxMessages, bool flipPages, bool backwards) { 
+MAMManager::MAMManager(Client *client, int mamPageSize, int mamMaxMessages, bool flipPages, bool backwards)
+{
     d = new Private;
 
-    d->client = client;
-    d->mamPageSize = mamPageSize;
+    d->client         = client;
+    d->mamPageSize    = mamPageSize;
     d->mamMaxMessages = mamMaxMessages;
-    d->flipPages = flipPages;
-    d->backwards = backwards;
+    d->flipPages      = flipPages;
+    d->backwards      = backwards;
 }
 
 MAMManager::~MAMManager() { delete d; }
 
 // TODO: review the safety of these methods/object lifetimes
-void MAMManager::getFullArchiveByIDRange(void (*archiveHandler)(QList<QDomElement>), const Jid &j, const bool allowMUCArchives) {
+void MAMManager::getFullArchive(void (*archiveHandler)(QList<QDomElement>), const Jid &j, const bool allowMUCArchives)
+{
     MAMTask task(d->client->rootTask());
-    connect(&task, &MAMTask::finished, this, [this, task, archiveHandler]() {
-        archiveHandler(task.archive());
-    });
+    connect(&task, &MAMTask::finished, this, [task, archiveHandler]() { archiveHandler(task.archive()); });
     task.get(j, QString(), QString(), allowMUCArchives, d->mamPageSize, d->mamMaxMessages, d->flipPages, d->backwards);
 }
 
-void MAMManager::getArchiveByIDRange(void (*archiveHandler)(QList<QDomElement>), const Jid &j, const QString &from_id, const QString &to_id, const bool allowMUCArchives) {
+void MAMManager::getArchiveByIDRange(void (*archiveHandler)(QList<QDomElement>), const Jid &j, const QString &from_id,
+                                     const QString &to_id, const bool allowMUCArchives)
+{
     MAMTask task(d->client->rootTask());
-    connect(&task, &MAMTask::finished, this, [this, task, archiveHandler]() {
-        archiveHandler(task.archive());
-    });
+    connect(&task, &MAMTask::finished, this, [task, archiveHandler]() { archiveHandler(task.archive()); });
     task.get(j, from_id, to_id, allowMUCArchives, d->mamPageSize, d->mamMaxMessages, d->flipPages, d->backwards);
 }
 
-void MAMManager::getArchiveByTimeRange(void (*archiveHandler)(QList<QDomElement>), const Jid &j, const QDateTime &from, const QDateTime &to, const bool allowMUCArchives) {
+void MAMManager::getArchiveByTimeRange(void (*archiveHandler)(QList<QDomElement>), const Jid &j, const QDateTime &from,
+                                       const QDateTime &to, const bool allowMUCArchives)
+{
     MAMTask task(d->client->rootTask());
-    connect(&task, &MAMTask::finished, this, [this, task, archiveHandler]() {
-        archiveHandler(task.archive());
-    });
+    connect(&task, &MAMTask::finished, this, [task, archiveHandler]() { archiveHandler(task.archive()); });
     task.get(j, from, to, allowMUCArchives, d->mamPageSize, d->mamMaxMessages, d->flipPages, d->backwards);
+}
+
+void MAMManager::getLatestMessagesFromArchive(void (*archiveHandler)(QList<QDomElement>), const Jid &j,
+                                              const bool allowMUCArchives = true, const QString &from_id, int amount)
+{
+    MAMTask task(d->client->rootTask());
+    connect(&task, &MAMTask::finished, this, [task, archiveHandler]() { archiveHandler(task.archive()); });
+    task.get(j, from_id, QString(), allowMUCArchives, d->mamPageSize, amount, true, true);
 }
