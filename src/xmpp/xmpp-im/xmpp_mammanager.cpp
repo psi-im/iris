@@ -74,3 +74,11 @@ void MAMManager::getLatestMessagesFromArchive(void (*archiveHandler)(QList<QDomE
     connect(&task, &MAMTask::finished, this, [task, archiveHandler]() { archiveHandler(task.archive()); });
     task.get(j, from_id, QString(), allowMUCArchives, d->mamPageSize, amount, true, true);
 }
+
+void MAMManager::getMessagesBeforeID(void (*archiveHandler)(QList<QDomElement>), const Jid &j,
+                                     const bool allowMUCArchives = true, const QString &to_id, int amount)
+{
+    MAMTask task(d->client->rootTask());
+    connect(&task, &MAMTask::finished, this, [task, archiveHandler]() { archiveHandler(task.archive()); });
+    task.get(j, QString(), to_id, allowMUCArchives, d->mamPageSize, amount, true, true);
+}

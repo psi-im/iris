@@ -41,6 +41,8 @@ public:
                                const QDateTime &to, const bool allowMUCArchives = true);
     void getLatestMessagesFromArchive(void (*archiveHandler)(QList<QDomElement>), const Jid &j,
                                       const bool allowMUCArchives = true, const QString &from_id, int amount = 100);
+    void getMessagesBeforeID(void (*archiveHandler)(QList<QDomElement>), const Jid &j,
+                             const bool allowMUCArchives = true, const QString &to_id, int amount = 100);
 
 private:
     class Private;
