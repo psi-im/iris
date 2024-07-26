@@ -44,41 +44,45 @@ MAMManager::MAMManager(Client *client, int mamPageSize, int mamMaxMessages, bool
 MAMManager::~MAMManager() { delete d; }
 
 // TODO: review the safety of these methods/object lifetimes
-void MAMManager::getFullArchive(void (*archiveHandler)(QList<QDomElement>), const Jid &j, const bool allowMUCArchives)
+MAMTask MAMManager::getFullArchive(const Jid &j, const bool allowMUCArchives)
 {
     MAMTask task(d->client->rootTask());
-    connect(&task, &MAMTask::finished, this, [task, archiveHandler]() { archiveHandler(task.archive()); });
+
     task.get(j, QString(), QString(), allowMUCArchives, d->mamPageSize, d->mamMaxMessages, d->flipPages, d->backwards);
+    return task;
 }
 
-void MAMManager::getArchiveByIDRange(void (*archiveHandler)(QList<QDomElement>), const Jid &j, const QString &from_id,
-                                     const QString &to_id, const bool allowMUCArchives)
+MAMTask MAMManager::getArchiveByIDRange(const Jid &j, const QString &from_id, const QString &to_id,
+                                        const bool allowMUCArchives)
 {
     MAMTask task(d->client->rootTask());
-    connect(&task, &MAMTask::finished, this, [task, archiveHandler]() { archiveHandler(task.archive()); });
+
     task.get(j, from_id, to_id, allowMUCArchives, d->mamPageSize, d->mamMaxMessages, d->flipPages, d->backwards);
+    return task;
 }
 
-void MAMManager::getArchiveByTimeRange(void (*archiveHandler)(QList<QDomElement>), const Jid &j, const QDateTime &from,
-                                       const QDateTime &to, const bool allowMUCArchives)
+MAMTask MAMManager::getArchiveByTimeRange(const Jid &j, const QDateTime &from, const QDateTime &to,
+                                          const bool allowMUCArchives)
 {
     MAMTask task(d->client->rootTask());
-    connect(&task, &MAMTask::finished, this, [task, archiveHandler]() { archiveHandler(task.archive()); });
+
     task.get(j, from, to, allowMUCArchives, d->mamPageSize, d->mamMaxMessages, d->flipPages, d->backwards);
+    return task;
 }
 
-void MAMManager::getLatestMessagesFromArchive(void (*archiveHandler)(QList<QDomElement>), const Jid &j,
-                                              const bool allowMUCArchives = true, const QString &from_id, int amount)
+MAMTask MAMManager::getLatestMessagesFromArchive(const Jid &j, const QString &from_id, const bool allowMUCArchives,
+                                                 int amount)
 {
     MAMTask task(d->client->rootTask());
-    connect(&task, &MAMTask::finished, this, [task, archiveHandler]() { archiveHandler(task.archive()); });
+
     task.get(j, from_id, QString(), allowMUCArchives, d->mamPageSize, amount, true, true);
+    return task;
 }
 
-void MAMManager::getMessagesBeforeID(void (*archiveHandler)(QList<QDomElement>), const Jid &j,
-                                     const bool allowMUCArchives = true, const QString &to_id, int amount)
+MAMTask MAMManager::getMessagesBeforeID(const Jid &j, const QString &to_id, const bool allowMUCArchives, int amount)
 {
     MAMTask task(d->client->rootTask());
-    connect(&task, &MAMTask::finished, this, [task, archiveHandler]() { archiveHandler(task.archive()); });
+
     task.get(j, QString(), to_id, allowMUCArchives, d->mamPageSize, amount, true, true);
+    return task;
 }
