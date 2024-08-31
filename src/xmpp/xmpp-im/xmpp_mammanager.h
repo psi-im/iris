@@ -35,13 +35,13 @@ public:
     ~MAMManager();
 
     MAMTask getFullArchive(const Jid &j, const bool allowMUCArchives = true);
-    MAMTask getArchiveByIDRange(const Jid &j, const QString &from_id, const QString &to_id,
+    MAMTask getArchiveByIDRange(const Jid &j, const QString &fromID, const QString &toID,
                                 const bool allowMUCArchives = true);
     MAMTask getArchiveByTimeRange(const Jid &j, const QDateTime &from, const QDateTime &to,
                                   const bool allowMUCArchives = true);
-    MAMTask getLatestMessagesFromArchive(const Jid &j, const QString &from_id, const bool allowMUCArchives = true,
+    MAMTask getLatestMessagesFromArchive(const Jid &j, const QString &fromID, const bool allowMUCArchives = true,
                                          int amount = 100);
-    MAMTask getMessagesBeforeID(const Jid &j, const QString &to_id, const bool allowMUCArchives = true,
+    MAMTask getMessagesBeforeID(const Jid &j, const QString &toID, const bool allowMUCArchives = true,
                                 int amount = 100);
 
 private:

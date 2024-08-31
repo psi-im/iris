@@ -51,7 +51,7 @@ public:
              bool backwards = true);
 
     // ID Filter
-    void get(const Jid &j, const QString &from_id = QString(), const QString &to_id = QString(),
+    void get(const Jid &j, const QString &fromID = QString(), const QString &toID = QString(),
              const bool allowMUCArchives = true, int mamPageSize = 10, int mamMaxMessages = 0, bool flipPages = true,
              bool backwards = true);
 
