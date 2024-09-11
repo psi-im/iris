@@ -44,45 +44,45 @@ MAMManager::MAMManager(Client *client, int mamPageSize, int mamMaxMessages, bool
 MAMManager::~MAMManager() { delete d; }
 
 // TODO: review the safety of these methods/object lifetimes
-MAMTask MAMManager::getFullArchive(const Jid &j, const bool allowMUCArchives)
+MAMTask *MAMManager::getFullArchive(const Jid &j, const bool allowMUCArchives)
 {
-    MAMTask task = new MAMTask(d->client->rootTask());
+    auto task = new MAMTask(d->client->rootTask());
 
-    task.get(j, QString(), QString(), allowMUCArchives, d->mamPageSize, d->mamMaxMessages, d->flipPages, d->backwards);
+    task->get(j, QString(), QString(), allowMUCArchives, d->mamPageSize, d->mamMaxMessages, d->flipPages, d->backwards);
     return task;
 }
 
-MAMTask MAMManager::getArchiveByIDRange(const Jid &j, const QString &fromID, const QString &toID,
-                                        const bool allowMUCArchives)
+MAMTask *MAMManager::getArchiveByIDRange(const Jid &j, const QString &fromID, const QString &toID,
+                                         const bool allowMUCArchives)
 {
-    MAMTask task = new MAMTask(d->client->rootTask());
+    auto task = new MAMTask(d->client->rootTask());
 
-    task.get(j, fromID, toID, allowMUCArchives, d->mamPageSize, d->mamMaxMessages, d->flipPages, d->backwards);
+    task->get(j, fromID, toID, allowMUCArchives, d->mamPageSize, d->mamMaxMessages, d->flipPages, d->backwards);
     return task;
 }
 
-MAMTask MAMManager::getArchiveByTimeRange(const Jid &j, const QDateTime &from, const QDateTime &to,
-                                          const bool allowMUCArchives)
+MAMTask *MAMManager::getArchiveByTimeRange(const Jid &j, const QDateTime &from, const QDateTime &to,
+                                           const bool allowMUCArchives)
 {
-    MAMTask task = new MAMTask(d->client->rootTask());
+    auto task = new MAMTask(d->client->rootTask());
 
-    task.get(j, from, to, allowMUCArchives, d->mamPageSize, d->mamMaxMessages, d->flipPages, d->backwards);
+    task->get(j, from, to, allowMUCArchives, d->mamPageSize, d->mamMaxMessages, d->flipPages, d->backwards);
     return task;
 }
 
-MAMTask MAMManager::getLatestMessagesFromArchive(const Jid &j, const QString &fromID, const bool allowMUCArchives,
-                                                 int amount)
+MAMTask *MAMManager::getLatestMessagesFromArchive(const Jid &j, const QString &fromID, const bool allowMUCArchives,
+                                                  int amount)
 {
-    MAMTask task = new MAMTask(d->client->rootTask());
+    auto task = new MAMTask(d->client->rootTask());
 
-    task.get(j, fromID, QString(), allowMUCArchives, d->mamPageSize, amount, true, true);
+    task->get(j, fromID, QString(), allowMUCArchives, d->mamPageSize, amount, true, true);
     return task;
 }
 
-MAMTask MAMManager::getMessagesBeforeID(const Jid &j, const QString &toID, const bool allowMUCArchives, int amount)
+MAMTask *MAMManager::getMessagesBeforeID(const Jid &j, const QString &toID, const bool allowMUCArchives, int amount)
 {
-    MAMTask task = new MAMTask(d->client->rootTask());
+    auto task = new MAMTask(d->client->rootTask());
 
-    task.get(j, QString(), toID, allowMUCArchives, d->mamPageSize, amount, true, true);
+    task->get(j, QString(), toID, allowMUCArchives, d->mamPageSize, amount, true, true);
     return task;
 }

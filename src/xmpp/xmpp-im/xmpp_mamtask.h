@@ -39,7 +39,7 @@ class Jid;
 class MAMTask : public Task {
     Q_OBJECT
 public:
-    MAMTask(Task *);
+    explicit MAMTask(Task *);
     MAMTask(const MAMTask &x);
     ~MAMTask();
 
