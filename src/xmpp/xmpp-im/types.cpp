@@ -2077,7 +2077,7 @@ CapsSpec CapsSpec::fromXml(const QDomElement &e)
 {
     QString    node     = e.attribute("node");
     QString    ver      = e.attribute("ver");
-    QString    hashAlgo = e.attribute("hash");
+    QString    hashAlgo = e.attribute("hash").toLower();
     QString    ext      = e.attribute("ext"); // deprecated. let it be here till 2018
     CryptoMap &cm       = cryptoMap();
     CapsSpec   cs;
