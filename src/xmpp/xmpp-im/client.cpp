@@ -1177,12 +1177,6 @@ DiscoItem Client::makeDiscoResult(const QString &node) const
     XData            si;
     XData::FieldList si_fields;
 
-    XData::Field si_type_field;
-    si_type_field.setType(XData::Field::Field_Hidden);
-    si_type_field.setVar("FORM_TYPE");
-    si_type_field.setValue(QStringList(QLatin1String("urn:xmpp:dataforms:softwareinfo")));
-    si_fields.append(si_type_field);
-
     if (!d->clientName.isEmpty()) {
         XData::Field software_field;
         software_field.setType(XData::Field::Field_TextSingle);
@@ -1216,6 +1210,7 @@ DiscoItem Client::makeDiscoResult(const QString &node) const
     }
     si.setType(XData::Data_Result);
     si.setFields(si_fields);
+    si.setRegistrarType("urn:xmpp:dataforms:softwareinfo");
 
     item.setExtensions(QList<XData>() << si);
 
