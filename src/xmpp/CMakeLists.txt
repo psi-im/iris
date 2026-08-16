@@ -268,7 +268,10 @@ else()
             ${Qca_INCLUDE_DIR}
         )
 endif()
-target_include_directories(iris PUBLIC $<INSTALL_INTERFACE:include/xmpp>)
+target_include_directories(iris PUBLIC
+    "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/xmpp>"
+    "$<INSTALL_INTERFACE:${IRIS_INSTALL_INCLUDEDIR}>"
+)
 
 if (IRIS_ENABLE_INSTALL)
     install(FILES ${XMPP_JID_HEADERS}
