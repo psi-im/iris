@@ -39,6 +39,12 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 set(CMAKE_CXX_STANDARD 20)
 
+# irisnet, stringprep and other internal static libraries are linked into
+# libiris when Iris itself is built shared. They must therefore be PIC too.
+if(BUILD_SHARED_LIBS)
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+endif()
+
 # Detect MXE cross-compilation
 set(IRIS_DEFAULT_BUNDLED_USRSCTP OFF)
 if(NOT DEFINED USE_MXE AND (EXISTS "${CMAKE_TOOLCHAIN_FILE}"))
