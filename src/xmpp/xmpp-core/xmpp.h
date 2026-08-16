@@ -194,12 +194,16 @@ public:
     QCATLSHandler(QCA::TLS *parent);
     ~QCATLSHandler();
 
+    /** Create a handler whose QCA::TLS object is allocated and owned inside Iris. */
+    static QCATLSHandler *createOwned(QObject *parent = nullptr);
+
     QCA::TLS *tls() const;
     int       tlsError() const;
 
     void setXMPPCertCheck(bool enable);
     bool XMPPCertCheck();
     bool certMatchesHostname();
+    bool peerIdentityValid() const;
 
     void reset();
     void startClient(const QString &host);
@@ -220,6 +224,9 @@ private slots:
     void tls_error();
 
 private:
+    QCATLSHandler(std::unique_ptr<QCA::TLS> tls, QObject *parent);
+    void init();
+
     class Private;
     Private *d;
 };
