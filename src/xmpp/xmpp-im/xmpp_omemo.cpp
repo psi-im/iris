@@ -3101,15 +3101,19 @@ EncryptionJob *OmemoEncryption::setUp(const QString &deviceLabel)
         });
     };
 
-    if (!freshIdentity) {
-        (*publish)();
-        return job;
-    }
-
     const auto self                     = d->client->jid().bare();
-    auto       checkCollisionAndPublish = [this, guarded, deviceLabel, self, publish]() {
+    auto       checkCollisionAndPublish = [this, guarded, deviceLabel, self, publish, freshIdentity]() {
         if (!guarded)
             return;
+
+        // Even an already established local device must refresh the server-side
+        // lists before publishing.  The PEP event reannouncement rule repairs
+        // concurrent updates, but it does not make it safe to overwrite a node
+        // from a stale local cache during startup.
+        if (!freshIdentity) {
+            (*publish)();
+            return;
+        }
 
         constexpr int MaxCollisionRetries = 32;
         for (int attempt = 0; attempt < MaxCollisionRetries; ++attempt) {
@@ -3138,30 +3142,30 @@ EncryptionJob *OmemoEncryption::setUp(const QString &deviceLabel)
         guarded->fail(EncryptionJob::Error::CryptoError, QStringLiteral("Could not generate a unique OMEMO device id"));
     };
 
-    d->fetchDeviceList(self, OmemoProtocol::Omemo2,
-                       [this, guarded, self, checkCollisionAndPublish](bool modernOk, const QString &modernError) {
-                           if (!guarded)
-                               return;
-                           if (!modernOk) {
-                               guarded->fail(EncryptionJob::Error::NetworkError, modernError);
-                               return;
-                           }
-                           if (!d->supportedProtocols.testFlag(OmemoProtocol::Legacy)) {
-                               checkCollisionAndPublish();
-                               return;
-                           }
-                           d->fetchDeviceList(
-                               self, OmemoProtocol::Legacy,
-                               [guarded, checkCollisionAndPublish](bool legacyOk, const QString &legacyError) {
-                                   if (!guarded)
-                                       return;
-                                   if (!legacyOk) {
-                                       guarded->fail(EncryptionJob::Error::NetworkError, legacyError);
-                                       return;
-                                   }
-                                   checkCollisionAndPublish();
-                               });
-                       });
+    struct DeviceListFetchState {
+        int  pending = 0;
+        bool failed  = false;
+    };
+    auto fetchState     = std::make_shared<DeviceListFetchState>();
+    fetchState->pending = d->supportedProtocols.testFlag(OmemoProtocol::Legacy) ? 2 : 1;
+    auto fetched        = [guarded, fetchState, checkCollisionAndPublish](bool ok, const QString &fetchError) {
+        if (!guarded || fetchState->failed)
+            return;
+        if (!ok) {
+            fetchState->failed = true;
+            guarded->fail(EncryptionJob::Error::NetworkError, fetchError);
+            return;
+        }
+        if (--fetchState->pending == 0)
+            checkCollisionAndPublish();
+    };
+
+    // The two protocol generations use independent PEP nodes.  Refresh both in
+    // parallel so publication is based on the latest server state without adding
+    // an extra round trip to every connection.
+    d->fetchDeviceList(self, OmemoProtocol::Omemo2, fetched);
+    if (d->supportedProtocols.testFlag(OmemoProtocol::Legacy))
+        d->fetchDeviceList(self, OmemoProtocol::Legacy, fetched);
     return job;
 }
 
@@ -3248,7 +3252,8 @@ EncryptionJob *OmemoEncryption::publishOwnBundle(OmemoProtocol protocol)
         options.insert(QStringLiteral("pubsub#access_model"), { QStringLiteral("open") });
         options.insert(QStringLiteral("pubsub#max_items"), { QStringLiteral("max") });
     }
-    const QString    itemId = protocol == OmemoProtocol::Omemo2 ? QString::number(d->data.ownDevice->id) : QString();
+    const QString itemId
+        = protocol == OmemoProtocol::Omemo2 ? QString::number(d->data.ownDevice->id) : QStringLiteral("current");
     const PubSubItem item(itemId, document.documentElement());
     d->publishPepItem(protocolBundleNode(protocol, d->data.ownDevice->id), item, options,
                       [job, protocol](bool ok, const QString &publishError) {
@@ -3280,7 +3285,7 @@ EncryptionJob *OmemoEncryption::publishOwnDevice(OmemoProtocol protocol)
     PubSubOptions options;
     if (protocol == OmemoProtocol::Omemo2)
         options.insert(QStringLiteral("pubsub#access_model"), { QStringLiteral("open") });
-    const QString    itemId = protocol == OmemoProtocol::Omemo2 ? QStringLiteral("current") : QString();
+    const QString    itemId = QStringLiteral("current");
     const PubSubItem item(itemId, document.documentElement());
     d->publishPepItem(
         protocolDevicesNode(protocol), item, options, [this, job, protocol](bool ok, const QString &publishError) {
