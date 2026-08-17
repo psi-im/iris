@@ -224,24 +224,25 @@ if(QT_DEFAULT_MAJOR_VERSION LESS 6)
     endif()
 endif()
 
-target_link_libraries(iris
-    PRIVATE
-        $<BUILD_INTERFACE:stringprep>
-        $<BUILD_INTERFACE:irisnet>
-        ZLIB::ZLIB
-    PUBLIC
-        ${Qca_LIBRARY}
-        Qt${QT_VERSION_MAJOR}::Core Qt${QT_VERSION_MAJOR}::Gui Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Xml
-)
-
 if(IRIS_BUNDLED_QCA)
-    add_dependencies(iris QcaProject)
+    add_dependencies(iris Qca::Qca)
+    get_target_property(Qca_INCLUDE_DIR Qca::Qca INTERFACE_INCLUDE_DIRECTORIES)
     target_include_directories(iris PUBLIC
         "$<BUILD_INTERFACE:${Qca_INCLUDE_DIR}>"
         "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/iris/qca>"
     )
     target_link_libraries(iris PUBLIC OpenSSL::SSL)
 endif()
+
+target_link_libraries(iris
+    PRIVATE
+        $<BUILD_INTERFACE:stringprep>
+        $<BUILD_INTERFACE:irisnet>
+        ZLIB::ZLIB
+    PUBLIC
+        Qca::Qca
+        Qt${QT_VERSION_MAJOR}::Core Qt${QT_VERSION_MAJOR}::Gui Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Xml
+)
 
 if(IRIS_ENABLE_DEBUG)
     target_compile_definitions(iris PRIVATE XMPP_TEST)

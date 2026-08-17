@@ -106,11 +106,13 @@ if(IRIS_ENABLE_JINGLE_SCTP)
 endif()
 
 if(IRIS_BUNDLED_QCA)
-    add_dependencies(irisnet QcaProject)
+    add_dependencies(irisnet Qca::Qca)
+    get_target_property(Qca_INCLUDE_DIR Qca::Qca INTERFACE_INCLUDE_DIRECTORIES)
 endif()
 
 if(IRIS_ENABLE_JINGLE_SCTP AND IRIS_BUNDLED_USRSCTP)
-    add_dependencies(irisnet UsrSCTPProject)
+    add_dependencies(irisnet SctpLab::UsrSCTP)
+    get_target_property(USRSCTP_INCLUDES SctpLab::UsrSCTP INTERFACE_INCLUDE_DIRECTORIES)
 endif()
 
 target_include_directories(irisnet
@@ -135,7 +137,7 @@ if(NOT WIN32)
 endif()
 
 target_link_libraries(irisnet PUBLIC
-    ${Qca_LIBRARY} ${USRSCTP_LIBRARY}
+    Qca::Qca SctpLab::UsrSCTP
 )
 
 if(QT_DEFAULT_MAJOR_VERSION LESS 6)

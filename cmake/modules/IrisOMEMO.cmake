@@ -101,7 +101,8 @@ else()
     set(_omemoc_source_args
         GIT_REPOSITORY https://github.com/dino/libomemo-c.git
         GIT_TAG "v${IRIS_BUNDLED_OMEMO_C_VERSION}"
-        GIT_SHALLOW TRUE GIT_PROGRESS TRUE)
+        GIT_SHALLOW TRUE GIT_PROGRESS TRUE
+        UPDATE_COMMAND "")
 endif()
 
 set(_omemoc_c_flags "${CMAKE_C_FLAGS}")
@@ -143,7 +144,6 @@ endif()
 ExternalProject_Add(
     iris_bundled_omemoc
     ${_omemoc_source_args}
-    UPDATE_COMMAND ""
     PREFIX "${_omemoc_prefix}/libomemo-c"
     INSTALL_DIR "${IRIS_OMEMO_C_INSTALL_DIR}"
     LIST_SEPARATOR "|"
