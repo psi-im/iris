@@ -344,10 +344,6 @@ void QCATLSHandler::init()
 
 QCATLSHandler *QCATLSHandler::createOwned(QObject *parent)
 {
-    // Keep the factory self-contained: callers do not need to arrange QCA
-    // initialization before asking Iris to create its owned TLS object.
-    static QCA::Initializer initializer;
-    Q_UNUSED(initializer);
     return new QCATLSHandler(std::make_unique<QCA::TLS>(), parent);
 }
 

@@ -194,7 +194,10 @@ public:
     QCATLSHandler(QCA::TLS *parent);
     ~QCATLSHandler();
 
-    /** Create a handler whose QCA::TLS object is allocated and owned inside Iris. */
+    /**
+     * Create a handler whose QCA::TLS object is allocated and owned inside Iris.
+     * The application must keep QCA initialized for the lifetime of the handler.
+     */
     static QCATLSHandler *createOwned(QObject *parent = nullptr);
 
     QCA::TLS *tls() const;

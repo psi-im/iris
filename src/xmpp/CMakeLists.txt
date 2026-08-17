@@ -92,7 +92,6 @@ set(XMPP_IM_HEADERS
     xmpp-im/jingle-s5b.h
     xmpp-im/jingle-ibb.h
     xmpp-im/jingle-file.h
-    xmpp-im/jingle-sctp.h
 )
 
 set(XMPP_HEADERS_PRIVATE
@@ -199,12 +198,14 @@ endif()
 if(IRIS_ENABLE_JINGLE_SCTP)
     target_compile_definitions(iris PRIVATE JINGLE_SCTP)
     target_sources(iris PRIVATE
+        xmpp-im/jingle-sctp.h
         xmpp-im/jingle-sctp.cpp
         xmpp-im/jingle-sctp-association_p.cpp
         xmpp-im/jingle-sctp-association_p.h
         xmpp-im/jingle-webrtc-datachannel_p.cpp
         xmpp-im/jingle-webrtc-datachannel_p.h
     )
+    list(APPEND XMPP_IM_HEADERS xmpp-im/jingle-sctp.h)
 endif()
 
 if(QT_DEFAULT_MAJOR_VERSION LESS 6)
