@@ -62,11 +62,14 @@ else()
         endif()
         # When using the "cmake --build . -t clean" command, it cleans the built files, but the next time it builds, it crashes with a patch error.
         # As an attempt to avoid this crash the last line of patch_command was added
-        set(patch_command
-            ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules/usrsctp.patch <SOURCE_DIR> &&
-            ${GIT_EXECUTABLE} checkout <SOURCE_DIR>/usrsctplib/netinet/sctp_output.c &&
-            ${GIT_EXECUTABLE} apply <SOURCE_DIR>/usrsctp.patch ||
-            ${CMAKE_COMMAND} -E echo "USRSCTP Sources already patched"
+        include(patchSrcs)
+        make_patch_command(patch_command
+            SOURCE_DIR "<SOURCE_DIR>"
+            PATCH_FILE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules/usrsctp.patch"
+            GIT_EXECUTABLE "${GIT_EXECUTABLE}"
+            PATCH_APPLY_PATH "usrsctp.patch"
+            CHECKOUT_FILES
+                "usrsctplib/netinet/sctp_output.c"
         )
         ExternalProject_Add(UsrSCTPProject
             PREFIX ${USRSCTP_PREFIX}

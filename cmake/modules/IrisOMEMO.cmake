@@ -125,6 +125,21 @@ if(CMAKE_C_COMPILER_LAUNCHER)
 endif()
 _iris_omemo_append_cross_compile_args(_omemoc_cmake_args)
 
+if(WIN32 AND NOT MSVC)
+    include(patchSrcs)
+    make_patch_command(PATCH_CMD
+        SOURCE_DIR "<SOURCE_DIR>"
+        PATCH_FILE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules/mingw32-omemo-c.patch"
+        GIT_EXECUTABLE "${GIT_EXECUTABLE}"
+        PATCH_APPLY_PATH "mingw32-omemo-c.patch"
+        CHECKOUT_FILES
+            "src/signal_protocol.c"
+            "src/signal_protocol_types.h"
+    )
+else()
+    set(PATCH_CMD "")
+endif()
+
 ExternalProject_Add(
     iris_bundled_omemoc
     ${_omemoc_source_args}
@@ -137,7 +152,9 @@ ExternalProject_Add(
                   "${IRIS_BUNDLED_OMEMO_C_JOBS}"
     INSTALL_COMMAND "${CMAKE_COMMAND}" --install <BINARY_DIR> --config "${_omemoc_build_config}"
     BUILD_BYPRODUCTS "${_omemoc_library}"
-    DEPENDS iris_bundled_protobuf_c)
+    DEPENDS iris_bundled_protobuf_c
+    PATCH_COMMAND ${PATCH_CMD}
+    )
 
 file(MAKE_DIRECTORY "${_omemoc_include_dir}" "${_protobuf_c_include_root}/protobuf-c")
 add_library(IrisProtobufC STATIC IMPORTED GLOBAL)
