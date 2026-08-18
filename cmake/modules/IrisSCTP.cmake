@@ -79,7 +79,7 @@ else()
         PATCH_COMMAND ${patch_command}
         INSTALL_COMMAND "${CMAKE_COMMAND}" --install <BINARY_DIR> --config "${_usrsctp_build_config}"
         )
-    add_library(SctpLab::UsrSCTP UNKNOWN IMPORTED)
+    add_library(SctpLab::UsrSCTP STATIC IMPORTED GLOBAL)
     set_target_properties(SctpLab::UsrSCTP PROPERTIES
             IMPORTED_LOCATION "${USRSCTP_LIBRARY}"
             INTERFACE_COMPILE_DEFINITIONS "${USRSCTP_DEFINITIONS}"
