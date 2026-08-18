@@ -92,6 +92,8 @@ set(XMPP_IM_HEADERS
     xmpp-im/jingle-s5b.h
     xmpp-im/jingle-ibb.h
     xmpp-im/jingle-file.h
+    xmpp-im/jingle-pub.h
+    xmpp-im/xmpp_file-sharing.h
 )
 
 set(XMPP_HEADERS_PRIVATE
@@ -163,6 +165,8 @@ target_sources(iris PRIVATE
     xmpp-im/jingle-s5b.cpp
     xmpp-im/jingle-ibb.cpp
     xmpp-im/jingle-file.cpp
+    xmpp-im/jingle-pub.cpp
+    xmpp-im/xmpp_file-sharing.cpp
 
     base/timezone.cpp
 

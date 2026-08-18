@@ -91,8 +91,9 @@ namespace XMPP { namespace Jingle {
     private:
         friend class Manager;
         friend class JTPush;
-        bool incomingInitiate(const Jingle &jingle, const QDomElement &jingleEl);
-        bool updateFromXml(Action action, const QDomElement &jingleEl);
+        QString reserveSid();
+        bool    incomingInitiate(const Jingle &jingle, const QDomElement &jingleEl);
+        bool    updateFromXml(Action action, const QDomElement &jingleEl);
 
         class Private;
         std::unique_ptr<Private> d;

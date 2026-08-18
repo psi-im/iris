@@ -21,6 +21,7 @@
 
 #include "xmpp_address.h"
 #include "xmpp_chatstate.h"
+#include "xmpp_file-sharing.h"
 #include "xmpp_muc.h"
 #include "xmpp_receipts.h"
 #include "xmpp_reference.h"
@@ -222,6 +223,23 @@ public:
     QList<Reference> references() const;
     void             addReference(const Reference &r);
     void             setReferences(const QList<Reference> &r);
+
+    // XEP-0447 Stateless File Sharing
+    QList<StatelessFileSharing::FileSharing> fileSharings() const;
+    void                                     addFileSharing(const StatelessFileSharing::FileSharing &sharing);
+    void                                     setFileSharings(const QList<StatelessFileSharing::FileSharing> &sharings);
+    QList<StatelessFileSharing::Sources>     attachedFileSources() const;
+    void                                     addAttachedFileSources(const StatelessFileSharing::Sources &sources);
+    void setAttachedFileSources(const QList<StatelessFileSharing::Sources> &sources);
+
+    // XEP-0367 Message Attaching (used by XEP-0447 source attachment)
+    QString attachToId() const;
+    void    setAttachToId(const QString &id);
+
+    // XEP-0358 Published Jingle Sessions sent directly in a message
+    QList<Jingle::JinglePub> jinglePublications() const;
+    void                     addJinglePublication(const Jingle::JinglePub &publication);
+    void                     setJinglePublications(const QList<Jingle::JinglePub> &publications);
 
     // XEP-0444 message reaction
     void      setReactions(const Reactions &reactions);

@@ -48,6 +48,10 @@ endif()
 
 # Detect MXE cross-compilation
 set(IRIS_DEFAULT_BUNDLED_USRSCTP OFF)
+if(ANDROID)
+    set(IRIS_DEFAULT_BUNDLED_USRSCTP ON)
+endif()
+
 if(NOT DEFINED USE_MXE AND (EXISTS "${CMAKE_TOOLCHAIN_FILE}"))
     option(USE_MXE "Use MXE (cross-compilation build environment for MS Windows)" OFF)
     string(TOLOWER ${CMAKE_TOOLCHAIN_FILE} TOOLCHAIN_FILE)
