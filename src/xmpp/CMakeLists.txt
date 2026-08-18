@@ -240,7 +240,7 @@ target_link_libraries(iris
         $<BUILD_INTERFACE:irisnet>
         ZLIB::ZLIB
     PUBLIC
-        Qca::Qca
+        $<BUILD_INTERFACE:Qca::Qca>
         Qt${QT_VERSION_MAJOR}::Core Qt${QT_VERSION_MAJOR}::Gui Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Xml
 )
 

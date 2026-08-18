@@ -105,16 +105,18 @@ if(IRIS_ENABLE_JINGLE_SCTP)
     )
 endif()
 
+set(Qca_INCLUDE_DIR "")
+
 if(IRIS_BUNDLED_QCA)
     add_dependencies(irisnet Qca::Qca)
     get_target_property(Qca_INCLUDE_DIR Qca::Qca INTERFACE_INCLUDE_DIRECTORIES)
-    list(APPEND IRISNET_DEPS Qca::Qca)
+    list(APPEND IRISNET_DEPS "$<BUILD_INTERFACE:Qca::Qca>")
 endif()
 
 if(IRIS_ENABLE_JINGLE_SCTP AND IRIS_BUNDLED_USRSCTP)
     add_dependencies(irisnet SctpLab::UsrSCTP)
     get_target_property(USRSCTP_INCLUDES SctpLab::UsrSCTP INTERFACE_INCLUDE_DIRECTORIES)
-    list(APPEND IRISNET_DEPS SctpLab::UsrSCTP)
+    list(APPEND IRISNET_DEPS "$<BUILD_INTERFACE:SctpLab::UsrSCTP>")
 endif()
 
 target_include_directories(irisnet

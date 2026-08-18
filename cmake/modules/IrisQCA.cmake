@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.10.0)
+cmake_minimum_required(VERSION 3.11.0)
 
 set(IRIS_BUNDLED_QCA_GIT_REPOSITORY "https://github.com/psi-im/qca.git" CACHE STRING
     "Bundled QCA git repository")
@@ -6,6 +6,7 @@ set(IRIS_BUNDLED_QCA_GIT_TAG "master" CACHE STRING "Bundled QCA git tag or branc
 set(IRIS_QCA_SOURCE_DIR "" CACHE PATH "Local QCA source directory")
 
 if(IRIS_BUNDLED_QCA)
+    include(GNUInstallDirs)
     message(STATUS "QCA: using bundled psi-im/qca")
     set(QCA_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/qca")
     if(IRIS_QCA_SOURCE_DIR)
@@ -106,12 +107,24 @@ if(IRIS_BUNDLED_QCA)
         BUILD_BYPRODUCTS ${Qca_CORE_LIB}
         INSTALL_COMMAND "${CMAKE_COMMAND}" --install <BINARY_DIR> --config "${_qca_build_config}"
         )
-    add_library(Qca::Qca STATIC IMPORTED GLOBAL)
-    set_target_properties(Qca::Qca PROPERTIES
-        IMPORTED_LOCATION "${Qca_LIBRARY}"
+    add_library(qca-core STATIC IMPORTED GLOBAL)
+    set_target_properties(qca-core PROPERTIES
+        IMPORTED_LOCATION "${Qca_CORE_LIB}"
         INTERFACE_INCLUDE_DIRECTORIES "${Qca_INCLUDE_DIR}"
-        )
-    add_dependencies(Qca::Qca QcaProject)
+    )
+    add_library(qca-ossl STATIC IMPORTED GLOBAL)
+    set_target_properties(qca-ossl PROPERTIES
+        IMPORTED_LOCATION "${Qca_OSSL_LIB}"
+        INTERFACE_INCLUDE_DIRECTORIES "${Qca_INCLUDE_DIR}"
+    )
+
+    add_library(Qca INTERFACE)
+    target_link_libraries(Qca INTERFACE qca-core qca-ossl)
+    target_include_directories(Qca INTERFACE "${Qca_INCLUDE_DIR}")
+    add_library(Qca::Qca ALIAS Qca)
+    add_dependencies(qca-core QcaProject)
+    add_dependencies(qca-ossl QcaProject)
+    add_dependencies(Qca QcaProject)
 else()
     message(WARNING "Disabling IRIS_BUNDLED_QCA makes DTLS/PsiMedia support dependent on the system QCA build")
     message(STATUS "QCA: using system")
