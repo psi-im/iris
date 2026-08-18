@@ -104,7 +104,7 @@ if(IRIS_BUNDLED_QCA)
         INSTALL_DIR "${IRIS_QCA_INSTALL_DIR}"
         LIST_SEPARATOR "|"
         CMAKE_ARGS ${QCA_BUILD_OPTIONS}
-        BUILD_BYPRODUCTS ${Qca_CORE_LIB}
+        BUILD_BYPRODUCTS ${Qca_CORE_LIB} ${Qca_OSSL_LIB}
         INSTALL_COMMAND "${CMAKE_COMMAND}" --install <BINARY_DIR> --config "${_qca_build_config}"
         )
     add_library(qca-core STATIC IMPORTED GLOBAL)
