@@ -16,10 +16,12 @@
 #include "xmpp_hash.h"
 
 #include <QDomElement>
+#include <QIODevice>
 #include <QSharedPointer>
 #include <QUrl>
 
 #include <cstdint>
+#include <memory>
 #include <optional>
 
 namespace XMPP::StatelessFileSharing {
@@ -161,9 +163,57 @@ struct EncryptedPayload {
     QByteArray iv;
 };
 
+/** Returns the wire size produced by XEP-0448 encryption for a plaintext size. */
+std::optional<std::uint64_t> encryptedSize(Cipher cipher, std::uint64_t plaintextSize);
+
+/**
+ * Read-only sequential device which encrypts another QIODevice as XEP-0448 bytes.
+ *
+ * The source remains owned by the caller. For GCM the authentication tag is
+ * appended to the ciphertext, matching XEP-0448. encryptedHash() becomes valid
+ * after the device reaches EOF and covers the complete wire representation, tag
+ * included. A second instance can be constructed with key()/iv() to reproduce
+ * exactly the same ciphertext for another transport.
+ */
+class EncryptingDevice : public QIODevice {
+public:
+    EncryptingDevice(QIODevice *source, Cipher cipher, QObject *parent = nullptr);
+    EncryptingDevice(QIODevice *source, Cipher cipher, const QByteArray &key, const QByteArray &iv,
+                     QObject *parent = nullptr);
+    ~EncryptingDevice() override;
+
+    bool   open(OpenMode mode) override;
+    void   close() override;
+    bool   isSequential() const override { return true; }
+    bool   atEnd() const override;
+    qint64 bytesAvailable() const override;
+
+    bool       isValid() const;
+    bool       finished() const;
+    Cipher     cipher() const;
+    QByteArray key() const;
+    QByteArray iv() const;
+    Hash       encryptedHash() const;
+
+protected:
+    qint64 readData(char *data, qint64 maxSize) override;
+    qint64 writeData(const char *data, qint64 maxSize) override;
+
+private:
+    class Private;
+    std::unique_ptr<Private> d;
+};
+
 std::optional<EncryptedPayload> encrypt(Cipher cipher, const QByteArray &plaintext);
 std::optional<QByteArray>       decrypt(Cipher cipher, const QByteArray &ciphertext, const QByteArray &key,
                                         const QByteArray &iv, std::optional<std::uint64_t> originalSize = {});
+/**
+ * Authenticated streaming decryption into an already open writable device.
+ * GCM input must be seekable because its authentication tag is stored at EOF
+ * and QCA requires the tag before decryption starts.
+ */
+bool decryptToDevice(Cipher cipher, QIODevice *ciphertext, QIODevice *plaintext, const QByteArray &key,
+                     const QByteArray &iv, std::optional<std::uint64_t> originalSize = {});
 
 } // namespace XMPP::StatelessFileSharing
 

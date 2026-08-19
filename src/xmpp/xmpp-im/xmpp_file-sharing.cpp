@@ -13,6 +13,8 @@
 #include <QtCrypto>
 
 #include <algorithm>
+#include <cstring>
+#include <limits>
 
 namespace XMPP::StatelessFileSharing {
 
@@ -410,6 +412,194 @@ QDomElement FileSharing::toXml(QDomDocument *doc) const
 }
 
 // Crypto ---------------------------------------------------------------------
+std::optional<std::uint64_t> encryptedSize(Cipher cipher, std::uint64_t plaintextSize)
+{
+    switch (cipher) {
+    case Cipher::Aes128Gcm:
+    case Cipher::Aes256Gcm:
+        if (plaintextSize > std::numeric_limits<std::uint64_t>::max() - std::uint64_t(GcmTagSize))
+            return std::nullopt;
+        return plaintextSize + std::uint64_t(GcmTagSize);
+    case Cipher::Aes256CbcPkcs7: {
+        constexpr std::uint64_t BlockSize = 16;
+        if (plaintextSize > std::numeric_limits<std::uint64_t>::max() - BlockSize)
+            return std::nullopt;
+        return (plaintextSize / BlockSize + 1) * BlockSize;
+    }
+    default:
+        return std::nullopt;
+    }
+}
+
+class EncryptingDevice::Private {
+public:
+    QIODevice                   *source = nullptr;
+    Cipher                       cipher = Cipher::Unknown;
+    QByteArray                   key;
+    QByteArray                   iv;
+    std::unique_ptr<QCA::Cipher> context;
+    std::unique_ptr<StreamHash>  hasher;
+    QByteArray                   pending;
+    Hash                         hash;
+    bool                         valid    = false;
+    bool                         finished = false;
+    bool                         failed   = false;
+
+    Private(QIODevice *source, Cipher cipher, QByteArray key, QByteArray iv) :
+        source(source), cipher(cipher), key(std::move(key)), iv(std::move(iv))
+    {
+        valid = source && cipherSupported(cipher) && this->key.size() == keySize(cipher)
+            && this->iv.size() == ivSize(cipher);
+    }
+
+    bool start()
+    {
+        pending.clear();
+        hash     = {};
+        finished = false;
+        failed   = false;
+        hasher   = std::make_unique<StreamHash>(Hash::Sha256);
+        if (cipher == Cipher::Aes256CbcPkcs7) {
+            context = std::make_unique<QCA::Cipher>(QStringLiteral("aes256"), QCA::Cipher::CBC, QCA::Cipher::PKCS7,
+                                                    QCA::Encode, QCA::SymmetricKey(key), QCA::InitializationVector(iv));
+        } else {
+            context = std::make_unique<QCA::Cipher>(qcaAlgorithm(cipher), QCA::Cipher::GCM, QCA::Cipher::NoPadding,
+                                                    QCA::Encode, QCA::SymmetricKey(key), QCA::InitializationVector(iv),
+                                                    QCA::AuthTag(QByteArray(GcmTagSize, '\0')));
+        }
+        return bool(context);
+    }
+
+    bool appendOutput(const QByteArray &data)
+    {
+        if (data.isEmpty())
+            return true;
+        if (!hasher || !hasher->addData(data))
+            return false;
+        pending.append(data);
+        return true;
+    }
+
+    bool finish()
+    {
+        if (finished)
+            return !failed;
+        if (!context || !appendOutput(context->final().toByteArray()) || !context->ok()) {
+            failed = true;
+            return false;
+        }
+        if (cipher == Cipher::Aes128Gcm || cipher == Cipher::Aes256Gcm) {
+            const auto tag = context->tag().toByteArray();
+            if (tag.size() != GcmTagSize || !appendOutput(tag)) {
+                failed = true;
+                return false;
+            }
+        }
+        hash = hasher ? hasher->final() : Hash();
+        if (!hash.isValid() || hash.data().isEmpty()) {
+            failed = true;
+            return false;
+        }
+        finished = true;
+        return true;
+    }
+};
+
+EncryptingDevice::EncryptingDevice(QIODevice *source, Cipher cipher, QObject *parent) :
+    EncryptingDevice(source, cipher, QCA::Random::randomArray(int(keySize(cipher))).toByteArray(),
+                     QCA::Random::randomArray(int(ivSize(cipher))).toByteArray(), parent)
+{
+}
+
+EncryptingDevice::EncryptingDevice(QIODevice *source, Cipher cipher, const QByteArray &key, const QByteArray &iv,
+                                   QObject *parent) :
+    QIODevice(parent), d(std::make_unique<Private>(source, cipher, key, iv))
+{
+    if (source) {
+        QObject::connect(source, &QIODevice::readyRead, this, &QIODevice::readyRead);
+        QObject::connect(source, &QIODevice::readChannelFinished, this, &QIODevice::readyRead);
+    }
+}
+
+EncryptingDevice::~EncryptingDevice() = default;
+
+bool EncryptingDevice::open(OpenMode mode)
+{
+    if (isOpen())
+        return false;
+    if (mode != QIODevice::ReadOnly || !d->valid || !d->source->isOpen() || !d->source->isReadable()) {
+        setErrorString(QStringLiteral("Invalid XEP-0448 encryption source or mode"));
+        return false;
+    }
+    if (!d->start()) {
+        setErrorString(QStringLiteral("Failed to initialize XEP-0448 cipher"));
+        return false;
+    }
+    return QIODevice::open(mode);
+}
+
+void EncryptingDevice::close()
+{
+    d->context.reset();
+    d->hasher.reset();
+    d->pending.clear();
+    QIODevice::close();
+}
+
+bool EncryptingDevice::atEnd() const { return d->finished && d->pending.isEmpty(); }
+
+qint64 EncryptingDevice::bytesAvailable() const
+{
+    const auto sourceAvailable = d->source ? d->source->bytesAvailable() : qint64(0);
+    return qint64(d->pending.size()) + sourceAvailable + QIODevice::bytesAvailable();
+}
+
+bool       EncryptingDevice::isValid() const { return d->valid; }
+bool       EncryptingDevice::finished() const { return d->finished && !d->failed; }
+Cipher     EncryptingDevice::cipher() const { return d->cipher; }
+QByteArray EncryptingDevice::key() const { return d->key; }
+QByteArray EncryptingDevice::iv() const { return d->iv; }
+Hash       EncryptingDevice::encryptedHash() const { return finished() ? d->hash : Hash(); }
+
+qint64 EncryptingDevice::readData(char *data, qint64 maxSize)
+{
+    if (!data || maxSize <= 0 || !isOpen() || d->failed)
+        return d->failed ? -1 : 0;
+
+    constexpr qint64 ChunkSize = 64 * 1024;
+    while (d->pending.isEmpty() && !d->finished) {
+        const auto input = d->source->read(ChunkSize);
+        if (!input.isEmpty()) {
+            const auto output = d->context->update(QCA::MemoryRegion(input)).toByteArray();
+            if (!d->context->ok() || !d->appendOutput(output)) {
+                d->failed = true;
+                setErrorString(QStringLiteral("XEP-0448 encryption failed"));
+                return -1;
+            }
+            continue;
+        }
+        if (!d->source->atEnd())
+            return 0;
+        if (!d->finish()) {
+            setErrorString(QStringLiteral("Failed to finalize XEP-0448 encryption"));
+            return -1;
+        }
+    }
+
+    if (d->pending.isEmpty())
+        return 0;
+    const auto count = qMin<qint64>(maxSize, d->pending.size());
+    std::memcpy(data, d->pending.constData(), std::size_t(count));
+    d->pending.remove(0, qsizetype(count));
+    return count;
+}
+
+qint64 EncryptingDevice::writeData(const char *, qint64)
+{
+    setErrorString(QStringLiteral("XEP-0448 EncryptingDevice is read-only"));
+    return -1;
+}
+
 std::optional<EncryptedPayload> encrypt(Cipher cipher, const QByteArray &plaintext)
 {
     if (!cipherSupported(cipher))
@@ -439,6 +629,79 @@ std::optional<EncryptedPayload> encrypt(Cipher cipher, const QByteArray &plainte
     if (result.data.size() < GcmTagSize)
         return std::nullopt;
     return result;
+}
+
+bool decryptToDevice(Cipher cipher, QIODevice *ciphertext, QIODevice *plaintext, const QByteArray &key,
+                     const QByteArray &iv, std::optional<std::uint64_t> originalSize)
+{
+    if (!ciphertext || !plaintext || !ciphertext->isOpen() || !ciphertext->isReadable() || !plaintext->isOpen()
+        || !plaintext->isWritable() || !cipherSupported(cipher) || key.size() != keySize(cipher)
+        || iv.size() != ivSize(cipher)) {
+        return false;
+    }
+
+    QByteArray tag;
+    qint64     payloadSize = -1;
+    if (cipher == Cipher::Aes128Gcm || cipher == Cipher::Aes256Gcm) {
+        if (ciphertext->isSequential() || ciphertext->size() < GcmTagSize)
+            return false;
+        payloadSize = ciphertext->size() - GcmTagSize;
+        if (!ciphertext->seek(payloadSize))
+            return false;
+        tag = ciphertext->read(GcmTagSize);
+        if (tag.size() != GcmTagSize || !ciphertext->seek(0))
+            return false;
+    }
+
+    std::unique_ptr<QCA::Cipher> context;
+    if (cipher == Cipher::Aes256CbcPkcs7) {
+        context = std::make_unique<QCA::Cipher>(QStringLiteral("aes256"), QCA::Cipher::CBC, QCA::Cipher::PKCS7,
+                                                QCA::Decode, QCA::SymmetricKey(key), QCA::InitializationVector(iv));
+    } else {
+        context
+            = std::make_unique<QCA::Cipher>(qcaAlgorithm(cipher), QCA::Cipher::GCM, QCA::Cipher::NoPadding, QCA::Decode,
+                                            QCA::SymmetricKey(key), QCA::InitializationVector(iv), QCA::AuthTag(tag));
+    }
+
+    constexpr qint64 ChunkSize  = 64 * 1024;
+    std::uint64_t    written    = 0;
+    auto             writePlain = [&](const QByteArray &data) {
+        qsizetype count = data.size();
+        if (originalSize) {
+            if (written >= *originalSize)
+                count = 0;
+            else
+                count = qsizetype(std::min<std::uint64_t>(std::uint64_t(count), *originalSize - written));
+        }
+        if (count > 0 && plaintext->write(data.constData(), count) != count)
+            return false;
+        written += std::uint64_t(count);
+        return true;
+    };
+
+    qint64 remaining = payloadSize;
+    while (true) {
+        const qint64 requested = remaining >= 0 ? qMin(remaining, ChunkSize) : ChunkSize;
+        if (requested == 0)
+            break;
+        const auto input = ciphertext->read(requested);
+        if (input.isEmpty()) {
+            if (ciphertext->atEnd())
+                break;
+            return false;
+        }
+        if (remaining >= 0)
+            remaining -= input.size();
+        const auto output = context->update(QCA::MemoryRegion(input)).toByteArray();
+        if (!context->ok() || !writePlain(output))
+            return false;
+    }
+    if (remaining > 0)
+        return false;
+    const auto final = context->final().toByteArray();
+    if (!context->ok() || !writePlain(final))
+        return false;
+    return !originalSize || written == *originalSize;
 }
 
 std::optional<QByteArray> decrypt(Cipher cipher, const QByteArray &ciphertext, const QByteArray &key,

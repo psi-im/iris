@@ -427,6 +427,7 @@ namespace XMPP { namespace Jingle {
                     starting.setAttribute(QStringLiteral("sid"), session->sid());
                     resp.appendChild(starting);
                     client()->send(resp);
+                    QTimer::singleShot(0, session, [session]() { session->initiate(); });
                     return true;
                 }
                 return false;
@@ -791,7 +792,6 @@ namespace XMPP { namespace Jingle {
             session->deleteLater();
             return nullptr;
         }
-        session->initiate();
         return session;
     }
 

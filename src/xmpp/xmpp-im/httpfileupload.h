@@ -80,7 +80,7 @@ public:
         HostProps        props;
     };
 
-    HttpFileUpload(Client *client, QIODevice *source, size_t fsize, const QString &dstFilename,
+    HttpFileUpload(Client *client, QIODevice *source, quint64 fsize, const QString &dstFilename,
                    const QString &mType = QString());
     HttpFileUpload(const HttpFileUpload &) = delete;
     ~HttpFileUpload();
