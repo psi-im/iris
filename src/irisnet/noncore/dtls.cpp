@@ -238,6 +238,12 @@ public:
         }
 
 #if IRIS_QCA_HAS_DTLS
+        if (!QCA::isSupported("dtls")) {
+            qWarning("DTLS is not supported by any loaded QCA provider");
+            lastError = QAbstractSocket::SocketError::OperationError;
+            emit q->errorOccurred(lastError);
+            return;
+        }
         tls = new QCA::TLS(QCA::TLS::Datagram);
         tls->setCertificate(cert, pkey);
 #else

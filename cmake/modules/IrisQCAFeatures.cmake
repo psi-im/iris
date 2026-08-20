@@ -5,7 +5,7 @@ include(CheckCXXSourceCompiles)
 # System QCA is probed by API, not by major version: downstream QCA 2 builds may
 # carry selected backports during the migration period.
 if(IRIS_BUNDLED_QCA)
-    set(IRIS_QCA_HAS_DTLS ON CACHE INTERNAL "QCA has Datagram TLS API" FORCE)
+    set(IRIS_QCA_HAS_DTLS ON CACHE INTERNAL "QCA has Datagram TLS 1.2 API" FORCE)
     set(IRIS_QCA_HAS_CHANNEL_BINDING ON CACHE INTERNAL "QCA has TLS/SASL channel-binding API" FORCE)
 else()
     # check_cxx_source_compiles caches results. Re-run probes if the caller
@@ -28,10 +28,15 @@ else()
         #include <type_traits>
         static_assert(std::is_constructible<QCA::TLS, QCA::TLS::Mode>::value,
                       "QCA::TLS datagram constructor is unavailable");
+        // QCA 2 exposed Datagram/DTLS_v1 in the API even when qca-ossl did not
+        // implement a DTLS provider. WebRTC DataChannel requires DTLS 1.2, so
+        // use the DTLS 1.2 enum as the compile-time capability boundary.
         int main()
         {
             const QCA::TLS::Mode mode = QCA::TLS::Datagram;
+            const QCA::TLS::Version version = QCA::TLS::DTLS_v1_2;
             (void)mode;
+            (void)version;
             return 0;
         }
     ]=] IRIS_QCA_HAS_DTLS)
@@ -57,9 +62,9 @@ else()
 endif()
 
 if(IRIS_QCA_HAS_DTLS)
-    set(IRIS_QCA_HAS_DTLS 1 CACHE INTERNAL "QCA has Datagram TLS API" FORCE)
+    set(IRIS_QCA_HAS_DTLS 1 CACHE INTERNAL "QCA has Datagram TLS 1.2 API" FORCE)
 else()
-    set(IRIS_QCA_HAS_DTLS 0 CACHE INTERNAL "QCA has Datagram TLS API" FORCE)
+    set(IRIS_QCA_HAS_DTLS 0 CACHE INTERNAL "QCA has Datagram TLS 1.2 API" FORCE)
 endif()
 if(IRIS_QCA_HAS_CHANNEL_BINDING)
     set(IRIS_QCA_HAS_CHANNEL_BINDING 1 CACHE INTERNAL "QCA has TLS/SASL channel-binding API" FORCE)
