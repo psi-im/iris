@@ -19,14 +19,14 @@
 #ifndef XMPP_MESSAGE_H
 #define XMPP_MESSAGE_H
 
-#include "xmpp_address.h"
-#include "xmpp_chatstate.h"
-#include "xmpp_file-sharing.h"
-#include "xmpp_muc.h"
-#include "xmpp_receipts.h"
-#include "xmpp_reference.h"
-#include "xmpp_rosterx.h"
-#include "xmpp_url.h"
+#include <iris/xmpp-im/xmpp_address.h>
+#include <iris/xmpp-im/xmpp_chatstate.h>
+#include <iris/xmpp-im/xmpp_file-sharing.h>
+#include <iris/xmpp-im/xmpp_muc.h>
+#include <iris/xmpp-im/xmpp_receipts.h>
+#include <iris/xmpp-im/xmpp_reference.h>
+#include <iris/xmpp-im/xmpp_rosterx.h>
+#include <iris/xmpp-im/xmpp_url.h>
 
 #include <QExplicitlySharedDataPointer>
 #include <QSet>

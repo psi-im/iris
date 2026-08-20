@@ -11,9 +11,9 @@
 #ifndef XMPP_FILE_SHARING_H
 #define XMPP_FILE_SHARING_H
 
-#include "jingle-file.h"
-#include "jingle-pub.h"
-#include "xmpp_hash.h"
+#include <iris/xmpp-im/jingle-file.h>
+#include <iris/xmpp-im/jingle-pub.h>
+#include <iris/xmpp-im/xmpp_hash.h>
 
 #include <QDomElement>
 #include <QIODevice>

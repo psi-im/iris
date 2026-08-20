@@ -1,1 +1,1 @@
-#include "xmpp/xmpp-im/jingle-pub.h"
+#include <iris/xmpp-im/jingle-pub.h>

@@ -20,8 +20,8 @@
 #ifndef XMPP_HTTPFILEUPLOAD_H
 #define XMPP_HTTPFILEUPLOAD_H
 
-#include "xmpp/jid/jid.h"
-#include "xmpp_task.h"
+#include <iris/jid/jid.h>
+#include <iris/xmpp-im/xmpp_task.h>
 
 #include <functional>
 #include <memory>

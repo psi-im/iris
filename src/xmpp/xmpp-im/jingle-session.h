@@ -20,9 +20,9 @@
 #ifndef JINGLE_SESSION_H
 #define JINGLE_SESSION_H
 
-#include "jingle-application.h"
-#include "jingle-transport.h"
-#include "xmpp_features.h"
+#include <iris/xmpp-im/jingle-application.h>
+#include <iris/xmpp-im/jingle-transport.h>
+#include <iris/xmpp-im/xmpp_features.h>
 
 namespace XMPP { namespace Jingle {
 

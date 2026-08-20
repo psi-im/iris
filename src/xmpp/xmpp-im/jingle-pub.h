@@ -11,7 +11,7 @@
 #ifndef XMPP_JINGLE_PUB_H
 #define XMPP_JINGLE_PUB_H
 
-#include "iris/xmpp_stanza.h"
+#include <iris/xmpp-core/xmpp_stanza.h>
 
 #include <QDomElement>
 #include <QObject>

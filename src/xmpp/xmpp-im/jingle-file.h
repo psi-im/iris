@@ -20,8 +20,8 @@
 #ifndef XMPP_JINGLE_FILETRANSFER_FILE_H
 #define XMPP_JINGLE_FILETRANSFER_FILE_H
 
-#include "xmpp_hash.h"
-#include "xmpp_thumbs.h"
+#include <iris/xmpp-im/xmpp_hash.h>
+#include <iris/xmpp-im/xmpp_thumbs.h>
 
 #include <QDateTime>
 #include <QMap>
