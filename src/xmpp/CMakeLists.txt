@@ -253,12 +253,6 @@ else()
     target_link_libraries(iris PUBLIC ${IRIS_QCA_TARGET})
 endif()
 
-if(IRIS_QCA_HAS_CHANNEL_BINDING)
-    target_compile_definitions(iris PRIVATE IRIS_QCA_HAS_CHANNEL_BINDING=1)
-else()
-    target_compile_definitions(iris PRIVATE IRIS_QCA_HAS_CHANNEL_BINDING=0)
-endif()
-
 target_link_libraries(iris
     PRIVATE
         $<BUILD_INTERFACE:stringprep>
