@@ -1,0 +1,258 @@
+name: Iris release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag; leave empty to use the latest v1* tag
+        required: false
+        type: string
+  push:
+    tags: [ 'v1*' ]
+
+permissions:
+  actions: write
+  contents: write
+
+concurrency:
+  group: iris-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve release tag
+        id: release_tag
+        shell: bash
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          git fetch --force --tags
+
+          if [[ "$GITHUB_EVENT_NAME" == push ]]; then
+            tag="$GITHUB_REF_NAME"
+          elif [[ -n "${INPUT_TAG:-}" ]]; then
+            tag="$INPUT_TAG"
+          else
+            tag=$(git tag --list 'v1*' --sort=-version:refname | head -n1)
+          fi
+
+          if [[ -z "$tag" || "$tag" != v1* ]]; then
+            echo "::error::No valid v1* release tag was found"
+            exit 1
+          fi
+          if ! git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "::error::Tag '$tag' does not exist"
+            exit 1
+          fi
+
+          sha=$(git rev-list -n1 "$tag")
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "Release tag: $tag ($sha)"
+
+      - name: Check whether release already exists
+        id: existing_release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release_tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            url=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json url --jq .url)
+            echo "Release already exists: $url"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Find or run packaging workflow
+        id: packaging
+        if: steps.existing_release.outputs.exists != 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release_tag.outputs.tag }}
+          TAG_SHA: ${{ steps.release_tag.outputs.sha }}
+        run: |
+          set -euo pipefail
+
+          expected_artifacts=(
+            iris-deb-ubuntu-24.04
+            iris-qt6-windows-x64
+            iris-qt6-macos-arm64
+            iris-qt6-macos-x86_64
+            iris-qt6-android-arm64-v8a
+            iris-qt6-android-x86_64
+            iris-qt6-android-x86
+          )
+
+          load_runs() {
+            gh run list --repo "$GITHUB_REPOSITORY" --workflow packages.yml --limit 100 \
+              --json databaseId,headSha,status,conclusion,createdAt > "$RUNNER_TEMP/package-runs.json"
+          }
+
+          latest_successful_run() {
+            jq -r --arg sha "$TAG_SHA" '
+              [.[] | select(.headSha == $sha and .status == "completed" and .conclusion == "success")]
+              | sort_by(.createdAt) | last | .databaseId // empty
+            ' "$RUNNER_TEMP/package-runs.json"
+          }
+
+          latest_active_run() {
+            jq -r --arg sha "$TAG_SHA" '
+              [.[] | select(.headSha == $sha and .status != "completed")]
+              | sort_by(.createdAt) | last | .databaseId // empty
+            ' "$RUNNER_TEMP/package-runs.json"
+          }
+
+          artifacts_complete() {
+            local run_id=$1
+            local names="$RUNNER_TEMP/package-artifacts.txt"
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/artifacts?per_page=100" \
+              --jq '.artifacts[] | select(.expired == false) | .name' > "$names"
+            for artifact in "${expected_artifacts[@]}"; do
+              if ! grep -Fxq "$artifact" "$names"; then
+                return 1
+              fi
+            done
+          }
+
+          wait_for_run() {
+            local run_id=$1
+            while true; do
+              state=$(gh run view "$run_id" --repo "$GITHUB_REPOSITORY" \
+                --json status,conclusion --jq '[.status, (.conclusion // "")] | @tsv')
+              status=${state%%$'\t'*}
+              conclusion=${state#*$'\t'}
+              echo "Packaging run $run_id: $status ${conclusion:+($conclusion)}"
+              if [[ "$status" == completed ]]; then
+                if [[ "$conclusion" != success ]]; then
+                  echo "::error::Packaging run $run_id finished with conclusion '$conclusion'"
+                  exit 1
+                fi
+                return
+              fi
+              sleep 30
+            done
+          }
+
+          load_runs
+          run_id=$(latest_successful_run)
+          if [[ -n "$run_id" ]] && ! artifacts_complete "$run_id"; then
+            echo "Successful packaging run $run_id has incomplete or expired artifacts; rebuilding"
+            run_id=""
+          fi
+
+          if [[ -z "$run_id" ]]; then
+            for _ in {1..6}; do
+              load_runs
+              run_id=$(latest_active_run)
+              [[ -n "$run_id" ]] && break
+              sleep 5
+            done
+          fi
+
+          if [[ -z "$run_id" ]]; then
+            load_runs
+            baseline=$(jq -r --arg sha "$TAG_SHA" \
+              '[.[] | select(.headSha == $sha) | .databaseId] | max // 0' \
+              "$RUNNER_TEMP/package-runs.json")
+
+            echo "No reusable packaging run found; dispatching packages.yml for $TAG"
+            gh workflow run packages.yml --repo "$GITHUB_REPOSITORY" --ref "$TAG"
+
+            for _ in {1..24}; do
+              sleep 5
+              load_runs
+              run_id=$(jq -r --arg sha "$TAG_SHA" --argjson baseline "$baseline" '
+                [.[] | select(.headSha == $sha and .databaseId > $baseline)]
+                | sort_by(.databaseId) | last | .databaseId // empty
+              ' "$RUNNER_TEMP/package-runs.json")
+              [[ -n "$run_id" ]] && break
+            done
+
+            if [[ -z "$run_id" ]]; then
+              echo "::error::Packaging workflow was dispatched but no matching run appeared"
+              exit 1
+            fi
+          fi
+
+          echo "Using packaging run $run_id"
+          wait_for_run "$run_id"
+
+          if ! artifacts_complete "$run_id"; then
+            echo "::error::Packaging run $run_id completed without the full artifact set"
+            exit 1
+          fi
+
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+
+      - name: Download packaging artifact archives
+        if: steps.existing_release.outputs.exists != 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ steps.packaging.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+
+          expected_artifacts=(
+            iris-deb-ubuntu-24.04
+            iris-qt6-windows-x64
+            iris-qt6-macos-arm64
+            iris-qt6-macos-x86_64
+            iris-qt6-android-arm64-v8a
+            iris-qt6-android-x86_64
+            iris-qt6-android-x86
+          )
+
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/artifacts?per_page=100" \
+            > "$RUNNER_TEMP/package-artifacts.json"
+
+          for artifact in "${expected_artifacts[@]}"; do
+            id=$(jq -r --arg name "$artifact" '
+              [.artifacts[] | select(.name == $name and .expired == false)]
+              | first | .id // empty
+            ' "$RUNNER_TEMP/package-artifacts.json")
+            if [[ -z "$id" ]]; then
+              echo "::error::Missing or expired packaging artifact: $artifact"
+              exit 1
+            fi
+
+            archive="release-assets/${artifact}.zip"
+            echo "Downloading $artifact as $(basename "$archive")"
+            gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$id/zip" > "$archive"
+            unzip -tq "$archive" >/dev/null
+          done
+
+          count=$(find release-assets -maxdepth 1 -type f -name '*.zip' | wc -l)
+          if [[ "$count" -ne 7 ]]; then
+            echo "::error::Expected 7 release archives, found $count"
+            exit 1
+          fi
+
+          ls -lh release-assets
+
+      - name: Create GitHub release
+        if: steps.existing_release.outputs.exists != 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release_tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" release-assets/*.zip \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --generate-notes \
+            --title "Iris ${TAG#v}"
