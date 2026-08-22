@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: iris-ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 env:
   QT_VERSION: 6.10.2
   QCA_TAG: v3.0.1
@@ -69,9 +73,8 @@ jobs:
           gh release download "$QCA_TAG" --repo psi-im/qca \
             -p 'qca3-deb-ubuntu-24.04.zip' -O qca3.zip
           (cd qca-release && cmake -E tar xvf ../qca3.zip)
-          mapfile -t debs < <(find qca-release -type f -name '*.deb' -print)
-          test "${#debs[@]}" -gt 0
-          sudo apt-get install -y "${debs[@]}"
+          test -n "$(find qca-release -type f -name '*.deb' -print -quit)"
+          sudo apt-get install -y ./qca-release/*.deb
 
       - name: Configure
         shell: bash
