@@ -311,7 +311,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX="$PWD/sdk" \
             -DANDROID_PLATFORM="android-$ANDROID_API" \
-            -DCMAKE_PREFIX_PATH="$PWD/qca-sdk" \
+            "-DQca3-qt6_DIR=$PWD/qca-sdk/lib/cmake/Qca3-qt6" \
             -DUSE_QT6=ON \
             -DIRIS_SYSTEM_QCA=3 -DIRIS_BUNDLED_QCA=OFF \
             -DIRIS_BUNDLED_USRSCTP=ON
@@ -354,7 +354,8 @@ jobs:
           "$qt_cmake" -S consumer -B consumer-build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DANDROID_PLATFORM="android-$ANDROID_API" \
-            "-DCMAKE_PREFIX_PATH=$PWD/sdk;$PWD/qca-sdk"
+            "-DIris_DIR=$PWD/sdk/lib/cmake/Iris" \
+            "-DQca3-qt6_DIR=$PWD/qca-sdk/lib/cmake/Qca3-qt6"
           cmake --build consumer-build --parallel
 
       - uses: actions/upload-artifact@v4
