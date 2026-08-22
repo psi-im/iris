@@ -1,17 +1,12 @@
-name: Build and test
+name: Iris packages
 
 on:
-  push:
-    branches: [ master ]
-  pull_request:
   workflow_dispatch:
+  push:
+    tags: [ 'v1*' ]
 
 permissions:
   contents: read
-
-concurrency:
-  group: iris-ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
 
 env:
   QT_VERSION: 6.10.2
@@ -20,50 +15,18 @@ env:
   ANDROID_API: 28
 
 jobs:
-  linux:
+  debian:
     runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: qt5-qca2
-            qt_major: 5
-            qca: qca2
-            deps: qtbase5-dev libqca-qt5-2-dev libb2-dev
-            options: -DIRIS_SYSTEM_QCA=2 -DIRIS_BUNDLED_QCA=OFF
-          - name: qt6-qca2
-            qt_major: 6
-            qca: qca2
-            deps: qt6-base-dev libqca-qt6-dev
-            options: -DUSE_QT6=ON -DIRIS_SYSTEM_QCA=2 -DIRIS_BUNDLED_QCA=OFF
-          - name: qt6-qca3
-            qt_major: 6
-            qca: qca3
-            deps: qt6-base-dev
-            options: -DUSE_QT6=ON -DIRIS_SYSTEM_QCA=3 -DIRIS_BUNDLED_QCA=OFF
-          - name: qt6-qca3-omemo
-            qt_major: 6
-            qca: qca3
-            deps: qt6-base-dev libomemo-c-dev
-            options: -DUSE_QT6=ON -DIRIS_SYSTEM_QCA=3 -DIRIS_BUNDLED_QCA=OFF -DIRIS_ENABLE_OMEMO=ON -DIRIS_BUNDLED_OMEMO_C=OFF
-          - name: qt6-bundled-qca3
-            qt_major: 6
-            qca: bundled
-            deps: qt6-base-dev libssl-dev
-            options: -DUSE_QT6=ON -DIRIS_BUNDLED_QCA=ON -DIRIS_BUNDLED_QCA_GIT_TAG=v3.0.1
-
-    name: Linux (${{ matrix.name }})
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install build dependencies
+      - name: Install dependencies
         shell: bash
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build zlib1g-dev libusrsctp-dev ${{ matrix.deps }}
+          sudo apt-get install -y cmake ninja-build qt6-base-dev zlib1g-dev libusrsctp-dev
 
       - name: Install QCA3 release packages
-        if: matrix.qca == 'qca3'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -76,20 +39,65 @@ jobs:
           test -n "$(find qca-release -type f -name '*.deb' -print -quit)"
           sudo apt-get install -y ./qca-release/*.deb
 
-      - name: Configure
+      - name: Build and stage
         shell: bash
         run: |
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX="$PWD/sdk" \
-            -DIRIS_BUNDLED_USRSCTP=OFF \
-            ${{ matrix.options }}
+            -DCMAKE_INSTALL_PREFIX=/usr \
+            -DUSE_QT6=ON \
+            -DIRIS_SYSTEM_QCA=3 -DIRIS_BUNDLED_QCA=OFF \
+            -DIRIS_BUNDLED_USRSCTP=OFF
+          cmake --build build --parallel
+          DESTDIR="$PWD/stage" cmake --install build
 
-      - name: Build and install
+      - name: Build split deb packages
         shell: bash
         run: |
-          cmake --build build --parallel
-          cmake --install build
+          set -euo pipefail
+          version=$(awk '/^[[:space:]]*VERSION[[:space:]]+[0-9]/{print $2; exit}' CMakeLists.txt)
+          arch=$(dpkg --print-architecture)
+          test -n "$version"
+          mkdir -p debs work/{runtime,dev}
+
+          while IFS= read -r -d '' f; do
+            rel=${f#stage/}
+            case "$rel" in
+              usr/include/*|*/cmake/*|*/pkgconfig/*|*/libiris-qt6.so) dst=dev ;;
+              *) dst=runtime ;;
+            esac
+            mkdir -p "work/$dst/$(dirname "$rel")"
+            cp -a "$f" "work/$dst/$rel"
+          done < <(find stage \( -type f -o -type l \) -print0)
+
+          make_deb() {
+            dir=$1 pkg=$2 depends=$3 desc=$4
+            mkdir -p "$dir/DEBIAN"
+            cat > "$dir/DEBIAN/control" <<CTRL
+          Package: $pkg
+          Version: $version
+          Architecture: $arch
+          Maintainer: Psi IM developers
+          Depends: $depends
+          Section: libs
+          Priority: optional
+          Description: $desc
+          CTRL
+            dpkg-deb --build --root-owner-group "$dir" "debs/${pkg}_${version}_${arch}.deb"
+          }
+
+          make_deb work/runtime libiris-qt6-1 \
+            'libqt6core6t64, libqt6gui6t64, libqt6network6t64, libqt6xml6t64, libqca3-qt6-3, libusrsctp2, zlib1g, libc6, libstdc++6, libgcc-s1' \
+            'Iris Qt6 XMPP runtime library'
+          make_deb work/dev libiris-qt6-dev \
+            "libiris-qt6-1 (= $version), libqca3-qt6-dev, qt6-base-dev, libusrsctp-dev" \
+            'Iris Qt6 XMPP development files'
+          ls -l debs
+
+      - name: Install package smoke test
+        shell: bash
+        run: |
+          sudo apt-get install -y ./debs/*.deb
 
       - name: Compile installed CMake consumer
         shell: bash
@@ -106,18 +114,21 @@ jobs:
           #include <iris/jid/jid.h>
           int main()
           {
-              XMPP::Jid jid(QStringLiteral("ci@example.org"));
+              XMPP::Jid jid(QStringLiteral("package@example.org"));
               return jid.isValid() ? 0 : 1;
           }
           CPP
-          cmake -S consumer -B consumer-build -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH="$PWD/sdk"
+          cmake -S consumer -B consumer-build -G Ninja
           cmake --build consumer-build
-          LD_LIBRARY_PATH="$PWD/sdk/lib:$PWD/sdk/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}" \
-            ./consumer-build/iris-consumer
+          ./consumer-build/iris-consumer
 
-  desktop:
+      - uses: actions/upload-artifact@v4
+        with:
+          name: iris-deb-ubuntu-24.04
+          path: debs/*.deb
+          if-no-files-found: error
+
+  desktop-sdk:
     strategy:
       fail-fast: false
       matrix:
@@ -129,7 +140,6 @@ jobs:
           - os: macos-15-intel
             platform: macos-x86_64
     runs-on: ${{ matrix.os }}
-    name: Desktop (${{ matrix.platform }})
     steps:
       - uses: actions/checkout@v4
 
@@ -138,12 +148,6 @@ jobs:
         with:
           version: ${{ env.QT_VERSION }}
           cache: true
-
-      - name: Set up MSVC environment for Ninja
-        if: runner.os == 'Windows'
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
 
       - name: Download QCA3 SDK
         shell: bash
@@ -175,7 +179,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/vcpkg-binary-cache
-          key: iris-vcpkg-zlib-${{ runner.os }}-${{ runner.arch }}-${{ steps.vcpkg-cache.outputs.image }}-x64-windows-static-md-release-v2
+          key: iris-vcpkg-zlib-${{ runner.os }}-${{ runner.arch }}-${{ steps.vcpkg-cache.outputs.image }}-x64-windows-static-v1
           restore-keys: |
             iris-vcpkg-zlib-${{ runner.os }}-${{ runner.arch }}-
 
@@ -183,7 +187,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          vcpkg install zlib:x64-windows-static-md-release
+          vcpkg install zlib:x64-windows-static
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Save vcpkg binary cache on Windows
@@ -191,22 +195,25 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ${{ runner.temp }}/vcpkg-binary-cache
-          key: iris-vcpkg-zlib-${{ runner.os }}-${{ runner.arch }}-${{ steps.vcpkg-cache.outputs.image }}-x64-windows-static-md-release-v2
+          key: iris-vcpkg-zlib-${{ runner.os }}-${{ runner.arch }}-${{ steps.vcpkg-cache.outputs.image }}-x64-windows-static-v1
 
       - name: Configure Windows
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $vcpkgToolchain = Join-Path $env:VCPKG_INSTALLATION_ROOT 'scripts\buildsystems\vcpkg.cmake'
-          if (!(Test-Path $vcpkgToolchain)) {
-            throw "vcpkg CMake toolchain not found: $vcpkgToolchain"
+          $zlibRoot = Join-Path $env:VCPKG_INSTALLATION_ROOT 'installed\x64-windows-static'
+          $zlibLibrary = Join-Path $zlibRoot 'lib\zlib.lib'
+          $zlibInclude = Join-Path $zlibRoot 'include'
+          if (!(Test-Path $zlibLibrary) -or !(Test-Path (Join-Path $zlibInclude 'zlib.h'))) {
+            throw "Static zlib installation is incomplete: $zlibRoot"
           }
-          cmake -S . -B build -G Ninja `
+          cmake -S . -B build `
             -DCMAKE_BUILD_TYPE=Release `
             -DCMAKE_INSTALL_PREFIX="$pwd/sdk" `
             "-DCMAKE_PREFIX_PATH=$pwd/qca-sdk;$env:QT_ROOT_DIR" `
-            "-DCMAKE_TOOLCHAIN_FILE=$vcpkgToolchain" `
-            -DVCPKG_TARGET_TRIPLET=x64-windows-static-md-release `
+            "-DZLIB_LIBRARY=$zlibLibrary" `
+            "-DZLIB_INCLUDE_DIR=$zlibInclude" `
+            -DZLIB_USE_STATIC_LIBS=ON `
             -DCMAKE_WINDOWS_EXPORT_ALL_SYMBOLS=ON `
             -DUSE_QT6=ON `
             -DIRIS_SYSTEM_QCA=3 -DIRIS_BUNDLED_QCA=OFF `
@@ -226,11 +233,21 @@ jobs:
             -DIRIS_SYSTEM_QCA=3 -DIRIS_BUNDLED_QCA=OFF \
             -DIRIS_BUNDLED_USRSCTP=ON
 
-      - name: Build and install
+      - name: Build and install SDK
         shell: bash
         run: |
           cmake --build build --config Release --parallel
           cmake --install build --config Release
+          mkdir -p sdk/share/licenses/iris
+          cp COPYING sdk/share/licenses/iris/COPYING
+          license=$(find build/_deps/usrsctp -type f -name LICENSE.md -print -quit)
+          test -n "$license"
+          mkdir -p sdk/share/licenses/iris/usrsctp
+          cp "$license" sdk/share/licenses/iris/usrsctp/LICENSE.md
+          if find sdk/lib -type f \( -name '*usrsctp*' -o -name '*qca3*' \) -print -quit | grep -q .; then
+            echo 'Iris SDK unexpectedly contains a private dependency library' >&2
+            exit 1
+          fi
 
       - name: Compile installed CMake consumer
         shell: bash
@@ -247,21 +264,13 @@ jobs:
           #include <iris/jid/jid.h>
           int main()
           {
-              XMPP::Jid jid(QStringLiteral("ci@example.org"));
+              XMPP::Jid jid(QStringLiteral("package@example.org"));
               return jid.isValid() ? 0 : 1;
           }
           CPP
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            cmake -S consumer -B consumer-build -G Ninja \
-              -DCMAKE_BUILD_TYPE=Release \
-              "-DIris_DIR=$PWD/sdk/lib/cmake/Iris" \
-              "-DQca3-qt6_DIR=$PWD/qca-sdk/lib/cmake/Qca3-qt6"
-          else
-            cmake -S consumer -B consumer-build \
-              -DCMAKE_BUILD_TYPE=Release \
-              "-DIris_DIR=$PWD/sdk/lib/cmake/Iris" \
-              "-DQca3-qt6_DIR=$PWD/qca-sdk/lib/cmake/Qca3-qt6"
-          fi
+          cmake -S consumer -B consumer-build \
+            -DCMAKE_BUILD_TYPE=Release \
+            "-DCMAKE_PREFIX_PATH=$PWD/sdk;$PWD/qca-sdk"
           cmake --build consumer-build --config Release --parallel
 
       - name: Run installed consumer on Windows
@@ -269,7 +278,7 @@ jobs:
         shell: pwsh
         run: |
           $env:PATH = "$pwd\sdk\bin;$pwd\qca-sdk\bin;$env:QT_ROOT_DIR\bin;$env:PATH"
-          & "$pwd\consumer-build\iris-consumer.exe"
+          & "$pwd\consumer-build\Release\iris-consumer.exe"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Run installed consumer on macOS
@@ -279,7 +288,13 @@ jobs:
           DYLD_LIBRARY_PATH="$PWD/sdk/lib:$PWD/qca-sdk/lib:${DYLD_LIBRARY_PATH:-}" \
             ./consumer-build/iris-consumer
 
-  android:
+      - uses: actions/upload-artifact@v4
+        with:
+          name: iris-qt6-${{ matrix.platform }}
+          path: sdk/
+          if-no-files-found: error
+
+  android-sdk:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -291,7 +306,6 @@ jobs:
             qt_arch: android_x86_64
           - abi: x86
             qt_arch: android_x86
-    name: Android (${{ matrix.abi }})
     steps:
       - uses: actions/checkout@v4
 
@@ -321,7 +335,7 @@ jobs:
           (cd qca-sdk && cmake -E tar xvf ../qca3.zip)
           test -n "$(find qca-sdk -type f \( -name 'Qca3-qt6Config.cmake' -o -name 'qca3-qt6-config.cmake' \) -print -quit)"
 
-      - name: Configure, build and install
+      - name: Build and install SDK
         shell: bash
         env:
           ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
@@ -340,6 +354,17 @@ jobs:
           cmake --build build --parallel
           cmake --install build
 
+          mkdir -p sdk/share/licenses/iris
+          cp COPYING sdk/share/licenses/iris/COPYING
+          license=$(find build/_deps/usrsctp -type f -name LICENSE.md -print -quit)
+          test -n "$license"
+          mkdir -p sdk/share/licenses/iris/usrsctp
+          cp "$license" sdk/share/licenses/iris/usrsctp/LICENSE.md
+          if find sdk/lib -type f \( -name '*usrsctp*' -o -name '*qca3*' \) -print -quit | grep -q .; then
+            echo 'Iris SDK unexpectedly contains a private dependency library' >&2
+            exit 1
+          fi
+
       - name: Compile installed CMake consumer
         shell: bash
         env:
@@ -357,7 +382,7 @@ jobs:
           #include <iris/jid/jid.h>
           extern "C" int iris_consumer_smoke()
           {
-              XMPP::Jid jid(QStringLiteral("ci@example.org"));
+              XMPP::Jid jid(QStringLiteral("package@example.org"));
               return jid.isValid() ? 0 : 1;
           }
           CPP
@@ -368,3 +393,9 @@ jobs:
             "-DIris_DIR=$PWD/sdk/lib/cmake/Iris" \
             "-DQca3-qt6_DIR=$PWD/qca-sdk/lib/cmake/Qca3-qt6"
           cmake --build consumer-build --parallel
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: iris-qt6-android-${{ matrix.abi }}
+          path: sdk/
+          if-no-files-found: error
