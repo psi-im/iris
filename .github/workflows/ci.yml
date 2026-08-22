@@ -247,7 +247,8 @@ jobs:
           CPP
           cmake -S consumer -B consumer-build \
             -DCMAKE_BUILD_TYPE=Release \
-            "-DCMAKE_PREFIX_PATH=$PWD/sdk;$PWD/qca-sdk"
+            "-DIris_DIR=$PWD/sdk/lib/cmake/Iris" \
+            "-DQca3-qt6_DIR=$PWD/qca-sdk/lib/cmake/Qca3-qt6"
           cmake --build consumer-build --config Release --parallel
 
       - name: Run installed consumer on Windows
