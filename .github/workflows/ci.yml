@@ -165,7 +165,8 @@ jobs:
 
       - name: Restore vcpkg binary cache on Windows
         if: runner.os == 'Windows'
-        uses: actions/cache@v4
+        id: vcpkg-cache-restore
+        uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/vcpkg-binary-cache
           key: iris-vcpkg-zlib-${{ runner.os }}-${{ runner.arch }}-${{ steps.vcpkg-cache.outputs.image }}-x64-windows-static-v1
@@ -179,16 +180,30 @@ jobs:
           vcpkg install zlib:x64-windows-static
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Save vcpkg binary cache on Windows
+        if: runner.os == 'Windows' && steps.vcpkg-cache-restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/vcpkg-binary-cache
+          key: iris-vcpkg-zlib-${{ runner.os }}-${{ runner.arch }}-${{ steps.vcpkg-cache.outputs.image }}-x64-windows-static-v1
+
       - name: Configure Windows
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $zlibRoot = Join-Path $env:VCPKG_INSTALLATION_ROOT 'installed\x64-windows-static'
+          $zlibLibrary = Join-Path $zlibRoot 'lib\zlib.lib'
+          $zlibInclude = Join-Path $zlibRoot 'include'
+          if (!(Test-Path $zlibLibrary) -or !(Test-Path (Join-Path $zlibInclude 'zlib.h'))) {
+            throw "Static zlib installation is incomplete: $zlibRoot"
+          }
           cmake -S . -B build `
             -DCMAKE_BUILD_TYPE=Release `
             -DCMAKE_INSTALL_PREFIX="$pwd/sdk" `
             "-DCMAKE_PREFIX_PATH=$pwd/qca-sdk;$env:QT_ROOT_DIR" `
-            "-DZLIB_ROOT=$zlibRoot" `
+            "-DZLIB_LIBRARY=$zlibLibrary" `
+            "-DZLIB_INCLUDE_DIR=$zlibInclude" `
+            -DZLIB_USE_STATIC_LIBS=ON `
             -DCMAKE_WINDOWS_EXPORT_ALL_SYMBOLS=ON `
             -DUSE_QT6=ON `
             -DIRIS_SYSTEM_QCA=3 -DIRIS_BUNDLED_QCA=OFF `
