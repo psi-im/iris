@@ -1,0 +1,53 @@
+name: Fix Iris Windows ZLIB discovery
+
+on:
+  push:
+    branches: [ ci/qca3-pipelines ]
+    paths:
+      - .github/workflows/fix-windows-zlib.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ci/qca3-pipelines
+          fetch-depth: 0
+
+      - name: Fix Windows ZLIB arguments and remove helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          for filename in ('.github/workflows/ci.yml', '.github/workflows/packages.yml'):
+              path = Path(filename)
+              text = path.read_text()
+              root_line = "          $zlibRoot = Join-Path $env:VCPKG_INSTALLATION_ROOT 'installed\\x64-windows-static'\n"
+              root_replacement = root_line + (
+                  "          $zlibLibrary = Join-Path $zlibRoot 'lib\\zlib.lib'\n"
+                  "          $zlibInclude = Join-Path $zlibRoot 'include'\n"
+              )
+              arg_line = '            "-DZLIB_ROOT=$zlibRoot" `\n'
+              arg_replacement = (
+                  '            "-DZLIB_LIBRARY=$zlibLibrary" `\n'
+                  '            "-DZLIB_INCLUDE_DIR=$zlibInclude" `\n'
+              )
+              if text.count(root_line) != 1:
+                  raise SystemExit(f'{filename}: expected one zlib root declaration, found {text.count(root_line)}')
+              if text.count(arg_line) != 1:
+                  raise SystemExit(f'{filename}: expected one ZLIB_ROOT argument, found {text.count(arg_line)}')
+              text = text.replace(root_line, root_replacement).replace(arg_line, arg_replacement)
+              path.write_text(text)
+          PY
+          git rm .github/workflows/fix-windows-zlib.yml
+          git add .github/workflows/ci.yml .github/workflows/packages.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m "Fix Windows ZLIB discovery in CI and packages"
+          git push origin HEAD:ci/qca3-pipelines
