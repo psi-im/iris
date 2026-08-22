@@ -280,6 +280,10 @@ if(IRIS_ENABLE_DEBUG)
     target_compile_definitions(iris PRIVATE XMPP_TEST)
 endif()
 
+if(WIN32)
+    target_compile_definitions(iris PRIVATE NOMINMAX)
+endif()
+
 target_compile_definitions(iris PUBLIC IRISNET_STATIC QSTRINGPREP_BUILDING)
 
 target_include_directories(iris
