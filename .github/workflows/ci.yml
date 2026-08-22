@@ -1,64 +1,319 @@
-name: CI
+name: Build and test
+
 on:
-  - push
-  - pull_request
-  - workflow_dispatch
+  push:
+    branches: [ master ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  QT_VERSION: 6.10.2
+  QCA_TAG: v3.0.1
+  ANDROID_NDK_VERSION: r27c
+  ANDROID_API: 28
 
 jobs:
-  test-linux:
-    runs-on: ubuntu-latest
-    env:
-      CCACHE_DIR: ${{github.workspace}}/ccache
-      CCACHE_MAXSIZE: 100M
+  linux:
+    runs-on: ubuntu-24.04
     strategy:
+      fail-fast: false
       matrix:
-        tag:
-          - minimal
-          - system-libs
-          - bundled-libs
         include:
-          - tag: minimal
-            deps: |
-              libb2-dev
-              libqca-qt5-2-dev
-            options: -DIRIS_ENABLE_JINGLE_SCTP=OFF
-          - tag: system-libs
-            deps: |
-              libb2-dev
-              libqca-qt5-2-dev
-              libusrsctp-dev
-            options: -DIRIS_BUNDLED_QCA=OFF -DIRIS_BUNDLED_USRSCTP=OFF
-          - tag: bundled-libs
-            deps: null
-            options: -DIRIS_BUNDLED_QCA=ON -DIRIS_BUNDLED_USRSCTP=ON
+          - name: qt5-qca2
+            qt_major: 5
+            qca: qca2
+            deps: qtbase5-dev libqca-qt5-2-dev libb2-dev
+            options: -DIRIS_SYSTEM_QCA=2 -DIRIS_BUNDLED_QCA=OFF
+          - name: qt6-qca2
+            qt_major: 6
+            qca: qca2
+            deps: qt6-base-dev libqca-qt6-dev
+            options: -DUSE_QT6=ON -DIRIS_SYSTEM_QCA=2 -DIRIS_BUNDLED_QCA=OFF
+          - name: qt6-qca3
+            qt_major: 6
+            qca: qca3
+            deps: qt6-base-dev
+            options: -DUSE_QT6=ON -DIRIS_SYSTEM_QCA=3 -DIRIS_BUNDLED_QCA=OFF
+          - name: qt6-qca3-omemo
+            qt_major: 6
+            qca: qca3
+            deps: qt6-base-dev
+            options: -DUSE_QT6=ON -DIRIS_SYSTEM_QCA=3 -DIRIS_BUNDLED_QCA=OFF -DIRIS_ENABLE_OMEMO=ON
+          - name: qt6-bundled-qca3
+            qt_major: 6
+            qca: bundled
+            deps: qt6-base-dev libssl-dev
+            options: -DUSE_QT6=ON -DIRIS_BUNDLED_QCA=ON -DIRIS_BUNDLED_QCA_GIT_TAG=v3.0.1
+
+    name: Linux (${{ matrix.name }})
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-      - name: Install dependencies
-        uses: awalsh128/cache-apt-pkgs-action@latest
-        with:
-          packages: |
-            ${{matrix.deps}}
-            ccache
-            ninja-build
-            qtbase5-dev
-          version: ${{matrix.tag}}
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build zlib1g-dev libusrsctp-dev ${{ matrix.deps }}
+
+      - name: Install QCA3 release packages
+        if: matrix.qca == 'qca3'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir qca-release
+          gh release download "$QCA_TAG" --repo psi-im/qca \
+            -p 'qca3-deb-ubuntu-24.04.zip' -O qca3.zip
+          (cd qca-release && cmake -E tar xvf ../qca3.zip)
+          mapfile -t debs < <(find qca-release -type f -name '*.deb' -print)
+          test "${#debs[@]}" -gt 0
+          sudo apt-get install -y "${debs[@]}"
+
       - name: Configure
+        shell: bash
         run: |
-          cmake -B ${{github.workspace}}/build -G Ninja \
-            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-            ${{matrix.options}}
-      - name: Restore cache
-        uses: actions/cache/restore@v3
-        with:
-          key: ccache-linux-${{matrix.tag}}
-          path: ${{github.workspace}}/ccache
-      - name: Build
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$PWD/sdk" \
+            -DIRIS_BUNDLED_USRSCTP=OFF \
+            ${{ matrix.options }}
+
+      - name: Build and install
+        shell: bash
         run: |
-          cmake --build ${{github.workspace}}/build -v -j $(nproc)
-      - name: Save cache
-        uses: actions/cache@v3
+          cmake --build build --parallel
+          cmake --install build
+
+      - name: Compile installed CMake consumer
+        shell: bash
+        run: |
+          mkdir consumer
+          cat > consumer/CMakeLists.txt <<'CMAKE'
+          cmake_minimum_required(VERSION 3.16)
+          project(iris_consumer LANGUAGES CXX)
+          find_package(Iris CONFIG REQUIRED)
+          add_executable(iris-consumer main.cpp)
+          target_link_libraries(iris-consumer PRIVATE Iris::Iris)
+          CMAKE
+          cat > consumer/main.cpp <<'CPP'
+          #include <iris/jid/jid.h>
+          int main()
+          {
+              XMPP::Jid jid(QStringLiteral("ci@example.org"));
+              return jid.isValid() ? 0 : 1;
+          }
+          CPP
+          cmake -S consumer -B consumer-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="$PWD/sdk"
+          cmake --build consumer-build
+          LD_LIBRARY_PATH="$PWD/sdk/lib:$PWD/sdk/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}" \
+            ./consumer-build/iris-consumer
+
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows-x64
+          - os: macos-15
+            platform: macos-arm64
+          - os: macos-15-intel
+            platform: macos-x86_64
+    runs-on: ${{ matrix.os }}
+    name: Desktop (${{ matrix.platform }})
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
         with:
-          key: ccache-linux-${{matrix.tag}}
-          path: ${{github.workspace}}/ccache
+          version: ${{ env.QT_VERSION }}
+          cache: true
+
+      - name: Download QCA3 SDK
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir qca-sdk
+          gh release download "$QCA_TAG" --repo psi-im/qca \
+            -p "qca3-qt6-${{ matrix.platform }}.zip" -O qca3.zip
+          (cd qca-sdk && cmake -E tar xvf ../qca3.zip)
+          test -n "$(find qca-sdk -type f \( -name 'Qca3-qt6Config.cmake' -o -name 'qca3-qt6-config.cmake' \) -print -quit)"
+
+      - name: Install static zlib on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          vcpkg install zlib:x64-windows-static
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Configure Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $zlibRoot = Join-Path $env:VCPKG_INSTALLATION_ROOT 'installed\x64-windows-static'
+          cmake -S . -B build `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_INSTALL_PREFIX="$pwd/sdk" `
+            "-DCMAKE_PREFIX_PATH=$pwd/qca-sdk;$env:QT_ROOT_DIR" `
+            "-DZLIB_ROOT=$zlibRoot" `
+            -DCMAKE_WINDOWS_EXPORT_ALL_SYMBOLS=ON `
+            -DUSE_QT6=ON `
+            -DIRIS_SYSTEM_QCA=3 -DIRIS_BUNDLED_QCA=OFF `
+            -DIRIS_BUNDLED_USRSCTP=ON
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Configure macOS
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$PWD/sdk" \
+            -DCMAKE_INSTALL_NAME_DIR='@rpath' \
+            "-DCMAKE_PREFIX_PATH=$PWD/qca-sdk;$QT_ROOT_DIR" \
+            -DUSE_QT6=ON \
+            -DIRIS_SYSTEM_QCA=3 -DIRIS_BUNDLED_QCA=OFF \
+            -DIRIS_BUNDLED_USRSCTP=ON
+
+      - name: Build and install
+        shell: bash
+        run: |
+          cmake --build build --config Release --parallel
+          cmake --install build --config Release
+
+      - name: Compile installed CMake consumer
+        shell: bash
+        run: |
+          mkdir consumer
+          cat > consumer/CMakeLists.txt <<'CMAKE'
+          cmake_minimum_required(VERSION 3.16)
+          project(iris_consumer LANGUAGES CXX)
+          find_package(Iris CONFIG REQUIRED)
+          add_executable(iris-consumer main.cpp)
+          target_link_libraries(iris-consumer PRIVATE Iris::Iris)
+          CMAKE
+          cat > consumer/main.cpp <<'CPP'
+          #include <iris/jid/jid.h>
+          int main()
+          {
+              XMPP::Jid jid(QStringLiteral("ci@example.org"));
+              return jid.isValid() ? 0 : 1;
+          }
+          CPP
+          cmake -S consumer -B consumer-build \
+            -DCMAKE_BUILD_TYPE=Release \
+            "-DCMAKE_PREFIX_PATH=$PWD/sdk;$PWD/qca-sdk"
+          cmake --build consumer-build --config Release --parallel
+
+      - name: Run installed consumer on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:PATH = "$pwd\sdk\bin;$pwd\qca-sdk\bin;$env:QT_ROOT_DIR\bin;$env:PATH"
+          & "$pwd\consumer-build\Release\iris-consumer.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Run installed consumer on macOS
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          DYLD_LIBRARY_PATH="$PWD/sdk/lib:$PWD/qca-sdk/lib:${DYLD_LIBRARY_PATH:-}" \
+            ./consumer-build/iris-consumer
+
+  android:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - abi: arm64-v8a
+            qt_arch: android_arm64_v8a
+          - abi: x86_64
+            qt_arch: android_x86_64
+          - abi: x86
+            qt_arch: android_x86
+    name: Android (${{ matrix.abi }})
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Android NDK
+        id: setup-ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: ${{ env.ANDROID_NDK_VERSION }}
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          target: android
+          arch: ${{ matrix.qt_arch }}
+          cache: true
+
+      - name: Download QCA3 SDK
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir qca-sdk
+          gh release download "$QCA_TAG" --repo psi-im/qca \
+            -p "qca3-qt6-android-${{ matrix.abi }}.zip" -O qca3.zip
+          (cd qca-sdk && cmake -E tar xvf ../qca3.zip)
+          test -n "$(find qca-sdk -type f \( -name 'Qca3-qt6Config.cmake' -o -name 'qca3-qt6-config.cmake' \) -print -quit)"
+
+      - name: Configure, build and install
+        shell: bash
+        env:
+          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: |
+          qt_cmake=$(find "$QT_ROOT_DIR" -type f -name qt-cmake -print -quit)
+          test -n "$qt_cmake"
+          chmod +x "$qt_cmake"
+          "$qt_cmake" -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$PWD/sdk" \
+            -DANDROID_PLATFORM="android-$ANDROID_API" \
+            -DCMAKE_PREFIX_PATH="$PWD/qca-sdk" \
+            -DUSE_QT6=ON \
+            -DIRIS_SYSTEM_QCA=3 -DIRIS_BUNDLED_QCA=OFF \
+            -DIRIS_BUNDLED_USRSCTP=ON
+          cmake --build build --parallel
+          cmake --install build
+
+      - name: Compile installed CMake consumer
+        shell: bash
+        env:
+          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: |
+          mkdir consumer
+          cat > consumer/CMakeLists.txt <<'CMAKE'
+          cmake_minimum_required(VERSION 3.16)
+          project(iris_consumer LANGUAGES CXX)
+          find_package(Iris CONFIG REQUIRED)
+          add_library(iris-consumer SHARED main.cpp)
+          target_link_libraries(iris-consumer PRIVATE Iris::Iris)
+          CMAKE
+          cat > consumer/main.cpp <<'CPP'
+          #include <iris/jid/jid.h>
+          extern "C" int iris_consumer_smoke()
+          {
+              XMPP::Jid jid(QStringLiteral("ci@example.org"));
+              return jid.isValid() ? 0 : 1;
+          }
+          CPP
+          qt_cmake=$(find "$QT_ROOT_DIR" -type f -name qt-cmake -print -quit)
+          "$qt_cmake" -S consumer -B consumer-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DANDROID_PLATFORM="android-$ANDROID_API" \
+            "-DCMAKE_PREFIX_PATH=$PWD/sdk;$PWD/qca-sdk"
+          cmake --build consumer-build --parallel
