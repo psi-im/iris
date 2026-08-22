@@ -139,6 +139,12 @@ jobs:
           version: ${{ env.QT_VERSION }}
           cache: true
 
+      - name: Set up MSVC environment for Ninja
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
       - name: Download QCA3 SDK
         shell: bash
         env:
@@ -195,7 +201,7 @@ jobs:
           if (!(Test-Path $vcpkgToolchain)) {
             throw "vcpkg CMake toolchain not found: $vcpkgToolchain"
           }
-          cmake -S . -B build `
+          cmake -S . -B build -G Ninja `
             -DCMAKE_BUILD_TYPE=Release `
             -DCMAKE_INSTALL_PREFIX="$pwd/sdk" `
             "-DCMAKE_PREFIX_PATH=$pwd/qca-sdk;$env:QT_ROOT_DIR" `
@@ -245,10 +251,17 @@ jobs:
               return jid.isValid() ? 0 : 1;
           }
           CPP
-          cmake -S consumer -B consumer-build \
-            -DCMAKE_BUILD_TYPE=Release \
-            "-DIris_DIR=$PWD/sdk/lib/cmake/Iris" \
-            "-DQca3-qt6_DIR=$PWD/qca-sdk/lib/cmake/Qca3-qt6"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            cmake -S consumer -B consumer-build -G Ninja \
+              -DCMAKE_BUILD_TYPE=Release \
+              "-DIris_DIR=$PWD/sdk/lib/cmake/Iris" \
+              "-DQca3-qt6_DIR=$PWD/qca-sdk/lib/cmake/Qca3-qt6"
+          else
+            cmake -S consumer -B consumer-build \
+              -DCMAKE_BUILD_TYPE=Release \
+              "-DIris_DIR=$PWD/sdk/lib/cmake/Iris" \
+              "-DQca3-qt6_DIR=$PWD/qca-sdk/lib/cmake/Qca3-qt6"
+          fi
           cmake --build consumer-build --config Release --parallel
 
       - name: Run installed consumer on Windows
@@ -256,7 +269,7 @@ jobs:
         shell: pwsh
         run: |
           $env:PATH = "$pwd\sdk\bin;$pwd\qca-sdk\bin;$env:QT_ROOT_DIR\bin;$env:PATH"
-          & "$pwd\consumer-build\Release\iris-consumer.exe"
+          & "$pwd\consumer-build\iris-consumer.exe"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Run installed consumer on macOS
