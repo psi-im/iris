@@ -169,7 +169,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/vcpkg-binary-cache
-          key: iris-vcpkg-zlib-${{ runner.os }}-${{ runner.arch }}-${{ steps.vcpkg-cache.outputs.image }}-x64-windows-static-v1
+          key: iris-vcpkg-zlib-${{ runner.os }}-${{ runner.arch }}-${{ steps.vcpkg-cache.outputs.image }}-x64-windows-static-md-release-v2
           restore-keys: |
             iris-vcpkg-zlib-${{ runner.os }}-${{ runner.arch }}-
 
@@ -177,7 +177,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          vcpkg install zlib:x64-windows-static
+          vcpkg install zlib:x64-windows-static-md-release
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Save vcpkg binary cache on Windows
@@ -185,25 +185,22 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ${{ runner.temp }}/vcpkg-binary-cache
-          key: iris-vcpkg-zlib-${{ runner.os }}-${{ runner.arch }}-${{ steps.vcpkg-cache.outputs.image }}-x64-windows-static-v1
+          key: iris-vcpkg-zlib-${{ runner.os }}-${{ runner.arch }}-${{ steps.vcpkg-cache.outputs.image }}-x64-windows-static-md-release-v2
 
       - name: Configure Windows
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $zlibRoot = Join-Path $env:VCPKG_INSTALLATION_ROOT 'installed\x64-windows-static'
-          $zlibLibrary = Join-Path $zlibRoot 'lib\zlib.lib'
-          $zlibInclude = Join-Path $zlibRoot 'include'
-          if (!(Test-Path $zlibLibrary) -or !(Test-Path (Join-Path $zlibInclude 'zlib.h'))) {
-            throw "Static zlib installation is incomplete: $zlibRoot"
+          $vcpkgToolchain = Join-Path $env:VCPKG_INSTALLATION_ROOT 'scripts\buildsystems\vcpkg.cmake'
+          if (!(Test-Path $vcpkgToolchain)) {
+            throw "vcpkg CMake toolchain not found: $vcpkgToolchain"
           }
           cmake -S . -B build `
             -DCMAKE_BUILD_TYPE=Release `
             -DCMAKE_INSTALL_PREFIX="$pwd/sdk" `
             "-DCMAKE_PREFIX_PATH=$pwd/qca-sdk;$env:QT_ROOT_DIR" `
-            "-DZLIB_LIBRARY=$zlibLibrary" `
-            "-DZLIB_INCLUDE_DIR=$zlibInclude" `
-            -DZLIB_USE_STATIC_LIBS=ON `
+            "-DCMAKE_TOOLCHAIN_FILE=$vcpkgToolchain" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows-static-md-release `
             -DCMAKE_WINDOWS_EXPORT_ALL_SYMBOLS=ON `
             -DUSE_QT6=ON `
             -DIRIS_SYSTEM_QCA=3 -DIRIS_BUNDLED_QCA=OFF `
