@@ -36,9 +36,8 @@ jobs:
           gh release download "$QCA_TAG" --repo psi-im/qca \
             -p 'qca3-deb-ubuntu-24.04.zip' -O qca3.zip
           (cd qca-release && cmake -E tar xvf ../qca3.zip)
-          mapfile -t debs < <(find qca-release -type f -name '*.deb' -print)
-          test "${#debs[@]}" -gt 0
-          sudo apt-get install -y "${debs[@]}"
+          test -n "$(find qca-release -type f -name '*.deb' -print -quit)"
+          sudo apt-get install -y ./qca-release/*.deb
 
       - name: Build and stage
         shell: bash
@@ -88,7 +87,7 @@ jobs:
           }
 
           make_deb work/runtime libiris-qt6-1 \
-            'libqt6core6t64, libqt6gui6, libqt6network6, libqt6xml6, libqca3-qt6-3, libusrsctp2, zlib1g, libc6, libstdc++6, libgcc-s1' \
+            'libqt6core6t64, libqt6gui6t64, libqt6network6t64, libqt6xml6t64, libqca3-qt6-3, libusrsctp2, zlib1g, libc6, libstdc++6, libgcc-s1' \
             'Iris Qt6 XMPP runtime library'
           make_deb work/dev libiris-qt6-dev \
             "libiris-qt6-1 (= $version), libqca3-qt6-dev, qt6-base-dev, libusrsctp-dev" \
