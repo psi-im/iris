@@ -44,8 +44,8 @@ jobs:
           - name: qt6-qca3-omemo
             qt_major: 6
             qca: qca3
-            deps: qt6-base-dev
-            options: -DUSE_QT6=ON -DIRIS_SYSTEM_QCA=3 -DIRIS_BUNDLED_QCA=OFF -DIRIS_ENABLE_OMEMO=ON
+            deps: qt6-base-dev libomemo-c-dev
+            options: -DUSE_QT6=ON -DIRIS_SYSTEM_QCA=3 -DIRIS_BUNDLED_QCA=OFF -DIRIS_ENABLE_OMEMO=ON -DIRIS_BUNDLED_OMEMO_C=OFF
           - name: qt6-bundled-qca3
             qt_major: 6
             qca: bundled
