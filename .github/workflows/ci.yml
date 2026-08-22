@@ -169,15 +169,15 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/vcpkg-binary-cache
-          key: iris-vcpkg-zlib-${{ runner.os }}-${{ runner.arch }}-${{ steps.vcpkg-cache.outputs.image }}-x64-windows-static-md-release-v2
+          key: iris-vcpkg-deps-${{ runner.os }}-${{ runner.arch }}-${{ steps.vcpkg-cache.outputs.image }}-x64-windows-static-md-release-v1
           restore-keys: |
-            iris-vcpkg-zlib-${{ runner.os }}-${{ runner.arch }}-
+            iris-vcpkg-deps-${{ runner.os }}-${{ runner.arch }}-
 
-      - name: Install static zlib on Windows
+      - name: Install static Windows dependencies
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          vcpkg install zlib:x64-windows-static-md-release
+          vcpkg install zlib:x64-windows-static-md-release usrsctp:x64-windows-static-md-release
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Save vcpkg binary cache on Windows
@@ -185,7 +185,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ${{ runner.temp }}/vcpkg-binary-cache
-          key: iris-vcpkg-zlib-${{ runner.os }}-${{ runner.arch }}-${{ steps.vcpkg-cache.outputs.image }}-x64-windows-static-md-release-v2
+          key: iris-vcpkg-deps-${{ runner.os }}-${{ runner.arch }}-${{ steps.vcpkg-cache.outputs.image }}-x64-windows-static-md-release-v1
 
       - name: Configure Windows
         if: runner.os == 'Windows'
@@ -204,7 +204,7 @@ jobs:
             -DCMAKE_WINDOWS_EXPORT_ALL_SYMBOLS=ON `
             -DUSE_QT6=ON `
             -DIRIS_SYSTEM_QCA=3 -DIRIS_BUNDLED_QCA=OFF `
-            -DIRIS_BUNDLED_USRSCTP=ON
+            -DIRIS_BUNDLED_USRSCTP=OFF
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Configure macOS
