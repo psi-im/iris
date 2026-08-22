@@ -1,0 +1,40 @@
+name: Apply OMEMO Qt 6.4 compatibility fix
+
+on:
+  push:
+    branches: [ ci/qca3-pipelines ]
+    paths:
+      - .github/workflows/fix-omemo-qt64.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ci/qca3-pipelines
+          fetch-depth: 0
+
+      - name: Apply compatibility guard and remove helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('src/xmpp/xmpp-im/xmpp_omemo.cpp')
+          text = path.read_text()
+          old = '''#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)\n            const bool envelopeParsed = envelopeDocument.setContent'''
+          new = '''#if QT_VERSION < QT_VERSION_CHECK(6, 5, 0)\n            const bool envelopeParsed = envelopeDocument.setContent'''
+          if text.count(old) != 1:
+              raise SystemExit(f'expected exactly one OMEMO parse guard, found {text.count(old)}')
+          path.write_text(text.replace(old, new))
+          PY
+          git rm .github/workflows/fix-omemo-qt64.yml
+          git add src/xmpp/xmpp-im/xmpp_omemo.cpp
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m "Fix OMEMO XML parsing with Qt 6.4"
+          git push origin HEAD:ci/qca3-pipelines
