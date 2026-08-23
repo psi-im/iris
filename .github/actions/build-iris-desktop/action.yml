@@ -1,0 +1,165 @@
+name: Build Iris for desktop
+description: Install desktop dependencies, configure, build, install and smoke-test Iris
+
+inputs:
+  qt-version:
+    description: Qt version
+    required: true
+  platform:
+    description: QCA SDK platform name
+    required: true
+  qca-tag:
+    description: QCA release tag
+    required: true
+  install-prefix:
+    description: CMake install prefix
+    required: true
+  build-parallel:
+    description: Maximum number of parallel build jobs
+    required: false
+    default: '4'
+
+runs:
+  using: composite
+  steps:
+    - name: Install Qt
+      uses: jurplel/install-qt-action@v4
+      with:
+        version: ${{ inputs.qt-version }}
+        cache: true
+
+    - name: Set up MSVC environment for Ninja
+      if: runner.os == 'Windows'
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: x64
+
+    - name: Download QCA3 SDK
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        rm -rf qca-sdk qca3.zip
+        mkdir qca-sdk
+        gh release download "${{ inputs.qca-tag }}" --repo psi-im/qca \
+          -p "qca3-qt6-${{ inputs.platform }}.zip" -O qca3.zip
+        (cd qca-sdk && cmake -E tar xvf ../qca3.zip)
+        test -n "$(find qca-sdk -type f \( -name 'Qca3-qt6Config.cmake' -o -name 'qca3-qt6-config.cmake' \) -print -quit)"
+
+    - name: Resolve Windows vcpkg cache key
+      if: runner.os == 'Windows'
+      id: vcpkg-cache-key
+      shell: pwsh
+      run: |
+        $vcpkgRevision = (git -C $env:VCPKG_INSTALLATION_ROOT rev-parse HEAD).Trim()
+        $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+        $vsPath = (& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath).Trim()
+        $toolsetFile = Join-Path $vsPath 'VC\Auxiliary\Build\Microsoft.VCToolsVersion.default.txt'
+        $toolset = (Get-Content $toolsetFile -Raw).Trim()
+        "vcpkg=$vcpkgRevision" >> $env:GITHUB_OUTPUT
+        "msvc=$toolset" >> $env:GITHUB_OUTPUT
+
+    - name: Restore Windows vcpkg binary cache
+      if: runner.os == 'Windows'
+      uses: actions/cache@v4
+      with:
+        path: ${{ runner.temp }}/vcpkg-binary-cache
+        key: iris-vcpkg-zlib-${{ runner.os }}-${{ steps.vcpkg-cache-key.outputs.vcpkg }}-${{ steps.vcpkg-cache-key.outputs.msvc }}-x64-windows-static-md-release-v3
+
+    - name: Install static zlib on Windows
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $cache = Join-Path $env:RUNNER_TEMP 'vcpkg-binary-cache'
+        New-Item -ItemType Directory -Force -Path $cache | Out-Null
+        $env:VCPKG_BINARY_SOURCES = "clear;files,$cache,readwrite"
+        vcpkg install zlib:x64-windows-static-md-release
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+    - name: Configure Windows
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $vcpkgToolchain = Join-Path $env:VCPKG_INSTALLATION_ROOT 'scripts\buildsystems\vcpkg.cmake'
+        if (!(Test-Path $vcpkgToolchain)) {
+          throw "vcpkg CMake toolchain not found: $vcpkgToolchain"
+        }
+        cmake -S . -B build -G Ninja `
+          -DCMAKE_BUILD_TYPE=Release `
+          -DCMAKE_INSTALL_PREFIX="${{ inputs.install-prefix }}" `
+          "-DCMAKE_PREFIX_PATH=$pwd/qca-sdk;$env:QT_ROOT_DIR" `
+          "-DCMAKE_TOOLCHAIN_FILE=$vcpkgToolchain" `
+          -DVCPKG_TARGET_TRIPLET=x64-windows-static-md-release `
+          -DCMAKE_WINDOWS_EXPORT_ALL_SYMBOLS=ON `
+          -DUSE_QT6=ON `
+          -DIRIS_SYSTEM_QCA=3 -DIRIS_BUNDLED_QCA=OFF `
+          -DIRIS_BUNDLED_USRSCTP=ON
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+    - name: Configure macOS
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        cmake -S . -B build \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_INSTALL_PREFIX="${{ inputs.install-prefix }}" \
+          -DCMAKE_INSTALL_NAME_DIR='@rpath' \
+          "-DCMAKE_PREFIX_PATH=$PWD/qca-sdk;$QT_ROOT_DIR" \
+          -DUSE_QT6=ON \
+          -DIRIS_SYSTEM_QCA=3 -DIRIS_BUNDLED_QCA=OFF \
+          -DIRIS_BUNDLED_USRSCTP=ON
+
+    - name: Build and install Iris
+      shell: bash
+      run: |
+        cmake --build build --config Release --parallel "${{ inputs.build-parallel }}"
+        cmake --install build --config Release
+
+    - name: Compile installed CMake consumer
+      shell: bash
+      run: |
+        rm -rf consumer consumer-build
+        mkdir consumer
+        cat > consumer/CMakeLists.txt <<'CMAKE'
+        cmake_minimum_required(VERSION 3.16)
+        project(iris_consumer LANGUAGES CXX)
+        find_package(Iris CONFIG REQUIRED)
+        add_executable(iris-consumer main.cpp)
+        target_link_libraries(iris-consumer PRIVATE Iris::Iris)
+        CMAKE
+        cat > consumer/main.cpp <<'CPP'
+        #include <iris/jid/jid.h>
+        int main()
+        {
+            XMPP::Jid jid(QStringLiteral("ci@example.org"));
+            return jid.isValid() ? 0 : 1;
+        }
+        CPP
+        if [ "$RUNNER_OS" = "Windows" ]; then
+          cmake -S consumer -B consumer-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            "-DIris_DIR=$PWD/sdk/lib/cmake/Iris" \
+            "-DQca3-qt6_DIR=$PWD/qca-sdk/lib/cmake/Qca3-qt6"
+        else
+          cmake -S consumer -B consumer-build \
+            -DCMAKE_BUILD_TYPE=Release \
+            "-DIris_DIR=$PWD/sdk/lib/cmake/Iris" \
+            "-DQca3-qt6_DIR=$PWD/qca-sdk/lib/cmake/Qca3-qt6"
+        fi
+        cmake --build consumer-build --config Release --parallel
+
+    - name: Run installed consumer on Windows
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $env:PATH = "$pwd\sdk\bin;$pwd\qca-sdk\bin;$env:QT_ROOT_DIR\bin;$env:PATH"
+        & "$pwd\consumer-build\iris-consumer.exe"
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+    - name: Run installed consumer on macOS
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        DYLD_LIBRARY_PATH="$PWD/sdk/lib:$PWD/qca-sdk/lib:${DYLD_LIBRARY_PATH:-}" \
+          ./consumer-build/iris-consumer
