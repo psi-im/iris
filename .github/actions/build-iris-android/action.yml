@@ -23,6 +23,10 @@ inputs:
   install-prefix:
     description: CMake install prefix
     required: true
+  iris-build-type:
+    description: Iris library type
+    required: false
+    default: shared
 
 outputs:
   ndk-path:
@@ -67,12 +71,18 @@ runs:
         qt_cmake=$(find "$QT_ROOT_DIR" -type f -name qt-cmake -print -quit)
         test -n "$qt_cmake"
         chmod +x "$qt_cmake"
+        if [ "${{ inputs.iris-build-type }}" = "static" ]; then
+          iris_build_args=("-DBUILD_SHARED_LIBS=OFF" "-DIRIS_POSITION_INDEPENDENT_CODE=ON")
+        else
+          iris_build_args=("-DBUILD_SHARED_LIBS=ON")
+        fi
         "$qt_cmake" -S . -B build -G Ninja \
           -DCMAKE_BUILD_TYPE=Release \
           -DCMAKE_INSTALL_PREFIX="${{ inputs.install-prefix }}" \
           -DANDROID_PLATFORM="android-${{ inputs.android-api }}" \
           "-DQca3-qt6_DIR=$PWD/qca-sdk/lib/cmake/Qca3-qt6" \
           -DUSE_QT6=ON \
+          "${iris_build_args[@]}" \
           -DIRIS_SYSTEM_QCA=3 -DIRIS_BUNDLED_QCA=OFF \
           -DIRIS_BUNDLED_USRSCTP=ON
         cmake --build build --parallel

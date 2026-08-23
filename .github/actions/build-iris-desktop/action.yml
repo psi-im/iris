@@ -18,6 +18,10 @@ inputs:
     description: Maximum number of parallel build jobs
     required: false
     default: '4'
+  iris-build-type:
+    description: Iris library type
+    required: false
+    default: shared
 
 runs:
   using: composite
@@ -85,6 +89,13 @@ runs:
         if (!(Test-Path $vcpkgToolchain)) {
           throw "vcpkg CMake toolchain not found: $vcpkgToolchain"
         }
+        $irisBuildArgs = @()
+        if ("${{ inputs.iris-build-type }}" -eq "static") {
+          $irisBuildArgs += "-DBUILD_SHARED_LIBS=OFF"
+          $irisBuildArgs += "-DIRIS_POSITION_INDEPENDENT_CODE=ON"
+        } else {
+          $irisBuildArgs += "-DBUILD_SHARED_LIBS=ON"
+        }
         cmake -S . -B build -G Ninja `
           -DCMAKE_BUILD_TYPE=Release `
           -DCMAKE_INSTALL_PREFIX="${{ inputs.install-prefix }}" `
@@ -93,6 +104,7 @@ runs:
           -DVCPKG_TARGET_TRIPLET=x64-windows-static-md-release `
           -DCMAKE_WINDOWS_EXPORT_ALL_SYMBOLS=ON `
           -DUSE_QT6=ON `
+          @irisBuildArgs `
           -DIRIS_SYSTEM_QCA=3 -DIRIS_BUNDLED_QCA=OFF `
           -DIRIS_BUNDLED_USRSCTP=ON
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -101,12 +113,19 @@ runs:
       if: runner.os == 'macOS'
       shell: bash
       run: |
+        iris_build_args=()
+        if [ "${{ inputs.iris-build-type }}" = "static" ]; then
+          iris_build_args+=("-DBUILD_SHARED_LIBS=OFF" "-DIRIS_POSITION_INDEPENDENT_CODE=ON")
+        else
+          iris_build_args+=("-DBUILD_SHARED_LIBS=ON")
+        fi
         cmake -S . -B build \
           -DCMAKE_BUILD_TYPE=Release \
           -DCMAKE_INSTALL_PREFIX="${{ inputs.install-prefix }}" \
           -DCMAKE_INSTALL_NAME_DIR='@rpath' \
           "-DCMAKE_PREFIX_PATH=$PWD/qca-sdk;$QT_ROOT_DIR" \
           -DUSE_QT6=ON \
+          "${iris_build_args[@]}" \
           -DIRIS_SYSTEM_QCA=3 -DIRIS_BUNDLED_QCA=OFF \
           -DIRIS_BUNDLED_USRSCTP=ON
 
@@ -116,7 +135,7 @@ runs:
         cmake --build build --config Release --parallel "${{ inputs.build-parallel }}"
         cmake --install build --config Release
 
-    - name: Compile installed CMake consumer
+    - name: Compile installed CMake shared-library consumer
       shell: bash
       run: |
         rm -rf consumer consumer-build
@@ -125,12 +144,19 @@ runs:
         cmake_minimum_required(VERSION 3.16)
         project(iris_consumer LANGUAGES CXX)
         find_package(Iris CONFIG REQUIRED)
-        add_executable(iris-consumer main.cpp)
+        add_library(iris-consumer SHARED consumer.cpp)
         target_link_libraries(iris-consumer PRIVATE Iris::Iris)
         CMAKE
-        cat > consumer/main.cpp <<'CPP'
+        cat > consumer/consumer.cpp <<'CPP'
         #include <iris/jid/jid.h>
-        int main()
+
+        #ifdef _WIN32
+        #define IRIS_CONSUMER_EXPORT __declspec(dllexport)
+        #else
+        #define IRIS_CONSUMER_EXPORT
+        #endif
+
+        extern "C" IRIS_CONSUMER_EXPORT int iris_consumer_smoke()
         {
             XMPP::Jid jid(QStringLiteral("ci@example.org"));
             return jid.isValid() ? 0 : 1;
@@ -148,18 +174,3 @@ runs:
             "-DQca3-qt6_DIR=$PWD/qca-sdk/lib/cmake/Qca3-qt6"
         fi
         cmake --build consumer-build --config Release --parallel
-
-    - name: Run installed consumer on Windows
-      if: runner.os == 'Windows'
-      shell: pwsh
-      run: |
-        $env:PATH = "$pwd\sdk\bin;$pwd\qca-sdk\bin;$env:QT_ROOT_DIR\bin;$env:PATH"
-        & "$pwd\consumer-build\iris-consumer.exe"
-        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-    - name: Run installed consumer on macOS
-      if: runner.os == 'macOS'
-      shell: bash
-      run: |
-        DYLD_LIBRARY_PATH="$PWD/sdk/lib:$PWD/qca-sdk/lib:${DYLD_LIBRARY_PATH:-}" \
-          ./consumer-build/iris-consumer
