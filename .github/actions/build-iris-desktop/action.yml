@@ -1,5 +1,5 @@
 name: Build Iris for desktop
-description: Install desktop dependencies, configure, build and install Iris
+description: Install desktop dependencies, configure, build, install and smoke-test Iris
 
 inputs:
   qt-version:
@@ -115,3 +115,51 @@ runs:
       run: |
         cmake --build build --config Release --parallel "${{ inputs.build-parallel }}"
         cmake --install build --config Release
+
+    - name: Compile installed CMake consumer
+      shell: bash
+      run: |
+        rm -rf consumer consumer-build
+        mkdir consumer
+        cat > consumer/CMakeLists.txt <<'CMAKE'
+        cmake_minimum_required(VERSION 3.16)
+        project(iris_consumer LANGUAGES CXX)
+        find_package(Iris CONFIG REQUIRED)
+        add_executable(iris-consumer main.cpp)
+        target_link_libraries(iris-consumer PRIVATE Iris::Iris)
+        CMAKE
+        cat > consumer/main.cpp <<'CPP'
+        #include <iris/jid/jid.h>
+        int main()
+        {
+            XMPP::Jid jid(QStringLiteral("ci@example.org"));
+            return jid.isValid() ? 0 : 1;
+        }
+        CPP
+        if [ "$RUNNER_OS" = "Windows" ]; then
+          cmake -S consumer -B consumer-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            "-DIris_DIR=$PWD/sdk/lib/cmake/Iris" \
+            "-DQca3-qt6_DIR=$PWD/qca-sdk/lib/cmake/Qca3-qt6"
+        else
+          cmake -S consumer -B consumer-build \
+            -DCMAKE_BUILD_TYPE=Release \
+            "-DIris_DIR=$PWD/sdk/lib/cmake/Iris" \
+            "-DQca3-qt6_DIR=$PWD/qca-sdk/lib/cmake/Qca3-qt6"
+        fi
+        cmake --build consumer-build --config Release --parallel
+
+    - name: Run installed consumer on Windows
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $env:PATH = "$pwd\sdk\bin;$pwd\qca-sdk\bin;$env:QT_ROOT_DIR\bin;$env:PATH"
+        & "$pwd\consumer-build\iris-consumer.exe"
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+    - name: Run installed consumer on macOS
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        DYLD_LIBRARY_PATH="$PWD/sdk/lib:$PWD/qca-sdk/lib:${DYLD_LIBRARY_PATH:-}" \
+          ./consumer-build/iris-consumer
