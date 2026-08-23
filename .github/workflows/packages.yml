@@ -143,101 +143,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Qt
-        uses: jurplel/install-qt-action@v4
+      - name: Build and install Iris SDK
+        uses: ./.github/actions/build-iris-desktop
         with:
-          version: ${{ env.QT_VERSION }}
-          cache: true
+          qt-version: ${{ env.QT_VERSION }}
+          platform: ${{ matrix.platform }}
+          qca-tag: ${{ env.QCA_TAG }}
+          install-prefix: ${{ github.workspace }}/sdk
 
-      - name: Download QCA3 SDK
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          mkdir qca-sdk
-          gh release download "$QCA_TAG" --repo psi-im/qca \
-            -p "qca3-qt6-${{ matrix.platform }}.zip" -O qca3.zip
-          (cd qca-sdk && cmake -E tar xvf ../qca3.zip)
-          test -n "$(find qca-sdk -type f \( -name 'Qca3-qt6Config.cmake' -o -name 'qca3-qt6-config.cmake' \) -print -quit)"
-
-      - name: Prepare vcpkg binary cache on Windows
-        if: runner.os == 'Windows'
-        id: vcpkg-cache
-        shell: pwsh
-        run: |
-          $cacheDir = Join-Path $env:RUNNER_TEMP 'vcpkg-binary-cache'
-          New-Item -ItemType Directory -Force -Path $cacheDir | Out-Null
-          "VCPKG_BINARY_SOURCES=clear;files,$cacheDir,readwrite" >> $env:GITHUB_ENV
-          $imageVersion = if ($env:ImageVersion) { $env:ImageVersion } else { 'unknown' }
-          $imageVersion = $imageVersion -replace '[^A-Za-z0-9_.-]', '_'
-          "image=$imageVersion" >> $env:GITHUB_OUTPUT
-
-      - name: Restore vcpkg binary cache on Windows
-        if: runner.os == 'Windows'
-        id: vcpkg-cache-restore
-        uses: actions/cache/restore@v4
-        with:
-          path: ${{ runner.temp }}/vcpkg-binary-cache
-          key: iris-vcpkg-zlib-${{ runner.os }}-${{ runner.arch }}-${{ steps.vcpkg-cache.outputs.image }}-x64-windows-static-v1
-          restore-keys: |
-            iris-vcpkg-zlib-${{ runner.os }}-${{ runner.arch }}-
-
-      - name: Install static zlib on Windows
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          vcpkg install zlib:x64-windows-static
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      - name: Save vcpkg binary cache on Windows
-        if: runner.os == 'Windows' && steps.vcpkg-cache-restore.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: ${{ runner.temp }}/vcpkg-binary-cache
-          key: iris-vcpkg-zlib-${{ runner.os }}-${{ runner.arch }}-${{ steps.vcpkg-cache.outputs.image }}-x64-windows-static-v1
-
-      - name: Configure Windows
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $zlibRoot = Join-Path $env:VCPKG_INSTALLATION_ROOT 'installed\x64-windows-static'
-          $zlibLibrary = Join-Path $zlibRoot 'lib\zlib.lib'
-          $zlibInclude = Join-Path $zlibRoot 'include'
-          if (!(Test-Path $zlibLibrary) -or !(Test-Path (Join-Path $zlibInclude 'zlib.h'))) {
-            throw "Static zlib installation is incomplete: $zlibRoot"
-          }
-          cmake -S . -B build `
-            -DCMAKE_BUILD_TYPE=Release `
-            -DCMAKE_INSTALL_PREFIX="$pwd/sdk" `
-            "-DCMAKE_PREFIX_PATH=$pwd/qca-sdk;$env:QT_ROOT_DIR" `
-            "-DZLIB_LIBRARY=$zlibLibrary" `
-            "-DZLIB_INCLUDE_DIR=$zlibInclude" `
-            -DZLIB_USE_STATIC_LIBS=ON `
-            -DCMAKE_WINDOWS_EXPORT_ALL_SYMBOLS=ON `
-            -DUSE_QT6=ON `
-            -DIRIS_SYSTEM_QCA=3 -DIRIS_BUNDLED_QCA=OFF `
-            -DIRIS_BUNDLED_USRSCTP=ON
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      - name: Configure macOS
-        if: runner.os == 'macOS'
+      - name: Stage SDK licenses
         shell: bash
         run: |
-          cmake -S . -B build \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX="$PWD/sdk" \
-            -DCMAKE_INSTALL_NAME_DIR='@rpath' \
-            "-DCMAKE_PREFIX_PATH=$PWD/qca-sdk;$QT_ROOT_DIR" \
-            -DUSE_QT6=ON \
-            -DIRIS_SYSTEM_QCA=3 -DIRIS_BUNDLED_QCA=OFF \
-            -DIRIS_BUNDLED_USRSCTP=ON
-
-      - name: Build and install SDK
-        shell: bash
-        run: |
-          cmake --build build --config Release --parallel
-          cmake --install build --config Release
           mkdir -p sdk/share/licenses/iris
           cp COPYING sdk/share/licenses/iris/COPYING
           license=$(find build/_deps/usrsctp -type f -name LICENSE.md -print -quit)
@@ -309,51 +225,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Android NDK
-        id: setup-ndk
-        uses: nttld/setup-ndk@v1
+      - name: Build and install Iris SDK
+        id: build-iris
+        uses: ./.github/actions/build-iris-android
         with:
+          qt-version: ${{ env.QT_VERSION }}
+          qt-arch: ${{ matrix.qt_arch }}
+          abi: ${{ matrix.abi }}
           ndk-version: ${{ env.ANDROID_NDK_VERSION }}
+          android-api: ${{ env.ANDROID_API }}
+          qca-tag: ${{ env.QCA_TAG }}
+          install-prefix: ${{ github.workspace }}/sdk
 
-      - name: Install Qt
-        uses: jurplel/install-qt-action@v4
-        with:
-          version: ${{ env.QT_VERSION }}
-          target: android
-          arch: ${{ matrix.qt_arch }}
-          cache: true
-
-      - name: Download QCA3 SDK
+      - name: Stage SDK licenses
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
-          mkdir qca-sdk
-          gh release download "$QCA_TAG" --repo psi-im/qca \
-            -p "qca3-qt6-android-${{ matrix.abi }}.zip" -O qca3.zip
-          (cd qca-sdk && cmake -E tar xvf ../qca3.zip)
-          test -n "$(find qca-sdk -type f \( -name 'Qca3-qt6Config.cmake' -o -name 'qca3-qt6-config.cmake' \) -print -quit)"
-
-      - name: Build and install SDK
-        shell: bash
-        env:
-          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
-        run: |
-          qt_cmake=$(find "$QT_ROOT_DIR" -type f -name qt-cmake -print -quit)
-          test -n "$qt_cmake"
-          chmod +x "$qt_cmake"
-          "$qt_cmake" -S . -B build -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX="$PWD/sdk" \
-            -DANDROID_PLATFORM="android-$ANDROID_API" \
-            "-DQca3-qt6_DIR=$PWD/qca-sdk/lib/cmake/Qca3-qt6" \
-            -DUSE_QT6=ON \
-            -DIRIS_SYSTEM_QCA=3 -DIRIS_BUNDLED_QCA=OFF \
-            -DIRIS_BUNDLED_USRSCTP=ON
-          cmake --build build --parallel
-          cmake --install build
-
           mkdir -p sdk/share/licenses/iris
           cp COPYING sdk/share/licenses/iris/COPYING
           license=$(find build/_deps/usrsctp -type f -name LICENSE.md -print -quit)
@@ -368,7 +254,7 @@ jobs:
       - name: Compile installed CMake consumer
         shell: bash
         env:
-          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_NDK_ROOT: ${{ steps.build-iris.outputs.ndk-path }}
         run: |
           mkdir consumer
           cat > consumer/CMakeLists.txt <<'CMAKE'
