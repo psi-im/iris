@@ -18,6 +18,10 @@ inputs:
     description: Maximum number of parallel build jobs
     required: false
     default: '4'
+  iris-build-type:
+    description: Iris library type
+    required: false
+    default: shared
 
 runs:
   using: composite
@@ -85,6 +89,13 @@ runs:
         if (!(Test-Path $vcpkgToolchain)) {
           throw "vcpkg CMake toolchain not found: $vcpkgToolchain"
         }
+        $irisBuildArgs = @()
+        if ("${{ inputs.iris-build-type }}" -eq "static") {
+          $irisBuildArgs += "-DBUILD_SHARED_LIBS=OFF"
+          $irisBuildArgs += "-DIRIS_POSITION_INDEPENDENT_CODE=ON"
+        } else {
+          $irisBuildArgs += "-DBUILD_SHARED_LIBS=ON"
+        }
         cmake -S . -B build -G Ninja `
           -DCMAKE_BUILD_TYPE=Release `
           -DCMAKE_INSTALL_PREFIX="${{ inputs.install-prefix }}" `
@@ -93,6 +104,7 @@ runs:
           -DVCPKG_TARGET_TRIPLET=x64-windows-static-md-release `
           -DCMAKE_WINDOWS_EXPORT_ALL_SYMBOLS=ON `
           -DUSE_QT6=ON `
+          @irisBuildArgs `
           -DIRIS_SYSTEM_QCA=3 -DIRIS_BUNDLED_QCA=OFF `
           -DIRIS_BUNDLED_USRSCTP=ON
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -101,12 +113,19 @@ runs:
       if: runner.os == 'macOS'
       shell: bash
       run: |
+        iris_build_args=()
+        if [ "${{ inputs.iris-build-type }}" = "static" ]; then
+          iris_build_args+=("-DBUILD_SHARED_LIBS=OFF" "-DIRIS_POSITION_INDEPENDENT_CODE=ON")
+        else
+          iris_build_args+=("-DBUILD_SHARED_LIBS=ON")
+        fi
         cmake -S . -B build \
           -DCMAKE_BUILD_TYPE=Release \
           -DCMAKE_INSTALL_PREFIX="${{ inputs.install-prefix }}" \
           -DCMAKE_INSTALL_NAME_DIR='@rpath' \
           "-DCMAKE_PREFIX_PATH=$PWD/qca-sdk;$QT_ROOT_DIR" \
           -DUSE_QT6=ON \
+          "${iris_build_args[@]}" \
           -DIRIS_SYSTEM_QCA=3 -DIRIS_BUNDLED_QCA=OFF \
           -DIRIS_BUNDLED_USRSCTP=ON
 
