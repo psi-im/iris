@@ -113,7 +113,7 @@ jobs:
           runtime_so=$(find work/runtime -type f -name 'libiris-qt6.so.*' -print -quit)
           test -n "$runtime_so"
           runtime_depends=$(
-            dpkg-shlibdeps --package=libiris-qt6-1 --ignore-missing-info -O "$runtime_so" \
+            dpkg-shlibdeps --ignore-missing-info -O "$runtime_so" \
               | sed -n 's/^shlibs:Depends=//p'
           )
           test -n "$runtime_depends"
