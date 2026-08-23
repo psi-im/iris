@@ -92,8 +92,11 @@ jobs:
             iris-qt6-macos-arm64
             iris-qt6-macos-x86_64
             iris-qt6-android-arm64-v8a
+            iris-qt6-android-arm64-v8a-symbols
             iris-qt6-android-x86_64
+            iris-qt6-android-x86_64-symbols
             iris-qt6-android-x86
+            iris-qt6-android-x86-symbols
           )
 
           load_runs() {
@@ -214,8 +217,11 @@ jobs:
             iris-qt6-macos-arm64
             iris-qt6-macos-x86_64
             iris-qt6-android-arm64-v8a
+            iris-qt6-android-arm64-v8a-symbols
             iris-qt6-android-x86_64
+            iris-qt6-android-x86_64-symbols
             iris-qt6-android-x86
+            iris-qt6-android-x86-symbols
           )
 
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/artifacts?per_page=100" \
@@ -238,8 +244,8 @@ jobs:
           done
 
           count=$(find release-assets -maxdepth 1 -type f -name '*.zip' | wc -l)
-          if [[ "$count" -ne 8 ]]; then
-            echo "::error::Expected 8 release archives, found $count"
+          if [[ "$count" -ne 11 ]]; then
+            echo "::error::Expected 11 release archives, found $count"
             exit 1
           fi
 

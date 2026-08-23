@@ -231,6 +231,7 @@ jobs:
           android-api: ${{ env.ANDROID_API }}
           qca-tag: ${{ env.QCA_TAG }}
           install-prefix: ${{ github.workspace }}/sdk
+          build-type: RelWithDebInfo
 
       - name: Stage SDK licenses
         shell: bash
@@ -245,6 +246,35 @@ jobs:
             echo 'Iris SDK unexpectedly contains a private dependency library' >&2
             exit 1
           fi
+
+      - name: Extract Android debug symbols and strip SDK
+        shell: bash
+        env:
+          ANDROID_NDK_ROOT: ${{ steps.build-iris.outputs.ndk-path }}
+        run: |
+          set -euo pipefail
+          toolchain_bin="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          llvm_objcopy="$toolchain_bin/llvm-objcopy"
+          llvm_strip="$toolchain_bin/llvm-strip"
+          test -x "$llvm_objcopy"
+          test -x "$llvm_strip"
+
+          rm -rf symbols
+          mkdir -p symbols
+          while IFS= read -r -d '' lib; do
+            rel=${lib#sdk/}
+            debug="symbols/${rel}.debug"
+            mkdir -p "$(dirname "$debug")"
+            "$llvm_objcopy" --only-keep-debug "$lib" "$debug"
+            "$llvm_strip" --strip-unneeded "$lib"
+            "$llvm_objcopy" --add-gnu-debuglink="$debug" "$lib"
+            test -s "$debug"
+            if readelf -S "$lib" | grep -q '\.debug_'; then
+              echo "Debug sections remain after stripping: $lib" >&2
+              exit 1
+            fi
+          done < <(find sdk -type f \( -name '*.so' -o -name '*.so.*' \) -print0)
+          test -n "$(find symbols -type f -name '*.debug' -print -quit)"
 
       - name: Compile installed CMake consumer
         shell: bash
@@ -279,4 +309,10 @@ jobs:
         with:
           name: iris-qt6-android-${{ matrix.abi }}
           path: sdk/
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: iris-qt6-android-${{ matrix.abi }}-symbols
+          path: symbols/
           if-no-files-found: error

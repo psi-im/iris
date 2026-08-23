@@ -27,6 +27,10 @@ inputs:
     description: Iris library type
     required: false
     default: shared
+  build-type:
+    description: CMake build type
+    required: false
+    default: Release
 
 outputs:
   ndk-path:
@@ -77,7 +81,7 @@ runs:
           iris_build_args=("-DBUILD_SHARED_LIBS=ON")
         fi
         "$qt_cmake" -S . -B build -G Ninja \
-          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_BUILD_TYPE="${{ inputs.build-type }}" \
           -DCMAKE_INSTALL_PREFIX="${{ inputs.install-prefix }}" \
           -DANDROID_PLATFORM="android-${{ inputs.android-api }}" \
           "-DQca3-qt6_DIR=$PWD/qca-sdk/lib/cmake/Qca3-qt6" \
