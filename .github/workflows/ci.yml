@@ -224,7 +224,7 @@ jobs:
             "-DCMAKE_PREFIX_PATH=$PWD/qca-sdk;$QT_ROOT_DIR" \
             -DUSE_QT6=ON \
             -DIRIS_SYSTEM_QCA=3 -DIRIS_BUNDLED_QCA=OFF \
-            -DIRIS_BUNDLED_USRSCTRP=ON
+            -DIRIS_BUNDLED_USRSCTP=ON
 
       - name: Build and install
         shell: bash
