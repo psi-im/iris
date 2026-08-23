@@ -30,7 +30,7 @@ jobs:
         shell: bash
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build qt6-base-dev zlib1g-dev libusrsctp-dev
+          sudo apt-get install -y cmake ninja-build dpkg-dev qt6-base-dev zlib1g-dev libusrsctp-dev
 
       - name: Install QCA3 release packages
         shell: bash
@@ -92,8 +92,36 @@ jobs:
             dpkg-deb --build --root-owner-group "$dir" "debs/${pkg}_${version}_${arch}.deb"
           }
 
+          # Let dpkg resolve distro-specific runtime package names from the
+          # actual linked library. QCA3 is our own package and does not yet
+          # ship Debian shlibs metadata, so append it explicitly.
+          mkdir -p debian
+          cat > debian/control <<CTRL
+          Source: iris
+          Section: libs
+          Priority: optional
+          Maintainer: Psi IM developers
+          Standards-Version: 4.6.2
+
+          Package: libiris-qt6-1
+          Architecture: any
+          Depends: \${shlibs:Depends}
+          Description: Iris Qt6 XMPP runtime library
+           Iris Qt6 XMPP runtime library
+          CTRL
+
+          runtime_so=$(find work/runtime -type f -name 'libiris-qt6.so.*' -print -quit)
+          test -n "$runtime_so"
+          runtime_depends=$(
+            dpkg-shlibdeps --package=libiris-qt6-1 --ignore-missing-info -O "$runtime_so" \
+              | sed -n 's/^shlibs:Depends=//p'
+          )
+          test -n "$runtime_depends"
+          runtime_depends="$runtime_depends, libqca3-qt6-3"
+          echo "Runtime dependencies: $runtime_depends"
+
           make_deb work/runtime libiris-qt6-1 \
-            'libqt6core6t64, libqt6gui6t64, libqt6network6t64, libqt6xml6t64, libqca3-qt6-3, libusrsctp2, zlib1g, libc6, libstdc++6, libgcc-s1' \
+            "$runtime_depends" \
             'Iris Qt6 XMPP runtime library'
           make_deb work/dev libiris-qt6-dev \
             "libiris-qt6-1 (= $version), libqca3-qt6-dev, qt6-base-dev, libusrsctp-dev" \
