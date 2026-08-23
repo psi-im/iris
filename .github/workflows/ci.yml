@@ -229,7 +229,7 @@ jobs:
       - name: Build and install
         shell: bash
         run: |
-          cmake --build build --config Release --parallel 3
+          cmake --build build --config Release --parallel 4
           cmake --install build --config Release
 
       - name: Compile installed CMake consumer
