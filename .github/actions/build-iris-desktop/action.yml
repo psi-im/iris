@@ -150,8 +150,11 @@ runs:
         target_link_libraries(iris-consumer PRIVATE Iris::Iris)
         CMAKE
         cat > consumer/consumer.cpp <<'CPP'
+        #include <iris/jingle-ft.h>
         #include <iris/jid/jid.h>
+        #include <iris/tcpportreserver.h>
         #include <iris/xmpp_omemo.h>
+        #include <iris/xmpp_task.h>
 
         #ifdef _WIN32
         #define IRIS_CONSUMER_EXPORT __declspec(dllexport)
@@ -162,7 +165,11 @@ runs:
         extern "C" IRIS_CONSUMER_EXPORT int iris_consumer_smoke()
         {
             XMPP::Jid jid(QStringLiteral("ci@example.org"));
-            return jid.isValid() && !XMPP::OmemoEncryption::methodId().isEmpty() ? 0 : 1;
+            XMPP::TcpPortReserver reserver;
+            const bool publicApiAvailable = XMPP::Task::staticMetaObject.className()[0] != '\0'
+                && reserver.scope(QStringLiteral("ci")) == nullptr
+                && !XMPP::Jingle::FileTransfer::NS.isEmpty();
+            return jid.isValid() && !XMPP::OmemoEncryption::methodId().isEmpty() && publicApiAvailable ? 0 : 1;
         }
         CPP
         if [ "$RUNNER_OS" = "Windows" ]; then
