@@ -106,6 +106,7 @@ runs:
           -DUSE_QT6=ON `
           @irisBuildArgs `
           -DIRIS_SYSTEM_QCA=3 -DIRIS_BUNDLED_QCA=OFF `
+          -DIRIS_ENABLE_OMEMO=ON -DIRIS_BUNDLED_OMEMO_C=ON `
           -DIRIS_BUNDLED_USRSCTP=ON
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
@@ -127,6 +128,7 @@ runs:
           -DUSE_QT6=ON \
           "${iris_build_args[@]}" \
           -DIRIS_SYSTEM_QCA=3 -DIRIS_BUNDLED_QCA=OFF \
+          -DIRIS_ENABLE_OMEMO=ON -DIRIS_BUNDLED_OMEMO_C=ON \
           -DIRIS_BUNDLED_USRSCTP=ON
 
     - name: Build and install Iris
@@ -149,6 +151,7 @@ runs:
         CMAKE
         cat > consumer/consumer.cpp <<'CPP'
         #include <iris/jid/jid.h>
+        #include <iris/xmpp_omemo.h>
 
         #ifdef _WIN32
         #define IRIS_CONSUMER_EXPORT __declspec(dllexport)
@@ -159,7 +162,7 @@ runs:
         extern "C" IRIS_CONSUMER_EXPORT int iris_consumer_smoke()
         {
             XMPP::Jid jid(QStringLiteral("ci@example.org"));
-            return jid.isValid() ? 0 : 1;
+            return jid.isValid() && !XMPP::OmemoEncryption::methodId().isEmpty() ? 0 : 1;
         }
         CPP
         if [ "$RUNNER_OS" = "Windows" ]; then

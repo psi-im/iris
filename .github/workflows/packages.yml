@@ -30,7 +30,7 @@ jobs:
         shell: bash
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build dpkg-dev qt6-base-dev zlib1g-dev libusrsctp-dev
+          sudo apt-get install -y cmake ninja-build dpkg-dev qt6-base-dev zlib1g-dev libusrsctp-dev libomemo-c-dev
 
       - name: Install QCA3 release packages
         shell: bash
@@ -53,6 +53,7 @@ jobs:
             -DCMAKE_INSTALL_PREFIX=/usr \
             -DUSE_QT6=ON \
             -DIRIS_SYSTEM_QCA=3 -DIRIS_BUNDLED_QCA=OFF \
+            -DIRIS_ENABLE_OMEMO=ON -DIRIS_BUNDLED_OMEMO_C=OFF \
             -DIRIS_BUNDLED_USRSCTP=OFF
           cmake --build build --parallel
           DESTDIR="$PWD/stage" cmake --install build
@@ -146,10 +147,11 @@ jobs:
           CMAKE
           cat > consumer/main.cpp <<'CPP'
           #include <iris/jid/jid.h>
+          #include <iris/xmpp_omemo.h>
           int main()
           {
               XMPP::Jid jid(QStringLiteral("package@example.org"));
-              return jid.isValid() ? 0 : 1;
+              return jid.isValid() && !XMPP::OmemoEncryption::methodId().isEmpty() ? 0 : 1;
           }
           CPP
           cmake -S consumer -B consumer-build -G Ninja
@@ -291,10 +293,11 @@ jobs:
           CMAKE
           cat > consumer/main.cpp <<'CPP'
           #include <iris/jid/jid.h>
+          #include <iris/xmpp_omemo.h>
           extern "C" int iris_consumer_smoke()
           {
               XMPP::Jid jid(QStringLiteral("package@example.org"));
-              return jid.isValid() ? 0 : 1;
+              return jid.isValid() && !XMPP::OmemoEncryption::methodId().isEmpty() ? 0 : 1;
           }
           CPP
           qt_cmake=$(find "$QT_ROOT_DIR" -type f -name qt-cmake -print -quit)

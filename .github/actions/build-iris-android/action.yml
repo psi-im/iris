@@ -88,6 +88,9 @@ runs:
           -DUSE_QT6=ON \
           "${iris_build_args[@]}" \
           -DIRIS_SYSTEM_QCA=3 -DIRIS_BUNDLED_QCA=OFF \
+          -DIRIS_ENABLE_OMEMO=ON -DIRIS_BUNDLED_OMEMO_C=ON \
           -DIRIS_BUNDLED_USRSCTP=ON
         cmake --build build --parallel
         cmake --install build
+        test -f "${{ inputs.install-prefix }}/include/iris/xmpp_omemo.h"
+        test -f "${{ inputs.install-prefix }}/include/iris/xmpp-im/xmpp_omemo.h"
