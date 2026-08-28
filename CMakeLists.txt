@@ -50,10 +50,13 @@ set(CMAKE_CXX_STANDARD 20)
 # Windows headers may be pulled in through Qt or either supported QCA
 # generation.  Iris uses std::numeric_limits<T>::min(), which conflicts with
 # the legacy min macro unless NOMINMAX is defined before windows.h is read.
-# WIN32_LEAN_AND_MEAN also prevents windows.h from selecting legacy winsock.h;
-# Iris uses winsock2.h where socket declarations are needed.
+# WIN32_LEAN_AND_MEAN also prevents windows.h from selecting legacy winsock.h.
+# Native MinGW therefore needs winsock2.h preincluded before any windows.h use.
 if(WIN32)
     add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN)
+    if(MINGW)
+        add_compile_options(-include winsock2.h)
+    endif()
 endif()
 
 # irisnet, stringprep and other internal static libraries must be PIC when
