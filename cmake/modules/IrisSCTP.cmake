@@ -4,8 +4,8 @@ set(IRIS_USRSCTP_GIT_REPO "https://github.com/sctplab/usrsctp.git")
 set(IRIS_USRSCTP_GIT_TAG fd070e05a7474f38c7fecdf4d4b6005d2547ee00)
 
 include(GNUInstallDirs)
-if(USE_MXE AND STDINT_FOUND)
-    # Add SCTP_STDINT_INCLUDE definition to compile irisnet with usrsctp with MinGW
+if((USE_MXE OR (WIN32 AND MINGW)) AND STDINT_FOUND)
+    # MinGW usrsctp requires an explicit fixed-width integer header.
     add_definitions(
         -DSCTP_STDINT_INCLUDE="${STDINT_INCLUDE}"
     )
