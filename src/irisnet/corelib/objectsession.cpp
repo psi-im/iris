@@ -29,7 +29,7 @@ namespace XMPP {
 namespace {
 const char *argumentName(const ObjectSessionArgument &arg)
 {
-#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+#if QT_VERSION < QT_VERSION_CHECK(6, 5, 0)
     return arg.name();
 #else
     return arg.name;
@@ -38,7 +38,7 @@ const char *argumentName(const ObjectSessionArgument &arg)
 
 const void *argumentData(const ObjectSessionArgument &arg)
 {
-#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+#if QT_VERSION < QT_VERSION_CHECK(6, 5, 0)
     return arg.data();
 #else
     return arg.data;
