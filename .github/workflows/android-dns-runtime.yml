@@ -1,0 +1,213 @@
+name: Android DNS runtime smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Iris branch, tag, or commit to test
+        required: true
+        default: master
+        type: string
+      api_level:
+        description: Android API level to run
+        required: true
+        default: both
+        type: choice
+        options:
+          - both
+          - '28'
+          - '30'
+
+permissions:
+  contents: read
+
+env:
+  QT_VERSION: 6.10.2
+  QCA_TAG: v3.0.1
+  ANDROID_NDK_VERSION: r27c
+  ANDROID_MIN_API: 28
+
+jobs:
+  build:
+    name: Build x86_64 smoke APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Build and install Iris
+        id: build-iris
+        uses: ./.github/actions/build-iris-android
+        with:
+          qt-version: ${{ env.QT_VERSION }}
+          qt-arch: android_x86_64
+          abi: x86_64
+          ndk-version: ${{ env.ANDROID_NDK_VERSION }}
+          android-api: ${{ env.ANDROID_MIN_API }}
+          qca-tag: ${{ env.QCA_TAG }}
+          install-prefix: ${{ github.workspace }}/sdk
+
+      - name: Build DNS smoke APK
+        shell: bash
+        env:
+          ANDROID_NDK_ROOT: ${{ steps.build-iris.outputs.ndk-path }}
+        run: |
+          set -euo pipefail
+          smoke_src="$RUNNER_TEMP/iris-dns-smoke"
+          mkdir -p "$smoke_src"
+
+          cat > "$smoke_src/CMakeLists.txt" <<'CMAKE'
+          cmake_minimum_required(VERSION 3.19)
+          project(iris_android_dns_smoke LANGUAGES CXX)
+
+          find_package(Qt6 REQUIRED COMPONENTS Core Network)
+          find_package(Iris CONFIG REQUIRED)
+
+          qt_standard_project_setup()
+          qt_add_executable(iris_dns_smoke main.cpp)
+          target_link_libraries(iris_dns_smoke PRIVATE Qt6::Core Qt6::Network Iris::Iris)
+          set_target_properties(iris_dns_smoke PROPERTIES
+              QT_ANDROID_PACKAGE_NAME org.psiim.iris.dnssmoke
+              QT_ANDROID_MIN_SDK_VERSION 28
+          )
+          qt_add_android_permission(iris_dns_smoke NAME android.permission.INTERNET)
+          qt_add_android_permission(iris_dns_smoke NAME android.permission.ACCESS_NETWORK_STATE)
+          CMAKE
+
+          cat > "$smoke_src/main.cpp" <<'CPP'
+          #include <iris/netnames.h>
+
+          #include <QCoreApplication>
+          #include <QDebug>
+          #include <QTimer>
+
+          int main(int argc, char **argv)
+          {
+              QCoreApplication app(argc, argv);
+              XMPP::NameResolver resolver;
+              QTimer timeout;
+              timeout.setSingleShot(true);
+
+              QObject::connect(&resolver, &XMPP::NameResolver::resultsReady,
+                               [&](const QList<XMPP::NameRecord> &results) {
+                  bool foundSrv = false;
+                  for (const XMPP::NameRecord &record : results) {
+                      if (record.type() != XMPP::NameRecord::Srv)
+                          continue;
+                      foundSrv = true;
+                      qInfo().noquote() << "IRIS_DNS_SRV"
+                                        << QString::fromLatin1(record.name())
+                                        << "port=" << record.port()
+                                        << "priority=" << record.priority()
+                                        << "weight=" << record.weight();
+                  }
+
+                  if (foundSrv) {
+                      qInfo() << "IRIS_DNS_SMOKE_OK";
+                      QCoreApplication::exit(0);
+                  } else {
+                      qCritical() << "IRIS_DNS_SMOKE_FAIL no SRV records";
+                      QCoreApplication::exit(2);
+                  }
+              });
+
+              QObject::connect(&resolver, &XMPP::NameResolver::error,
+                               [&](XMPP::NameResolver::Error error) {
+                  qCritical() << "IRIS_DNS_SMOKE_FAIL resolver error" << int(error);
+                  QCoreApplication::exit(3);
+              });
+
+              QObject::connect(&timeout, &QTimer::timeout, [&] {
+                  qCritical() << "IRIS_DNS_SMOKE_FAIL timeout";
+                  resolver.stop();
+                  QCoreApplication::exit(4);
+              });
+
+              QTimer::singleShot(0, [&] {
+                  qInfo() << "IRIS_DNS_SMOKE_START _xmpp-client._tcp.psi-im.org";
+                  timeout.start(30000);
+                  resolver.start("_xmpp-client._tcp.psi-im.org", XMPP::NameRecord::Srv);
+              });
+
+              return app.exec();
+          }
+          CPP
+
+          qt_cmake=$(find "$QT_ROOT_DIR" -type f -name qt-cmake -print -quit)
+          test -n "$qt_cmake"
+          "$qt_cmake" -S "$smoke_src" -B smoke-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DANDROID_PLATFORM="android-$ANDROID_MIN_API" \
+            "-DIris_DIR=$PWD/sdk/lib/cmake/Iris" \
+            "-DQca3-qt6_DIR=$PWD/qca-sdk/lib/cmake/Qca3-qt6"
+          cmake --build smoke-build --target iris_dns_smoke_make_apk --parallel
+
+          apk=$(find smoke-build -type f -name '*.apk' -print -quit)
+          test -n "$apk"
+          mkdir -p artifact
+          cp "$apk" artifact/iris-dns-smoke.apk
+          ls -lh artifact/iris-dns-smoke.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: iris-dns-smoke-apk
+          path: artifact/iris-dns-smoke.apk
+          if-no-files-found: error
+
+  runtime:
+    name: Android API ${{ matrix.api_level }} SRV lookup
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        api_level: ${{ fromJSON(inputs.api_level == 'both' && '[28,30]' || format('[{0}]', inputs.api_level)) }}
+    steps:
+      - name: Enable KVM
+        shell: bash
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: iris-dns-smoke-apk
+          path: artifact
+
+      - name: Resolve XMPP SRV on emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api_level }}
+          target: default
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: |
+            set -eu
+            apk="artifact/iris-dns-smoke.apk"
+            adb logcat -c
+            adb install -r "$apk"
+            adb shell monkey -p org.psiim.iris.dnssmoke -c android.intent.category.LAUNCHER 1 >/dev/null
+
+            i=0
+            while [ "$i" -lt 45 ]; do
+              logs="$(adb logcat -d -v brief | grep -E 'IRIS_DNS_(SMOKE|SRV)' || true)"
+              if echo "$logs" | grep -q 'IRIS_DNS_SMOKE_OK'; then
+                echo "$logs"
+                exit 0
+              fi
+              if echo "$logs" | grep -q 'IRIS_DNS_SMOKE_FAIL'; then
+                echo "$logs"
+                exit 1
+              fi
+              sleep 1
+              i=$((i + 1))
+            done
+
+            echo 'Timed out waiting for Iris DNS smoke marker.'
+            adb logcat -d -v brief | tail -n 200
+            exit 1
