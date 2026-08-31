@@ -1,7 +1,7 @@
 include_guard(GLOBAL)
 
 set(IRIS_JDNS_GIT_TAG
-    "ec72215761723c355e610d62c13f1c85ef8e3da3"
+    "0357d0eebce7f50521350269d8461580e415a6c3"
     CACHE STRING "JDNS revision used by Iris on Android")
 
 function(iris_configure_jdns)
