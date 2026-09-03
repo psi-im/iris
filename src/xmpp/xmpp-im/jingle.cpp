@@ -399,40 +399,6 @@ namespace XMPP { namespace Jingle {
             if (iq.tagName() != QLatin1String("iq"))
                 return false;
 
-            // XEP-0358: a requester asks the publisher to initiate a previously
-            // advertised Jingle session. This is an IQ-get, unlike normal Jingle.
-            if (iq.attribute(QLatin1String("type")) == QLatin1String("get")) {
-                auto start = childElementsByTagNameNS(iq, JINGLEPUB_NS, QStringLiteral("start")).item(0).toElement();
-                if (!start.isNull()) {
-                    const Jid  requester(iq.attribute(QStringLiteral("from")));
-                    const auto publicationId = start.attribute(QStringLiteral("id"));
-                    auto       manager       = client()->jingleManager();
-                    if (publicationId.isEmpty() || !manager->publishedSession(publicationId).isValid()) {
-                        respondError(iq, Stanza::Error::ErrorType::Modify, Stanza::Error::ErrorCond::NotAcceptable);
-                        return true;
-                    }
-                    if (!manager->isAllowedParty(requester)) {
-                        respondError(iq, Stanza::Error::ErrorType::Auth, Stanza::Error::ErrorCond::Forbidden);
-                        return true;
-                    }
-                    auto session = manager->startPublishedSession(requester, publicationId);
-                    if (!session || session->sid().isEmpty()) {
-                        respondError(iq, Stanza::Error::ErrorType::Cancel,
-                                     Stanza::Error::ErrorCond::ServiceUnavailable);
-                        return true;
-                    }
-                    auto resp
-                        = createIQ(client()->doc(), "result", requester.full(), iq.attribute(QStringLiteral("id")));
-                    auto starting = client()->doc()->createElementNS(JINGLEPUB_NS, QStringLiteral("starting"));
-                    starting.setAttribute(QStringLiteral("sid"), session->sid());
-                    resp.appendChild(starting);
-                    client()->send(resp);
-                    QTimer::singleShot(0, session, [session]() { session->initiate(); });
-                    return true;
-                }
-                return false;
-            }
-
             if (iq.attribute(QLatin1String("type")) != QLatin1String("set"))
                 return false;
 
@@ -586,12 +552,8 @@ namespace XMPP { namespace Jingle {
         Jid                                   redirectionJid;
         std::optional<XMPP::Stanza::Error>    lastError;
         QHash<QPair<Jid, QString>, Session *> sessions;
-        struct Published {
-            JinglePub               publication;
-            PublishedSessionFactory factory;
-        };
-        QHash<QString, Published> publishedSessions;
-        int                       maxSessions = -1; // no limit
+        std::unique_ptr<PublicationManager>   publicationManager;
+        int                                   maxSessions = -1; // no limit
 
         void setupSession(Session *s)
         {
@@ -605,6 +567,7 @@ namespace XMPP { namespace Jingle {
         d->client  = client;
         d->manager = this;
         d->pushTask.reset(new JTPush(client->rootTask()));
+        d->publicationManager = std::make_unique<PublicationManager>(this);
         /*
         static bool mtReg = false;
         if (!mtReg) {
@@ -624,6 +587,8 @@ namespace XMPP { namespace Jingle {
     }
 
     Client *Manager::client() const { return d->client; }
+
+    PublicationManager *Manager::publicationManager() const { return d->publicationManager.get(); }
 
     void Manager::addExternalManager(const QString &ns) { d->pushTask->addExternalManager(ns); }
 
@@ -728,72 +693,35 @@ namespace XMPP { namespace Jingle {
 
     QStringList Manager::discoFeatures() const
     {
-        QStringList ret { JINGLEPUB_NS };
+        QStringList ret = d->publicationManager->discoFeatures();
         for (auto const &mgr : d->applicationManagers) {
             ret += mgr.second->discoFeatures();
         }
         for (auto const &mgr : d->transportManagers) {
             ret += mgr.second->discoFeatures();
         }
+        ret.removeDuplicates();
         return ret;
     }
 
     JinglePub Manager::registerPublishedSession(JinglePub publication, PublishedSessionFactory factory)
     {
-        if (!factory)
-            return {};
-        if (!publication.from().isValid())
-            publication.setFrom(d->client->jid());
-        if (publication.id().isEmpty()) {
-            QString id;
-            do {
-                id = QString::number(QRandomGenerator::global()->generate64(), 16);
-            } while (d->publishedSessions.contains(id));
-            publication.setId(id);
-        }
-        if (!publication.isValid())
-            return {};
-        const auto localJid = d->client->jid();
-        if (!publication.from().compare(localJid, false)
-            || (!publication.from().resource().isEmpty() && !publication.from().compare(localJid)))
-            return {};
-        if (d->publishedSessions.contains(publication.id()))
-            return {};
-        d->publishedSessions.insert(publication.id(), Private::Published { publication, std::move(factory) });
-        return publication;
+        return d->publicationManager->registerPublishedSession(std::move(publication), std::move(factory));
     }
 
-    void Manager::unregisterPublishedSession(const QString &id) { d->publishedSessions.remove(id); }
-
-    JinglePub Manager::publishedSession(const QString &id) const
+    void Manager::unregisterPublishedSession(const QString &id)
     {
-        auto it = d->publishedSessions.constFind(id);
-        return it == d->publishedSessions.cend() ? JinglePub() : it->publication;
+        d->publicationManager->unregisterPublishedSession(id);
     }
+
+    JinglePub Manager::publishedSession(const QString &id) const { return d->publicationManager->publishedSession(id); }
 
     PublishedSessionRequest *Manager::requestPublishedSession(const Jid &publisher, const QString &id, QObject *parent)
     {
-        return new PublishedSessionRequest(this, publisher, id, parent ? parent : this);
+        return d->publicationManager->requestPublishedSession(publisher, id, parent ? parent : this);
     }
 
-    Session *Manager::startPublishedSession(const Jid &requester, const QString &id)
-    {
-        auto it = d->publishedSessions.find(id);
-        if (it == d->publishedSessions.end() || !isAllowedParty(requester))
-            return nullptr;
-        Session *session = it->factory(requester);
-        if (!session || session->manager() != this || session->role() != Origin::Initiator
-            || !session->peer().compare(requester)) {
-            if (session && session->manager() == this)
-                session->deleteLater();
-            return nullptr;
-        }
-        if (session->reserveSid().isEmpty()) {
-            session->deleteLater();
-            return nullptr;
-        }
-        return session;
-    }
+    void Manager::clientPresenceAvailable() { d->publicationManager->clientPresenceAvailable(); }
 
     Session *Manager::incomingSessionInitiate(const Jid &from, const Jingle &jingle, const QDomElement &jingleEl)
     {

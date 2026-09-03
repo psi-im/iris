@@ -1240,6 +1240,12 @@ void Client::setPresence(const Status &s)
     j->pres(s);
     j->go(true);
 
+    // PEP node+notify subscriptions are established by available presence.
+    // Start XEP-0358 authority snapshots only after that stanza has been
+    // queued, so live catalog events cannot normally precede the subscription.
+    if (s.isAvailable())
+        d->jingleManager->clientPresenceAvailable();
+
     // update our resourceList
     ppPresence(jid(), s);
     // ResourceList::Iterator rit = d->resourceList.find(resource());

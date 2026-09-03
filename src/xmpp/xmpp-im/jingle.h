@@ -382,10 +382,11 @@ namespace Jingle {
         QString                                   registerSession(Session *session);
         const std::optional<XMPP::Stanza::Error> &lastError() const;
 
-        // XEP-0358 Publishing Available Jingle Sessions. The factory must return a
-        // configured, not-yet-initiated local Session for the requester. Manager
-        // reserves its SID, acknowledges <start/>, then initiates it.
-        using PublishedSessionFactory = std::function<Session *(const Jid &requester)>;
+        PublicationManager *publicationManager() const;
+
+        // Source-compatible shortcuts for the original local-only XEP-0358 API.
+        // Durable/PubSub publications should use publicationManager() directly.
+        using PublishedSessionFactory = XMPP::Jingle::PublishedSessionFactory;
         JinglePub                registerPublishedSession(JinglePub publication, PublishedSessionFactory factory);
         void                     unregisterPublishedSession(const QString &id);
         JinglePub                publishedSession(const QString &id) const;
@@ -398,8 +399,9 @@ namespace Jingle {
 
     private:
         friend class JTPush;
+        friend class XMPP::Client;
+        void     clientPresenceAvailable();
         Session *incomingSessionInitiate(const Jid &from, const Jingle &jingle, const QDomElement &jingleEl);
-        Session *startPublishedSession(const Jid &requester, const QString &id);
 
         class Private;
         std::unique_ptr<Private> d;

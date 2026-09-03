@@ -92,6 +92,7 @@ namespace XMPP { namespace Jingle {
 
     private:
         friend class Manager;
+        friend class PublicationManager;
         friend class JTPush;
         QString reserveSid();
         bool    incomingInitiate(const Jingle &jingle, const QDomElement &jingleEl);
