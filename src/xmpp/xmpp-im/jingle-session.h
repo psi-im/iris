@@ -58,10 +58,24 @@ namespace XMPP { namespace Jingle {
 
         std::optional<Stanza::Error> lastError() const;
 
-        // make new local content but do not add it to session yet
+        /**
+         * @brief Create a local application for a new Jingle content.
+         * @param ns application description namespace
+         * @param senders value represented by the Jingle content `senders` attribute
+         * @return a new application, or nullptr if the namespace is not registered
+         *
+         * The returned application is not added to the session yet. Configure it first, then pass it to addContent().
+         */
         Application *newContent(const QString &ns, Origin senders = Origin::Both);
         // get registered content if any
-        Application                           *content(const QString &contentName, Origin creator);
+        Application *content(const QString &contentName, Origin creator);
+
+        /**
+         * @brief Add a previously created local application to the session.
+         *
+         * The session takes responsibility for the application lifetime. If negotiation has already started, the
+         * application is prepared immediately so it can be sent as content-add.
+         */
         void                                   addContent(Application *content);
         const QMap<ContentKey, Application *> &contentList() const;
         void                                   setGrouping(const QString &groupType, const QStringList &group);
@@ -76,7 +90,10 @@ namespace XMPP { namespace Jingle {
 
         void setLocalJid(const Jid &jid); // w/o real use case the implementation is rather stub
 
+        /// Accept a validated incoming session and start preparing its initial contents for session-accept.
         void accept();
+
+        /// Start preparing an outgoing session. session-initiate is sent when all initial contents are ready.
         void initiate();
         void terminate(Reason::Condition cond, const QString &comment = QString());
 
@@ -86,6 +103,11 @@ namespace XMPP { namespace Jingle {
     signals:
         void managerPadAdded(const QString &ns);
         void initiated();
+
+        /**
+         * Emitted when the initial Jingle negotiation has been accepted and applications are allowed to start their
+         * transports. It does not mean that every application Connection is already active.
+         */
         void activated();
         void terminated();
         void newContentReceived();
