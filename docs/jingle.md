@@ -38,6 +38,24 @@ a per-`Session`, per-namespace bridge to a global manager. For example, a sessio
 file-transfer contents normally has three `FileTransfer::Application` objects but only one
 `FileTransfer::Pad`.
 
+For an XMPP developer, the split can also be read directly from a content element:
+
+```xml
+<content creator='initiator' name='fileoffer_1234' senders='initiator'>
+  <description xmlns='urn:xmpp:jingle:apps:file-transfer:5'>
+    <!-- application-specific offer -->
+  </description>
+  <transport xmlns='urn:xmpp:jingle:transports:s5b:1'>
+    <!-- transport-specific offer -->
+  </transport>
+</content>
+```
+
+The `<content/>` becomes one `Application`; the `<description/>` namespace chooses its
+`ApplicationManager`, while the `<transport/>` namespace independently chooses the current
+`TransportManager`/`Transport`. The content name and creator remain application identity even if
+the transport is later replaced.
+
 ## Object structure
 
 ```mermaid
@@ -437,38 +455,41 @@ session termination. The important architectural ordering is:
 4. add the application to the session;
 5. call `initiate()` once all initial contents are present.
 
-See `psi-im/psi/src/multifiletransferdlg.cpp` for the complete consumer.
+See [Psi's `multifiletransferdlg.cpp`](https://github.com/psi-im/psi/blob/master/src/multifiletransferdlg.cpp)
+for the complete consumer.
 
 ## Example: receiving files (adapted from Psi)
 
 Psi connects once to `Jingle::Manager::incomingSession` and passes a native file-transfer session
-to the receive dialog. The session already contains parsed `Application` objects:
+to the receive dialog. The session already contains parsed `Application` objects. After the UI has
+chosen destinations, the acceptance side can be reduced to:
 
 ```cpp
-connect(client->jingleManager(), &Jingle::Manager::incomingSession, this,
-        [this](Jingle::Session *session) {
-            for (auto *content : session->contentList()) {
-                if (content->creator() != Jingle::Origin::Initiator
-                    || content->pad()->ns() != Jingle::FileTransfer::NS) {
-                    continue;
-                }
+void acceptIncomingFiles(Jingle::Session *session, const QHash<QString, QString> &destinationPaths)
+{
+    for (auto *content : session->contentList()) {
+        if (content->creator() != Jingle::Origin::Initiator
+            || content->pad()->ns() != Jingle::FileTransfer::NS) {
+            continue;
+        }
 
-                auto *app = static_cast<Jingle::FileTransfer::Application *>(content);
-                const auto offeredFile = app->file();
+        auto *app = static_cast<Jingle::FileTransfer::Application *>(content);
+        const QString destinationPath = destinationPaths.value(app->contentName());
+        if (destinationPath.isEmpty())
+            continue;
 
-                connect(app, &Jingle::FileTransfer::Application::deviceRequested, app,
-                        [app](quint64 offset, std::optional<quint64>) {
-                            auto *file = new QFile(/* selected destination */, app);
-                            if (file->open(QIODevice::WriteOnly)) {
-                                file->seek(qint64(offset));
-                                app->setDevice(file);
-                            }
-                        });
-            }
+        connect(app, &Jingle::FileTransfer::Application::deviceRequested, app,
+                [app, destinationPath](quint64 offset, std::optional<quint64>) {
+                    auto *file = new QFile(destinationPath, app);
+                    if (file->open(QIODevice::WriteOnly)) {
+                        file->seek(qint64(offset));
+                        app->setDevice(file);
+                    }
+                });
+    }
 
-            // Call only after the application/UI has accepted the offer and configured it.
-            session->accept();
-        });
+    session->accept();
+}
 ```
 
 In a GUI client the destination normally cannot be chosen inside the `incomingSession` handler
