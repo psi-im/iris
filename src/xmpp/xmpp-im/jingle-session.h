@@ -34,8 +34,8 @@ namespace XMPP { namespace Jingle {
     class IRIS_EXPORT Session : public QObject {
         Q_OBJECT
     public:
-        // Note incoming session are not registered in Jingle Manager until validated.
-        // and then either rejected or registered in Pending state.
+        // Incoming sessions are not registered in Jingle Manager until their initial contents are validated. A valid
+        // incoming session remains in Created state while it waits for local accept() or terminate().
 
         Session(Manager *manager, const Jid &peer, Origin role = Origin::Initiator);
         ~Session();
@@ -64,11 +64,12 @@ namespace XMPP { namespace Jingle {
          * @param senders value represented by the Jingle content `senders` attribute
          * @return a new application, or nullptr if the namespace is not registered
          *
-         * The returned application is not added to the session yet. Configure it first, then pass it to addContent().
+         * The returned application is not added to the session yet. Configure it first, then pass it to
+         * addContent().
          */
         Application *newContent(const QString &ns, Origin senders = Origin::Both);
         // get registered content if any
-        Application *content(const QString &contentName, Origin creator);
+        Application                           *content(const QString &contentName, Origin creator);
 
         /**
          * @brief Add a previously created local application to the session.
