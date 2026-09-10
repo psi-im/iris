@@ -1,0 +1,58 @@
+name: Jingle regressions
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: iris-jingle-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  QCA_TAG: v3.0.1
+
+jobs:
+  qca3-srtp:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build qt6-base-dev libssl-dev libusrsctp-dev libsrtp2-dev
+
+      - name: Install QCA3 release packages
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir qca-release
+          gh release download "$QCA_TAG" --repo psi-im/qca \
+            -p 'qca3-deb-ubuntu-24.04.zip' -O qca3.zip
+          (cd qca-release && cmake -E tar xvf ../qca3.zip)
+          test -n "$(find qca-release -type f -name '*.deb' -print -quit)"
+          sudo apt-get install -y ./qca-release/*.deb
+
+      - name: Configure
+        shell: bash
+        run: |
+          cmake -S tests/jingle -B build-jingle -G Ninja \
+            -DUSE_QT6=ON \
+            -DIRIS_SYSTEM_QCA=3 \
+            -DIRIS_BUNDLED_QCA=OFF \
+            -DIRIS_BUNDLED_USRSCTP=OFF \
+            -DIRIS_ENABLE_SRTP=ON
+
+      - name: Build
+        run: cmake --build build-jingle --parallel 2
+
+      - name: Test
+        run: ctest --test-dir build-jingle --output-on-failure -j1
