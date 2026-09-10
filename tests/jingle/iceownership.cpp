@@ -53,15 +53,26 @@ int main(int argc, char **argv)
     client.setTcpPortReserver(&reserver);
     Jingle::Session sessionA(client.jingleManager(), Jid(QStringLiteral("peer@example.org/device")));
     Jingle::Session sessionB(client.jingleManager(), Jid(QStringLiteral("peer@example.org/device")));
-    Manager         manager;
-    auto            padA            = Pad::Ptr::create(&manager, &sessionA);
-    auto            padB            = Pad::Ptr::create(&manager, &sessionB);
-    auto            first           = QSharedPointer<Transport>::create(padA, Jingle::Origin::Initiator);
-    auto            sibling         = QSharedPointer<Transport>::create(padA, Jingle::Origin::Initiator);
-    auto            separate        = QSharedPointer<Transport>::create(padB, Jingle::Origin::Initiator);
-    auto            firstNetwork    = padA->connectionFor(first.data());
-    auto            siblingNetwork  = padA->connectionFor(sibling.data());
-    auto            separateNetwork = padB->connectionFor(separate.data());
+
+    auto builtinIce = client.jingleICEManager();
+    check(builtinIce && builtinIce->ns().contains(NS) && builtinIce->ns().contains(NS_ICE_UDP),
+          "built-in ICE manager did not register both wire profiles");
+    auto modernProfile = sessionA.newOutgoingTransport(NS);
+    auto udpProfile    = sessionA.newOutgoingTransport(NS_ICE_UDP);
+    check(modernProfile && modernProfile->pad()->ns() == NS, "ice:0 profile lost its namespace");
+    check(udpProfile && udpProfile->pad()->ns() == NS_ICE_UDP, "ice-udp:1 profile lost its namespace");
+    check(!sessionA.newOutgoingTransport(QStringLiteral("urn:example:unsupported")),
+          "unsupported transport namespace created a transport");
+
+    Manager manager;
+    auto    padA            = Pad::Ptr::create(&manager, &sessionA);
+    auto    padB            = Pad::Ptr::create(&manager, &sessionB);
+    auto    first           = QSharedPointer<Transport>::create(padA, Jingle::Origin::Initiator);
+    auto    sibling         = QSharedPointer<Transport>::create(padA, Jingle::Origin::Initiator);
+    auto    separate        = QSharedPointer<Transport>::create(padB, Jingle::Origin::Initiator);
+    auto    firstNetwork    = padA->connectionFor(first.data());
+    auto    siblingNetwork  = padA->connectionFor(sibling.data());
+    auto    separateNetwork = padB->connectionFor(separate.data());
     check(firstNetwork == padA->connectionFor(first.data()), "registry lost transport identity");
     check(firstNetwork != siblingNetwork, "unbundled contents shared a connection");
     check(firstNetwork != separateNetwork, "sessions to the same peer shared a connection");
