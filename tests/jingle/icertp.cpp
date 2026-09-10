@@ -95,6 +95,8 @@ int main(int argc, char **argv)
     QCoreApplication app(argc, argv);
     QCA::Initializer qca;
     const bool       applicationMode = app.arguments().contains("--application");
+    const bool       iceUdpMode      = app.arguments().contains("--ice-udp");
+    const QString    transportNs     = iceUdpMode ? J::ICE::NS_ICE_UDP : J::ICE::NS;
     TcpPortReserver  reserver;
     Client           firstClient, secondClient;
     firstClient.setTcpPortReserver(&reserver);
@@ -104,17 +106,17 @@ int main(int argc, char **argv)
     J::ICE::Manager firstManager, secondManager;
     firstManager.setSelfAddress(QHostAddress::LocalHost);
     secondManager.setSelfAddress(QHostAddress::LocalHost);
-    auto firstPad  = J::ICE::Pad::Ptr::create(&firstManager, &firstSession);
-    auto secondPad = J::ICE::Pad::Ptr::create(&secondManager, &secondSession);
+    auto firstPad  = J::ICE::Pad::Ptr::create(&firstManager, &firstSession, transportNs);
+    auto secondPad = J::ICE::Pad::Ptr::create(&secondManager, &secondSession, transportNs);
     auto first     = QSharedPointer<J::ICE::Transport>::create(firstPad, J::Origin::Initiator);
     auto second    = QSharedPointer<J::ICE::Transport>::create(secondPad, J::Origin::Initiator);
     std::unique_ptr<J::RTP::Application> firstApp, secondApp;
     auto firstMedia = std::make_shared<MediaState>(), secondMedia = std::make_shared<MediaState>();
     if (applicationMode) {
-        auto makeApp = [](Client &client, J::Session &session, std::shared_ptr<MediaState> state) {
+        auto makeApp = [&transportNs](Client &client, J::Session &session, std::shared_ptr<MediaState> state) {
             auto pad
                 = QSharedPointer<J::RTP::Pad>::create(client.jingleManager()->rtpManager(), &session,
-                                                      std::make_shared<Provider>(state), QStringList { J::ICE::NS });
+                                                      std::make_shared<Provider>(state), QStringList { transportNs });
             return std::make_unique<J::RTP::Application>(pad, "audio", J::Origin::Initiator, J::Origin::Both);
         };
         firstApp  = makeApp(firstClient, firstSession, firstMedia);
@@ -148,7 +150,8 @@ int main(int argc, char **argv)
         if (!from->hasUpdates())
             return false;
         auto [xml, ack] = from->takeOutgoingUpdate(false);
-        check(!xml.isNull() && to->update(xml), "ICE signaling update rejected");
+        check(!xml.isNull() && xml.namespaceURI() == transportNs, "wrong ICE wire namespace");
+        check(to->update(xml), "ICE signaling update rejected");
         if (ack) {
             const bool reject = from == second.data() && !rejectionChecked && !delayedAck;
             Ack        result(from->pad()->session()->manager()->client()->rootTask(), !reject);
@@ -309,5 +312,5 @@ int main(int argc, char **argv)
               "retained media writer survived application deletion");
     }
     second->stop();
-    qInfo("Loopback ICE/DTLS/SRTP integration passed");
+    qInfo() << "Loopback ICE/DTLS/SRTP integration passed for" << transportNs;
 }
