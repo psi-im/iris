@@ -24,7 +24,7 @@ add_test(NAME jingle_dtlssrtp COMMAND jingle_dtlssrtp_test)
 add_executable(jingle_iceownership_test iceownership.cpp)
 target_link_libraries(jingle_iceownership_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core)
 add_test(NAME jingle_iceownership COMMAND jingle_iceownership_test)
-add_executable(jingle_iceudp_test iceudp.cpp ../../src/xmpp/xmpp-im/jingle-ice-udp.cpp)
+add_executable(jingle_iceudp_test iceudp.cpp)
 target_include_directories(jingle_iceudp_test PRIVATE ../../src/xmpp/xmpp-im)
 target_link_libraries(jingle_iceudp_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
     Qt${QT_DEFAULT_MAJOR_VERSION}::Network Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
