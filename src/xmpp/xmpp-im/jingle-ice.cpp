@@ -101,7 +101,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
         // if(!c.rem_addr.isNull())
         //    e.setAttribute("rem-addr", c.rem_addr.toString());
         // if(c.rem_port != -1)
-        //    e.setAttribute("rem-port", c.rem_port);
+        //    e.setAttribute("rem-port", QString::number(c.rem_port));
         e.setAttribute("type", c.type);
         return e;
     }
@@ -1083,7 +1083,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
         }
         if (profiles.isEmpty())
             return false;
-        d->rtpProfiles                         = profiles;
+        d->rtpProfiles                        = profiles;
         d->network->components[0].lowOverhead = true;
         return true;
     }
@@ -1220,8 +1220,8 @@ namespace XMPP { namespace Jingle { namespace ICE {
             e.remoteCandidates = d->network->ice->selectedCandidates();
         // TODO sctp
 
-        auto         doc = _pad.staticCast<Pad>()->session()->manager()->client()->doc();
-        QDomElement  transportXml = e.toXml(doc);
+        auto        doc          = _pad.staticCast<Pad>()->session()->manager()->client()->doc();
+        QDomElement transportXml = e.toXml(doc);
         if (_pad->ns() == NS_ICE_UDP) {
             QString error;
             transportXml = internalToIceUdp(*doc, transportXml, &error);
@@ -1258,7 +1258,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
     int Transport::maxSupportedChannelsPerComponent(TransportFeatures features) const
     {
         return features & TransportFeature::DataOriented ? 65536 : 1;
-    }
+    };
 
     void Transport::setComponentsCount(int count)
     {
@@ -1337,11 +1337,6 @@ namespace XMPP { namespace Jingle { namespace ICE {
 
     TransportManagerPad *Manager::pad(Session *session) { return new Pad(this, session); }
 
-    TransportManagerPad *Manager::padForNamespace(Session *session, const QString &ns)
-    {
-        return ns == NS || ns == NS_ICE_UDP ? new Pad(this, session, ns) : nullptr;
-    }
-
     QStringList Manager::ns() const { return { NS, NS_ICE_UDP }; }
     QStringList Manager::discoFeatures() const
     {
@@ -1397,13 +1392,17 @@ namespace XMPP { namespace Jingle { namespace ICE {
     //----------------------------------------------------------------
     // Pad
     //----------------------------------------------------------------
-    Pad::Pad(Manager *manager, Session *session, const QString &ns) : _manager(manager), _session(session), _ns(ns)
+    Pad::Pad(Manager *manager, Session *session) : _manager(manager), _session(session)
     {
         auto reserver = _session->manager()->client()->tcpPortReserver();
         _discoScope   = reserver->scope(QString::fromLatin1("ice"));
     }
 
-    QString Pad::ns() const { return _ns; }
+    QString Pad::ns() const
+    {
+        const auto requested = requestedNamespace();
+        return requested.isEmpty() ? NS : requested;
+    }
 
     QSharedPointer<IceConnection> Pad::connectionFor(Transport *transport)
     {
