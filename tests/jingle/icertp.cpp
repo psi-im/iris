@@ -101,15 +101,26 @@ int main(int argc, char **argv)
     Client           firstClient, secondClient;
     firstClient.setTcpPortReserver(&reserver);
     secondClient.setTcpPortReserver(&reserver);
-    J::Session      firstSession(firstClient.jingleManager(), Jid("second@example.test/device"), J::Origin::Initiator);
-    J::Session      secondSession(secondClient.jingleManager(), Jid("first@example.test/device"), J::Origin::Responder);
-    J::ICE::Manager firstManager, secondManager;
-    firstManager.setSelfAddress(QHostAddress::LocalHost);
-    secondManager.setSelfAddress(QHostAddress::LocalHost);
-    auto firstPad  = J::ICE::Pad::Ptr::create(&firstManager, &firstSession, transportNs);
-    auto secondPad = J::ICE::Pad::Ptr::create(&secondManager, &secondSession, transportNs);
-    auto first     = QSharedPointer<J::ICE::Transport>::create(firstPad, J::Origin::Initiator);
-    auto second    = QSharedPointer<J::ICE::Transport>::create(secondPad, J::Origin::Initiator);
+    J::Session firstSession(firstClient.jingleManager(), Jid("second@example.test/device"), J::Origin::Initiator);
+    J::Session secondSession(secondClient.jingleManager(), Jid("first@example.test/device"), J::Origin::Responder);
+    firstClient.jingleICEManager()->setSelfAddress(QHostAddress::LocalHost);
+    secondClient.jingleICEManager()->setSelfAddress(QHostAddress::LocalHost);
+
+    auto makeTransport = [&](Client &client, J::Session &session, J::Origin creator) {
+        auto rawPad = client.jingleManager()->transportPad(&session, transportNs);
+        check(rawPad, "selected ICE namespace was not registered");
+        J::TransportManagerPad::Ptr pad(rawPad);
+        check(pad->ns() == transportNs, "selected ICE namespace was not retained by pad");
+        auto base = pad->manager()->newTransport(pad, creator);
+        auto ice  = qSharedPointerDynamicCast<J::ICE::Transport>(base);
+        check(bool(ice), "selected ICE namespace did not create an ICE transport");
+        return ice;
+    };
+    auto first  = makeTransport(firstClient, firstSession, J::Origin::Initiator);
+    auto second = makeTransport(secondClient, secondSession, J::Origin::Initiator);
+    auto firstPad  = first->pad().staticCast<J::ICE::Pad>();
+    auto secondPad = second->pad().staticCast<J::ICE::Pad>();
+
     std::unique_ptr<J::RTP::Application> firstApp, secondApp;
     auto firstMedia = std::make_shared<MediaState>(), secondMedia = std::make_shared<MediaState>();
     if (applicationMode) {
@@ -151,6 +162,9 @@ int main(int argc, char **argv)
             return false;
         auto [xml, ack] = from->takeOutgoingUpdate(false);
         check(!xml.isNull() && xml.namespaceURI() == transportNs, "wrong ICE wire namespace");
+        if (iceUdpMode)
+            check(xml.firstChildElement(QStringLiteral("gathering-complete")).isNull(),
+                  "gathering-complete leaked into XEP-0176");
         check(to->update(xml), "ICE signaling update rejected");
         if (ack) {
             const bool reject = from == second.data() && !rejectionChecked && !delayedAck;
