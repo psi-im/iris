@@ -32,6 +32,10 @@ namespace XMPP { namespace Jingle {
     {
         return (features() & desiredFeatures) == desiredFeatures;
     }
+    TransportManagerPad *TransportManager::padForNamespace(Session *session, const QString &)
+    {
+        return pad(session);
+    }
     QStringList TransportManager::ns() const { return discoFeatures(); }
     void        TransportManager::closeAll(const QString &) { emit abortAllRequested(); }
 
