@@ -181,6 +181,10 @@ managers:
 the final policy through `TransportSelector`; Jingle core deliberately does not hard-code a single
 transport order.
 
+The ICE data-oriented/ordered feature advertisement is conditional on `JINGLE_SCTP` and
+`Dtls::isSupported()`. Registering the ICE manager alone does not guarantee that it can carry
+file transfers in a particular build.
+
 ## Pads in more detail
 
 `SessionManagerPad` is the common base for application and transport pads. It provides hooks that
@@ -232,6 +236,8 @@ A session serializes outgoing Jingle IQs through a small scheduler in `Session::
 
 `Action` values are ordered by priority and application updates are collected in a `QMultiMap`.
 That ordering is therefore part of how concurrent pending updates are serialized.
+This priority applies to the application-update `QMultiMap`, not to explicit session-level
+`outgoingUpdates`, which is a `QHash` and has no defined iteration priority.
 
 ```mermaid
 flowchart TD
@@ -295,11 +301,12 @@ sequenceDiagram
 
     Peer->>S: IQ set: session-accept
     S->>A: setRemoteAnswer() + transport update
-    S->>S: state = Connecting
+    S->>S: state = Active (signaling accepted)
+    S-->>Peer: IQ result (sent by JTPush)
+    Note over S,A: queued start; skip removed contents or a terminated session
     S->>A: start()
     A->>T: start()
     S-->>UI: activated()
-    S-->>Peer: IQ result
 
     T-->>A: Connection connected / accepted
     A-->>UI: stateChanged(Active)
@@ -314,10 +321,11 @@ Two consequences are worth calling out:
   connected. Observe `Application::stateChanged()` or application-specific signals when data-path
   readiness matters.
 
-### Current session-state asymmetry
+### Session state versus connectivity
 
 The shared `State` enum is used by sessions, applications and transports, but each object uses only
-part of it. In the current implementation, the session-level path is also slightly asymmetric:
+part of it. Both roles reach session-level `Active` after acceptance; applications and transports
+can still be `Connecting`:
 
 ```mermaid
 stateDiagram-v2
@@ -326,8 +334,9 @@ stateDiagram-v2
         Created --> ApprovedToSend: initiate()
         ApprovedToSend --> Unacked: send session-initiate
         Unacked --> Pending: IQ result
-        Pending --> Connecting: receive session-accept
-        Connecting --> Connecting: activated() emitted; apps continue independently
+        Pending --> Active: receive valid session-accept
+        Active --> Finishing: terminate()
+        Finishing --> Finished: termination completes
     }
 
     state "Incoming / responder" as In {
@@ -335,12 +344,23 @@ stateDiagram-v2
         Created --> ApprovedToSend: accept()
         ApprovedToSend --> Unacked: send session-accept
         Unacked --> Active: IQ result / activated()
+        Active --> Finishing: terminate()
+        Finishing --> Finished: termination completes
     }
 ```
 
-Thus consumers should prefer lifecycle signals and application states over assuming that
-`Session::state() == Active` is the universal definition of a usable data channel. This documents
-the implementation as it exists; it is not a requirement imposed by XEP-0166.
+These diagrams show successful local negotiation and termination, not every error/disconnect edge.
+`Active` means that session signaling was accepted, not that a usable data channel exists;
+see [XEP-0166, acceptance](https://xmpp.org/extensions/xep-0166.html#session-accept).
+
+On incoming `session-accept`, Iris sets `Active` synchronously, but queues application `start()`
+and `activated()` until after `JTPush` sends the IQ result. This prevents IBB `<open/>` from
+overtaking the acknowledgement ([XEP-0261, section 2.1](https://xmpp.org/extensions/xep-0261.html)).
+Incoming `content-accept` in an active session uses the same deferred start, without emitting
+another `activated()`. Queued starts check session state, content membership and application state.
+
+The deferred-start ordering assumes the normal single-threaded, non-reentrant IQ dispatch:
+application parsing callbacks must not spin a nested event loop.
 
 ## Incoming session lifecycle
 
@@ -497,6 +517,11 @@ synchronously. Store the `Session *`, present the offer, configure the applicati
 accepts, and only then call `Session::accept()`. Psi's `MultiFileTransferDlg::initIncoming()` does
 exactly this.
 
+These examples omit I/O error reporting and resume policy. In particular, opening a `QFile` with
+`WriteOnly` truncates an existing file; a real resume implementation must preserve and validate
+the existing prefix before seeking to a nonzero offset. Do not use the simplified receiving
+example unchanged for resumed transfers.
+
 Rejecting the invitation is session termination with an appropriate Jingle reason, for example:
 
 ```cpp
@@ -568,7 +593,8 @@ The API is QObject-heavy and event-driven. Several lifetime details matter when 
 
 - outgoing `Manager::newSession()` returns a `Session *` whose deletion is scheduled when the
   session reaches `Finished`;
-- `Session` deletes its registered `Application` objects when finishing;
+- `Session` schedules deletion of its registered `Application` objects when finishing; its
+  destructor deletes any contents still registered;
 - applications hold transports through `QSharedPointer` because transport callbacks may outlive a
   signaling step;
 - `Connection::Ptr` is shared between transport and application;
@@ -579,6 +605,86 @@ The API is QObject-heavy and event-driven. Several lifetime details matter when 
 
 Do not keep an unguarded long-lived raw pointer to a session/application across asynchronous UI or
 network operations. In Qt code, `QPointer` is usually the appropriate guard.
+
+## Implementation limits and regression checks
+
+The object model above is not a claim of complete XEP-0166 support. In particular,
+`Session::updateFromXml()` currently falls through to `feature-not-implemented` for
+`security-info` and `transport-reject`.
+The existence of corresponding enum values or outgoing serialization does not imply an
+implemented incoming handler. Transport fallback diagrams describe the intended flow through
+the implemented paths, not successful recovery from every possible peer response.
+
+`content-reject` removes a pending locally added content, stops its transport and notifies the
+application through `incomingRemove()`. Rejection of an initial or already accepted content is
+out of order. Other contents remain registered; removing the last content schedules termination.
+
+Incoming `content-modify` validates the entire batch (identities, directions, duplicates,
+content lifetime and application support) before dispatch. Applications explicitly opt in via
+`supportsContentModify()`; existing fixed-direction file transfers do not. A valid update changes
+`senders()` and emits `sendersChanged()` only if the value changes, without starting the application,
+changing negotiation state or replacing its transport. This notification is signaling state, not
+permission to activate media capture: the media adapter must independently enforce local consent.
+Callbacks must not run nested event loops. No `content-accept` is generated in response.
+An omitted `senders` means `both`; explicit `none` disables both sending directions.
+There is no dedicated outgoing direction-change API yet.
+
+`description-info` validates content identities and description namespaces before dispatching to
+`Application::incomingDescriptionInfo()`. This hook processes advisory parameters without
+replacing the negotiated offer/answer. The default returns false, resulting in
+`feature-not-implemented` with `unsupported-info`; application types must implement the payload
+semantics explicitly. The current file-transfer application does not override this hook.
+
+Focused executable regressions are in `tests/jingle` (standalone CMake project). They cover
+direction parsing/roundtrips and incoming modifications, description dispatch and malformed batches,
+pending-content rejection, session destruction with
+remaining contents, and DTLS fingerprint comparison. Run with:
+
+```sh
+cmake -S tests/jingle -B build/jingle-tests -DUSE_QT6=ON -DIRIS_SYSTEM_QCA=3
+cmake --build build/jingle-tests -j2
+ctest --test-dir build/jingle-tests --output-on-failure
+```
+
+The DTLS-SRTP integration test requires a QCA3 provider supporting
+`SRTP_AES128_CM_HMAC_SHA1_80`. It runs two local DTLS endpoints and verifies directional key
+agreement, fingerprint mismatch, required-SRTP refusal, key invalidation on fingerprint change,
+and plain DTLS application data. With QCA2 it checks that SRTP configuration is rejected.
+With `IRIS_ENABLE_SRTP=ON`, it also protects RTP/SRTCP with actual DTLS-exported keys through
+system libSRTP. When SCTP is enabled, it transfers and echoes a 32 KiB data-channel message
+over QCA DTLS, both without SRTP negotiation and alongside live SRTP contexts. These are
+in-memory integration tests, not ICE connectivity or external-client interoperability tests.
+The separate SRTP test exercises supported profiles, authentication failure, replay, rollover,
+directional keys, stream limits and fail-closed reconfiguration.
+The optional `jingle_icertp` test additionally runs native ICE transports over loopback UDP,
+exchanges their transport XML and verifies protected RTP/RTCP plus fingerprint-ACK gating.
+It requires local socket permissions. `jingle_transportacks` checks IBB acknowledgement
+success/failure and callbacks outliving their transport. A non-null IQ task is not evidence of
+success: acknowledgement handlers inspect `Task::success()`.
+`jingle_rtpmedia` uses the local ICE path with native RTP Applications and mock media endpoints,
+checking authenticated attachment, direction/payload filtering and teardown. The media API is
+documented in [RTP extension design](jingle-rtp-design.md#media-integration); no psimedia adapter
+or external-client call is exercised by this test.
+
+For the proposed RTP/security extension boundaries, see [RTP and DTLS design](jingle-rtp-design.md).
+
+This document covers ordinary session signaling and data transport. It does **not** validate
+the separate PubSub authority/reconciliation machinery in `PublicationManager` (`jingle-pub.*`).
+Publication IDs and running session SIDs are different identities; the publication manager's
+factory creates a new initiator session for a requester, reserves its SID, and then starts the
+ordinary lifecycle described above.
+
+Regression scenarios for acceptance (an integration checklist, not a record of executed tests):
+
+| Scenario | Required observation |
+| --- | --- |
+| Initiator receives a valid `session-accept` using IBB | Session becomes `Active`; outgoing IQ result precedes IBB `<open/>`; `activated()` is emitted once. |
+| A later `content-add` is accepted | The new application starts after its `content-accept` IQ result; session activation is not emitted again. |
+| Session terminates before the queued start runs | No application starts and no late `activated()` is emitted. |
+| A content is removed before the queued start runs | That application is not started, even if its QObject has not yet been deleted. |
+| An application start synchronously deletes or terminates its session | Remaining queued applications are not started; no dangling session access occurs. |
+| Responder receives the result for its `session-accept` | Existing responder flow still enters `Active` and starts accepted applications. |
+| Transport remains disconnected after acceptance | Session remains `Active`; connectivity is represented by application/transport state. |
 
 ## Source map
 

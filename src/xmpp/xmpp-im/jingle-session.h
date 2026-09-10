@@ -31,6 +31,12 @@ namespace XMPP { namespace Jingle {
     // class Manager;
     class Application;
 
+    // Ordered XEP-0338 group. Multiple groups may have the same semantics.
+    struct ContentGroup {
+        QString     semantics;
+        QStringList contents;
+    };
+
     class IRIS_EXPORT Session : public QObject {
         Q_OBJECT
     public:
@@ -69,7 +75,7 @@ namespace XMPP { namespace Jingle {
          */
         Application *newContent(const QString &ns, Origin senders = Origin::Both);
         // get registered content if any
-        Application                           *content(const QString &contentName, Origin creator);
+        Application *content(const QString &contentName, Origin creator);
 
         /**
          * @brief Add a previously created local application to the session.
@@ -80,6 +86,11 @@ namespace XMPP { namespace Jingle {
         void                                   addContent(Application *content);
         const QMap<ContentKey, Application *> &contentList() const;
         void                                   setGrouping(const QString &groupType, const QStringList &group);
+        // Local signaling proposal, not proof of an established shared transport.
+        bool                setGroupings(const QList<ContentGroup> &groups);
+        QList<ContentGroup> groupings() const;
+        // Last successfully parsed initial peer offer/answer. Never auto-accepted.
+        QList<ContentGroup> remoteGroupings() const;
 
         ApplicationManagerPad::Ptr applicationPad(const QString &ns);
         TransportManagerPad::Ptr   transportPad(const QString &ns);
@@ -117,9 +128,12 @@ namespace XMPP { namespace Jingle {
         friend class Manager;
         friend class PublicationManager;
         friend class JTPush;
-        QString reserveSid();
-        bool    incomingInitiate(const Jingle &jingle, const QDomElement &jingleEl);
-        bool    updateFromXml(Action action, const QDomElement &jingleEl);
+        QString                                   reserveSid();
+        bool                                      incomingInitiate(const Jingle &jingle, const QDomElement &jingleEl);
+        bool                                      updateFromXml(Action action, const QDomElement &jingleEl);
+        static std::optional<QList<ContentGroup>> parseGroupings(const QDomElement &jingleEl);
+        static bool validBundleAnswer(const QList<ContentGroup> &offer, const QList<ContentGroup> &answer);
+        bool        validLocalGroupings() const;
 
         class Private;
         std::unique_ptr<Private> d;

@@ -47,6 +47,9 @@ namespace XMPP { namespace Jingle {
         virtual QString generateContentName(Origin senders) = 0;
 
         virtual bool incomingSessionInfo(const QDomElement &el);
+        // Auxiliary info namespaces need not equal the application description
+        // namespace. They must route to the existing pad, not create another one.
+        virtual QStringList sessionInfoNamespaces() const { return { ns() }; }
     };
 
     // Represents a session for single application. for example a single file in a file transfer session.
@@ -98,6 +101,26 @@ namespace XMPP { namespace Jingle {
         virtual SetDescError setRemoteAnswer(const QDomElement &description) = 0;
         virtual QDomElement  makeLocalOffer()                                = 0;
         virtual QDomElement  makeLocalAnswer()                               = 0;
+
+        /**
+         * Process advisory application parameters from description-info.
+         * This is not a new offer/answer. Return false for unsupported payloads.
+         * Implementations must not run a nested event loop in this callback.
+         */
+        virtual bool incomingDescriptionInfo(const QDomElement &) { return false; }
+
+        /** Opt in only if the application can enforce changing media direction.
+         * This is a capability query, not a consent callback; it must have no side effects.
+         * File-transfer applications retain their fixed sending direction by default.
+         */
+        virtual bool supportsContentModify() const { return false; }
+
+        /** Apply a validated peer direction update. Does not start the application,
+         * restart its transport or grant permission to capture local media.
+         * Receivers of sendersChanged must enforce local consent independently and
+         * must not run a nested event loop during incoming stanza processing.
+         */
+        void incomingContentModify(Origin senders);
 
         /**
          * @brief evaluateOutgoingUpdate computes and prepares next update which will be taken with takeOutgoingUpdate
@@ -164,6 +187,7 @@ namespace XMPP { namespace Jingle {
         void updated(); // signal for session it has to send updates to remote. so it will follow with
                         // takeOutgoingUpdate() eventually
         void stateChanged(State);
+        void sendersChanged(Origin);
 
     protected:
         State            _state = State::Created;

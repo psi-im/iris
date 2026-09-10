@@ -27,7 +27,9 @@
 #include "xmpp_xmlcommon.h"
 
 #include <QPointer>
+#include <QSet>
 #include <QTimer>
+#include <algorithm>
 
 template <class T> constexpr std::add_const_t<T> &as_const(T &t) noexcept { return t; }
 
@@ -93,7 +95,9 @@ namespace XMPP { namespace Jingle {
         QMap<QString, QWeakPointer<TransportManagerPad>>   transportPads;
         QMap<ContentKey, Application *>                    contentList;
         QSet<Application *>                                signalingContent;
-        QHash<QString, QStringList>                        groups;
+        QList<ContentGroup>                                groups;
+        QList<ContentGroup>                                remoteGroups;
+        QList<ContentGroup>                                sentInitialGroups;
 
         // not yet acccepted applications from initial incoming request
         QList<Application *> initialIncomingUnacceptedContent;
@@ -135,13 +139,12 @@ namespace XMPP { namespace Jingle {
 
             QDomDocument &doc = *manager->client()->doc();
 
-            QHashIterator<QString, QStringList> it(groups);
-            while (it.hasNext()) {
-                it.next();
+            for (const auto &group : groups) {
                 auto g = doc.createElementNS(QLatin1String("urn:xmpp:jingle:apps:grouping:0"), QLatin1String("group"));
-                g.setAttribute(QLatin1String("semantics"), it.key());
-                for (auto const &name : it.value()) {
-                    auto c = doc.createElement(QLatin1String("content"));
+                g.setAttribute(QLatin1String("semantics"), group.semantics);
+                for (auto const &name : group.contents) {
+                    auto c = doc.createElementNS(QLatin1String("urn:xmpp:jingle:apps:grouping:0"),
+                                                 QLatin1String("content"));
                     c.setAttribute(QLatin1String("name"), name);
                     g.appendChild(c);
                 }
@@ -177,7 +180,8 @@ namespace XMPP { namespace Jingle {
             if (action == Action::SessionAccept) {
                 jingle.setResponder(manager->client()->jid());
             }
-            auto xml = jingle.toXml(&doc);
+            auto                xml = jingle.toXml(&doc);
+            QList<ContentGroup> includedGroups;
 
             for (const QDomElement &e : update) {
                 xml.appendChild(e);
@@ -186,11 +190,18 @@ namespace XMPP { namespace Jingle {
                 && (action == Action::SessionInitiate || action == Action::SessionAccept || action == Action::ContentAdd
                     || action == Action::ContentAccept)) {
                 const auto xmls = genGroupingXML();
+                if (!xmls.isEmpty())
+                    includedGroups = groups;
                 for (auto const &g : xmls)
                     xml.appendChild(g);
                 needNotifyGroup = false;
             }
 
+            if (action == Action::SessionInitiate) {
+                // Snapshot what was actually serialized (including capability
+                // filtering), not the mutable local proposal used by the UI.
+                sentInitialGroups = includedGroups;
+            }
             auto jt = new JT(manager->client()->rootTask());
             jt->request(otherParty, xml);
             QObject::connect(jt, &JT::finished, q, [jt, jingle, callback, this]() {
@@ -397,6 +408,14 @@ namespace XMPP { namespace Jingle {
             }
 
             notifyPads<&SessionManagerPad::onSend>();
+
+            // Pads may change the proposal in onSend(). Validate after that,
+            // but before consuming application updates or entering Unacked.
+            if (groupingAllowed && needNotifyGroup && !q->validLocalGroupings()) {
+                lastError = Stanza::Error(Stanza::Error::ErrorType::Cancel, Stanza::Error::ErrorCond::BadRequest);
+                q->terminate(Reason::IncompatibleParameters, QStringLiteral("Invalid local content grouping"));
+                return true;
+            }
 
             QList<QDomElement> contents;
             QList<AckHndl>     acceptApps;
@@ -750,7 +769,7 @@ namespace XMPP { namespace Jingle {
             return true;
         }
 
-        bool handleIncomingContentRemove(const QDomElement &jingleEl)
+        bool handleIncomingContentRemove(const QDomElement &jingleEl, bool rejected = false)
         {
             QSet<Application *> toRemove;
             QString             contentTag(QStringLiteral("content"));
@@ -763,17 +782,31 @@ namespace XMPP { namespace Jingle {
                     return false;
                 }
                 Application *app = contentList.value(ContentKey { cb.name, cb.creator });
+                if (rejected && app
+                    && (app->creator() != role || app->flags().testFlag(Application::InitialApplication)
+                        || (app->state() != State::Pending && app->state() != State::Unacked))) {
+                    lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,
+                                                    XMPP::Stanza::Error::ErrorCond::UnexpectedRequest);
+                    ErrorUtil::fill(jingleEl.ownerDocument(), *lastError, ErrorUtil::OutOfOrder);
+                    return false;
+                }
                 if (app) {
                     toRemove.insert(app);
                 }
             }
 
             auto   reasonEl = jingleEl.firstChildElement(QString::fromLatin1("reason"));
-            Reason reason   = reasonEl.isNull() ? Reason(Reason::Success) : Reason(reasonEl);
+            Reason reason = reasonEl.isNull() ? Reason(rejected ? Reason::Decline : Reason::Success) : Reason(reasonEl);
 
             for (auto app : toRemove) {
-                app->incomingRemove(reason);
+                signalingContent.remove(app);
+                initialIncomingUnacceptedContent.removeAll(app);
                 contentList.remove(ContentKey { app->contentName(), app->creator() });
+                if (app->transport()) {
+                    app->transport()->disconnect(app);
+                    app->transport()->stop();
+                }
+                app->incomingRemove(reason);
                 delete app;
             }
 
@@ -792,8 +825,35 @@ namespace XMPP { namespace Jingle {
             return true;
         }
 
+        void startAcceptedContents(const QList<Application *> &apps, bool notifyActivated = false)
+        {
+            QList<QPointer<Application>> guardedApps;
+            for (auto app : apps) {
+                guardedApps.append(app);
+            }
+            // JTPush must send the acceptance IQ result before start() can send
+            // transport traffic (in particular IBB <open/>, XEP-0261 section 2.1).
+            QTimer::singleShot(0, q, [this, session = QPointer<Session>(q), guardedApps, notifyActivated]() {
+                for (const auto &app : guardedApps) {
+                    if (!session || state != State::Active)
+                        return;
+                    if (app && app->state() == State::Accepted
+                        && contentList.value(ContentKey { app->contentName(), app->creator() }) == app.data()) {
+                        app->start();
+                    }
+                }
+                if (session && state == State::Active && notifyActivated)
+                    emit q->activated();
+            });
+        }
+
         bool handleIncomingSessionAccept(const QDomElement &jingleEl)
         {
+            auto peerGroups = Session::parseGroupings(jingleEl);
+            if (!peerGroups || !Session::validBundleAnswer(sentInitialGroups, *peerGroups)) {
+                lastError = Stanza::Error(Stanza::Error::ErrorType::Cancel, Stanza::Error::ErrorCond::BadRequest);
+                return false;
+            }
             bool                 parsed;
             QList<Application *> apps;
 
@@ -804,13 +864,10 @@ namespace XMPP { namespace Jingle {
                 return false;
             }
 
-            state = State::Connecting;
-            if (apps.size()) {
-                for (auto app : std::as_const(apps)) {
-                    app->start();
-                }
-            }
-            QTimer::singleShot(0, q, [this]() { emit q->activated(); });
+            remoteGroups = *peerGroups;
+            // Session acceptance completes signaling, not transport connectivity.
+            state = State::Active;
+            startAcceptedContents(apps, true);
             planStep();
 
             return true;
@@ -828,10 +885,8 @@ namespace XMPP { namespace Jingle {
                 return false;
             }
 
-            if (apps.size() && state >= State::Active) {
-                for (auto app : std::as_const(apps)) {
-                    app->start(); // start accepted app. connection establishing and data transfer are inside
-                }
+            if (apps.size() && state == State::Active) {
+                startAcceptedContents(apps);
             }
             planStep();
 
@@ -962,20 +1017,135 @@ namespace XMPP { namespace Jingle {
             return true;
         }
 
+        bool handleIncomingContentModify(const QDomElement &jingleEl)
+        {
+            QList<QPair<QPointer<Application>, Origin>> updates;
+            QSet<Application *>                         seen;
+            for (auto ce = jingleEl.firstChildElement(); !ce.isNull(); ce = ce.nextSiblingElement()) {
+                const auto name = ce.localName().isEmpty() ? ce.tagName() : ce.localName();
+                if (name != QLatin1String("content") || ce.namespaceURI() != jingleEl.namespaceURI())
+                    continue;
+                ContentBase cb(ce);
+                if (!cb.isValid() || !ce.firstChildElement().isNull()) {
+                    lastError = Stanza::Error(Stanza::Error::ErrorType::Modify, Stanza::Error::ErrorCond::BadRequest);
+                    return false;
+                }
+                auto app = contentList.value(ContentKey { cb.name, cb.creator });
+                if (state >= State::Finishing || !app || app->state() >= State::Finishing
+                    || (app->isLocal() && app->state() < State::Unacked) || seen.contains(app)) {
+                    lastError
+                        = Stanza::Error(Stanza::Error::ErrorType::Cancel, Stanza::Error::ErrorCond::UnexpectedRequest);
+                    ErrorUtil::fill(jingleEl.ownerDocument(), *lastError, ErrorUtil::OutOfOrder);
+                    return false;
+                }
+                if (!app->supportsContentModify()) {
+                    lastError = Stanza::Error(Stanza::Error::ErrorType::Cancel,
+                                              Stanza::Error::ErrorCond::FeatureNotImplemented);
+                    return false;
+                }
+                seen.insert(app);
+                updates.append(qMakePair(QPointer<Application>(app), cb.senders));
+            }
+            if (updates.isEmpty()) {
+                lastError = Stanza::Error(Stanza::Error::ErrorType::Modify, Stanza::Error::ErrorCond::BadRequest);
+                return false;
+            }
+            // Validate the entire batch before notifying applications. A notification
+            // may synchronously remove another content or even destroy the session.
+            QPointer<Session> session(q);
+            for (const auto &update : updates) {
+                if (!session)
+                    return true;
+                if (update.first && update.first->state() < State::Finishing)
+                    update.first->incomingContentModify(update.second);
+            }
+            return true;
+        }
+
+        bool handleIncomingDescriptionInfo(const QDomElement &jingleEl)
+        {
+            QList<QPair<QPointer<Application>, QDomElement>> updates;
+            QSet<Application *>                              seen;
+            for (auto ce = jingleEl.firstChildElement(QStringLiteral("content")); !ce.isNull();
+                 ce      = ce.nextSiblingElement(QStringLiteral("content"))) {
+                ContentBase cb(ce);
+                auto        description = ce.firstChildElement(QStringLiteral("description"));
+                auto        app         = contentList.value(ContentKey { cb.name, cb.creator });
+                if (!cb.isValid() || description.isNull()
+                    || !description.nextSiblingElement(QStringLiteral("description")).isNull()) {
+                    lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Modify,
+                                                    XMPP::Stanza::Error::ErrorCond::BadRequest);
+                    return false;
+                }
+                if (!app || app->state() >= State::Finishing || seen.contains(app)) {
+                    lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,
+                                                    XMPP::Stanza::Error::ErrorCond::UnexpectedRequest);
+                    ErrorUtil::fill(jingleEl.ownerDocument(), *lastError, ErrorUtil::OutOfOrder);
+                    return false;
+                }
+                if (description.namespaceURI() != app->pad()->ns()) {
+                    lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,
+                                                    XMPP::Stanza::Error::ErrorCond::FeatureNotImplemented);
+                    ErrorUtil::fill(jingleEl.ownerDocument(), *lastError, ErrorUtil::UnsupportedInfo);
+                    return false;
+                }
+                seen.insert(app);
+                updates.append(qMakePair(QPointer<Application>(app), description));
+            }
+            if (updates.isEmpty()) {
+                lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Modify,
+                                                XMPP::Stanza::Error::ErrorCond::BadRequest);
+                return false;
+            }
+            for (const auto &update : updates) {
+                if (!update.first || !update.first->incomingDescriptionInfo(update.second)) {
+                    lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,
+                                                    XMPP::Stanza::Error::ErrorCond::FeatureNotImplemented);
+                    ErrorUtil::fill(jingleEl.ownerDocument(), *lastError, ErrorUtil::UnsupportedInfo);
+                    return false;
+                }
+            }
+            return true;
+        }
+
         bool handleIncomingSessionInfo(const QDomElement &jingleEl)
         {
-            bool hasElements = false;
+            ApplicationManagerPad::Ptr destination;
+            bool                       hasElements = false;
             for (QDomElement child = jingleEl.firstChildElement(); !child.isNull();
                  child             = child.nextSiblingElement()) {
                 hasElements = true;
-                auto pad    = q->applicationPad(child.namespaceURI());
-                if (pad) {
-                    return pad->incomingSessionInfo(jingleEl); // should return true if supported
+                ApplicationManagerPad::Ptr owner;
+                for (const auto &weakPad : std::as_const(applicationPads)) {
+                    auto pad = weakPad.toStrongRef();
+                    if (pad && pad->sessionInfoNamespaces().contains(child.namespaceURI())) {
+                        if (owner && owner != pad) {
+                            owner.clear(); // ambiguous namespace ownership
+                            break;
+                        }
+                        owner = pad;
+                    }
                 }
+                if (!owner || (destination && destination != owner)) {
+                    lastError = Stanza::Error(Stanza::Error::ErrorType::Cancel,
+                                              Stanza::Error::ErrorCond::FeatureNotImplemented);
+                    ErrorUtil::fill(jingleEl.ownerDocument(), *lastError, ErrorUtil::UnsupportedInfo);
+                    return false;
+                }
+                destination = owner;
             }
             if (!hasElements && state >= State::ApprovedToSend) {
                 return true;
             }
+            if (destination) {
+                QPointer<Session> guard(q);
+                const bool        handled = destination->incomingSessionInfo(jingleEl);
+                if (handled || !guard)
+                    return handled;
+            }
+            lastError
+                = Stanza::Error(Stanza::Error::ErrorType::Cancel, Stanza::Error::ErrorCond::FeatureNotImplemented);
+            ErrorUtil::fill(jingleEl.ownerDocument(), *lastError, ErrorUtil::UnsupportedInfo);
             return false;
         }
 
@@ -1032,7 +1202,11 @@ namespace XMPP { namespace Jingle {
 
     Session::~Session()
     {
-        qDeleteAll(d->contentList);
+        // Application::destroyed removes entries from contentList. Detach the
+        // list before deletion so those callbacks cannot invalidate iteration.
+        const auto contents = d->contentList.values();
+        d->contentList.clear();
+        qDeleteAll(contents);
         qDebug("session %s destroyed", qPrintable(d->sid));
     }
 
@@ -1097,8 +1271,139 @@ namespace XMPP { namespace Jingle {
 
     void Session::setGrouping(const QString &groupType, const QStringList &group)
     {
-        d->groups.insert(groupType, group);
+        // Compatibility setter: replace all groups of these semantics. Use the
+        // plural API to express multiple independently negotiated BUNDLE groups.
+        auto groups = d->groups;
+        groups.erase(std::remove_if(groups.begin(), groups.end(),
+                                    [&groupType](const ContentGroup &g) { return g.semantics == groupType; }),
+                     groups.end());
+        if (!group.isEmpty())
+            groups.append(ContentGroup { groupType, group });
+        setGroupings(groups);
+    }
+
+    static bool validGroup(const ContentGroup &group)
+    {
+        if (group.semantics.trimmed().isEmpty())
+            return false;
+        QSet<QString> seen;
+        for (const auto &name : group.contents) {
+            if (name.isEmpty() || seen.contains(name))
+                return false;
+            seen.insert(name);
+        }
+        return true;
+    }
+
+    bool Session::setGroupings(const QList<ContentGroup> &groups)
+    {
+        for (const auto &group : groups) {
+            if (!validGroup(group))
+                return false;
+        }
+        // One content cannot belong to two BUNDLE transports. For the initial
+        // answer, check membership against the peer's offer as well.
+        if (!validBundleAnswer(groups, groups)
+            || (d->role == Origin::Responder && d->state <= State::ApprovedToSend
+                && !validBundleAnswer(d->remoteGroups, groups)))
+            return false;
+        d->groups          = groups;
         d->needNotifyGroup = true;
+        return true;
+    }
+
+    QList<ContentGroup> Session::groupings() const { return d->groups; }
+    QList<ContentGroup> Session::remoteGroupings() const { return d->remoteGroups; }
+
+    bool Session::validLocalGroupings() const
+    {
+        if (!validBundleAnswer(d->groups, d->groups)
+            || (d->role == Origin::Responder && !validBundleAnswer(d->remoteGroups, d->groups)))
+            return false;
+        QHash<QString, int> names;
+        for (auto app : d->contentList) {
+            if (app->state() < State::Finishing)
+                ++names[app->contentName()];
+        }
+        for (const auto &group : d->groups) {
+            for (const auto &name : group.contents) {
+                if (names.value(name) != 1)
+                    return false;
+            }
+        }
+        return true;
+    }
+
+    bool Session::validBundleAnswer(const QList<ContentGroup> &offer, const QList<ContentGroup> &answer)
+    {
+        // Initial group membership only (RFC 9143 sections 7.3 and 7.4).
+        // Transport attributes, bundle-only and tagged-content selection require
+        // application/transport negotiation and are not validated here.
+        QHash<QString, int> offered;
+        for (int index = 0; index < offer.size(); ++index) {
+            const auto &group = offer[index];
+            if (group.semantics != QLatin1String("BUNDLE"))
+                continue;
+            for (const auto &name : group.contents) {
+                if (name.isEmpty() || offered.contains(name))
+                    return false;
+                offered.insert(name, index);
+            }
+        }
+        QSet<int>     answeredGroups;
+        QSet<QString> answeredMembers;
+        for (const auto &group : answer) {
+            if (group.semantics != QLatin1String("BUNDLE") || group.contents.isEmpty())
+                continue;
+            const int index = offered.value(group.contents.first(), -1);
+            if (index < 0 || answeredGroups.contains(index))
+                return false;
+            answeredGroups.insert(index);
+            for (const auto &name : group.contents) {
+                if (offered.value(name, -1) != index || answeredMembers.contains(name))
+                    return false;
+                answeredMembers.insert(name);
+            }
+        }
+        return true;
+    }
+
+    std::optional<QList<ContentGroup>> Session::parseGroupings(const QDomElement &jingleEl)
+    {
+        const auto ns = QStringLiteral("urn:xmpp:jingle:apps:grouping:0");
+        // Group names map to SDP mids, not (creator, name) content keys. A
+        // reference must identify exactly one top-level content in this offer
+        // or answer. Do not resolve it against an older local session snapshot.
+        QHash<QString, int> contentNames;
+        for (auto el = jingleEl.firstChildElement(); !el.isNull(); el = el.nextSiblingElement()) {
+            if (el.namespaceURI() == QLatin1String("urn:xmpp:jingle:1") && el.localName() == QLatin1String("content")) {
+                const auto name = el.attribute(QStringLiteral("name"));
+                if (!name.isEmpty())
+                    ++contentNames[name];
+            }
+        }
+        QList<ContentGroup> groups;
+        for (auto el = jingleEl.firstChildElement(); !el.isNull(); el = el.nextSiblingElement()) {
+            if (el.namespaceURI() != ns || el.localName() != QLatin1String("group"))
+                continue;
+            ContentGroup group { el.attribute(QStringLiteral("semantics")), {} };
+            for (auto child = el.firstChildElement(); !child.isNull(); child = child.nextSiblingElement()) {
+                if (child.namespaceURI() != ns || child.localName() != QLatin1String("content"))
+                    continue;
+                group.contents.append(child.attribute(QStringLiteral("name")));
+            }
+            if (!validGroup(group))
+                return std::nullopt;
+            // RFC 5888 section 6: ignore the whole group if any reference is
+            // unresolved. Keeping just its known members would change its meaning.
+            const bool resolved
+                = std::all_of(group.contents.cbegin(), group.contents.cend(),
+                              [&contentNames](const QString &name) { return contentNames.value(name) == 1; });
+            if (!resolved)
+                continue;
+            groups.append(group);
+        }
+        return groups;
     }
 
     ApplicationManagerPad::Ptr Session::applicationPad(const QString &ns)
@@ -1183,8 +1488,9 @@ namespace XMPP { namespace Jingle {
     {
         auto pad = d->transportPads.value(ns).toStrongRef();
         if (!pad) {
-            auto deleter = [ns, this](TransportManagerPad *pad) {
-                d->transportPads.remove(ns);
+            auto deleter = [ns, session = QPointer<Session>(this)](TransportManagerPad *pad) {
+                if (session)
+                    session->d->transportPads.remove(ns);
                 delete pad;
             };
             pad = TransportManagerPad::Ptr(d->manager->transportPad(this, ns), deleter);
@@ -1199,8 +1505,9 @@ namespace XMPP { namespace Jingle {
     {
         auto pad = d->applicationPads.value(ns).toStrongRef();
         if (!pad) {
-            auto deleter = [ns, this](ApplicationManagerPad *pad) {
-                d->applicationPads.remove(ns);
+            auto deleter = [ns, session = QPointer<Session>(this)](ApplicationManagerPad *pad) {
+                if (session)
+                    session->d->applicationPads.remove(ns);
                 delete pad;
             };
             pad = ApplicationManagerPad::Ptr(d->manager->applicationPad(this, ns), deleter);
@@ -1213,6 +1520,11 @@ namespace XMPP { namespace Jingle {
 
     bool Session::incomingInitiate(const Jingle &jingle, const QDomElement &jingleEl)
     {
+        auto peerGroups = parseGroupings(jingleEl);
+        if (!peerGroups) {
+            d->lastError = Stanza::Error(Stanza::Error::ErrorType::Cancel, Stanza::Error::ErrorCond::BadRequest);
+            return false;
+        }
         d->sid      = jingle.sid();
         d->origFrom = d->otherParty;
         if (jingle.initiator().isValid() && !jingle.initiator().compare(d->origFrom)) {
@@ -1235,6 +1547,7 @@ namespace XMPP { namespace Jingle {
             return true;
         case Private::AddContentError::Ok:
             Q_ASSERT(!apps.isEmpty());
+            d->remoteGroups                     = *peerGroups;
             d->initialIncomingUnacceptedContent = apps;
             for (auto app : std::as_const(apps)) {
                 app->markInitialApplication(true);
@@ -1262,13 +1575,13 @@ namespace XMPP { namespace Jingle {
         case Action::ContentAdd:
             return d->handleIncomingContentAdd(jingleEl);
         case Action::ContentModify:
-            break;
+            return d->handleIncomingContentModify(jingleEl);
         case Action::ContentReject:
-            break;
+            return d->handleIncomingContentRemove(jingleEl, true);
         case Action::ContentRemove:
             return d->handleIncomingContentRemove(jingleEl);
         case Action::DescriptionInfo:
-            break;
+            return d->handleIncomingDescriptionInfo(jingleEl);
         case Action::SecurityInfo:
             break;
         case Action::SessionAccept:

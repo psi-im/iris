@@ -20,6 +20,7 @@
 #include "jingle.h"
 
 #include "jingle-pub.h"
+#include "jingle-rtp.h"
 
 #include "jingle-application.h"
 #include "jingle-session.h"
@@ -306,12 +307,15 @@ namespace XMPP { namespace Jingle {
     ContentBase::ContentBase(const QDomElement &el)
     {
         static QMap<QString, Origin> sendersMap({ { QStringLiteral("initiator"), Origin::Initiator },
-                                                  { QStringLiteral("none"), Origin::Both },
+                                                  { QStringLiteral("none"), Origin::None },
+                                                  { QStringLiteral("both"), Origin::Both },
                                                   { QStringLiteral("responder"), Origin::Responder } });
-        creator     = creatorAttr(el);
-        name        = el.attribute(QLatin1String("name"));
-        senders     = sendersMap.value(el.attribute(QLatin1String("senders")));
-        disposition = el.attribute(QLatin1String("disposition")); // if empty, it's "session"
+        creator              = creatorAttr(el);
+        name                 = el.attribute(QLatin1String("name"));
+        const auto direction = el.attribute(QLatin1String("senders"), QStringLiteral("both"));
+        validSenders         = sendersMap.contains(direction);
+        senders              = sendersMap.value(direction, Origin::None);
+        disposition          = el.attribute(QLatin1String("disposition")); // if empty, it's "session"
     }
 
     QDomElement ContentBase::toXml(QDomDocument *doc, const QString &tagName, const QString &ns) const
@@ -553,6 +557,7 @@ namespace XMPP { namespace Jingle {
         std::optional<XMPP::Stanza::Error>    lastError;
         QHash<QPair<Jid, QString>, Session *> sessions;
         std::unique_ptr<PublicationManager>   publicationManager;
+        std::unique_ptr<RTP::Manager>         rtpManager;
         int                                   maxSessions = -1; // no limit
 
         void setupSession(Session *s)
@@ -568,6 +573,8 @@ namespace XMPP { namespace Jingle {
         d->manager = this;
         d->pushTask.reset(new JTPush(client->rootTask()));
         d->publicationManager = std::make_unique<PublicationManager>(this);
+        d->rtpManager         = std::make_unique<RTP::Manager>();
+        registerApplication(d->rtpManager.get());
         /*
         static bool mtReg = false;
         if (!mtReg) {
@@ -589,6 +596,7 @@ namespace XMPP { namespace Jingle {
     Client *Manager::client() const { return d->client; }
 
     PublicationManager *Manager::publicationManager() const { return d->publicationManager.get(); }
+    RTP::Manager       *Manager::rtpManager() const { return d->rtpManager.get(); }
 
     void Manager::addExternalManager(const QString &ns) { d->pushTask->addExternalManager(ns); }
 

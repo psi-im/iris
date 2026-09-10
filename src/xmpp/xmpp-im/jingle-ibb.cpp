@@ -23,7 +23,9 @@
 #include "xmpp/jid/jid.h"
 #include "xmpp_client.h"
 #include "xmpp_ibb.h"
+#include "xmpp_task.h"
 
+#include <QPointer>
 #include <QTimer>
 #if QT_VERSION >= QT_VERSION_CHECK(5, 10, 0)
 #include <QRandomGenerator>
@@ -343,23 +345,25 @@ namespace XMPP { namespace Jingle { namespace IBB {
         if (_state == State::ApprovedToSend) {
             setState(State::Unacked);
         }
-        upd = OutgoingTransportInfoUpdate { tel, [this, connection](bool success) mutable {
-                                               if (!success || connection->state != State::Unacked)
-                                                   return;
+        upd = OutgoingTransportInfoUpdate {
+            tel,
+            [this, guard = QPointer<Transport>(this), connection](Task *task) mutable {
+                if (!guard || !task || !task->success() || connection->state != State::Unacked)
+                    return;
 
-                                               if (connection->creator == _pad->session()->role()) {
-                                                   connection->state = State::Pending;
-                                               } else {
-                                                   connection->state = State::Accepted;
-                                               }
+                if (connection->creator == _pad->session()->role()) {
+                    connection->state = State::Pending;
+                } else {
+                    connection->state = State::Accepted;
+                }
 
-                                               if (_state == State::Unacked) {
-                                                   setState(_creator == _pad->session()->role() ? State::Pending
-                                                                                                : State::Accepted);
-                                               }
-                                               if (_state >= State::Connecting)
-                                                   d->checkAndStartConnection(connection);
-                                           } };
+                if (_state == State::Unacked) {
+                    setState(_creator == _pad->session()->role() ? State::Pending : State::Accepted);
+                }
+                if (guard && _state >= State::Connecting)
+                    d->checkAndStartConnection(connection);
+            }
+        };
 
         return upd;
     }

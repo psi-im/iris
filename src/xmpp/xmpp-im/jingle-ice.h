@@ -20,7 +20,10 @@
 #ifndef JINGLE_ICE_H
 #define JINGLE_ICE_H
 
+#include <QHash>
+#include <QWeakPointer>
 #include <iris/irisnet/noncore/tcpportreserver.h>
+#include <iris/jingle-rtp-srtp.h>
 #include <iris/xmpp-core/xmpp.h>
 #include <iris/xmpp-im/jingle-transport.h>
 
@@ -35,7 +38,8 @@ namespace Jingle { namespace ICE {
     class Transport;
 
     class Manager;
-    class Transport : public XMPP::Jingle::Transport {
+    class IceConnection;
+    class Transport : public XMPP::Jingle::Transport, public RTP::PacketTransport {
         Q_OBJECT
     public:
         enum Mode { Tcp, Udp };
@@ -45,6 +49,7 @@ namespace Jingle { namespace ICE {
 
         void                        prepare() override;
         void                        start() override;
+        void                        stop() override;
         bool                        update(const QDomElement &transportEl) override;
         bool                        hasUpdates() const override;
         OutgoingTransportInfoUpdate takeOutgoingUpdate(bool ensureTransportElement) override;
@@ -55,6 +60,14 @@ namespace Jingle { namespace ICE {
         void                   setComponentsCount(int count) override;
         Connection::Ptr        addChannel(TransportFeatures features, const QString &id, int component = -1) override;
         QList<Connection::Ptr> channels() const override;
+        // Explicit experimental single-component RTP/RTCP mux. Configure before
+        // prepare(); caller must require rtcp-mux in the RTP answer (a refusal
+        // needs a different transport). No raw media fallback. This does not
+        // advertise standard ICE-UDP or BUNDLE. The returned binding is owned
+        // by the ICE connection; consumers retaining it must use QPointer.
+        bool              enableRtpMux() override;
+        RTP::SrtpSession *rtpSession() const override;
+        bool              sendRtpPacket(QByteArray, RTP::SrtpContext::Packet, quint64 epoch) override;
 
     private:
         friend class Manager;
@@ -78,6 +91,10 @@ namespace Jingle { namespace ICE {
         inline TcpPortScope *discoScope() const { return _discoScope; }
 
     private:
+        friend class Transport;
+        QSharedPointer<IceConnection>                   connectionFor(Transport *transport);
+        QHash<Transport *, QWeakPointer<IceConnection>> _connections;
+
         Manager      *_manager;
         Session      *_session;
         TcpPortScope *_discoScope;

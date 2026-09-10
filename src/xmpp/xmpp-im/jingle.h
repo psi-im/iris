@@ -44,6 +44,9 @@ namespace Jingle {
 
     class Manager;
     class Session;
+    namespace RTP {
+        class Manager;
+    }
 
     enum class Origin { None, Both, Initiator, Responder };
 
@@ -284,7 +287,10 @@ namespace Jingle {
         ContentBase(Origin creator, const QString &name);
         ContentBase(const QDomElement &el);
 
-        inline bool isValid() const { return creator != Origin::None && !name.isEmpty(); }
+        inline bool isValid() const
+        {
+            return (creator == Origin::Initiator || creator == Origin::Responder) && !name.isEmpty() && validSenders;
+        }
 
         inline QDomElement toXml(QDomDocument *doc, const char *tagName, const QString &ns = QString()) const
         {
@@ -298,6 +304,8 @@ namespace Jingle {
         QString name;
         Origin  senders = Origin::Both;
         QString disposition; // default "session"
+    private:
+        bool validSenders = true;
     };
 
     class Security { };
@@ -383,6 +391,7 @@ namespace Jingle {
         const std::optional<XMPP::Stanza::Error> &lastError() const;
 
         PublicationManager *publicationManager() const;
+        RTP::Manager       *rtpManager() const;
 
         // Source-compatible shortcuts for the original local-only XEP-0358 API.
         // Durable/PubSub publications should use publicationManager() directly.
