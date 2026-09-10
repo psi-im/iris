@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  QCA_TAG: v3.0.1
+  QCA_TAG: v3.0.7
 
 jobs:
   qca3-srtp:
