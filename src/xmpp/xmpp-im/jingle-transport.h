@@ -249,9 +249,6 @@ namespace XMPP { namespace Jingle {
         // FIXME rename methods
         virtual QSharedPointer<Transport> newTransport(const TransportManagerPad::Ptr &pad, Origin creator) = 0;
         virtual TransportManagerPad      *pad(Session *session)                                             = 0;
-        // Multi-namespace managers override this so the pad retains the exact wire
-        // profile selected by Session. Existing one-namespace managers need no changes.
-        virtual TransportManagerPad *padForNamespace(Session *session, const QString &ns);
 
         // this method is supposed to gracefully close all related sessions as a preparation for plugin unload for
         // example
