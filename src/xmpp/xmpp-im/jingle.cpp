@@ -681,7 +681,7 @@ namespace XMPP { namespace Jingle {
         if (transportManager == d->transportManagers.end()) {
             return nullptr;
         }
-        return transportManager->second->pad(session);
+        return transportManager->second->padForNamespace(session, ns);
     }
 
     QStringList Manager::availableTransports(const TransportFeatures &features) const
