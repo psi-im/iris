@@ -54,17 +54,21 @@ namespace XMPP { namespace Jingle {
         inline bool                     isLocal() const { return !isRemote(); }
 
         /**
-         * @brief prepare to send content-add/session-initiate
-         *  When ready, the application first set update type to ContentAdd and then emit updated()
+         * @brief Start preparing the transport signaling offer or answer.
+         *
+         * Implementations should collect the information needed for their `<transport/>` element and emit updated()
+         * when signaling can proceed. Candidate-based transports may emit updated() more than once as more candidates
+         * become available.
          */
         virtual void prepare() = 0;
 
         /**
-         * @brief start really transfer data. starting with connection to remote candidates for example
+         * @brief Start connectivity negotiation after the transport has been accepted by signaling.
+         *
+         * For a local transport this may start candidate connectivity checks; for a remote transport it may start
+         * connecting to the peer's candidates. In-band transports may become usable immediately.
          */
-        virtual void start() = 0; // for local transport start searching for candidates (including probing proxy,stun
-                                  // etc) for remote transport try to connect to all proposed hosts in order their
-                                  // priority. in-band transport may just emit updated() here
+        virtual void start() = 0;
         virtual void stop();
         virtual bool update(const QDomElement &el) = 0; // accepts transport element on incoming transport-info
         virtual bool hasUpdates() const            = 0;
@@ -156,16 +160,16 @@ namespace XMPP { namespace Jingle {
 
     signals:
         /**
-         * found some candidates and they have to be sent. takeUpdate has to be called from this signal
-         * handler. if it's just always ready then signal has to be sent at least once otherwise
-         * session-initiate won't be sent.
+         * Found signaling updates that have to be sent. The session will eventually call takeOutgoingUpdate(). If a
+         * transport is immediately ready it still has to emit this signal at least once, otherwise the initial Jingle
+         * action cannot be sent.
          */
         void updated();
-        void failed(); // transport ailed for whatever reason. aborted for example. _state will be State::Finished
+        void failed(); // transport failed for whatever reason. aborted for example. _state will be State::Finished
         void stateChanged();
 
     protected:
-        /// just updates state and signals about the change. No any loggic attached to the new state
+        /// Just updates state and signals about the change. No logic is attached to the new state.
         void setState(State newState);
 
         /// Where the user already gave his consent to transfer data. (one exception: State::Finished)

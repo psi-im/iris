@@ -27,6 +27,14 @@
 
 namespace XMPP { namespace Jingle {
 
+    void Application::incomingContentModify(Origin senders)
+    {
+        if (!supportsContentModify() || _senders == senders)
+            return;
+        _senders = senders;
+        emit sendersChanged(senders);
+    }
+
     class ConnectionWaiter : public QObject {
         Q_OBJECT
 
