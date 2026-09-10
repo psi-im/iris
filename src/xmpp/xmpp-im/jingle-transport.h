@@ -153,7 +153,7 @@ namespace XMPP { namespace Jingle {
         void addAcceptor(TransportFeatures features, ConnectionAcceptorCallback &&acceptor, int componentIndex = -1);
 
         /**
-         * @brief acceptors returns all registered connection acceptors both local and remote
+         * @brief acceptors returns all registered connection acceptors
          * @return list of acceptors
          */
         const QList<ConnectionAcceptor> &acceptors() const;
@@ -212,8 +212,12 @@ namespace XMPP { namespace Jingle {
         virtual bool replace(QSharedPointer<Transport> old, QSharedPointer<Transport> newer) = 0;
 
         // Put transport back to the set for future use
-        virtual void backupTransport(QSharedPointer<Transport>) override;
+        virtual void backupTransport(QSharedPointer<Transport>) = 0;
+
+        // Where we can allocate another transport for a replacement
         virtual bool hasMoreTransports() const = 0;
+
+        // Check where we can (still) use this transport for the application
         virtual bool hasTransport(QSharedPointer<Transport>) const = 0;
 
         /*
