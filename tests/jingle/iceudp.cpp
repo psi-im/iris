@@ -4,6 +4,8 @@
 
 using XMPP::Jingle::ICE::NS_ICE_UDP;
 using XMPP::Jingle::ICE::UdpTransportCodec;
+using XMPP::Jingle::ICE::iceUdpToInternal;
+using XMPP::Jingle::ICE::internalToIceUdp;
 
 static void check(bool value, const char *message)
 {
@@ -49,6 +51,28 @@ int main(int argc, char **argv)
     const auto roundtrip = UdpTransportCodec::fromXml(xml(doc.toString()));
     check(roundtrip && roundtrip->candidates.size() == 2 && roundtrip->extensions.size() == 1,
           "ICE-UDP roundtrip failed");
+
+    QDomDocument internalDoc;
+    const auto internal = iceUdpToInternal(internalDoc, transport, QStringLiteral("urn:xmpp:jingle:transports:ice:0"));
+    check(!internal.isNull() && internal.namespaceURI() == QStringLiteral("urn:xmpp:jingle:transports:ice:0")
+              && internal.firstChildElement(QStringLiteral("candidate")).namespaceURI().isEmpty(),
+          "ICE-UDP to shared ICE conversion failed");
+    check(!internal.firstChildElement(QStringLiteral("fingerprint")).isNull(), "DTLS extension lost in shared ICE");
+    const auto bridged = internalToIceUdp(internalDoc, internal);
+    check(!bridged.isNull() && bridged.namespaceURI() == NS_ICE_UDP
+              && bridged.firstChildElement(QStringLiteral("candidate")).namespaceURI() == NS_ICE_UDP,
+          "shared ICE to ICE-UDP conversion failed");
+    const auto bridgedDescription = UdpTransportCodec::fromXml(bridged);
+    check(bridgedDescription && bridgedDescription->candidates.size() == 2
+              && bridgedDescription->extensions.size() == 1,
+          "shared ICE bridge changed XEP-0176 semantics");
+
+    auto internalWithCompletion = internal.cloneNode(true).toElement();
+    internalWithCompletion.appendChild(internalDoc.createElement(QStringLiteral("gathering-complete")));
+    const auto withoutCompletion = internalToIceUdp(internalDoc, internalWithCompletion);
+    check(!withoutCompletion.isNull()
+              && withoutCompletion.firstChildElement(QStringLiteral("gathering-complete")).isNull(),
+          "gathering-complete leaked through shared ICE bridge");
 
     const auto selected = parse("<remote-candidate component='1' ip='192.0.2.10' port='6000'/>");
     check(selected && selected->remoteCandidate && selected->remoteCandidate->port == 6000,
