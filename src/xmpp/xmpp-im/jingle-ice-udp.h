@@ -1,0 +1,56 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
+#ifndef JINGLE_ICE_UDP_H
+#define JINGLE_ICE_UDP_H
+
+#include <QDomElement>
+#include <QHostAddress>
+#include <QList>
+#include <QString>
+#include <optional>
+
+namespace XMPP::Jingle::ICE {
+
+extern const QString NS_ICE_UDP;
+
+struct UdpCandidate {
+    int          component  = -1;
+    QString      foundation;
+    int          generation = -1;
+    QString      id;
+    QHostAddress ip;
+    int          network  = -1;
+    int          port     = -1;
+    int          priority = -1;
+    QString      protocol;
+    QHostAddress relAddr;
+    int          relPort = -1;
+    QString      type;
+};
+
+struct UdpRemoteCandidate {
+    int          component = -1;
+    QHostAddress ip;
+    int          port = -1;
+};
+
+// Wire model for XEP-0176 only. Foreign namespaced children (for example
+// XEP-0320 fingerprints) are preserved but not interpreted here.
+struct UdpTransportDescription {
+    QString                           pwd;
+    QString                           ufrag;
+    QList<UdpCandidate>               candidates;
+    std::optional<UdpRemoteCandidate> remoteCandidate;
+    QList<QDomElement>                extensions;
+
+    bool isValid(QString *error = nullptr) const;
+};
+
+class UdpTransportCodec {
+public:
+    static std::optional<UdpTransportDescription> fromXml(const QDomElement &transport, QString *error = nullptr);
+    static QDomElement toXml(QDomDocument &doc, const UdpTransportDescription &transport, QString *error = nullptr);
+};
+
+} // namespace XMPP::Jingle::ICE
+
+#endif // JINGLE_ICE_UDP_H
