@@ -51,6 +51,13 @@ public:
     static QDomElement toXml(QDomDocument &doc, const UdpTransportDescription &transport, QString *error = nullptr);
 };
 
+// The production ICE implementation predates XEP-0176 and internally uses the
+// XEP-0371-shaped ice:0 DOM. These helpers are a wire adapter only: ICE state,
+// candidate gathering, DTLS and packet ownership remain shared.
+QDomElement iceUdpToInternal(QDomDocument &doc, const QDomElement &transport, const QString &internalNamespace,
+                             QString *error = nullptr);
+QDomElement internalToIceUdp(QDomDocument &doc, const QDomElement &transport, QString *error = nullptr);
+
 } // namespace XMPP::Jingle::ICE
 
 #endif // JINGLE_ICE_UDP_H
