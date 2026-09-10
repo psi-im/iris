@@ -204,6 +204,8 @@ target_sources(iris PRIVATE
     xmpp-im/jingle-rtp.cpp
     xmpp-im/jingle-rtp-info.cpp
     xmpp-im/jingle-rtp-srtp.cpp
+    xmpp-im/jingle-ice-udp.h
+    xmpp-im/jingle-ice-udp.cpp
     xmpp-im/jingle-ice.cpp
     xmpp-im/jingle-s5b.cpp
     xmpp-im/jingle-ibb.cpp
