@@ -42,7 +42,13 @@ namespace XMPP { namespace Jingle {
         do {
             auto t = _session->newOutgoingTransport(_transports[idx]);
             if (t) {
-                auto const discoFeatures = t->pad()->manager()->discoFeatures();
+                auto discoFeatures = t->pad()->manager()->discoFeatures();
+                // A manager may implement several alternative wire profiles. The
+                // selected transport requires its own namespace, not all siblings.
+                for (const auto &ns : t->pad()->manager()->ns()) {
+                    if (ns != t->pad()->ns())
+                        discoFeatures.removeAll(ns);
+                }
                 // FIXME next if is quite stupid. instead need to check a minimal set of features of desired connection.
                 if (std::all_of(discoFeatures.begin(), discoFeatures.end(),
                                 [this](auto const &f) { return _session->checkPeerCaps(f); }))
