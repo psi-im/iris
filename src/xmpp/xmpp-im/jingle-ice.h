@@ -83,7 +83,7 @@ namespace Jingle { namespace ICE {
     public:
         typedef QSharedPointer<Pad> Ptr;
 
-        Pad(Manager *manager, Session *session, const QString &ns = NS);
+        Pad(Manager *manager, Session *session);
         QString           ns() const override;
         Session          *session() const override;
         TransportManager *manager() const override;
@@ -98,7 +98,6 @@ namespace Jingle { namespace ICE {
 
         Manager      *_manager;
         Session      *_session;
-        QString       _ns;
         TcpPortScope *_discoScope;
         bool          _allowGrouping = false;
     };
@@ -114,7 +113,6 @@ namespace Jingle { namespace ICE {
         QSharedPointer<XMPP::Jingle::Transport> newTransport(const TransportManagerPad::Ptr &pad,
                                                              Origin                          creator) override;
         TransportManagerPad                    *pad(Session *session) override;
-        TransportManagerPad                    *padForNamespace(Session *session, const QString &ns) override;
 
         QStringList ns() const override;
         QStringList discoFeatures() const override;
