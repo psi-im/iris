@@ -23,6 +23,7 @@
 
 #include "jingle-ice-connection_p.h"
 #include "jingle-ice.h"
+#include "jingle-ice-udp.h"
 
 #include "dtls.h"
 #include "ice176.h"
@@ -100,7 +101,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
         // if(!c.rem_addr.isNull())
         //    e.setAttribute("rem-addr", c.rem_addr.toString());
         // if(c.rem_port != -1)
-        //    e.setAttribute("rem-port", QString::number(c.rem_port));
+        //    e.setAttribute("rem-port", c.rem_port);
         e.setAttribute("type", c.type);
         return e;
     }
@@ -753,8 +754,10 @@ namespace XMPP { namespace Jingle { namespace ICE {
                            emit q->updated();
                        });
             q->connect(network->ice, &XMPP::Ice176::localGatheringComplete, q, [this]() {
-                pendingActions |= GatheringComplete;
-                emit q->updated();
+                if (q->pad()->ns() == NS)
+                    pendingActions |= GatheringComplete;
+                if (pendingActions)
+                    emit q->updated();
             });
             q->connect(
                 network->ice, &XMPP::Ice176::readyToSendMedia, q,
@@ -1080,7 +1083,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
         }
         if (profiles.isEmpty())
             return false;
-        d->rtpProfiles                        = profiles;
+        d->rtpProfiles                         = profiles;
         d->network->components[0].lowOverhead = true;
         return true;
     }
@@ -1169,8 +1172,18 @@ namespace XMPP { namespace Jingle { namespace ICE {
     bool Transport::update(const QDomElement &transportEl)
     {
         try {
+            QDomDocument normalizedDoc;
+            QDomElement  normalized = transportEl;
+            if (_pad->ns() == NS_ICE_UDP) {
+                QString error;
+                normalized = iceUdpToInternal(normalizedDoc, transportEl, NS, &error);
+                if (normalized.isNull()) {
+                    qWarning("ICE-UDP transport update failed: %s", qPrintable(error));
+                    return false;
+                }
+            }
             Element e;
-            e.parse(transportEl);
+            e.parse(normalized);
             QTimer::singleShot(0, this, [this, e]() { d->handleRemoteUpdate(e); });
             return true;
         } catch (std::runtime_error &e) {
@@ -1207,10 +1220,21 @@ namespace XMPP { namespace Jingle { namespace ICE {
             e.remoteCandidates = d->network->ice->selectedCandidates();
         // TODO sctp
 
+        auto         doc = _pad.staticCast<Pad>()->session()->manager()->client()->doc();
+        QDomElement  transportXml = e.toXml(doc);
+        if (_pad->ns() == NS_ICE_UDP) {
+            QString error;
+            transportXml = internalToIceUdp(*doc, transportXml, &error);
+            if (transportXml.isNull()) {
+                qWarning("Failed to serialize ICE-UDP transport update: %s", qPrintable(error));
+                return {};
+            }
+        }
+
         d->pendingLocalCandidates.clear();
         d->pendingActions = 0;
 
-        return OutgoingTransportInfoUpdate { e.toXml(_pad.staticCast<Pad>()->session()->manager()->client()->doc()),
+        return OutgoingTransportInfoUpdate { transportXml,
                                              [this, trptr = QPointer<Transport>(d->q), hasFingerprint](Task *task) {
                                                  if (!trptr || !task || !task->success())
                                                      return;
@@ -1234,7 +1258,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
     int Transport::maxSupportedChannelsPerComponent(TransportFeatures features) const
     {
         return features & TransportFeature::DataOriented ? 65536 : 1;
-    };
+    }
 
     void Transport::setComponentsCount(int count)
     {
@@ -1289,6 +1313,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
     Manager::~Manager()
     {
         if (d->jingleManager) {
+            d->jingleManager->unregisterTransport(NS_ICE_UDP);
             d->jingleManager->unregisterTransport(NS);
         }
     }
@@ -1312,10 +1337,15 @@ namespace XMPP { namespace Jingle { namespace ICE {
 
     TransportManagerPad *Manager::pad(Session *session) { return new Pad(this, session); }
 
-    QStringList Manager::ns() const { return { NS }; }
+    TransportManagerPad *Manager::padForNamespace(Session *session, const QString &ns)
+    {
+        return ns == NS || ns == NS_ICE_UDP ? new Pad(this, session, ns) : nullptr;
+    }
+
+    QStringList Manager::ns() const { return { NS, NS_ICE_UDP }; }
     QStringList Manager::discoFeatures() const
     {
-        return { NS, NS_DTLS
+        return { NS, NS_ICE_UDP, NS_DTLS
 #ifdef JINGLE_SCTP
                  ,
                  SCTP::ns()
@@ -1367,13 +1397,13 @@ namespace XMPP { namespace Jingle { namespace ICE {
     //----------------------------------------------------------------
     // Pad
     //----------------------------------------------------------------
-    Pad::Pad(Manager *manager, Session *session) : _manager(manager), _session(session)
+    Pad::Pad(Manager *manager, Session *session, const QString &ns) : _manager(manager), _session(session), _ns(ns)
     {
         auto reserver = _session->manager()->client()->tcpPortReserver();
         _discoScope   = reserver->scope(QString::fromLatin1("ice"));
     }
 
-    QString Pad::ns() const { return NS; }
+    QString Pad::ns() const { return _ns; }
 
     QSharedPointer<IceConnection> Pad::connectionFor(Transport *transport)
     {
