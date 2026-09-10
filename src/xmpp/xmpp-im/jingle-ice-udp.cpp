@@ -168,6 +168,25 @@ QDomElement remoteCandidateToXml(QDomDocument &doc, const UdpRemoteCandidate &ca
     return element;
 }
 
+QDomElement internalCandidateToUdp(QDomDocument &doc, const QDomElement &candidate, QString *error)
+{
+    auto converted = doc.createElementNS(NS_ICE_UDP, QStringLiteral("candidate"));
+    static const QStringList attributes { QStringLiteral("component"), QStringLiteral("foundation"),
+                                          QStringLiteral("generation"), QStringLiteral("id"),
+                                          QStringLiteral("ip"), QStringLiteral("network"),
+                                          QStringLiteral("port"), QStringLiteral("priority"),
+                                          QStringLiteral("protocol"), QStringLiteral("rel-addr"),
+                                          QStringLiteral("rel-port"), QStringLiteral("type") };
+    for (const auto &attribute : attributes) {
+        if (candidate.hasAttribute(attribute))
+            converted.setAttribute(attribute, candidate.attribute(attribute));
+    }
+    UdpCandidate parsed;
+    if (!parseCandidate(converted, &parsed, error))
+        return {};
+    return converted;
+}
+
 } // namespace
 
 bool UdpTransportDescription::isValid(QString *error) const
@@ -261,6 +280,95 @@ QDomElement UdpTransportCodec::toXml(QDomDocument &doc, const UdpTransportDescri
         element.appendChild(doc.importNode(extension, true));
 
     return element;
+}
+
+QDomElement iceUdpToInternal(QDomDocument &doc, const QDomElement &transport, const QString &internalNamespace,
+                             QString *error)
+{
+    const auto parsed = UdpTransportCodec::fromXml(transport, error);
+    if (!parsed || internalNamespace.isEmpty())
+        return {};
+
+    auto internal = doc.createElementNS(internalNamespace, QStringLiteral("transport"));
+    if (!parsed->pwd.isEmpty())
+        internal.setAttribute(QStringLiteral("pwd"), parsed->pwd);
+    if (!parsed->ufrag.isEmpty())
+        internal.setAttribute(QStringLiteral("ufrag"), parsed->ufrag);
+
+    for (const auto &candidate : parsed->candidates) {
+        auto element = doc.createElement(QStringLiteral("candidate"));
+        element.setAttribute(QStringLiteral("component"), candidate.component);
+        element.setAttribute(QStringLiteral("foundation"), candidate.foundation);
+        element.setAttribute(QStringLiteral("generation"), candidate.generation);
+        element.setAttribute(QStringLiteral("id"), candidate.id);
+        element.setAttribute(QStringLiteral("ip"), candidate.ip.toString());
+        if (candidate.network >= 0)
+            element.setAttribute(QStringLiteral("network"), candidate.network);
+        element.setAttribute(QStringLiteral("port"), candidate.port);
+        element.setAttribute(QStringLiteral("priority"), candidate.priority);
+        element.setAttribute(QStringLiteral("protocol"), candidate.protocol);
+        if (!candidate.relAddr.isNull())
+            element.setAttribute(QStringLiteral("rel-addr"), candidate.relAddr.toString());
+        if (candidate.relPort >= 0)
+            element.setAttribute(QStringLiteral("rel-port"), candidate.relPort);
+        element.setAttribute(QStringLiteral("type"), candidate.type);
+        internal.appendChild(element);
+    }
+    if (parsed->remoteCandidate) {
+        auto element = doc.createElement(QStringLiteral("remote-candidate"));
+        element.setAttribute(QStringLiteral("component"), parsed->remoteCandidate->component);
+        element.setAttribute(QStringLiteral("ip"), parsed->remoteCandidate->ip.toString());
+        element.setAttribute(QStringLiteral("port"), parsed->remoteCandidate->port);
+        internal.appendChild(element);
+    }
+    for (const auto &extension : parsed->extensions)
+        internal.appendChild(doc.importNode(extension, true));
+    return internal;
+}
+
+QDomElement internalToIceUdp(QDomDocument &doc, const QDomElement &transport, QString *error)
+{
+    if (transport.isNull() || elementName(transport) != QStringLiteral("transport")) {
+        fail(error, QStringLiteral("Invalid internal ICE transport element"));
+        return {};
+    }
+
+    UdpTransportDescription converted;
+    converted.pwd   = transport.attribute(QStringLiteral("pwd"));
+    converted.ufrag = transport.attribute(QStringLiteral("ufrag"));
+
+    for (auto child = transport.firstChildElement(); !child.isNull(); child = child.nextSiblingElement()) {
+        const auto name = elementName(child);
+        if (name == QStringLiteral("candidate") && child.namespaceURI().isEmpty()) {
+            auto udpCandidate = internalCandidateToUdp(doc, child, error);
+            if (udpCandidate.isNull())
+                return {};
+            UdpCandidate parsed;
+            if (!parseCandidate(udpCandidate, &parsed, error))
+                return {};
+            converted.candidates.append(parsed);
+        } else if (name == QStringLiteral("remote-candidate") && child.namespaceURI().isEmpty()) {
+            if (converted.remoteCandidate) {
+                fail(error, QStringLiteral("Multiple internal remote-candidate elements"));
+                return {};
+            }
+            UdpRemoteCandidate remote;
+            if (!parseInteger(child, QStringLiteral("component"), 1, 255, &remote.component, error)
+                || !parseAddress(child, QStringLiteral("ip"), &remote.ip, error)
+                || !parseInteger(child, QStringLiteral("port"), 1, 65535, &remote.port, error))
+                return {};
+            converted.remoteCandidate = remote;
+        } else if (name == QStringLiteral("gathering-complete") && child.namespaceURI().isEmpty()) {
+            continue; // XEP-0371-only signal; XEP-0176 has no equivalent.
+        } else if (!child.namespaceURI().isEmpty()) {
+            converted.extensions.append(child);
+        } else {
+            fail(error, QStringLiteral("Unsupported internal ICE child for XEP-0176"));
+            return {};
+        }
+    }
+
+    return UdpTransportCodec::toXml(doc, converted, error);
 }
 
 } // namespace XMPP::Jingle::ICE
