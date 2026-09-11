@@ -128,6 +128,9 @@ class IRIS_EXPORT MediaProvider {
 public:
     virtual ~MediaProvider()                              = default;
     virtual std::unique_ptr<MediaSession> createSession() = 0;
+    // Discovery must describe the actual backend, not merely the RTP parser.
+    // Unknown providers advertise no RTP media types by default.
+    virtual QStringList mediaTypes() const { return {}; }
 };
 
 class Manager;
@@ -228,7 +231,20 @@ public:
     ApplicationManagerPad *pad(Session *) override;
     void                   closeAll(const QString & = QString()) override;
     QStringList            ns() const override { return { Description::ns() }; }
-    QStringList            discoFeatures() const override { return {}; }
+    QStringList            discoFeatures() const override
+    {
+        if (!provider_)
+            return {};
+        const auto media = provider_->mediaTypes();
+        QStringList features;
+        if (media.contains(QStringLiteral("audio")) || media.contains(QStringLiteral("video")))
+            features << Description::ns();
+        if (media.contains(QStringLiteral("audio")))
+            features << QStringLiteral("urn:xmpp:jingle:apps:rtp:audio");
+        if (media.contains(QStringLiteral("video")))
+            features << QStringLiteral("urn:xmpp:jingle:apps:rtp:video");
+        return features;
+    }
 
 private:
     QPointer<XMPP::Jingle::Manager> jingle_;
