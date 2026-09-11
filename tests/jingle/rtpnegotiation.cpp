@@ -2,6 +2,8 @@
 #include <QCoreApplication>
 #include <QDebug>
 #include <iris/jingle-rtp-negotiation.h>
+
+using XMPP::Jingle::Origin;
 using namespace XMPP::Jingle::RTP;
 
 static void check(bool value, const char *message)
@@ -54,6 +56,34 @@ static Description makeOffer()
     auto         extension = doc.createElementNS("urn:iris:test", "test");
     extension.setAttribute("value", "original");
     result.extensions.append(extension);
+    return result;
+}
+
+static Result answerResult(const Description &offer, const Description &answer)
+{
+    MockCodecs  codecs;
+    Negotiation negotiation;
+    const auto  initial = negotiation.setLocalOffer(offer);
+    if (initial != Result::Ok)
+        return initial;
+    return negotiation.setRemoteAnswer(answer, codecs);
+}
+
+static Feedback feedback(const char *type, const char *subtype = nullptr)
+{
+    Feedback result;
+    result.type = QString::fromLatin1(type);
+    if (subtype)
+        result.subtype = QString::fromLatin1(subtype);
+    return result;
+}
+
+static HeaderExtension headerExtension(quint16 id, const char *uri, Origin senders = Origin::Both)
+{
+    HeaderExtension result;
+    result.id      = id;
+    result.uri     = QString::fromLatin1(uri);
+    result.senders = senders;
     return result;
 }
 
@@ -151,6 +181,126 @@ int main(int argc, char **argv)
     reorderedAnswer.payloads.swapItemsAt(0, 1);
     check(reordered.setRemoteAnswer(reorderedAnswer, codecs) == Result::Ok, "peer codec preferences rejected");
     check(reordered.remoteDescription()->payloads.first().id == 0, "peer codec preference order lost");
+
+    // XEP-0293: accepted feedback is an unchanged subset at the same scope.
+    auto feedbackOffer = makeOffer();
+    feedbackOffer.feedback.append(feedback("nack", "pli"));
+    feedbackOffer.feedback.first().parameters.append({ QStringLiteral("mode"), QStringLiteral("fast") });
+    feedbackOffer.feedbackTrrInt = 100;
+    feedbackOffer.payloads.first().feedback.append(feedback("transport-cc"));
+    feedbackOffer.payloads.first().feedbackTrrInt = 50;
+    auto feedbackAnswer = feedbackOffer;
+    feedbackAnswer.feedback.clear();
+    feedbackAnswer.payloads.first().feedback.clear();
+    check(answerResult(feedbackOffer, feedbackAnswer) == Result::Ok, "feedback subset rejected");
+
+    auto modifiedFeedback = feedbackOffer;
+    modifiedFeedback.feedback.first().subtype = QStringLiteral("sli");
+    check(answerResult(feedbackOffer, modifiedFeedback) == Result::IncompatibleAnswer,
+          "modified description feedback accepted");
+    modifiedFeedback = feedbackOffer;
+    modifiedFeedback.feedback.first().parameters.first().value = QStringLiteral("slow");
+    check(answerResult(feedbackOffer, modifiedFeedback) == Result::IncompatibleAnswer,
+          "modified feedback parameter accepted");
+    modifiedFeedback = feedbackOffer;
+    modifiedFeedback.feedbackTrrInt = 101;
+    check(answerResult(feedbackOffer, modifiedFeedback) == Result::IncompatibleAnswer,
+          "modified description trr-int accepted");
+    modifiedFeedback = feedbackOffer;
+    modifiedFeedback.payloads.first().feedbackTrrInt = 51;
+    check(answerResult(feedbackOffer, modifiedFeedback) == Result::IncompatibleAnswer,
+          "modified payload trr-int accepted");
+    modifiedFeedback = feedbackOffer;
+    modifiedFeedback.payloads.first().feedback.append(feedback("goog-remb"));
+    check(answerResult(feedbackOffer, modifiedFeedback) == Result::IncompatibleAnswer,
+          "unoffered payload feedback accepted");
+
+    auto avpfOffer = makeOffer();
+    avpfOffer.feedback.append(feedback("nack", "pli"));
+    auto avpfOnly = makeOffer();
+    avpfOnly.feedbackTrrInt = 0;
+    check(answerResult(avpfOffer, avpfOnly) == Result::Ok, "XEP-0293 AVPF trr-int=0 fallback rejected");
+    check(answerResult(makeOffer(), avpfOnly) == Result::IncompatibleAnswer,
+          "unsolicited AVPF trr-int=0 accepted");
+    auto offeredTrr = avpfOffer;
+    offeredTrr.feedbackTrrInt = 100;
+    check(answerResult(offeredTrr, avpfOnly) == Result::IncompatibleAnswer,
+          "offered trr-int was replaced by synthetic zero");
+
+    // XEP-0294 / RFC 8285: ordinary ids remain stable while extended offer ids
+    // may represent alternatives and are remapped to a free usable answer id.
+    auto headerOffer = makeOffer();
+    auto mid         = headerExtension(1, "urn:ietf:params:rtp-hdrext:sdes:mid");
+    mid.parameters.append({ QStringLiteral("mode"), QStringLiteral("compact") });
+    headerOffer.headerExtensions.append(mid);
+    headerOffer.extmapAllowMixed = true;
+    auto headerAnswer = headerOffer;
+    headerAnswer.headerExtensions.first().senders = Origin::Initiator;
+    headerAnswer.extmapAllowMixed                  = false;
+    check(answerResult(headerOffer, headerAnswer) == Result::Ok, "header-extension sender downgrade rejected");
+
+    auto badHeader = headerAnswer;
+    badHeader.headerExtensions.first().id = 2;
+    check(answerResult(headerOffer, badHeader) == Result::IncompatibleAnswer,
+          "ordinary header-extension id remap accepted");
+    badHeader = headerAnswer;
+    badHeader.headerExtensions.first().uri = QStringLiteral("urn:example:unoffered");
+    check(answerResult(headerOffer, badHeader) == Result::IncompatibleAnswer,
+          "unoffered header-extension URI accepted");
+    badHeader = headerAnswer;
+    badHeader.headerExtensions.first().parameters.first().value = QStringLiteral("changed");
+    check(answerResult(headerOffer, badHeader) == Result::IncompatibleAnswer,
+          "modified header-extension parameter accepted");
+    badHeader = headerAnswer;
+    badHeader.headerExtensions.first().senders = Origin::None;
+    check(answerResult(headerOffer, badHeader) == Result::IncompatibleAnswer,
+          "unsupported both-to-none sender downgrade accepted");
+    auto noMixedOffer = headerOffer;
+    noMixedOffer.extmapAllowMixed = false;
+    auto addedMixed = headerAnswer;
+    addedMixed.extmapAllowMixed = true;
+    check(answerResult(noMixedOffer, addedMixed) == Result::IncompatibleAnswer,
+          "unoffered extmap-allow-mixed accepted");
+
+    auto directionalOffer = makeOffer();
+    directionalOffer.headerExtensions.append(
+        headerExtension(3, "urn:ietf:params:rtp-hdrext:ssrc-audio-level", Origin::Initiator));
+    auto directionalAnswer = directionalOffer;
+    directionalAnswer.headerExtensions.first().senders = Origin::Responder;
+    check(answerResult(directionalOffer, directionalAnswer) == Result::IncompatibleAnswer,
+          "one-way header-extension direction was reversed");
+
+    auto extendedOffer = makeOffer();
+    extendedOffer.headerExtensions = { headerExtension(4096, "urn:example:gps-string"),
+                                       headerExtension(4096, "urn:example:gps-binary") };
+    auto extendedAnswer = makeOffer();
+    extendedAnswer.headerExtensions = { headerExtension(2, "urn:example:gps-string", Origin::Responder) };
+    check(answerResult(extendedOffer, extendedAnswer) == Result::Ok, "extended header alternative remap rejected");
+    auto tooManyAlternatives = extendedAnswer;
+    tooManyAlternatives.headerExtensions.append(headerExtension(3, "urn:example:gps-binary"));
+    check(answerResult(extendedOffer, tooManyAlternatives) == Result::IncompatibleAnswer,
+          "multiple alternatives from one extended id accepted");
+    auto echoedExtended = makeOffer();
+    echoedExtended.headerExtensions = { headerExtension(4096, "urn:example:gps-binary") };
+    check(answerResult(extendedOffer, echoedExtended) == Result::Ok, "extended capability echo rejected");
+
+    auto duplicateUsableIds = makeOffer();
+    duplicateUsableIds.headerExtensions = { headerExtension(1, "urn:example:a"), headerExtension(1, "urn:example:b") };
+    Negotiation invalidHeaderOffer;
+    check(invalidHeaderOffer.setLocalOffer(duplicateUsableIds) == Result::InvalidDescription,
+          "duplicate usable header-extension ids accepted");
+    Negotiation extendedAlternatives;
+    check(extendedAlternatives.setLocalOffer(extendedOffer) == Result::Ok,
+          "duplicate extended alternative ids rejected");
+
+    // SSRC/source information is endpoint state, not an offer capability: peers
+    // are free to describe different local sources in the answer.
+    auto sourceOffer = makeOffer();
+    sourceOffer.sources.append({ 111, {} });
+    auto sourceAnswer = sourceOffer;
+    sourceAnswer.sources = { Source { 222, {} } };
+    check(answerResult(sourceOffer, sourceAnswer) == Result::Ok, "independent peer SSRC source rejected");
+
     Negotiation invalidOffer;
     auto        empty = makeOffer();
     empty.payloads.clear();
