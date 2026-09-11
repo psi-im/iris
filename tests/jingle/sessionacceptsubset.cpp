@@ -7,6 +7,9 @@
 #include <iris/jingle-application.h>
 #include <iris/jingle-session.h>
 #include <iris/xmpp_client.h>
+#include <qca.h>
+
+#include <utility>
 
 using namespace XMPP;
 using namespace XMPP::Jingle;
@@ -140,7 +143,7 @@ private:
     Reason                        reason_;
 };
 
-static QDomElement answer(Session &session, Application *accepted, bool malformed = false)
+static QDomElement answer(Application *accepted, bool malformed = false)
 {
     QDomDocument doc;
     auto         jingle = doc.createElementNS(NS, QStringLiteral("jingle"));
@@ -157,7 +160,6 @@ static QDomElement answer(Session &session, Application *accepted, bool malforme
         missing.setAttribute(QStringLiteral("name"), QStringLiteral("missing"));
         jingle.appendChild(missing);
     }
-    Q_UNUSED(session)
     return jingle;
 }
 
@@ -173,6 +175,7 @@ static void addInitialPair(Session &session, const QSharedPointer<Stats> &stats,
 int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
+    QCA::Initializer qca;
     Client           client;
 
     {
@@ -182,7 +185,7 @@ int main(int argc, char **argv)
         addInitialPair(session, stats, &audio, &video);
         QPointer<TestApplication> videoGuard(video);
 
-        check(!session.updateFromXml(Action::SessionAccept, answer(session, audio, true)),
+        check(!session.updateFromXml(Action::SessionAccept, answer(audio, true)),
               "malformed subset session-accept was accepted");
         check(audio->state() == State::Pending, "malformed answer did not roll accepted content back");
         check(videoGuard && videoGuard->state() == State::Pending
@@ -190,8 +193,7 @@ int main(int argc, char **argv)
               "malformed subset answer removed omitted initial content");
         check(stats->removes == 0 && stats->stops == 0, "malformed answer performed content cleanup");
 
-        check(session.updateFromXml(Action::SessionAccept, answer(session, audio)),
-              "valid subset session-accept was rejected");
+        check(session.updateFromXml(Action::SessionAccept, answer(audio)), "valid subset session-accept was rejected");
         check(!videoGuard && !session.content(QStringLiteral("video"), Origin::Initiator),
               "subset session-accept retained omitted initial content");
         check(stats->removes == 1 && stats->stops == 1, "omitted initial content was not cleaned up exactly once");
@@ -207,8 +209,7 @@ int main(int argc, char **argv)
         addInitialPair(session, stats, &audio, &video);
         QPointer<TestApplication> videoGuard(video);
 
-        check(session.updateFromXml(Action::ContentAccept, answer(session, audio)),
-              "ordinary content-accept was rejected");
+        check(session.updateFromXml(Action::ContentAccept, answer(audio)), "ordinary content-accept was rejected");
         check(videoGuard && videoGuard->state() == State::Pending
                   && session.content(QStringLiteral("video"), Origin::Initiator) == videoGuard.data(),
               "content-accept incorrectly removed an omitted sibling");
