@@ -55,28 +55,47 @@ int main(int argc, char **argv)
     independent.reset();
     check(!other, "independent connection leaked");
 
-    auto association = QSharedPointer<IceConnection>::create();
-    association->generation = ConnectionGeneration { 7, 11, 13 };
-    QPointer<IceConnection> associationGuard(association.data());
-    ConnectionMembership audioMembership(association, 42,
-                                         Jingle::ContentKey { QStringLiteral("audio"), Jingle::Origin::Initiator });
-    ConnectionMembership videoMembership(association, 42,
-                                         Jingle::ContentKey { QStringLiteral("video"), Jingle::Origin::Initiator });
-    const auto callbackGeneration = audioMembership.generation();
-    check(audioMembership.associationId() == 42
-              && audioMembership.content()
-                  == Jingle::ContentKey { QStringLiteral("audio"), Jingle::Origin::Initiator },
-          "membership identity was not retained");
-    association.reset();
+    ConnectionRegistry registry;
+    ConnectionRegistry separateRegistry;
+    const Jingle::ContentKey audioKey { QStringLiteral("audio"), Jingle::Origin::Initiator };
+    const Jingle::ContentKey videoKey { QStringLiteral("video"), Jingle::Origin::Initiator };
+    auto audioMembership = registry.create(audioKey);
+    check(audioMembership && audioMembership.associationId() != 0 && audioMembership.content() == audioKey,
+          "registry did not create the first membership");
+    const auto associationId = audioMembership.associationId();
+    check(registry.contains(associationId) && registry.liveAssociationCount() == 1,
+          "registry lost its live association");
+    check(!separateRegistry.attach(associationId, videoKey), "association id escaped its session-local registry");
+    QPointer<IceConnection> associationGuard(audioMembership.connection());
+    audioMembership.connection()->generation.iceGeneration = 7;
+    audioMembership.connection()->generation.dtlsEpoch     = 11;
+    const auto beforeAttach = audioMembership.generation();
+
+    auto videoMembership = registry.attach(associationId, videoKey);
+    check(videoMembership && videoMembership.connection() == audioMembership.connection()
+              && videoMembership.membershipCount() == 2,
+          "second member did not attach to the existing association");
+    check(videoMembership.associationId() == associationId && videoMembership.content() == videoKey,
+          "attached membership identity was not retained");
+    check(videoMembership.generation().iceGeneration == beforeAttach.iceGeneration
+              && videoMembership.generation().dtlsEpoch == beforeAttach.dtlsEpoch
+              && videoMembership.generation().membershipRevision == beforeAttach.membershipRevision + 1,
+          "membership attach changed the wrong association generation");
+    check(!registry.attach(associationId, videoKey), "duplicate logical membership was accepted");
+
+    const auto callbackGeneration = videoMembership.generation();
     audioMembership.reset();
-    check(associationGuard, "releasing one explicit membership destroyed the shared association");
-    check(videoMembership.generation() == callbackGeneration, "membership generation snapshot changed unexpectedly");
-    ++videoMembership.connection()->generation.membershipRevision;
-    check(videoMembership.generation() != callbackGeneration, "membership revision did not invalidate a stale token");
+    check(associationGuard && videoMembership.membershipCount() == 1,
+          "releasing one explicit membership destroyed the shared association");
+    check(videoMembership.generation().membershipRevision == callbackGeneration.membershipRevision + 1,
+          "membership release did not invalidate stale association state");
     ConnectionMembership movedMembership(std::move(videoMembership));
     check(!videoMembership && movedMembership, "moving membership duplicated or lost its strong share");
     movedMembership.reset();
     check(!associationGuard, "last explicit membership did not release the shared association");
+    check(!registry.contains(associationId) && registry.liveAssociationCount() == 0,
+          "weak registry retained a released association");
+    registry.prune();
 
     TcpPortReserver reserver;
     Client          client;
