@@ -70,6 +70,7 @@ private:
 // Public completion callbacks are always queued and therefore never run inline
 // from prepareLocalOffer()/prepareAnswer()/applyNegotiation().
 class IRIS_EXPORT MediaSession : public QObject {
+    Q_OBJECT
 public:
     using PrepareCallback = std::function<void(MediaOperation::Id, std::optional<Description>, MediaError)>;
     using ApplyCallback   = std::function<void(MediaOperation::Id, MediaError)>;
@@ -90,6 +91,11 @@ public:
     // operation may subsequently deliver a callback. Pad teardown calls this while
     // the derived adapter is still alive, so cancelMediaOperation() can stop I/O.
     void cancelAll();
+
+signals:
+    // Backend failure outside a prepare/apply operation. Operation-scoped errors
+    // must be returned through that operation's completion instead, never twice.
+    void runtimeError(const XMPP::Jingle::RTP::MediaError &);
 
 protected:
     using PrepareCompletion = std::function<void(std::optional<Description>, MediaError)>;
@@ -141,6 +147,8 @@ public:
 signals:
     // Peer status only: never changes local consent or negotiated senders.
     void informationReceived(const XMPP::Jingle::RTP::SessionInfo &);
+    // Call-level backend failure propagated to every still-live RTP content.
+    void mediaError(const XMPP::Jingle::RTP::MediaError &);
 
 private:
     QPointer<Manager> manager_;
@@ -196,9 +204,9 @@ private:
     QString                         media_;
     std::optional<Stanza::Error>    error_;
     Reason                          reason_;
-    bool                            configured_       = false;
-    bool                            attached_         = false;
-    bool                            stopping_         = false;
+    bool                            configured_        = false;
+    bool                            attached_          = false;
+    bool                            stopping_          = false;
     bool                            preparationFailed_ = false;
     QPointer<SrtpSession>           security_;
     QSet<int>                       negotiatedPayloads_;
@@ -229,4 +237,5 @@ private:
 };
 
 }
+Q_DECLARE_METATYPE(XMPP::Jingle::RTP::MediaError)
 #endif
