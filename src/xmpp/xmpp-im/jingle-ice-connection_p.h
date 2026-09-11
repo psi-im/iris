@@ -135,6 +135,8 @@ namespace Jingle {
         public:
             ConnectionMembership create(const ContentKey &content)
             {
+                if (containsContent(content))
+                    return {};
                 auto state        = QSharedPointer<ConnectionAssociationState>::create();
                 state->id         = nextAssociationId_++;
                 state->connection = QSharedPointer<IceConnection>::create();
@@ -146,8 +148,10 @@ namespace Jingle {
 
             ConnectionMembership attach(quint64 associationId, const ContentKey &content)
             {
+                if (containsContent(content))
+                    return {};
                 auto state = associations_.value(associationId).toStrongRef();
-                if (!state || state->members.contains(content))
+                if (!state)
                     return {};
                 state->members.insert(content);
                 ++state->connection->generation.membershipRevision;
@@ -180,6 +184,16 @@ namespace Jingle {
             }
 
         private:
+            bool containsContent(const ContentKey &content) const
+            {
+                for (auto it = associations_.cbegin(); it != associations_.cend(); ++it) {
+                    auto state = it.value().toStrongRef();
+                    if (state && state->members.contains(content))
+                        return true;
+                }
+                return false;
+            }
+
             QHash<quint64, QWeakPointer<ConnectionAssociationState>> associations_;
             quint64                                                  nextAssociationId_ = 1;
         };
