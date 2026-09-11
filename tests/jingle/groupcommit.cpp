@@ -85,7 +85,7 @@ int main(int argc, char **argv)
     check(registry.liveAssociationCount() == 1 && existingScreen.membershipCount() == 1,
           "failed commit left a partially applied group");
     auto postRollbackAudio = registry.create(members.at(0).content);
-    check(postRollbackAudio, "rollback retained an earlier temporary audio membership");
+    check(bool(postRollbackAudio), "rollback retained an earlier temporary audio membership");
     postRollbackAudio.reset();
     existingScreen.reset();
     check(registry.liveAssociationCount() == 0, "rollback regression leaked the seeded association");
