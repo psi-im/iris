@@ -8,6 +8,8 @@
 #include <iris/jingle-transport.h>
 #include <iris/xmpp_client.h>
 
+#include <type_traits>
+
 // Inspect the internal per-session registry without publishing a BUNDLE API.
 #define private public
 #include <iris/jingle-ice.h>
@@ -15,6 +17,11 @@
 
 using namespace XMPP;
 using namespace XMPP::Jingle::ICE;
+
+static_assert(!std::is_copy_constructible_v<ConnectionMembership>);
+static_assert(!std::is_copy_assignable_v<ConnectionMembership>);
+static_assert(std::is_move_constructible_v<ConnectionMembership>);
+static_assert(std::is_move_assignable_v<ConnectionMembership>);
 
 static void check(bool value, const char *message)
 {
@@ -47,6 +54,29 @@ int main(int argc, char **argv)
     check(other, "group teardown destroyed an independent connection");
     independent.reset();
     check(!other, "independent connection leaked");
+
+    auto association = QSharedPointer<IceConnection>::create();
+    association->generation = ConnectionGeneration { 7, 11, 13 };
+    QPointer<IceConnection> associationGuard(association.data());
+    ConnectionMembership audioMembership(association, 42,
+                                         Jingle::ContentKey { QStringLiteral("audio"), Jingle::Origin::Initiator });
+    ConnectionMembership videoMembership(association, 42,
+                                         Jingle::ContentKey { QStringLiteral("video"), Jingle::Origin::Initiator });
+    const auto callbackGeneration = audioMembership.generation();
+    check(audioMembership.associationId() == 42
+              && audioMembership.content()
+                  == Jingle::ContentKey { QStringLiteral("audio"), Jingle::Origin::Initiator },
+          "membership identity was not retained");
+    association.reset();
+    audioMembership.reset();
+    check(associationGuard, "releasing one explicit membership destroyed the shared association");
+    check(videoMembership.generation() == callbackGeneration, "membership generation snapshot changed unexpectedly");
+    ++videoMembership.connection()->generation.membershipRevision;
+    check(videoMembership.generation() != callbackGeneration, "membership revision did not invalidate a stale token");
+    ConnectionMembership movedMembership(std::move(videoMembership));
+    check(!videoMembership && movedMembership, "moving membership duplicated or lost its strong share");
+    movedMembership.reset();
+    check(!associationGuard, "last explicit membership did not release the shared association");
 
     TcpPortReserver reserver;
     Client          client;
