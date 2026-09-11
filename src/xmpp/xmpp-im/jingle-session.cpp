@@ -369,19 +369,29 @@ namespace XMPP { namespace Jingle {
              *         b) don't send content-accept and accept everything with session-accept
              *      We prefer option (b) in our implementation.
              */
-            typedef std::tuple<QPointer<Application>, OutgoingUpdateCB> AckHndl;
+            typedef std::tuple<QPointer<Application>, OutgoingUpdateCB, bool> AckHndl;
+            QSet<Application *> rejectedInitialContent;
             if (role == Origin::Responder) {
+                int    acceptedInitialContent = 0;
+                Reason rejectionReason;
                 for (const auto &c : std::as_const(initialIncomingUnacceptedContent)) {
                     auto out = c->evaluateOutgoingUpdate();
-                    if (out.action == Action::ContentReject) {
-                        lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,
-                                                        XMPP::Stanza::Error::ErrorCond::BadRequest);
-                        setSessionFinished();
-                        return true;
+                    if (out.action == Action::ContentAccept) {
+                        ++acceptedInitialContent;
+                        continue;
                     }
-                    if (out.action != Action::ContentAccept) {
-                        return false; // keep waiting.
+                    if (out.action == Action::ContentReject || out.action == Action::ContentRemove) {
+                        rejectedInitialContent.insert(c);
+                        if (!rejectionReason.isValid() && out.reason.isValid())
+                            rejectionReason = out.reason;
+                        continue;
                     }
+                    return false; // keep waiting.
+                }
+                if (!acceptedInitialContent) {
+                    q->terminate(rejectionReason.isValid() ? rejectionReason.condition() : Reason::Decline,
+                                 rejectionReason.text());
+                    return true;
                 }
             } else {
                 for (const auto &c : std::as_const(contentList)) {
@@ -423,11 +433,16 @@ namespace XMPP { namespace Jingle {
                 QList<QDomElement> xml;
                 OutgoingUpdateCB   callback;
                 std::tie(xml, callback) = app->takeOutgoingUpdate();
-                contents += xml;
-                // p->setState(State::Unacked);
-                if (callback) {
-                    acceptApps.append(AckHndl { app, callback });
-                }
+                const bool rejectedInitial
+                    = role == Origin::Responder && rejectedInitialContent.contains(app);
+                if (!rejectedInitial)
+                    contents += xml;
+                if (callback)
+                    acceptApps.append(AckHndl { app, callback, !rejectedInitial });
+            }
+            if (contents.isEmpty()) {
+                q->terminate(Reason::Decline, QStringLiteral("No initial content was accepted"));
+                return true;
             }
 
             state = State::Unacked;
@@ -440,13 +455,13 @@ namespace XMPP { namespace Jingle {
                 }
                 state = finalState;
                 for (const auto &h : acceptApps) {
-                    auto app      = std::get<0>(h);
-                    auto callback = std::get<1>(h);
+                    auto app         = std::get<0>(h);
+                    auto callback    = std::get<1>(h);
+                    auto shouldStart = std::get<2>(h);
                     if (app) {
                         callback(jt);
-                        if (role == Origin::Responder) {
+                        if (role == Origin::Responder && shouldStart)
                             app->start();
-                        }
                     }
                 }
                 if (finalState == State::Active) {

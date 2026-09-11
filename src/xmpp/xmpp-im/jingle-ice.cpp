@@ -334,9 +334,10 @@ namespace XMPP { namespace Jingle { namespace ICE {
     public:
         XMPP::Jingle::Manager *jingleManager = nullptr;
 
-        int          basePort = -1;
+        int          basePort        = -1;
         QString      extHost;
         QHostAddress selfAddr;
+        bool         allowIpExposure = true;
 
         QString stunBindHost;
         int     stunBindPort = 0;
@@ -733,6 +734,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
             }
 
             network->ice = new Ice176(network.data());
+            network->ice->setAllowIpExposure(manager->allowIpExposure);
 
             q->connect(network->ice, &XMPP::Ice176::started, q, [this]() {
                 for (auto const &c : as_const(network->components)) {
@@ -1353,6 +1355,8 @@ namespace XMPP { namespace Jingle { namespace ICE {
     void Manager::setExternalAddress(const QString &host) { d->extHost = host; }
 
     void Manager::setSelfAddress(const QHostAddress &addr) { d->selfAddr = addr; }
+
+    void Manager::setAllowIpExposure(bool allow) { d->allowIpExposure = allow; }
 
     void Manager::setStunBindService(const QString &host, int port)
     {
