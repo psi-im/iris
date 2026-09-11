@@ -194,6 +194,8 @@ int main(int argc, char **argv)
         check(stats->removes == 0 && stats->stops == 0, "malformed answer performed content cleanup");
 
         check(session.updateFromXml(Action::SessionAccept, answer(audio)), "valid subset session-accept was rejected");
+        check(session.content(QStringLiteral("audio"), Origin::Initiator) == audio,
+              "subset session-accept removed accepted initial content");
         check(!videoGuard && !session.content(QStringLiteral("video"), Origin::Initiator),
               "subset session-accept retained omitted initial content");
         check(stats->removes == 1 && stats->stops == 1, "omitted initial content was not cleaned up exactly once");
