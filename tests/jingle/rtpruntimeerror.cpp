@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #include <QCoreApplication>
 #include <iris/jingle-rtp.h>
+#include <iris/jingle-session.h>
 #include <iris/xmpp_client.h>
 #include <qca.h>
 
