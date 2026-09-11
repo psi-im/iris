@@ -46,6 +46,10 @@ add_executable(jingle_rtpnegotiation_test rtpnegotiation.cpp)
 target_link_libraries(jingle_rtpnegotiation_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
     Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
 add_test(NAME jingle_rtpnegotiation COMMAND jingle_rtpnegotiation_test)
+add_executable(jingle_rtprouter_test rtprouter.cpp ../../src/xmpp/xmpp-im/jingle-rtp-router_p.cpp)
+target_include_directories(jingle_rtprouter_test PRIVATE ../../src/xmpp/xmpp-im)
+target_link_libraries(jingle_rtprouter_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core)
+add_test(NAME jingle_rtprouter COMMAND jingle_rtprouter_test)
 add_executable(jingle_rtpapplication_test rtpapplication.cpp)
 target_link_libraries(jingle_rtpapplication_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
     Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
