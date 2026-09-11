@@ -181,6 +181,7 @@ public:
     void                                start() override;
     void                       remove(Reason::Condition = Reason::Success, const QString & = QString()) override;
     void                       incomingRemove(const Reason &) override;
+    const QString              &media() const { return media_; }
     std::optional<Description> localDescription() const { return negotiation_.localDescription(); }
     std::optional<Description> remoteDescription() const { return negotiation_.remoteDescription(); }
 
