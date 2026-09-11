@@ -296,7 +296,7 @@ int main(int argc, char **argv)
     // SSRC/source information is endpoint state, not an offer capability: peers
     // are free to describe different local sources in the answer.
     auto sourceOffer = makeOffer();
-    sourceOffer.sources.append({ 111, {} });
+    sourceOffer.sources.append(Source { 111, {} });
     auto sourceAnswer = sourceOffer;
     sourceAnswer.sources = { Source { 222, {} } };
     check(answerResult(sourceOffer, sourceAnswer) == Result::Ok, "independent peer SSRC source rejected");
