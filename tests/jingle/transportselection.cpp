@@ -18,8 +18,12 @@ static void setPeerFeatures(Client &client, const Jid &peer, const QStringList &
 {
     DiscoItem disco;
     disco.setJid(peer);
+    disco.setNode(QStringLiteral("urn:iris:test:jingle-transport-selection"));
     disco.setFeatures(Features(features));
-    client.capsManager()->updateDisco(peer, disco);
+
+    const CapsSpec caps(disco);
+    CapsRegistry::instance()->registerCaps(caps, disco);
+    client.capsManager()->updateCaps(peer, caps);
 }
 
 static QString selectTransport(Session &session)
