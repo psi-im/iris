@@ -4,6 +4,7 @@
 
 #include "jingle-session.h"
 
+#include <QByteArray>
 #include <QMap>
 #include <QSet>
 
@@ -12,12 +13,28 @@
 namespace XMPP { namespace Jingle {
 
     struct GroupPlan {
+        struct TransportParameters {
+            QString    iceUfrag;
+            QString    icePassword;
+            QString    dtlsHash;
+            QByteArray dtlsFingerprint;
+            QString    dtlsSetup;
+
+            bool operator==(const TransportParameters &other) const
+            {
+                return iceUfrag == other.iceUfrag && icePassword == other.icePassword && dtlsHash == other.dtlsHash
+                    && dtlsFingerprint == other.dtlsFingerprint && dtlsSetup == other.dtlsSetup;
+            }
+            bool operator!=(const TransportParameters &other) const { return !(*this == other); }
+        };
+
         struct Association {
-            int               id = -1;
-            bool              bundled = false;
-            ContentKey        owner;
-            QList<ContentKey> members;
-            QString           transportNamespace;
+            int                                id = -1;
+            bool                               bundled = false;
+            ContentKey                         owner;
+            QList<ContentKey>                  members;
+            QString                            transportNamespace;
+            std::optional<TransportParameters> transportParameters;
         };
 
         enum class ActionKind { CreateAssociation, AttachMember };
@@ -31,6 +48,14 @@ namespace XMPP { namespace Jingle {
         const QList<Association> &associations() const { return associations_; }
         const QList<Action>      &actions() const { return actions_; }
         int associationFor(const ContentKey &content) const { return memberAssociations_.value(content, -1); }
+        bool readyToCommit() const
+        {
+            for (const auto &association : associations_) {
+                if (association.bundled && association.members.size() > 1 && !association.transportParameters)
+                    return false;
+            }
+            return true;
+        }
 
     private:
         friend class GroupNegotiation;
@@ -41,10 +66,13 @@ namespace XMPP { namespace Jingle {
 
     class GroupNegotiation {
     public:
+        using TransportParameters = GroupPlan::TransportParameters;
+
         struct Member {
-            ContentKey content;
-            QString    transportNamespace;
-            bool       shareable = false;
+            ContentKey                         content;
+            QString                            transportNamespace;
+            bool                               shareable = false;
+            std::optional<TransportParameters> transportParameters;
         };
 
         enum class Error {
@@ -56,11 +84,15 @@ namespace XMPP { namespace Jingle {
             AmbiguousContent,
             InvalidAnswer,
             UnsupportedSharedTransport,
-            ConflictingTransport
+            ConflictingTransport,
+            IncompleteTransportParameters,
+            ConflictingTransportParameters
         };
 
         // Build an immutable initial membership plan. This validates the whole
         // answer before producing actions and never starts ICE or mutates transports.
+        // A multi-member association with no parameter snapshots is a preflight
+        // plan only; readyToCommit() remains false until parameters are supplied.
         static std::optional<GroupPlan> initialPlan(const QList<Member> &members, const QList<ContentGroup> &offer,
                                                     const QList<ContentGroup> &answer, Error *error = nullptr)
         {
@@ -72,8 +104,8 @@ namespace XMPP { namespace Jingle {
             if (error)
                 *error = Error::None;
 
-            QMap<ContentKey, int>      memberIndexes;
-            QMap<QString, QList<int>>  nameIndexes;
+            QMap<ContentKey, int>     memberIndexes;
+            QMap<QString, QList<int>> nameIndexes;
             for (int index = 0; index < members.size(); ++index) {
                 const auto &member = members.at(index);
                 if (member.content.first.isEmpty()
@@ -116,9 +148,9 @@ namespace XMPP { namespace Jingle {
                 }
             }
 
-            GroupPlan   plan;
-            QSet<int>   assignedMembers;
-            QSet<int>   answeredGroups;
+            GroupPlan     plan;
+            QSet<int>     assignedMembers;
+            QSet<int>     answeredGroups;
             QSet<QString> answeredNames;
 
             for (const auto &group : answer) {
@@ -132,6 +164,8 @@ namespace XMPP { namespace Jingle {
                 GroupPlan::Association association;
                 association.id      = plan.associations_.size();
                 association.bundled = true;
+                bool hasParameters  = false;
+                bool missingParameters = false;
 
                 for (const auto &name : group.contents) {
                     if (name.isEmpty() || groupNames.contains(name) || answeredNames.contains(name)
@@ -148,6 +182,15 @@ namespace XMPP { namespace Jingle {
                         association.transportNamespace = member.transportNamespace;
                     else if (association.transportNamespace != member.transportNamespace)
                         return fail(Error::ConflictingTransport);
+                    if (member.transportParameters) {
+                        if (!association.transportParameters)
+                            association.transportParameters = member.transportParameters;
+                        else if (*association.transportParameters != *member.transportParameters)
+                            return fail(Error::ConflictingTransportParameters);
+                        hasParameters = true;
+                    } else {
+                        missingParameters = true;
+                    }
                     if (association.members.isEmpty())
                         association.owner = member.content;
                     association.members.append(member.content);
@@ -155,6 +198,8 @@ namespace XMPP { namespace Jingle {
                     groupNames.insert(name);
                     answeredNames.insert(name);
                 }
+                if (hasParameters && missingParameters)
+                    return fail(Error::IncompleteTransportParameters);
                 answeredGroups.insert(offeredGroup);
                 plan.associations_.append(association);
             }
@@ -164,10 +209,11 @@ namespace XMPP { namespace Jingle {
                     continue;
                 const auto &member = members.at(memberIndex);
                 GroupPlan::Association association;
-                association.id                 = plan.associations_.size();
-                association.owner              = member.content;
-                association.members            = { member.content };
-                association.transportNamespace = member.transportNamespace;
+                association.id                  = plan.associations_.size();
+                association.owner               = member.content;
+                association.members             = { member.content };
+                association.transportNamespace  = member.transportNamespace;
+                association.transportParameters = member.transportParameters;
                 plan.associations_.append(association);
             }
 
