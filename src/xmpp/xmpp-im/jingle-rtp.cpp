@@ -10,6 +10,8 @@ Pad::Pad(Manager *manager, Session *session, std::shared_ptr<MediaProvider> prov
 {
     if (provider_)
         media_ = provider_->createSession();
+    if (media_)
+        connect(media_.get(), &MediaSession::runtimeError, this, &Pad::mediaError);
 }
 Pad::~Pad()
 {
@@ -62,6 +64,12 @@ Application::Application(const QSharedPointer<Pad> &pad, const QString &name, Or
     _creator           = creator;
     _senders           = senders;
     _transportSelector = std::make_unique<NSTransportsList>(pad->session(), pad->transportNamespaces());
+    connect(pad.data(), &Pad::mediaError, this, [this](const MediaError &error) {
+        if (_state >= State::Finishing)
+            return;
+        remove(Reason::FailedApplication,
+               error.text.isEmpty() ? QStringLiteral("Media backend failed during the call") : error.text);
+    });
 }
 Application::~Application()
 {
@@ -459,7 +467,11 @@ void Application::incomingRemove(const Reason &reason)
     setState(State::Finished);
 }
 
-Manager::Manager(QObject *parent) : ApplicationManager(parent) { qRegisterMetaType<SessionInfo>(); }
+Manager::Manager(QObject *parent) : ApplicationManager(parent)
+{
+    qRegisterMetaType<SessionInfo>();
+    qRegisterMetaType<MediaError>();
+}
 Manager::~Manager() { closeAll(); }
 void Manager::setJingleManager(XMPP::Jingle::Manager *manager)
 {
