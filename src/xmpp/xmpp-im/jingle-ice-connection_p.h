@@ -4,9 +4,14 @@
 
 #include "jingle.h"
 
+#include <QHash>
 #include <QObject>
+#include <QSet>
 #include <QSharedPointer>
 #include <QVector>
+#include <QWeakPointer>
+
+#include <utility>
 
 namespace XMPP {
 class Dtls;
@@ -52,13 +57,21 @@ namespace Jingle {
         // including releasing memberships, must happen on the connection's thread.
         class IceConnection : public QObject {
         public:
-            QVector<Component>  components;
-            UdpPortReserver    *portReserver = nullptr;
-            Ice176             *ice          = nullptr;
+            QVector<Component>   components;
+            UdpPortReserver     *portReserver = nullptr;
+            Ice176              *ice          = nullptr;
             ConnectionGeneration generation;
 
             ~IceConnection() override;
         };
+
+        struct ConnectionAssociationState {
+            quint64                       id = 0;
+            QSharedPointer<IceConnection> connection;
+            QSet<ContentKey>              members;
+        };
+
+        class ConnectionRegistry;
 
         // A logical content's strong share in one session-local network association.
         // Move-only so copying a convenience handle cannot accidentally extend the
@@ -66,34 +79,109 @@ namespace Jingle {
         class ConnectionMembership {
         public:
             ConnectionMembership() = default;
-            ConnectionMembership(QSharedPointer<IceConnection> connection, quint64 associationId, ContentKey content) :
-                connection_(std::move(connection)), associationId_(associationId), content_(std::move(content))
-            {
-            }
             ConnectionMembership(const ConnectionMembership &)            = delete;
             ConnectionMembership &operator=(const ConnectionMembership &) = delete;
-            ConnectionMembership(ConnectionMembership &&)                 = default;
-            ConnectionMembership &operator=(ConnectionMembership &&)      = default;
+            ConnectionMembership(ConnectionMembership &&other) :
+                state_(std::move(other.state_)), content_(std::move(other.content_))
+            {
+                other.content_ = {};
+            }
+            ConnectionMembership &operator=(ConnectionMembership &&other)
+            {
+                if (this != &other) {
+                    reset();
+                    state_         = std::move(other.state_);
+                    content_       = std::move(other.content_);
+                    other.content_ = {};
+                }
+                return *this;
+            }
+            ~ConnectionMembership() { reset(); }
 
-            explicit operator bool() const { return !connection_.isNull(); }
-            IceConnection *connection() const { return connection_.data(); }
-            quint64        associationId() const { return associationId_; }
+            explicit operator bool() const { return state_ && state_->connection; }
+            IceConnection *connection() const { return state_ ? state_->connection.data() : nullptr; }
+            quint64 associationId() const { return state_ ? state_->id : 0; }
             const ContentKey &content() const { return content_; }
+            qsizetype membershipCount() const { return state_ ? state_->members.size() : 0; }
             ConnectionGeneration generation() const
             {
-                return connection_ ? connection_->generation : ConnectionGeneration {};
+                return state_ && state_->connection ? state_->connection->generation : ConnectionGeneration {};
             }
             void reset()
             {
-                connection_.reset();
-                associationId_ = 0;
-                content_       = {};
+                if (!state_)
+                    return;
+                auto state = std::move(state_);
+                if (state->members.remove(content_) && state->connection)
+                    ++state->connection->generation.membershipRevision;
+                content_ = {};
             }
 
         private:
-            QSharedPointer<IceConnection> connection_;
-            quint64                       associationId_ = 0;
-            ContentKey                    content_;
+            friend class ConnectionRegistry;
+            ConnectionMembership(QSharedPointer<ConnectionAssociationState> state, ContentKey content) :
+                state_(std::move(state)), content_(std::move(content))
+            {
+            }
+
+            QSharedPointer<ConnectionAssociationState> state_;
+            ContentKey                                 content_;
+        };
+
+        // Intended to live in one ICE Pad, hence one Session. It deliberately holds
+        // only weak association references: memberships, not the registry, own network
+        // lifetime. Association ids therefore have no meaning across sessions.
+        class ConnectionRegistry {
+        public:
+            ConnectionMembership create(const ContentKey &content)
+            {
+                auto state        = QSharedPointer<ConnectionAssociationState>::create();
+                state->id         = nextAssociationId_++;
+                state->connection = QSharedPointer<IceConnection>::create();
+                state->members.insert(content);
+                ++state->connection->generation.membershipRevision;
+                associations_.insert(state->id, state.toWeakRef());
+                return ConnectionMembership(std::move(state), content);
+            }
+
+            ConnectionMembership attach(quint64 associationId, const ContentKey &content)
+            {
+                auto state = associations_.value(associationId).toStrongRef();
+                if (!state || state->members.contains(content))
+                    return {};
+                state->members.insert(content);
+                ++state->connection->generation.membershipRevision;
+                return ConnectionMembership(std::move(state), content);
+            }
+
+            bool contains(quint64 associationId) const
+            {
+                return !associations_.value(associationId).toStrongRef().isNull();
+            }
+
+            qsizetype liveAssociationCount() const
+            {
+                qsizetype count = 0;
+                for (auto it = associations_.cbegin(); it != associations_.cend(); ++it) {
+                    if (!it.value().toStrongRef().isNull())
+                        ++count;
+                }
+                return count;
+            }
+
+            void prune()
+            {
+                for (auto it = associations_.begin(); it != associations_.end();) {
+                    if (it.value().toStrongRef().isNull())
+                        it = associations_.erase(it);
+                    else
+                        ++it;
+                }
+            }
+
+        private:
+            QHash<quint64, QWeakPointer<ConnectionAssociationState>> associations_;
+            quint64                                                  nextAssociationId_ = 1;
         };
     }
 }
