@@ -159,7 +159,7 @@ namespace XMPP { namespace Jingle {
         void addAcceptor(TransportFeatures features, ConnectionAcceptorCallback &&acceptor, int componentIndex = -1);
 
         /**
-         * @brief acceptors
+         * @brief acceptors returns all registered connection acceptors
          * @return list of acceptors
          */
         const QList<ConnectionAcceptor> &acceptors() const;
