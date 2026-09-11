@@ -1,0 +1,27 @@
+name: Apply call interop patch
+
+on:
+  push:
+    branches:
+      - jingle/async-media
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    if: contains(github.event.head_commit.message, 'Stage call interop patch')
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: jingle/async-media
+      - run: python3 .github/call-interop-patch.py
+      - run: |
+          git rm .github/workflows/apply-call-interop.yml .github/call-interop-patch.py
+          git config user.name 'Sergei Ilinykh'
+          git config user.email 'rion4ik@gmail.com'
+          git add src/xmpp/xmpp-im/jingle-session.cpp src/xmpp/xmpp-im/jingle-ice.h src/xmpp/xmpp-im/jingle-ice.cpp
+          git commit -m 'Support initial content subsets and ICE privacy'
+          git push origin HEAD:jingle/async-media
