@@ -67,15 +67,16 @@ int main(int argc, char **argv)
     QCoreApplication app(argc, argv);
     QCA::Initializer qca;
     Client           client;
-    auto             manager = client.jingleManager()->rtpManager();
+    auto             manager  = client.jingleManager()->rtpManager();
     auto             provider = std::make_shared<Provider>();
-    manager->setMediaProvider(provider);
+    Session          session(client.jingleManager(), Jid(QStringLiteral("peer@example.org/device")));
+    auto pad = QSharedPointer<R::Pad>::create(manager, &session, provider, QStringList {});
 
-    Session session(client.jingleManager(), Jid(QStringLiteral("peer@example.org/device")));
-    auto    audio = manager->createOutgoing(&session, QStringLiteral("audio"));
-    auto    video = manager->createOutgoing(&session, QStringLiteral("video"));
-    check(audio && video && provider->session, "runtime-error fixture setup failed");
-    check(audio->pad() == video->pad(), "runtime-error contents do not share media session");
+    auto audio = std::make_unique<R::Application>(pad, QStringLiteral("audio"), Origin::Initiator, Origin::Both);
+    auto video = std::make_unique<R::Application>(pad, QStringLiteral("video"), Origin::Initiator, Origin::Both);
+    check(audio->initializeOutgoing(QStringLiteral("audio")) && video->initializeOutgoing(QStringLiteral("video"))
+              && provider->session,
+          "runtime-error fixture setup failed");
 
     provider->session->fail();
     check(audio->state() >= State::Finishing && video->state() >= State::Finishing,
