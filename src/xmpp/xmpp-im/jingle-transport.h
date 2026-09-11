@@ -23,6 +23,8 @@
 #include <iris/xmpp-im/jingle-connection.h>
 #include <iris/xmpp-im/jingle.h>
 
+#include <QVariant>
+
 namespace XMPP { namespace Jingle {
 
     class TransportManager;
@@ -157,7 +159,7 @@ namespace XMPP { namespace Jingle {
         void addAcceptor(TransportFeatures features, ConnectionAcceptorCallback &&acceptor, int componentIndex = -1);
 
         /**
-         * @brief acceptors returns all registered connection acceptors
+         * @brief acceptors
          * @return list of acceptors
          */
         const QList<ConnectionAcceptor> &acceptors() const;
