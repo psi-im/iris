@@ -6,10 +6,12 @@
 #include "jingle-rtp-info.h"
 #include "jingle-rtp-negotiation.h"
 #include "jingle-rtp-srtp.h"
+#include <QObject>
 #include <QPointer>
 #include <QSet>
 #include <functional>
 #include <memory>
+#include <optional>
 
 namespace XMPP::Jingle::RTP {
 
@@ -28,17 +30,93 @@ public:
     virtual bool        attachPacketIo(PacketWriter) { return false; }
     virtual void        receivePacket(const QByteArray &, SrtpContext::Packet) { }
     virtual Description localOffer() const = 0;
-    // Configure negotiated codecs without starting capture or packet transmission.
+    // Transitional synchronous fallback for adapters which do not implement the
+    // MediaSession async hooks yet. Native media adapters must not block here.
     virtual bool configure(const Description &local, const Description &remote) = 0;
     virtual void stop() = 0; // idempotent, synchronous quiescence of callbacks
     // Parsed partial hints, not a replacement offer. Ignoring a hint is valid.
     virtual void advisory(const Description &) { }
 };
 
-class IRIS_EXPORT MediaSession {
+struct IRIS_EXPORT MediaError {
+    enum class Code { None, Unsupported, InvalidDescription, Backend };
+    Code    code = Code::None;
+    QString text;
+    explicit operator bool() const { return code != Code::None; }
+};
+
+class MediaSession;
+
+// Cancellable handle for one serialized media-backend operation. Destruction is
+// equivalent to cancel(). Cancellation suppresses all later completion delivery.
+class IRIS_EXPORT MediaOperation {
 public:
-    virtual ~MediaSession()                                                                                 = default;
+    using Id = quint64;
+    ~MediaOperation();
+    MediaOperation(const MediaOperation &)            = delete;
+    MediaOperation &operator=(const MediaOperation &) = delete;
+    Id              id() const;
+    void            cancel();
+
+private:
+    class Private;
+    explicit MediaOperation(Id, MediaSession *);
+    std::unique_ptr<Private> d;
+    friend class MediaSession;
+};
+
+// One backend media session may own several RTP endpoints (for example audio and
+// video). Backend operations are serialized across all endpoints in this object.
+// Public completion callbacks are always queued and therefore never run inline
+// from prepareLocalOffer()/prepareAnswer()/applyNegotiation().
+class IRIS_EXPORT MediaSession : public QObject {
+public:
+    using PrepareCallback
+        = std::function<void(MediaOperation::Id, std::optional<Description>, MediaError)>;
+    using ApplyCallback = std::function<void(MediaOperation::Id, MediaError)>;
+
+    explicit MediaSession(QObject *parent = nullptr);
+    ~MediaSession() override;
+    MediaSession(const MediaSession &)            = delete;
+    MediaSession &operator=(const MediaSession &) = delete;
+
     virtual std::unique_ptr<MediaEndpoint> createEndpoint(const QString &contentName, const QString &media) = 0;
+
+    std::unique_ptr<MediaOperation> prepareLocalOffer(MediaEndpoint *, PrepareCallback);
+    std::unique_ptr<MediaOperation> prepareAnswer(MediaEndpoint *, const Description &remoteSnapshot,
+                                                  PrepareCallback);
+    std::unique_ptr<MediaOperation> applyNegotiation(MediaEndpoint *, const Description &local,
+                                                     const Description &remote, ApplyCallback);
+
+    // Cancel queued work and the currently running backend operation. No cancelled
+    // operation may subsequently deliver a callback. Pad teardown calls this while
+    // the derived adapter is still alive, so cancelMediaOperation() can stop I/O.
+    void cancelAll();
+
+protected:
+    using PrepareCompletion = std::function<void(std::optional<Description>, MediaError)>;
+    using ApplyCompletion   = std::function<void(MediaError)>;
+
+    // These hooks are entered one at a time on the Jingle thread. Completion must
+    // also be invoked on that thread; worker-thread adapters must marshal first.
+    // The default implementation is a migration fallback around the legacy
+    // synchronous MediaEndpoint methods. Native psimedia integration overrides it.
+    virtual void beginPrepareLocalOffer(MediaOperation::Id, MediaEndpoint *, PrepareCompletion);
+    virtual void beginPrepareAnswer(MediaOperation::Id, MediaEndpoint *, const Description &remoteSnapshot,
+                                    PrepareCompletion);
+    virtual void beginApplyNegotiation(MediaOperation::Id, MediaEndpoint *, const Description &local,
+                                       const Description &remote, ApplyCompletion);
+    virtual void cancelMediaOperation(MediaOperation::Id) { }
+
+private:
+    class Private;
+    std::unique_ptr<Private> d;
+    void                     cancelOperation(MediaOperation::Id);
+    void                     scheduleNext();
+    void                     startNext();
+    void finishPrepared(MediaOperation::Id, std::optional<Description>, MediaError);
+    void finishApplied(MediaOperation::Id, MediaError);
+    friend class MediaOperation;
 };
 
 class IRIS_EXPORT MediaProvider {
