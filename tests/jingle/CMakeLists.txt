@@ -60,6 +60,10 @@ add_executable(jingle_rtpapplication_test rtpapplication.cpp)
 target_link_libraries(jingle_rtpapplication_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
     Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
 add_test(NAME jingle_rtpapplication COMMAND jingle_rtpapplication_test)
+add_executable(jingle_sessionacceptsubset_test sessionacceptsubset.cpp)
+target_link_libraries(jingle_sessionacceptsubset_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
+    Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
+add_test(NAME jingle_sessionacceptsubset COMMAND jingle_sessionacceptsubset_test)
 add_executable(jingle_rtpruntimeerror_test rtpruntimeerror.cpp)
 target_link_libraries(jingle_rtpruntimeerror_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core)
 add_test(NAME jingle_rtpruntimeerror COMMAND jingle_rtpruntimeerror_test)
