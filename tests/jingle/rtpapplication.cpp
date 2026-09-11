@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #include <QCoreApplication>
 #include <QDebug>
+#include <QEventLoop>
 #include <iris/jingle-rtp.h>
 #include <iris/xmpp_client.h>
 #include <qca.h>
@@ -16,10 +17,15 @@ static void check(bool ok, const char *message)
     if (!ok)
         qFatal("%s", message);
 }
+static void pump()
+{
+    for (int i = 0; i < 8; ++i)
+        QCoreApplication::processEvents(QEventLoop::AllEvents);
+}
 static const QString transportNs = QStringLiteral("urn:iris:test:rtp-transport");
 struct Counters {
     int  sessions = 0, endpoints = 0, configured = 0, stopped = 0, liveEndpoints = 0, hints = 0;
-    bool configOk = true, packetIo = false;
+    bool configOk = true, packetIo = false, offerOk = true, answerOk = true;
 };
 class Endpoint : public R::MediaEndpoint {
 public:
@@ -32,6 +38,8 @@ public:
     bool           supportsPacketIo() const override { return c->packetIo; }
     R::Description localOffer() const override
     {
+        if (!c->offerOk)
+            return {};
         R::Description d;
         d.media   = media;
         d.rtcpMux = true;
@@ -43,7 +51,10 @@ public:
         d.payloads.append(p);
         return d;
     }
-    std::optional<R::Description> makeAnswer(const R::Description &offer) const override { return offer; }
+    std::optional<R::Description> makeAnswer(const R::Description &offer) const override
+    {
+        return c->answerOk ? std::optional<R::Description>(offer) : std::nullopt;
+    }
     bool acceptsAnswer(const R::Description &, const R::Description &) const override { return true; }
     bool configure(const R::Description &local, const R::Description &remote) override
     {
@@ -153,7 +164,7 @@ int main(int argc, char **argv)
         check(audio && video && audio->contentName() != video->contentName(), "audio/video construction failed");
         check(audio->pad() == video->pad() && counters->sessions == 1 && counters->endpoints == 2,
               "audio/video do not share one media session");
-        check(counters->configured == 0, "offer creation activated media");
+        check(counters->configured == 0 && !audio->localDescription(), "offer creation touched media backend inline");
         check(!manager->createOutgoing(&session, "data"), "unsupported media accepted");
         check(audio->supportsContentModify(), "RTP cannot modify direction");
         audio->incomingContentModify(Origin::None);
@@ -162,6 +173,9 @@ int main(int argc, char **argv)
         auto transport = QSharedPointer<TestTransport>::create(&session, Origin::Initiator);
         check(audio->setTransport(transport), "test transport rejected");
         audio->prepare();
+        check(audio->evaluateOutgoingUpdate().action == Action::NoAction && !audio->localDescription(),
+              "initial RTP offer became ready before backend completion");
+        pump();
         check(audio->evaluateOutgoingUpdate().action == Action::ContentAdd, "initial RTP offer not scheduled");
         auto outgoing = audio->takeOutgoingUpdate();
         check(std::get<0>(outgoing).size() == 1
@@ -187,7 +201,7 @@ int main(int argc, char **argv)
               "rejected batch retained committed RTP answer");
         check(session.updateFromXml(Action::SessionAccept, accepted), "RTP session-accept failed");
         check(counters->configured == 0 && transport->starts == 0, "RTP started before acceptance returned");
-        QCoreApplication::processEvents();
+        pump();
         check(counters->configured == 1 && transport->starts == 1, "accepted RTP not configured");
         check(audio->state() == State::Connecting, "bare connectivity authorized protected media");
         auto rtpPad = qSharedPointerDynamicCast<R::Pad>(audio->pad());
@@ -225,6 +239,7 @@ int main(int argc, char **argv)
         check(audio->remoteDescription()->payloads.first().clockrate == 48000,
               "advisory hint replaced the negotiated description");
         audio->start();
+        pump();
         check(counters->configured == 1 && transport->starts == 1, "duplicate start repeated media configuration");
         video->remove();
         check(counters->stopped > 0 && audio->state() == State::Connecting, "removing video stopped audio");
@@ -252,17 +267,26 @@ int main(int argc, char **argv)
         Endpoint                        fake(counters, "audio");
         check(audio && audio->setRemoteOffer(fake.localOffer().toXml(doc)) == XMPP::Jingle::Application::Ok,
               "incoming RTP offer rejected");
+        check(!audio->localDescription(), "incoming RTP answer was prepared during stanza parsing");
         auto transport = QSharedPointer<TestTransport>::create(&incoming, Origin::Initiator);
         check(audio->setTransport(transport), "incoming test transport rejected");
         audio->prepare();
+        check(audio->evaluateOutgoingUpdate().action == Action::NoAction && audio->makeLocalAnswer().isNull(),
+              "incoming RTP answer became ready before backend completion");
+        pump();
         check(audio->evaluateOutgoingUpdate().action == Action::ContentAccept, "incoming RTP answer not scheduled");
         check(!audio->makeLocalAnswer().isNull(), "local RTP answer empty");
         audio->takeOutgoingUpdate();
         audio->setState(State::Connecting); // emulate successful session-accept IQ result
         counters->configOk = false;
+        const int configuredBefore = counters->configured;
         audio->start();
+        check(counters->configured == configuredBefore && transport->starts == 0,
+              "media configuration ran inline from start");
+        pump();
         check(audio->state() == State::Finishing && transport->starts == 0,
               "failed media configuration started transport");
+        counters->configOk = true;
     }
     check(counters->liveEndpoints == 0, "incoming teardown leaked endpoint");
     for (auto kind : { R::SessionInfo::Kind::Active, R::SessionInfo::Kind::Hold, R::SessionInfo::Kind::Unhold,
@@ -303,9 +327,16 @@ int main(int argc, char **argv)
         auto    unprotected = QSharedPointer<TestTransport>::create(&session, Origin::Initiator);
         check(audio && audio->setTransport(unprotected), "packet test setup failed");
         audio->prepare();
+        check(audio->state() == State::Created, "packet preparation completed inline");
+        pump();
         check(audio->state() >= State::Finishing && unprotected->starts == 0 && packetCounters->configured == 0,
               "packet backend accepted an unprotected transport");
         auto other = manager->createOutgoing(&session, "audio");
+        auto otherTransport = QSharedPointer<TestTransport>::create(&session, Origin::Initiator);
+        check(other && other->setTransport(otherTransport), "mux-refusal fixture rejected transport");
+        other->prepare();
+        pump();
+        check(bool(other->localDescription()), "mux-refusal fixture did not prepare local description");
         other->setState(State::Pending);
         auto answer    = *other->localDescription();
         answer.rtcpMux = false;
@@ -328,6 +359,7 @@ int main(int argc, char **argv)
         auto transport = QSharedPointer<TestTransport>::create(&session, Origin::Initiator);
         check(audio->setTransport(transport), "lifecycle transport rejected");
         audio->prepare();
+        pump();
         audio->setState(State::Pending);
         QDomDocument doc;
         check(audio->setRemoteAnswer(audio->localDescription()->toXml(doc)) == XMPP::Jingle::Application::Ok,
@@ -337,9 +369,29 @@ int main(int argc, char **argv)
                 audio->remove();
         });
         audio->start();
+        check(transport->starts == 0, "transport started before asynchronous media apply completed");
+        pump();
         check(audio->state() >= State::Finishing && transport->starts == 0,
               "Connecting callback stopped media but transport still started");
         audio.reset();
+
+        auto cancelled   = make();
+        auto cancelledTr = QSharedPointer<TestTransport>::create(&session, Origin::Initiator);
+        check(cancelled->setTransport(cancelledTr), "cancelled-apply fixture rejected transport");
+        cancelled->prepare();
+        pump();
+        cancelled->setState(State::Pending);
+        check(cancelled->setRemoteAnswer(cancelled->localDescription()->toXml(doc)) == XMPP::Jingle::Application::Ok,
+              "cancelled-apply answer rejected");
+        const int configuredBefore = life->configured;
+        cancelled->start();
+        cancelled->remove();
+        pump();
+        check(life->configured == configuredBefore && cancelledTr->starts == 0
+                  && cancelled->state() >= State::Finishing,
+              "cancelled asynchronous apply revived media");
+        cancelled.reset();
+
         for (bool incoming : { false, true }) {
             auto disposable = make();
             auto tr         = QSharedPointer<TestTransport>::create(&session, Origin::Initiator);
@@ -352,6 +404,39 @@ int main(int argc, char **argv)
                 disposable->remove();
             check(!guard && !disposable, "transport stop did not exercise application destruction");
         }
+    }
+    {
+        auto failures = std::make_shared<Counters>();
+        manager->setMediaProvider(std::make_shared<Provider>(failures));
+        Session outgoing(client.jingleManager(), Jid("peer@example.org/device"));
+        failures->offerOk = false;
+        auto failedOffer  = manager->createOutgoing(&outgoing, "audio");
+        auto failedTr     = QSharedPointer<TestTransport>::create(&outgoing, Origin::Initiator);
+        check(failedOffer && failedOffer->setTransport(failedTr), "failed-offer fixture rejected transport");
+        failedOffer->prepare();
+        pump();
+        check(failedOffer->state() == State::Finishing
+                  && failedOffer->evaluateOutgoingUpdate().action == Action::ContentRemove,
+              "asynchronous local-offer failure did not terminate unsent content");
+        failures->offerOk = true;
+
+        Session incoming(client.jingleManager(), Jid("peer@example.org/device"), Origin::Responder);
+        auto    pad = incoming.applicationPadFactory(R::Description::ns());
+        std::unique_ptr<R::Application> failedAnswer(
+            manager->startApplication(pad, "failed-answer", Origin::Initiator, Origin::Both));
+        Endpoint fake(failures, "audio");
+        failures->answerOk = false;
+        QDomDocument doc;
+        check(failedAnswer && failedAnswer->setRemoteOffer(fake.localOffer().toXml(doc)) == R::Application::Ok,
+              "failed-answer fixture rejected remote offer too early");
+        auto incomingTr = QSharedPointer<TestTransport>::create(&incoming, Origin::Initiator);
+        check(failedAnswer->setTransport(incomingTr), "failed-answer fixture rejected transport");
+        failedAnswer->prepare();
+        pump();
+        check(failedAnswer->state() == State::Finishing
+                  && failedAnswer->evaluateOutgoingUpdate().action == Action::ContentReject,
+              "asynchronous remote-offer failure did not reject unsent content");
+        failures->answerOk = true;
     }
     qInfo("RTP application regressions passed");
 }

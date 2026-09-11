@@ -11,7 +11,11 @@ Pad::Pad(Manager *manager, Session *session, std::shared_ptr<MediaProvider> prov
     if (provider_)
         media_ = provider_->createSession();
 }
-Pad::~Pad() = default;
+Pad::~Pad()
+{
+    if (media_)
+        media_->cancelAll();
+}
 QString             Pad::ns() const { return Description::ns(); }
 Session            *Pad::session() const { return session_; }
 ApplicationManager *Pad::manager() const { return manager_; }
@@ -69,6 +73,9 @@ Application::~Application()
 }
 void Application::stopMedia()
 {
+    prepareOperation_.reset();
+    applyOperation_.reset();
+    pendingRemoteOffer_.reset();
     if (security_)
         security_->disconnect(this);
     security_.clear();
@@ -95,6 +102,15 @@ void Application::setState(State state)
     if (guard)
         emit stateChanged(state);
 }
+Application::Update Application::evaluateOutgoingUpdate()
+{
+    auto result = XMPP::Jingle::Application::evaluateOutgoingUpdate();
+    if (preparationFailed_ && isRemote() && result.action == Action::ContentRemove) {
+        result.action = Action::ContentReject;
+        _update       = result;
+    }
+    return result;
+}
 bool Application::initializeOutgoing(const QString &media)
 {
     if (isRemote() || endpoint_ || _state != State::Created || (media != "audio" && media != "video"))
@@ -105,11 +121,7 @@ bool Application::initializeOutgoing(const QString &media)
     auto endpoint = pad->mediaSession()->createEndpoint(_contentName, media);
     if (!endpoint)
         return false;
-    auto offer = endpoint->localOffer();
-    if (offer.media != media || negotiation_.setLocalOffer(offer) != Negotiation::Result::Ok) {
-        endpoint->stop();
-        return false;
-    }
+    media_    = media;
     endpoint_ = std::move(endpoint);
     return true;
 }
@@ -126,12 +138,19 @@ Application::SetDescError Application::setRemoteOffer(const QDomElement &xml)
     auto endpoint = pad->mediaSession()->createEndpoint(_contentName, offer->media);
     if (!endpoint)
         return IncompatibleParameters;
-    auto result = negotiation_.setRemoteOffer(*offer, *endpoint);
-    if (result != Negotiation::Result::Ok) {
+    if (endpoint->supportsPacketIo() && !offer->rtcpMux) {
         endpoint->stop();
-        return result == Negotiation::Result::InvalidDescription ? Unparsed : IncompatibleParameters;
+        return IncompatibleParameters;
     }
-    endpoint_ = std::move(endpoint);
+    QDomDocument snapshotDoc;
+    auto         snapshot = Description::fromXml(offer->toXml(snapshotDoc));
+    if (!snapshot) {
+        endpoint->stop();
+        return Unparsed;
+    }
+    media_              = offer->media;
+    pendingRemoteOffer_ = std::move(snapshot);
+    endpoint_           = std::move(endpoint);
     return Ok;
 }
 Application::SetDescError Application::setRemoteAnswer(const QDomElement &xml)
@@ -179,14 +198,87 @@ bool Application::isTransportReplaceEnabled() const
 }
 void Application::prepare()
 {
-    if (!endpoint_ || (_state != State::Created && !(isRemote() && _state == State::Pending)))
+    if (!endpoint_ || prepareOperation_ || (_state != State::Created && !(isRemote() && _state == State::Pending)))
         return;
     if (!_transport && !selectNextTransport())
         return;
+    auto pad   = _pad.staticCast<Pad>();
+    auto media = pad->mediaSession();
+    if (!media) {
+        failPreparation(Reason::FailedApplication, QStringLiteral("Media session unavailable"));
+        return;
+    }
+    QPointer<Application> guard(this);
+    if (pendingRemoteOffer_) {
+        prepareOperation_ = media->prepareAnswer(
+            endpoint_.get(), *pendingRemoteOffer_,
+            [guard](MediaOperation::Id id, std::optional<Description> result, MediaError error) mutable {
+                if (guard)
+                    guard->prepared(id, std::move(result), std::move(error));
+            });
+    } else {
+        prepareOperation_ = media->prepareLocalOffer(
+            endpoint_.get(), [guard](MediaOperation::Id id, std::optional<Description> result, MediaError error) mutable {
+                if (guard)
+                    guard->prepared(id, std::move(result), std::move(error));
+            });
+    }
+    if (!prepareOperation_)
+        failPreparation(Reason::FailedApplication, QStringLiteral("Media preparation could not be started"));
+}
+void Application::prepared(MediaOperation::Id id, std::optional<Description> description, MediaError error)
+{
+    if (!prepareOperation_ || prepareOperation_->id() != id || _state >= State::Finishing)
+        return;
+    prepareOperation_.reset();
+    if (error || !description) {
+        failPreparation(error.code == MediaError::Code::Unsupported ? Reason::IncompatibleParameters
+                                                                    : Reason::FailedApplication,
+                        error.text.isEmpty() ? QStringLiteral("Media preparation failed") : error.text);
+        return;
+    }
+    if (description->media != media_ || (endpoint_->supportsPacketIo() && !description->rtcpMux)) {
+        failPreparation(Reason::FailedApplication, QStringLiteral("Media backend returned incompatible parameters"));
+        return;
+    }
+
+    Negotiation::Result result;
+    if (pendingRemoteOffer_) {
+        result = negotiation_.setRemoteOffer(*pendingRemoteOffer_, *description);
+        pendingRemoteOffer_.reset();
+    } else {
+        result = negotiation_.setLocalOffer(*description);
+    }
+    if (result != Negotiation::Result::Ok) {
+        failPreparation(Reason::FailedApplication, QStringLiteral("Media backend returned an invalid RTP description"));
+        return;
+    }
+
     QPointer<Application> guard(this);
     setState(State::ApprovedToSend);
     if (guard)
         prepareTransport();
+}
+void Application::failPreparation(Reason::Condition condition, const QString &text)
+{
+    if (_state >= State::Finishing)
+        return;
+    preparationFailed_ = true;
+    reason_ = _terminationReason = Reason(condition, text);
+    QPointer<Application> guard(this);
+    stopMedia();
+    if (!guard)
+        return;
+    auto transport = _transport;
+    if (transport) {
+        transport->disconnect(this);
+        transport->stop();
+    }
+    if (!guard)
+        return;
+    setState(State::Finishing);
+    if (guard)
+        emit updated();
 }
 void Application::prepareTransport()
 {
@@ -235,18 +327,43 @@ void Application::prepareTransport()
 }
 void Application::start()
 {
-    if (!endpoint_ || !_transport || configured_ || _state >= State::Finishing
+    if (!endpoint_ || !_transport || configured_ || applyOperation_ || _state >= State::Finishing
         || (_state != State::Accepted && _state != State::Connecting)
         || negotiation_.state() != Negotiation::State::Accepted)
         return;
-    const auto            local  = negotiation_.localDescription();
-    const auto            remote = negotiation_.remoteDescription();
-    QPointer<Application> guard(this);
-    const bool            configured = endpoint_->configure(*local, *remote);
-    if (!guard || _state >= State::Finishing)
+    const auto local  = negotiation_.localDescription();
+    const auto remote = negotiation_.remoteDescription();
+    if (!local || !remote)
         return;
-    if (!configured) {
-        remove(Reason::FailedApplication, QStringLiteral("Media configuration failed"));
+    auto pad   = _pad.staticCast<Pad>();
+    auto media = pad->mediaSession();
+    if (!media) {
+        remove(Reason::FailedApplication, QStringLiteral("Media session unavailable"));
+        return;
+    }
+    QPointer<Application> guard(this);
+    applyOperation_ = media->applyNegotiation(
+        endpoint_.get(), *local, *remote, [guard](MediaOperation::Id id, MediaError error) mutable {
+            if (guard)
+                guard->applied(id, std::move(error));
+        });
+    if (!applyOperation_)
+        remove(Reason::FailedApplication, QStringLiteral("Media configuration could not be started"));
+}
+void Application::applied(MediaOperation::Id id, MediaError error)
+{
+    if (!applyOperation_ || applyOperation_->id() != id || _state >= State::Finishing)
+        return;
+    applyOperation_.reset();
+    if (error) {
+        remove(Reason::FailedApplication,
+               error.text.isEmpty() ? QStringLiteral("Media configuration failed") : error.text);
+        return;
+    }
+    const auto local  = negotiation_.localDescription();
+    const auto remote = negotiation_.remoteDescription();
+    if (!local || !remote) {
+        remove(Reason::FailedApplication, QStringLiteral("Negotiated RTP description disappeared"));
         return;
     }
     configured_ = true;
@@ -255,8 +372,10 @@ void Application::start()
     for (const auto &payload : (isLocal() ? remote : local)->payloads)
         negotiatedPayloads_.insert(payload.id);
     beforeAnswer_.reset();
-    auto transport = _transport;
-    setState(State::Connecting);
+    auto                  transport = _transport;
+    QPointer<Application> guard(this);
+    if (_state == State::Accepted)
+        setState(State::Connecting);
     if (guard && _state == State::Connecting && configured_ && _transport == transport)
         transport->start();
     if (guard)

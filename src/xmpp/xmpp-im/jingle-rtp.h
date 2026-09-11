@@ -24,8 +24,8 @@ public:
     // Stable opt-in capability; all calls, including PacketWriter, stay on the Jingle
     // thread. Worker-thread engines must use bounded queues in their adapter.
     virtual bool supportsPacketIo() const { return false; }
-    // Called once after configure() and authentication. Returning true means
-    // packet I/O is prepared, not permission to capture media. Writer becomes
+    // Called once after negotiated parameters are applied and authentication is
+    // ready. This does not grant permission to capture media. Writer becomes
     // usable when the Application is Active. stop() must detach all callbacks.
     virtual bool        attachPacketIo(PacketWriter) { return false; }
     virtual void        receivePacket(const QByteArray &, SrtpContext::Packet) { }
@@ -71,9 +71,8 @@ private:
 // from prepareLocalOffer()/prepareAnswer()/applyNegotiation().
 class IRIS_EXPORT MediaSession : public QObject {
 public:
-    using PrepareCallback
-        = std::function<void(MediaOperation::Id, std::optional<Description>, MediaError)>;
-    using ApplyCallback = std::function<void(MediaOperation::Id, MediaError)>;
+    using PrepareCallback = std::function<void(MediaOperation::Id, std::optional<Description>, MediaError)>;
+    using ApplyCallback   = std::function<void(MediaOperation::Id, MediaError)>;
 
     explicit MediaSession(QObject *parent = nullptr);
     ~MediaSession() override;
@@ -83,8 +82,7 @@ public:
     virtual std::unique_ptr<MediaEndpoint> createEndpoint(const QString &contentName, const QString &media) = 0;
 
     std::unique_ptr<MediaOperation> prepareLocalOffer(MediaEndpoint *, PrepareCallback);
-    std::unique_ptr<MediaOperation> prepareAnswer(MediaEndpoint *, const Description &remoteSnapshot,
-                                                  PrepareCallback);
+    std::unique_ptr<MediaOperation> prepareAnswer(MediaEndpoint *, const Description &remoteSnapshot, PrepareCallback);
     std::unique_ptr<MediaOperation> applyNegotiation(MediaEndpoint *, const Description &local,
                                                      const Description &remote, ApplyCallback);
 
@@ -99,8 +97,9 @@ protected:
 
     // These hooks are entered one at a time on the Jingle thread. Completion must
     // also be invoked on that thread; worker-thread adapters must marshal first.
-    // The default implementation is a migration fallback around the legacy
-    // synchronous MediaEndpoint methods. Native psimedia integration overrides it.
+    // Preparing codecs/session state must not itself grant microphone/camera
+    // capture permission. The default implementation is a migration fallback
+    // around the legacy synchronous MediaEndpoint methods.
     virtual void beginPrepareLocalOffer(MediaOperation::Id, MediaEndpoint *, PrepareCompletion);
     virtual void beginPrepareAnswer(MediaOperation::Id, MediaEndpoint *, const Description &remoteSnapshot,
                                     PrepareCompletion);
@@ -160,6 +159,7 @@ public:
     ~Application() override;
     bool                                initializeOutgoing(const QString &media);
     void                                setState(State) override;
+    Update                              evaluateOutgoingUpdate() override;
     const std::optional<Stanza::Error> &lastError() const override { return error_; }
     Reason                              lastReason() const override { return reason_; }
     SetDescError                        setRemoteOffer(const QDomElement &) override;
@@ -181,19 +181,27 @@ protected:
 
 private:
     void                           stopMedia();
+    void                           prepared(MediaOperation::Id, std::optional<Description>, MediaError);
+    void                           applied(MediaOperation::Id, MediaError);
+    void                           failPreparation(Reason::Condition, const QString &);
     void                           activateMedia();
     bool                           sendPacket(QByteArray, SrtpContext::Packet, quint64 epoch);
     bool                           allowsRtp(bool sending) const;
     Negotiation                    negotiation_;
     std::optional<Negotiation>     beforeAnswer_;
-    std::unique_ptr<MediaEndpoint> endpoint_;
-    std::optional<Stanza::Error>   error_;
-    Reason                         reason_;
-    bool                           configured_ = false;
-    bool                           attached_   = false;
-    bool                           stopping_   = false;
-    QPointer<SrtpSession>          security_;
-    QSet<int>                      negotiatedPayloads_;
+    std::optional<Description>     pendingRemoteOffer_;
+    std::unique_ptr<MediaEndpoint>  endpoint_;
+    std::unique_ptr<MediaOperation> prepareOperation_;
+    std::unique_ptr<MediaOperation> applyOperation_;
+    QString                         media_;
+    std::optional<Stanza::Error>    error_;
+    Reason                          reason_;
+    bool                            configured_       = false;
+    bool                            attached_         = false;
+    bool                            stopping_         = false;
+    bool                            preparationFailed_ = false;
+    QPointer<SrtpSession>           security_;
+    QSet<int>                       negotiatedPayloads_;
 };
 
 class IRIS_EXPORT Manager : public ApplicationManager {
