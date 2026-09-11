@@ -23,6 +23,8 @@
 #include <iris/xmpp-im/jingle-connection.h>
 #include <iris/xmpp-im/jingle.h>
 
+#include <QVariant>
+
 namespace XMPP { namespace Jingle {
 
     class TransportManager;
@@ -32,6 +34,10 @@ namespace XMPP { namespace Jingle {
         typedef QSharedPointer<TransportManagerPad> Ptr;
 
         virtual TransportManager *manager() const = 0;
+        QString                   requestedNamespace() const
+        {
+            return property("_iris_jingle_transport_namespace").toString();
+        }
     };
 
     class Transport : public QObject {
@@ -249,6 +255,9 @@ namespace XMPP { namespace Jingle {
         // FIXME rename methods
         virtual QSharedPointer<Transport> newTransport(const TransportManagerPad::Ptr &pad, Origin creator) = 0;
         virtual TransportManagerPad      *pad(Session *session)                                             = 0;
+        // Additive, non-virtual helper so multi-namespace managers keep the
+        // existing vtable and pads keep their existing object layout.
+        TransportManagerPad *padForNamespace(Session *session, const QString &ns);
 
         // this method is supposed to gracefully close all related sessions as a preparation for plugin unload for
         // example

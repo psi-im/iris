@@ -34,6 +34,7 @@ class Client;
 
 namespace Jingle { namespace ICE {
     extern const QString NS;
+    extern const QString NS_ICE_UDP;
 
     class Transport;
 
@@ -63,8 +64,8 @@ namespace Jingle { namespace ICE {
         // Explicit experimental single-component RTP/RTCP mux. Configure before
         // prepare(); caller must require rtcp-mux in the RTP answer (a refusal
         // needs a different transport). No raw media fallback. This does not
-        // advertise standard ICE-UDP or BUNDLE. The returned binding is owned
-        // by the ICE connection; consumers retaining it must use QPointer.
+        // advertise BUNDLE. The returned binding is owned by the ICE connection;
+        // consumers retaining it must use QPointer.
         bool              enableRtpMux() override;
         RTP::SrtpSession *rtpSession() const override;
         bool              sendRtpPacket(QByteArray, RTP::SrtpContext::Packet, quint64 epoch) override;
