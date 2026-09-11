@@ -26,6 +26,7 @@ public:
         ContentKey    content;
         QByteArray    mid;
         quint16       midExtensionId = 0; // 0 when MID was not negotiated for this content.
+        QSet<quint8>  incomingPayloadTypes; // Used only when a PT is unique across the BUNDLE group.
         QSet<quint32> incomingSsrcs;
         QSet<quint32> localSsrcs; // Peer RTCP can refer to our local media source.
     };
@@ -52,7 +53,8 @@ public:
 
 private:
     struct ParsedRtp {
-        quint32                   ssrc = 0;
+        quint32                   ssrc        = 0;
+        quint8                    payloadType = 0;
         std::optional<QByteArray> mid;
     };
 
@@ -68,6 +70,9 @@ private:
     QList<Route>           routes_;
     QMap<ContentKey, int>  contentRoutes_;
     QHash<QByteArray, int> midRoutes_;
+    // A payload type appears here only when it identifies exactly one route.
+    // Colliding PTs are intentionally absent rather than guessed.
+    QHash<quint8, int> payloadTypeRoutes_;
     // Incoming and local SSRCs are deliberately separate. Incoming RTP may only
     // use peer SSRCs; local SSRCs are valid only in RTCP report/media-source fields.
     QHash<quint32, int> incomingSsrcRoutes_;
