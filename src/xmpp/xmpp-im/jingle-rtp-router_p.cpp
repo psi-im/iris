@@ -43,6 +43,8 @@ bool BundleRouter::configure(const QList<Route> &routes)
 
     QMap<ContentKey, int>  contentRoutes;
     QHash<QByteArray, int> midRoutes;
+    QHash<quint8, int>     payloadTypeRoutes;
+    QSet<quint8>           ambiguousPayloadTypes;
     QHash<quint32, int>    incomingSsrcRoutes;
     QHash<quint32, int>    localSsrcRoutes;
     QSet<QByteArray>       mids;
@@ -85,6 +87,22 @@ bool BundleRouter::configure(const QList<Route> &routes)
             midRoutes.insert(route.mid, routeIndex);
         }
 
+        for (auto payloadType : route.incomingPayloadTypes) {
+            if (payloadType > 127) {
+                lastError_ = Error::InvalidRoutes;
+                return false;
+            }
+            if (ambiguousPayloadTypes.contains(payloadType))
+                continue;
+            auto existing = payloadTypeRoutes.constFind(payloadType);
+            if (existing == payloadTypeRoutes.cend()) {
+                payloadTypeRoutes.insert(payloadType, routeIndex);
+            } else if (existing.value() != routeIndex) {
+                payloadTypeRoutes.remove(payloadType);
+                ambiguousPayloadTypes.insert(payloadType);
+            }
+        }
+
         for (auto ssrc : route.incomingSsrcs) {
             if (!addSsrc(incomingSsrcRoutes, ssrc, routeIndex)) {
                 lastError_ = Error::InvalidRoutes;
@@ -106,6 +124,7 @@ bool BundleRouter::configure(const QList<Route> &routes)
     routes_              = routes;
     contentRoutes_       = std::move(contentRoutes);
     midRoutes_           = std::move(midRoutes);
+    payloadTypeRoutes_   = std::move(payloadTypeRoutes);
     incomingSsrcRoutes_  = std::move(incomingSsrcRoutes);
     localSsrcRoutes_     = std::move(localSsrcRoutes);
     learnedSsrcs_.clear();
@@ -120,6 +139,7 @@ void BundleRouter::reset()
     routes_.clear();
     contentRoutes_.clear();
     midRoutes_.clear();
+    payloadTypeRoutes_.clear();
     incomingSsrcRoutes_.clear();
     localSsrcRoutes_.clear();
     learnedSsrcs_.clear();
@@ -142,7 +162,8 @@ std::optional<BundleRouter::ParsedRtp> BundleRouter::parseRtp(const QByteArray &
         return {};
 
     ParsedRtp result;
-    result.ssrc = read32(packet, 8);
+    result.payloadType = bytes[1] & 0x7f;
+    result.ssrc        = read32(packet, 8);
     if (!(bytes[0] & 0x10))
         return result;
     if (offset + 4 > packet.size())
@@ -329,29 +350,45 @@ std::optional<BundleRouter::RoutedPacket> BundleRouter::routeIncoming(const QByt
             return {};
         }
 
-        auto ssrcRoute = incomingSsrcRoutes_.constFind(parsed->ssrc);
+        auto ssrcRoute    = incomingSsrcRoutes_.constFind(parsed->ssrc);
+        auto payloadRoute = payloadTypeRoutes_.constFind(parsed->payloadType);
         if (parsed->mid) {
             auto midRoute = midRoutes_.constFind(*parsed->mid);
             if (midRoute == midRoutes_.cend()) {
                 lastError_ = Error::UnknownRoute;
                 return {};
             }
-            if (ssrcRoute != incomingSsrcRoutes_.cend() && ssrcRoute.value() != midRoute.value()) {
+            if ((ssrcRoute != incomingSsrcRoutes_.cend() && ssrcRoute.value() != midRoute.value())
+                || (payloadRoute != payloadTypeRoutes_.cend() && payloadRoute.value() != midRoute.value())) {
                 lastError_ = Error::AmbiguousRoute;
                 return {};
             }
-            if (ssrcRoute == incomingSsrcRoutes_.cend() && learnedSsrcs_.size() < MaxLearnedSsrcs) {
+            if (ssrcRoute == incomingSsrcRoutes_.cend() && parsed->ssrc
+                && learnedSsrcs_.size() < MaxLearnedSsrcs) {
                 incomingSsrcRoutes_.insert(parsed->ssrc, midRoute.value());
                 learnedSsrcs_.insert(parsed->ssrc);
             }
             return routed(midRoute.value(), packet, kind);
         }
 
-        if (ssrcRoute == incomingSsrcRoutes_.cend()) {
-            lastError_ = Error::UnknownRoute;
-            return {};
+        if (ssrcRoute != incomingSsrcRoutes_.cend()) {
+            if (payloadRoute != payloadTypeRoutes_.cend() && payloadRoute.value() != ssrcRoute.value()) {
+                lastError_ = Error::AmbiguousRoute;
+                return {};
+            }
+            return routed(ssrcRoute.value(), packet, kind);
         }
-        return routed(ssrcRoute.value(), packet, kind);
+
+        if (payloadRoute != payloadTypeRoutes_.cend()) {
+            if (parsed->ssrc && learnedSsrcs_.size() < MaxLearnedSsrcs) {
+                incomingSsrcRoutes_.insert(parsed->ssrc, payloadRoute.value());
+                learnedSsrcs_.insert(parsed->ssrc);
+            }
+            return routed(payloadRoute.value(), packet, kind);
+        }
+
+        lastError_ = Error::UnknownRoute;
+        return {};
     }
 
     QSet<int> routes;
