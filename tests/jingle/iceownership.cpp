@@ -59,6 +59,7 @@ int main(int argc, char **argv)
     ConnectionRegistry separateRegistry;
     const Jingle::ContentKey audioKey { QStringLiteral("audio"), Jingle::Origin::Initiator };
     const Jingle::ContentKey videoKey { QStringLiteral("video"), Jingle::Origin::Initiator };
+    const Jingle::ContentKey screenKey { QStringLiteral("screen"), Jingle::Origin::Initiator };
     auto audioMembership = registry.create(audioKey);
     check(audioMembership && audioMembership.associationId() != 0 && audioMembership.content() == audioKey,
           "registry did not create the first membership");
@@ -82,6 +83,15 @@ int main(int argc, char **argv)
               && videoMembership.generation().membershipRevision == beforeAttach.membershipRevision + 1,
           "membership attach changed the wrong association generation");
     check(!registry.attach(associationId, videoKey), "duplicate logical membership was accepted");
+
+    auto screenMembership = registry.create(screenKey);
+    check(screenMembership && screenMembership.associationId() != associationId && registry.liveAssociationCount() == 2,
+          "independent association was not created");
+    check(!registry.create(audioKey), "live content was duplicated into a new association");
+    check(!registry.attach(screenMembership.associationId(), audioKey),
+          "live content was attached to a second association");
+    screenMembership.reset();
+    check(registry.liveAssociationCount() == 1, "released independent association remained live");
 
     const auto callbackGeneration = videoMembership.generation();
     audioMembership.reset();
