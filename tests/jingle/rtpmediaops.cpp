@@ -155,12 +155,15 @@ int main(int argc, char **argv)
     pump();
     check(answerCallbacks == 0 && session.applyStarts == 0, "cancelled/stale media callback was delivered");
 
+    R::MediaOperation::Id applyId = 0;
     auto apply = session.applyNegotiation(
         &audio, description(QStringLiteral("audio")), description(QStringLiteral("audio")),
         [&](R::MediaOperation::Id id, R::MediaError error) {
-            check(id == apply->id() && !error, "apply completion corrupted");
+            check(applyId && id == applyId && !error, "apply completion corrupted");
             ++applyCallbacks;
         });
+    check(bool(apply), "apply operation handle missing");
+    applyId = apply->id();
     pump();
     check(session.applyStarts == 1 && bool(session.applyCompletion), "apply operation did not start");
     auto applyDone = session.applyCompletion;
