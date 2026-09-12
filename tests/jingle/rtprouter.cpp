@@ -358,6 +358,29 @@ int main(int argc, char **argv)
               && dynamic.lastError() == BundleRouter::Error::UnknownRoute,
           "removed member retained an RTCP route");
 
+    // Registering a source that is also present in signaling must still create
+    // runtime ownership. Otherwise removing the static declaration on a later
+    // reconfigure silently loses RTCP routing for the live sender.
+    BundleRouter staticThenRuntime;
+    auto staticAudio = audio;
+    staticAudio.incomingSsrcs.clear();
+    check(staticThenRuntime.configure({ staticAudio }), "static/runtime SSRC route rejected");
+    check(staticThenRuntime.registerOutgoingSsrc(staticAudio.content, AudioLocal),
+          "runtime registration of a statically declared SSRC failed");
+    check(staticThenRuntime.registeredOutgoingSsrcCount() == 1,
+          "statically declared SSRC was not tracked as a runtime registration");
+    staticAudio.localSsrcs.clear();
+    check(staticThenRuntime.configure({ staticAudio }), "removing static SSRC declaration failed");
+    auto afterStaticRemoval = staticThenRuntime.routeIncoming(receiverReport(0x77770001, AudioLocal),
+                                                               SrtpContext::Packet::Rtcp);
+    check(afterStaticRemoval && afterStaticRemoval->content == staticAudio.content,
+          "runtime SSRC route disappeared with its static declaration");
+    check(staticThenRuntime.unregisterOutgoingSsrc(staticAudio.content, AudioLocal),
+          "runtime unregister after static removal failed");
+    check(!staticThenRuntime.routeIncoming(receiverReport(0x77770001, AudioLocal), SrtpContext::Packet::Rtcp)
+              && staticThenRuntime.lastError() == BundleRouter::Error::UnknownRoute,
+          "runtime unregister retained a removed static SSRC route");
+
     BundleRouter limitedOutgoing;
     auto noStaticLocal = audio;
     noStaticLocal.localSsrcs.clear();
@@ -373,6 +396,22 @@ int main(int argc, char **argv)
           "outgoing SSRC unregister failed");
     check(limitedOutgoing.registerOutgoingSsrc(noStaticLocal.content, 0x60000000u),
           "outgoing SSRC slot was not released after unregister");
+
+    // A source first seen statically still consumes a runtime registration slot
+    // once the producer registers it.
+    BundleRouter limitedStaticRuntime;
+    auto limitedStatic = audio;
+    limitedStatic.incomingSsrcs.clear();
+    check(limitedStaticRuntime.configure({ limitedStatic }), "static runtime limit route rejected");
+    check(limitedStaticRuntime.registerOutgoingSsrc(limitedStatic.content, AudioLocal),
+          "static source runtime registration failed");
+    for (int i = 0; i < BundleRouter::MaxRegisteredOutgoingSsrcs - 1; ++i) {
+        check(limitedStaticRuntime.registerOutgoingSsrc(limitedStatic.content, 0x61000000u + quint32(i)),
+              "static/runtime registration hit its bound too early");
+    }
+    check(!limitedStaticRuntime.registerOutgoingSsrc(limitedStatic.content, 0x62000000u)
+              && limitedStaticRuntime.lastError() == BundleRouter::Error::ResourceLimit,
+          "static source runtime registration did not count toward the bound");
 
     // Receive-only is valid without any local source registration. Unique PT can
     // still establish the authenticated incoming SSRC association.
