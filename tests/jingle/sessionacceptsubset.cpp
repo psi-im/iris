@@ -156,6 +156,12 @@ private:
     Reason                        reason_;
 };
 
+static QDomElement emptyAnswer()
+{
+    QDomDocument doc;
+    return doc.createElementNS(NS, QStringLiteral("jingle"));
+}
+
 static QDomElement answer(Application *accepted, bool malformed = false)
 {
     QDomDocument doc;
@@ -198,6 +204,33 @@ int main(int argc, char **argv)
     QCoreApplication app(argc, argv);
     QCA::Initializer qca;
     Client           client;
+
+    // Reject a session-accept that omits every still-pending initial content.
+    // This is a validation failure, so it must not commit any subset cleanup.
+    {
+        auto    stats = QSharedPointer<Stats>::create();
+        Session session(client.jingleManager(), Jid(QStringLiteral("peer@example.org/device")), Origin::Initiator);
+        TestApplication *audio = nullptr, *video = nullptr;
+        addInitialPair(session, stats, &audio, &video);
+        QPointer<TestApplication> audioGuard(audio);
+        QPointer<TestApplication> videoGuard(video);
+        const auto                initialState = session.state();
+        int                       activations  = 0;
+        QObject::connect(&session, &Session::activated, &session, [&activations]() { ++activations; });
+
+        check(!session.updateFromXml(Action::SessionAccept, emptyAnswer()),
+              "empty session-accept that rejected every initial content was accepted");
+        check(session.state() == initialState, "empty session-accept changed session state");
+        check(audioGuard && videoGuard && audioGuard->state() == State::Pending && videoGuard->state() == State::Pending,
+              "empty session-accept changed or removed initial contents");
+        check(session.content(QStringLiteral("audio"), Origin::Initiator) == audioGuard.data()
+                  && session.content(QStringLiteral("video"), Origin::Initiator) == videoGuard.data(),
+              "empty session-accept detached initial contents");
+        check(stats->removes == 0 && stats->stops == 0 && stats->starts == 0,
+              "empty session-accept performed content side effects");
+        pump();
+        check(activations == 0, "empty session-accept activated the session");
+    }
 
     // Full validation must finish before any omitted-content cleanup is committed.
     {
