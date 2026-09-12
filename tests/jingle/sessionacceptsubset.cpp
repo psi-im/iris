@@ -13,6 +13,7 @@
 #include <iris/jingle-session.h>
 #undef private
 
+#include <functional>
 #include <utility>
 
 using namespace XMPP;
@@ -34,9 +35,11 @@ static void pump()
 }
 
 struct Stats {
-    int starts  = 0;
-    int removes = 0;
-    int stops   = 0;
+    int                   starts  = 0;
+    int                   removes = 0;
+    int                   stops   = 0;
+    std::function<void()> onStop;
+    std::function<void()> onRemove;
 };
 
 class TestApplicationPad final : public ApplicationManagerPad {
@@ -77,6 +80,9 @@ public:
     {
         ++stats_->stops;
         Transport::stop();
+        auto callback = std::move(stats_->onStop);
+        if (callback)
+            callback();
     }
     bool update(const QDomElement &) override
     {
@@ -136,6 +142,9 @@ public:
         reason_ = reason;
         ++stats_->removes;
         setState(State::Finished);
+        auto callback = std::move(stats_->onRemove);
+        if (callback)
+            callback();
     }
 
 protected:
@@ -176,18 +185,29 @@ static void addInitialPair(Session &session, const QSharedPointer<Stats> &stats,
     session.addContent(*video);
 }
 
+static void addInitialTriple(Session &session, const QSharedPointer<Stats> &stats, TestApplication **audio,
+                             TestApplication **video, TestApplication **zvideo)
+{
+    addInitialPair(session, stats, audio, video);
+    *zvideo = new TestApplication(&session, QStringLiteral("zvideo"), stats);
+    session.addContent(*zvideo);
+}
+
 int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
     QCA::Initializer qca;
     Client           client;
 
+    // Full validation must finish before any omitted-content cleanup is committed.
     {
         auto    stats = QSharedPointer<Stats>::create();
         Session session(client.jingleManager(), Jid(QStringLiteral("peer@example.org/device")), Origin::Initiator);
         TestApplication *audio = nullptr, *video = nullptr;
         addInitialPair(session, stats, &audio, &video);
         QPointer<TestApplication> videoGuard(video);
+        int                       activations = 0;
+        QObject::connect(&session, &Session::activated, &session, [&activations]() { ++activations; });
 
         check(!session.updateFromXml(Action::SessionAccept, answer(audio, true)),
               "malformed subset session-accept was accepted");
@@ -206,8 +226,104 @@ int main(int argc, char **argv)
         pump();
         check(session.state() == State::Active && audio->state() == State::Active && stats->starts == 1,
               "accepted subset content did not start normally");
+        check(activations == 1, "normal subset session-accept did not activate exactly once");
     }
 
+    // A reentrant local termination from Transport::stop() wins over the
+    // incoming session-accept. The handler must not restore Active afterwards.
+    {
+        auto    stats = QSharedPointer<Stats>::create();
+        Session session(client.jingleManager(), Jid(QStringLiteral("peer@example.org/device")), Origin::Initiator);
+        TestApplication *audio = nullptr, *video = nullptr;
+        addInitialPair(session, stats, &audio, &video);
+        QPointer<TestApplication> videoGuard(video);
+        stats->onStop = [&session]() { session.terminate(Reason::Decline, QStringLiteral("test cancellation")); };
+
+        check(session.updateFromXml(Action::SessionAccept, answer(audio)),
+              "session-accept was rejected after reentrant termination");
+        check(session.state() == State::Finishing, "session-accept overwrote a reentrant termination");
+        check(!videoGuard, "detached omitted content leaked after reentrant termination");
+        check(stats->starts == 0, "accepted content started after reentrant termination");
+    }
+
+    // The current omitted content is detached before stop(). If stop destroys
+    // the whole Session, that detached object is no longer owned by the Session
+    // destructor and must still be released by the handler.
+    {
+        auto stats = QSharedPointer<Stats>::create();
+        auto session = new Session(client.jingleManager(), Jid(QStringLiteral("peer@example.org/device")),
+                                   Origin::Initiator);
+        QPointer<Session> sessionGuard(session);
+        TestApplication *audio = nullptr, *video = nullptr;
+        addInitialPair(*session, stats, &audio, &video);
+        QPointer<TestApplication> videoGuard(video);
+        stats->onStop = [session]() { delete session; };
+
+        check(session->updateFromXml(Action::SessionAccept, answer(audio)),
+              "session-accept did not survive Session deletion from stop callback");
+        check(!sessionGuard, "Session survived its stop callback deletion");
+        check(!videoGuard, "detached omitted content leaked when stop callback deleted Session");
+        check(stats->starts == 0, "accepted content started after Session deletion");
+    }
+
+    // A callback for one omitted content may destroy another omitted content.
+    // Snapshotted QPointers must make the later cleanup entry harmless.
+    {
+        auto    stats = QSharedPointer<Stats>::create();
+        Session session(client.jingleManager(), Jid(QStringLiteral("peer@example.org/device")), Origin::Initiator);
+        TestApplication *audio = nullptr, *video = nullptr, *zvideo = nullptr;
+        addInitialTriple(session, stats, &audio, &video, &zvideo);
+        QPointer<TestApplication> videoGuard(video);
+        QPointer<TestApplication> zvideoGuard(zvideo);
+        stats->onStop = [zvideo]() { delete zvideo; };
+
+        check(session.updateFromXml(Action::SessionAccept, answer(audio)),
+              "session-accept failed after neighboring omitted content was deleted");
+        check(!videoGuard && !zvideoGuard, "neighboring omitted content cleanup left an object alive");
+        pump();
+        check(session.state() == State::Active && audio->state() == State::Active && stats->starts == 1,
+              "neighbor deletion prevented the accepted content from starting");
+    }
+
+    // An omitted-content callback can also invalidate a content that was
+    // accepted earlier in the same stanza. Never dereference the raw parser
+    // result or activate a Session whose accepted content disappeared.
+    {
+        auto    stats = QSharedPointer<Stats>::create();
+        Session session(client.jingleManager(), Jid(QStringLiteral("peer@example.org/device")), Origin::Initiator);
+        TestApplication *audio = nullptr, *video = nullptr;
+        addInitialPair(session, stats, &audio, &video);
+        QPointer<TestApplication> audioGuard(audio);
+        QPointer<TestApplication> videoGuard(video);
+        stats->onStop = [audio]() { delete audio; };
+
+        check(session.updateFromXml(Action::SessionAccept, answer(audio)),
+              "session-accept failed after accepted content was invalidated reentrantly");
+        check(!audioGuard && !videoGuard, "reentrant accepted-content deletion left stale content alive");
+        check(session.state() == State::Finishing, "session activated after its accepted content disappeared");
+        check(stats->starts == 0, "deleted accepted content was started");
+    }
+
+    // incomingRemove() is another external callback boundary. Deleting the
+    // Session there must have the same detached-object lifetime guarantees.
+    {
+        auto stats = QSharedPointer<Stats>::create();
+        auto session = new Session(client.jingleManager(), Jid(QStringLiteral("peer@example.org/device")),
+                                   Origin::Initiator);
+        QPointer<Session> sessionGuard(session);
+        TestApplication *audio = nullptr, *video = nullptr;
+        addInitialPair(*session, stats, &audio, &video);
+        QPointer<TestApplication> videoGuard(video);
+        stats->onRemove = [session]() { delete session; };
+
+        check(session->updateFromXml(Action::SessionAccept, answer(audio)),
+              "session-accept did not survive Session deletion from incomingRemove callback");
+        check(!sessionGuard, "Session survived its incomingRemove callback deletion");
+        check(!videoGuard, "detached omitted content leaked when incomingRemove deleted Session");
+        check(stats->starts == 0, "accepted content started after incomingRemove deleted Session");
+    }
+
+    // Ordinary content-accept must not inherit the initial-session subset rule.
     {
         auto    stats = QSharedPointer<Stats>::create();
         Session session(client.jingleManager(), Jid(QStringLiteral("peer@example.org/device")), Origin::Initiator);
