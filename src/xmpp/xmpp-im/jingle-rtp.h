@@ -39,10 +39,21 @@ public:
 };
 
 struct IRIS_EXPORT MediaError {
-    enum class Code { None, Unsupported, InvalidDescription, Backend };
+    enum class Code { None, Unsupported, InvalidDescription, Backend, Timeout };
     Code    code = Code::None;
     QString text;
     explicit operator bool() const { return code != Code::None; }
+};
+
+struct IRIS_EXPORT MediaOperationPolicy {
+    int prepareDeadlineMs    = 15000;
+    int applyDeadlineMs      = 10000;
+    int maxPendingOperations = 8;
+
+    bool isValid() const
+    {
+        return prepareDeadlineMs > 0 && applyDeadlineMs > 0 && maxPendingOperations > 0;
+    }
 };
 
 class MediaSession;
@@ -87,6 +98,10 @@ public:
     std::unique_ptr<MediaOperation> applyNegotiation(MediaEndpoint *, const Description &local,
                                                      const Description &remote, ApplyCallback);
 
+    MediaOperationPolicy operationPolicy() const;
+    // Policy may only change while the serialized operation queue is idle.
+    bool setOperationPolicy(const MediaOperationPolicy &);
+
     // Cancel queued work and the currently running backend operation. No cancelled
     // operation may subsequently deliver a callback. Pad teardown calls this while
     // the derived adapter is still alive, so cancelMediaOperation() can stop I/O.
@@ -112,6 +127,15 @@ protected:
     virtual void beginApplyNegotiation(MediaOperation::Id, MediaEndpoint *, const Description &local,
                                        const Description &remote, ApplyCompletion);
     virtual void cancelMediaOperation(MediaOperation::Id) { }
+    // Timeout differs from caller cancellation: the live caller receives an
+    // explicit Timeout error. Providers with untagged async signals may override
+    // this hook to fail the whole backend session rather than reuse it.
+    virtual void timeoutMediaOperation(MediaOperation::Id id) { cancelMediaOperation(id); }
+    // Overridable clock seam for deterministic tests. Implementations must not
+    // invoke mediaOperationDeadlineExpired() synchronously from arm().
+    virtual void armMediaOperationDeadline(MediaOperation::Id, int timeoutMs);
+    virtual void disarmMediaOperationDeadline(MediaOperation::Id);
+    void         mediaOperationDeadlineExpired(MediaOperation::Id);
 
 private:
     class Private;
@@ -119,8 +143,10 @@ private:
     void                     cancelOperation(MediaOperation::Id);
     void                     scheduleNext();
     void                     startNext();
-    void finishPrepared(MediaOperation::Id, std::optional<Description>, MediaError);
-    void finishApplied(MediaOperation::Id, MediaError);
+    bool                     claimCompletion(MediaOperation::Id);
+    void                     finishPrepared(MediaOperation::Id, std::optional<Description>, MediaError);
+    void                     finishApplied(MediaOperation::Id, MediaError);
+    void                     finishTimedOut(MediaOperation::Id);
     friend class MediaOperation;
 };
 
