@@ -31,11 +31,12 @@ static void append16(QByteArray &data, quint16 value)
     data.append(char(value));
 }
 
-static QByteArray rtp(quint32 ssrc, const QByteArray &mid = {}, quint8 extensionId = 1, bool twoByte = false)
+static QByteArray rtp(quint32 ssrc, const QByteArray &mid = {}, quint8 extensionId = 1, bool twoByte = false,
+                      quint8 payloadType = 111)
 {
     QByteArray packet(12, '\0');
     packet[0] = char(0x80 | (mid.isEmpty() ? 0 : 0x10));
-    packet[1] = char(111);
+    packet[1] = char(payloadType & 0x7f);
     write32(packet, 8, ssrc);
     if (mid.isEmpty())
         return packet;
@@ -55,6 +56,17 @@ static QByteArray rtp(quint32 ssrc, const QByteArray &mid = {}, quint8 extension
     append16(packet, twoByte ? 0x1000 : 0xbede);
     append16(packet, quint16(extensions.size() / 4));
     packet.append(extensions);
+    return packet;
+}
+
+static QByteArray paddedRtp(quint32 ssrc, int paddingLength)
+{
+    auto packet = rtp(ssrc);
+    packet[0] = char(quint8(packet[0]) | 0x20);
+    if (paddingLength > 0) {
+        packet.append(QByteArray(paddingLength, '\0'));
+        packet[packet.size() - 1] = char(paddingLength);
+    }
     return packet;
 }
 
@@ -85,9 +97,18 @@ static QByteArray receiverReport(quint32 sender, quint32 reported)
     return rtcp(201, 1, payload);
 }
 
-static QByteArray feedback(quint8 type, quint32 sender, quint32 media)
+static QByteArray receiverReport(quint32 sender, quint32 firstReported, quint32 secondReported)
 {
-    QByteArray payload(8, '\0');
+    QByteArray payload(52, '\0');
+    write32(payload, 0, sender);
+    write32(payload, 4, firstReported);
+    write32(payload, 28, secondReported);
+    return rtcp(201, 2, payload);
+}
+
+static QByteArray feedback(quint8 type, quint32 sender, quint32 media, bool withFci = false)
+{
+    QByteArray payload(withFci ? 12 : 8, '\0');
     write32(payload, 0, sender);
     write32(payload, 4, media);
     return rtcp(type, 1, payload);
@@ -104,15 +125,22 @@ static QByteArray sdes(quint32 ssrc)
     return rtcp(202, 1, payload);
 }
 
-static BundleRouter::Route route(const char *name, const char *mid, quint16 midId, quint32 incoming, quint32 local)
+static BundleRouter::Route route(const char *name, const char *mid, quint16 midId, quint32 incoming, quint32 local,
+                                 quint8 payloadType)
 {
     BundleRouter::Route result;
     result.content = ContentKey { QString::fromLatin1(name), Origin::Initiator };
     result.mid = QByteArray(mid);
     result.midExtensionId = midId;
+    result.incomingPayloadTypes.insert(payloadType);
     result.incomingSsrcs.insert(incoming);
     result.localSsrcs.insert(local);
     return result;
+}
+
+static bool containsContent(const QList<ContentKey> &contents, const ContentKey &content)
+{
+    return contents.contains(content);
 }
 
 int main(int argc, char **argv)
@@ -123,9 +151,11 @@ int main(int argc, char **argv)
     constexpr quint32 VideoRemote = 0x22222222;
     constexpr quint32 AudioLocal  = 0xaaaaaaaa;
     constexpr quint32 VideoLocal  = 0xbbbbbbbb;
+    constexpr quint8  AudioPt     = 111;
+    constexpr quint8  VideoPt     = 96;
 
-    const auto audio = route("audio", "audio", 1, AudioRemote, AudioLocal);
-    const auto video = route("video", "video", 1, VideoRemote, VideoLocal);
+    const auto audio = route("audio", "audio", 1, AudioRemote, AudioLocal, AudioPt);
+    const auto video = route("video", "video", 1, VideoRemote, VideoLocal, VideoPt);
 
     BundleRouter router;
     check(router.configure({ audio, video }), "valid BUNDLE routes rejected");
@@ -137,31 +167,57 @@ int main(int argc, char **argv)
           "known audio SSRC routed incorrectly");
 
     const quint32 learnedVideo = 0x33333333;
-    auto videoByMid = router.routeIncoming(rtp(learnedVideo, "video"), SrtpContext::Packet::Rtp);
+    auto videoByMid = router.routeIncoming(rtp(learnedVideo, "video", 1, false, VideoPt), SrtpContext::Packet::Rtp);
     check(videoByMid && videoByMid->content == video.content && router.learnedSsrcCount() == 1,
           "authenticated MID did not route and learn a new SSRC");
-    auto videoByLearnedSsrc = router.routeIncoming(rtp(learnedVideo), SrtpContext::Packet::Rtp);
+    auto videoByLearnedSsrc = router.routeIncoming(rtp(learnedVideo, {}, 1, false, VideoPt), SrtpContext::Packet::Rtp);
     check(videoByLearnedSsrc && videoByLearnedSsrc->content == video.content,
           "learned SSRC did not route without repeated MID");
 
-    check(!router.routeIncoming(rtp(AudioRemote, "video"), SrtpContext::Packet::Rtp)
+    check(!router.routeIncoming(rtp(AudioRemote, "video", 1, false, VideoPt), SrtpContext::Packet::Rtp)
               && router.lastError() == BundleRouter::Error::AmbiguousRoute,
           "MID/SSRC route conflict was not dropped");
     check(!router.routeIncoming(rtp(0x44444444, "missing"), SrtpContext::Packet::Rtp)
               && router.lastError() == BundleRouter::Error::UnknownRoute,
-          "unknown explicit MID fell back to an unrelated SSRC route");
-    check(!router.routeIncoming(rtp(0x44444444), SrtpContext::Packet::Rtp)
+          "unknown explicit MID fell back to an unrelated route");
+    check(!router.routeIncoming(rtp(0x44444444, {}, 1, false, 127), SrtpContext::Packet::Rtp)
               && router.lastError() == BundleRouter::Error::UnknownRoute,
-          "unknown RTP SSRC was guessed");
-    check(!router.routeIncoming(rtp(AudioLocal), SrtpContext::Packet::Rtp)
+          "unknown RTP SSRC/PT was guessed");
+    check(!router.routeIncoming(rtp(AudioLocal, {}, 1, false, 127), SrtpContext::Packet::Rtp)
               && router.lastError() == BundleRouter::Error::UnknownRoute,
           "local SSRC was incorrectly accepted as an incoming RTP route");
+
+    // MID/SSRC select a route before PT fallback, but the selected content must
+    // still have negotiated the packet PT.
+    check(!router.routeIncoming(rtp(AudioRemote, {}, 1, false, 127), SrtpContext::Packet::Rtp)
+              && router.lastError() == BundleRouter::Error::DisallowedPayloadType,
+          "known SSRC accepted a PT not negotiated by any content");
+    check(!router.routeIncoming(rtp(0x45454545, "audio", 1, false, 127), SrtpContext::Packet::Rtp)
+              && router.lastError() == BundleRouter::Error::DisallowedPayloadType,
+          "known MID accepted a PT not negotiated by any content");
+    auto videoByPt = router.routeIncoming(rtp(0x46464646, {}, 1, false, VideoPt), SrtpContext::Packet::Rtp);
+    check(videoByPt && videoByPt->content == video.content, "unique PT fallback did not route an unknown SSRC");
 
     auto malformedRtp = rtp(0x55555555, "audio");
     malformedRtp.chop(1);
     check(!router.routeIncoming(malformedRtp, SrtpContext::Packet::Rtp)
               && router.lastError() == BundleRouter::Error::MalformedPacket,
           "truncated RTP extension accepted");
+    auto truncatedCsrc = rtp(AudioRemote);
+    truncatedCsrc[0] = char(quint8(truncatedCsrc[0]) | 0x01);
+    check(!router.routeIncoming(truncatedCsrc, SrtpContext::Packet::Rtp)
+              && router.lastError() == BundleRouter::Error::MalformedPacket,
+          "truncated RTP CSRC list accepted");
+    check(!router.routeIncoming(paddedRtp(AudioRemote, 0), SrtpContext::Packet::Rtp)
+              && router.lastError() == BundleRouter::Error::MalformedPacket,
+          "RTP padding flag without padding accepted");
+    auto excessivePadding = paddedRtp(AudioRemote, 2);
+    excessivePadding[excessivePadding.size() - 1] = char(3);
+    check(!router.routeIncoming(excessivePadding, SrtpContext::Packet::Rtp)
+              && router.lastError() == BundleRouter::Error::MalformedPacket,
+          "RTP padding beyond packet payload accepted");
+    auto validPadding = router.routeIncoming(paddedRtp(AudioRemote, 4), SrtpContext::Packet::Rtp);
+    check(validPadding && validPadding->content == audio.content, "valid RTP padding was rejected");
 
     BundleRouter twoByteRouter;
     auto twoByteAudio = audio;
@@ -202,7 +258,7 @@ int main(int argc, char **argv)
     directionalVideo.incomingSsrcs.insert(AudioLocal);
     BundleRouter directional;
     check(directional.configure({ audio, directionalVideo }), "cross-direction SSRC collision was rejected");
-    auto collidingRtp = directional.routeIncoming(rtp(AudioLocal), SrtpContext::Packet::Rtp);
+    auto collidingRtp = directional.routeIncoming(rtp(AudioLocal, {}, 1, false, VideoPt), SrtpContext::Packet::Rtp);
     check(collidingRtp && collidingRtp->content == video.content,
           "incoming RTP used the local RTCP SSRC namespace");
     auto senderDirected = directional.routeIncoming(feedback(206, AudioLocal, 0), SrtpContext::Packet::Rtcp);
@@ -219,22 +275,35 @@ int main(int argc, char **argv)
     check(!router.isCurrent(*queued) && router.revision() != initialRevision && router.learnedSsrcCount() == 0,
           "route replacement did not invalidate stale delivery or learned sources");
 
-    // RTCP is routed by all known sender/media/report SSRCs in the compound packet.
+    // RTCP is routed from all known sender/media/report SSRCs. A packet touching
+    // multiple contents is preserved as one shared-media-session ingress rather
+    // than duplicated or split between endpoints.
     BundleRouter rtcpRouter;
     check(rtcpRouter.configure({ audio, video }), "RTCP route table rejected");
     auto audioSr = rtcpRouter.routeIncoming(senderReport(AudioRemote), SrtpContext::Packet::Rtcp);
-    check(audioSr && audioSr->content == audio.content, "RTCP sender report routed incorrectly");
+    check(audioSr && audioSr->delivery == BundleRouter::Delivery::Content && audioSr->content == audio.content,
+          "RTCP sender report routed incorrectly");
     auto audioRr = rtcpRouter.routeIncoming(receiverReport(0x77777777, AudioLocal), SrtpContext::Packet::Rtcp);
     check(audioRr && audioRr->content == audio.content, "RTCP receiver report target was not routed");
-    auto videoFeedback = rtcpRouter.routeIncoming(feedback(206, 0x88888888, VideoLocal), SrtpContext::Packet::Rtcp);
-    check(videoFeedback && videoFeedback->content == video.content, "RTCP feedback media SSRC was not routed");
+    auto videoPli = rtcpRouter.routeIncoming(feedback(206, 0x88888888, VideoLocal), SrtpContext::Packet::Rtcp);
+    check(videoPli && videoPli->content == video.content, "RTCP PLI media SSRC was not routed");
+    auto videoNack = rtcpRouter.routeIncoming(feedback(205, 0x88888888, VideoLocal, true), SrtpContext::Packet::Rtcp);
+    check(videoNack && videoNack->content == video.content, "RTCP NACK media SSRC was not routed");
     auto audioSdes = rtcpRouter.routeIncoming(sdes(AudioRemote), SrtpContext::Packet::Rtcp);
     check(audioSdes && audioSdes->content == audio.content, "RTCP SDES chunk was not routed");
 
     const auto crossContent = senderReport(AudioRemote) + senderReport(VideoRemote);
-    check(!rtcpRouter.routeIncoming(crossContent, SrtpContext::Packet::Rtcp)
-              && rtcpRouter.lastError() == BundleRouter::Error::AmbiguousRoute,
-          "cross-content compound RTCP packet was broadcast or guessed");
+    auto sharedCompound = rtcpRouter.routeIncoming(crossContent, SrtpContext::Packet::Rtcp);
+    check(sharedCompound && sharedCompound->delivery == BundleRouter::Delivery::SharedRtcp
+              && sharedCompound->data == crossContent && sharedCompound->relatedContents.size() == 2
+              && containsContent(sharedCompound->relatedContents, audio.content)
+              && containsContent(sharedCompound->relatedContents, video.content) && rtcpRouter.isCurrent(*sharedCompound),
+          "cross-content compound RTCP was not preserved for shared ingress");
+    auto sharedReports = rtcpRouter.routeIncoming(receiverReport(0x89898989, AudioLocal, VideoLocal),
+                                                   SrtpContext::Packet::Rtcp);
+    check(sharedReports && sharedReports->delivery == BundleRouter::Delivery::SharedRtcp
+              && sharedReports->relatedContents.size() == 2,
+          "one RR containing reports for two contents was rejected or split");
     check(!rtcpRouter.routeIncoming(senderReport(0x99999999), SrtpContext::Packet::Rtcp)
               && rtcpRouter.lastError() == BundleRouter::Error::UnknownRoute,
           "unknown RTCP sender was guessed");
@@ -247,8 +316,75 @@ int main(int argc, char **argv)
               && rtcpRouter.lastError() == BundleRouter::Error::MalformedPacket,
           "invalid RTCP block length accepted");
 
-    // Learning is bounded. MID still routes after the cap, but an unlearned SSRC
-    // cannot later bypass MID-based demultiplexing.
+    // psimedia does not expose local SSRCs ahead of packet production. Runtime
+    // registration lets RR/feedback route before the first remote RTP packet.
+    auto dynamicAudio = audio;
+    auto dynamicVideo = video;
+    dynamicAudio.localSsrcs.clear();
+    dynamicVideo.localSsrcs.clear();
+    dynamicAudio.incomingSsrcs.clear();
+    dynamicVideo.incomingSsrcs.clear();
+    BundleRouter dynamic;
+    check(dynamic.configure({ dynamicAudio, dynamicVideo }), "dynamic SSRC route table rejected");
+    check(dynamic.registerOutgoingSsrc(dynamicAudio.content, AudioLocal), "audio outgoing SSRC registration failed");
+    check(dynamic.registerOutgoingSsrc(dynamicVideo.content, VideoLocal), "video outgoing SSRC registration failed");
+    check(dynamic.registeredOutgoingSsrcCount() == 2, "outgoing SSRC registrations were not tracked");
+    auto earlyRr = dynamic.routeIncoming(receiverReport(0x77770000, AudioLocal), SrtpContext::Packet::Rtcp);
+    check(earlyRr && earlyRr->content == dynamicAudio.content,
+          "RR before first remote RTP did not use the registered local SSRC");
+    auto earlyPli = dynamic.routeIncoming(feedback(206, 0, VideoLocal), SrtpContext::Packet::Rtcp);
+    check(earlyPli && earlyPli->content == dynamicVideo.content,
+          "PLI before first remote RTP did not use the registered local SSRC");
+    auto earlyNack = dynamic.routeIncoming(feedback(205, 0, VideoLocal, true), SrtpContext::Packet::Rtcp);
+    check(earlyNack && earlyNack->content == dynamicVideo.content,
+          "NACK before first remote RTP did not use the registered local SSRC");
+    check(!dynamic.registerOutgoingSsrc(dynamicVideo.content, AudioLocal)
+              && dynamic.lastError() == BundleRouter::Error::AmbiguousRoute,
+          "one outgoing SSRC was registered for two contents");
+
+    // Removing one member retains the live source registration of the survivor
+    // and drops the removed member's source without changing the old queued packet.
+    auto queuedShared = dynamic.routeIncoming(receiverReport(0x77770000, AudioLocal, VideoLocal),
+                                               SrtpContext::Packet::Rtcp);
+    check(queuedShared && queuedShared->delivery == BundleRouter::Delivery::SharedRtcp,
+          "shared RTCP teardown regression setup failed");
+    check(dynamic.configure({ dynamicAudio }), "surviving member reconfiguration failed");
+    check(dynamic.registeredOutgoingSsrcCount() == 1 && !dynamic.isCurrent(*queuedShared),
+          "member removal did not fence queued shared RTCP or release its outgoing SSRC");
+    auto survivingRr = dynamic.routeIncoming(receiverReport(0x77770000, AudioLocal), SrtpContext::Packet::Rtcp);
+    check(survivingRr && survivingRr->content == dynamicAudio.content,
+          "surviving member lost its runtime outgoing SSRC registration");
+    check(!dynamic.routeIncoming(receiverReport(0x77770000, VideoLocal), SrtpContext::Packet::Rtcp)
+              && dynamic.lastError() == BundleRouter::Error::UnknownRoute,
+          "removed member retained an RTCP route");
+
+    BundleRouter limitedOutgoing;
+    auto noStaticLocal = audio;
+    noStaticLocal.localSsrcs.clear();
+    check(limitedOutgoing.configure({ noStaticLocal }), "outgoing SSRC limit route rejected");
+    for (int i = 0; i < BundleRouter::MaxRegisteredOutgoingSsrcs; ++i) {
+        check(limitedOutgoing.registerOutgoingSsrc(noStaticLocal.content, 0x50000000u + quint32(i)),
+              "outgoing SSRC registration hit its bound too early");
+    }
+    check(!limitedOutgoing.registerOutgoingSsrc(noStaticLocal.content, 0x60000000u)
+              && limitedOutgoing.lastError() == BundleRouter::Error::ResourceLimit,
+          "outgoing SSRC registration bound was not enforced");
+    check(limitedOutgoing.unregisterOutgoingSsrc(noStaticLocal.content, 0x50000000u),
+          "outgoing SSRC unregister failed");
+    check(limitedOutgoing.registerOutgoingSsrc(noStaticLocal.content, 0x60000000u),
+          "outgoing SSRC slot was not released after unregister");
+
+    // Receive-only is valid without any local source registration. Unique PT can
+    // still establish the authenticated incoming SSRC association.
+    BundleRouter receiveOnly;
+    auto receiveOnlyAudio = dynamicAudio;
+    check(receiveOnly.configure({ receiveOnlyAudio }), "receive-only route rejected");
+    auto receivedByPt = receiveOnly.routeIncoming(rtp(0x70707070), SrtpContext::Packet::Rtp);
+    check(receivedByPt && receivedByPt->content == receiveOnlyAudio.content,
+          "receive-only content could not use unique PT fallback");
+
+    // Incoming SSRC learning is bounded. MID still routes after the cap, but an
+    // unlearned SSRC cannot later bypass MID-based demultiplexing.
     BundleRouter bounded;
     check(bounded.configure({ audio }), "bounded learning route rejected");
     quint32 last = 0;
@@ -258,7 +394,7 @@ int main(int argc, char **argv)
         check(routed && routed->content == audio.content, "MID routing failed while learning SSRCs");
     }
     check(bounded.learnedSsrcCount() == BundleRouter::MaxLearnedSsrcs, "learned SSRC bound was not enforced");
-    check(!bounded.routeIncoming(rtp(last), SrtpContext::Packet::Rtp)
+    check(!bounded.routeIncoming(rtp(last, {}, 1, false, 127), SrtpContext::Packet::Rtp)
               && bounded.lastError() == BundleRouter::Error::UnknownRoute,
           "SSRC beyond the learning bound became an implicit route");
 
@@ -266,7 +402,7 @@ int main(int argc, char **argv)
     check(beforeReset && bounded.isCurrent(*beforeReset), "reset revision regression setup failed");
     bounded.reset();
     check(!bounded.isCurrent(*beforeReset)
-              && !bounded.routeIncoming(rtp(AudioRemote), SrtpContext::Packet::Rtp)
+              && !bounded.routeIncoming(rtp(AudioRemote, {}, 1, false, 127), SrtpContext::Packet::Rtp)
               && bounded.lastError() == BundleRouter::Error::UnknownRoute,
           "reset retained a stale RTP route");
 
