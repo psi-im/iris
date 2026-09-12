@@ -40,6 +40,7 @@ struct Stats {
     int                   stops   = 0;
     std::function<void()> onStop;
     std::function<void()> onRemove;
+    std::function<void()> onStart;
 };
 
 class TestApplicationPad final : public ApplicationManagerPad {
@@ -113,7 +114,7 @@ public:
         _transport = QSharedPointer<TestTransport>::create(session, Origin::Initiator, stats_);
     }
 
-    void setState(State state) override { _state = state; }
+    void                                setState(State state) override { _state = state; }
     const std::optional<Stanza::Error> &lastError() const override { return error_; }
     Reason                              lastReason() const override { return reason_; }
 
@@ -127,10 +128,13 @@ public:
     QDomElement makeLocalAnswer() override { return {}; }
     Update      evaluateOutgoingUpdate() override { return { Action::NoAction, {} }; }
     void        prepare() override { }
-    void start() override
+    void        start() override
     {
         ++stats_->starts;
         setState(State::Active);
+        auto callback = std::move(stats_->onStart);
+        if (callback)
+            callback();
     }
     void remove(Reason::Condition condition = Reason::Success, const QString &text = {}) override
     {
@@ -151,9 +155,9 @@ protected:
     void prepareTransport() override { }
 
 private:
-    QSharedPointer<Stats>         stats_;
+    QSharedPointer<Stats>        stats_;
     std::optional<Stanza::Error> error_;
-    Reason                        reason_;
+    Reason                       reason_;
 };
 
 static QDomElement emptyAnswer()
@@ -165,7 +169,7 @@ static QDomElement emptyAnswer()
 static QDomElement answer(Application *accepted, bool malformed = false)
 {
     QDomDocument doc;
-    auto         jingle = doc.createElementNS(NS, QStringLiteral("jingle"));
+    auto         jingle  = doc.createElementNS(NS, QStringLiteral("jingle"));
     auto         content = doc.createElementNS(NS, QStringLiteral("content"));
     content.setAttribute(QStringLiteral("creator"), QStringLiteral("initiator"));
     content.setAttribute(QStringLiteral("name"), accepted->contentName());
@@ -221,7 +225,8 @@ int main(int argc, char **argv)
         check(!session.updateFromXml(Action::SessionAccept, emptyAnswer()),
               "empty session-accept that rejected every initial content was accepted");
         check(session.state() == initialState, "empty session-accept changed session state");
-        check(audioGuard && videoGuard && audioGuard->state() == State::Pending && videoGuard->state() == State::Pending,
+        check(audioGuard && videoGuard && audioGuard->state() == State::Pending
+                  && videoGuard->state() == State::Pending,
               "empty session-accept changed or removed initial contents");
         check(session.content(QStringLiteral("audio"), Origin::Initiator) == audioGuard.data()
                   && session.content(QStringLiteral("video"), Origin::Initiator) == videoGuard.data(),
@@ -284,10 +289,10 @@ int main(int argc, char **argv)
     // destructor and must still be released by the handler.
     {
         auto stats = QSharedPointer<Stats>::create();
-        auto session = new Session(client.jingleManager(), Jid(QStringLiteral("peer@example.org/device")),
-                                   Origin::Initiator);
+        auto session
+            = new Session(client.jingleManager(), Jid(QStringLiteral("peer@example.org/device")), Origin::Initiator);
         QPointer<Session> sessionGuard(session);
-        TestApplication *audio = nullptr, *video = nullptr;
+        TestApplication  *audio = nullptr, *video = nullptr;
         addInitialPair(*session, stats, &audio, &video);
         QPointer<TestApplication> videoGuard(video);
         stats->onStop = [session]() { delete session; };
@@ -341,10 +346,10 @@ int main(int argc, char **argv)
     // Session there must have the same detached-object lifetime guarantees.
     {
         auto stats = QSharedPointer<Stats>::create();
-        auto session = new Session(client.jingleManager(), Jid(QStringLiteral("peer@example.org/device")),
-                                   Origin::Initiator);
+        auto session
+            = new Session(client.jingleManager(), Jid(QStringLiteral("peer@example.org/device")), Origin::Initiator);
         QPointer<Session> sessionGuard(session);
-        TestApplication *audio = nullptr, *video = nullptr;
+        TestApplication  *audio = nullptr, *video = nullptr;
         addInitialPair(*session, stats, &audio, &video);
         QPointer<TestApplication> videoGuard(video);
         stats->onRemove = [session]() { delete session; };
@@ -369,6 +374,92 @@ int main(int argc, char **argv)
                   && session.content(QStringLiteral("video"), Origin::Initiator) == videoGuard.data(),
               "content-accept incorrectly removed an omitted sibling");
         check(stats->removes == 0 && stats->stops == 0, "content-accept performed subset cleanup");
+    }
+
+    // Accepted siblings must progress independently across the queued start and
+    // synchronous start callbacks. Session cancellation still stops the batch.
+    for (int scenario = 0; scenario < 7; ++scenario) {
+        auto stats = QSharedPointer<Stats>::create();
+        auto session
+            = new Session(client.jingleManager(), Jid(QStringLiteral("peer@example.org/device")), Origin::Initiator);
+        QPointer<Session> guard(session);
+        TestApplication  *audio = nullptr, *video = nullptr;
+        addInitialPair(*session, stats, &audio, &video);
+        QPointer<TestApplication> audioGuard(audio), videoGuard(video);
+        int                       activations = 0;
+        QObject::connect(session, &Session::activated, &app, [&]() { ++activations; });
+        auto both   = answer(audio);
+        auto second = answer(video);
+        both.appendChild(both.ownerDocument().importNode(second.firstChildElement(), true));
+        check(session->updateFromXml(Action::SessionAccept, both), "full acceptance failed");
+        check(stats->starts == 0 && activations == 0, "start overtook acceptance ACK boundary");
+        switch (scenario) {
+        case 0:
+            delete audio;
+            break;
+        case 1:
+            stats->onStart = [audio]() { delete audio; };
+            break;
+        case 2:
+            stats->onStart = [video]() { delete video; };
+            break;
+        case 3:
+            delete audio;
+            delete video;
+            break;
+        case 4:
+            stats->onStart = [session]() { session->terminate(Reason::Cancel); };
+            break;
+        case 5:
+            stats->onStart = [session]() { delete session; };
+            break;
+        case 6:
+            stats->onStart = [audio, video]() {
+                delete audio;
+                delete video;
+            };
+            break;
+        }
+        pump();
+        if (scenario <= 2) {
+            check(guard && guard->state() == State::Active && activations == 1,
+                  "surviving content did not activate session exactly once");
+            check((audioGuard && audioGuard->state() == State::Active)
+                      || (videoGuard && videoGuard->state() == State::Active),
+                  "surviving accepted content was stranded");
+            check(stats->starts == (scenario == 1 ? 2 : 1), "wrong surviving start count");
+        } else {
+            check(activations == 0, "cancelled or empty session activated");
+            check(!guard || guard->state() >= State::Finishing, "empty/cancelled session stayed Active");
+            check(stats->starts == (scenario == 3 ? 0 : 1), "batch continued after cancellation");
+        }
+        if (guard)
+            delete guard.data();
+    }
+
+    // Later content-accept shares the scheduler but must not reactivate Session.
+    {
+        auto    stats = QSharedPointer<Stats>::create();
+        Session session(client.jingleManager(), Jid(QStringLiteral("peer@example.org/device")), Origin::Initiator);
+        auto    audio = new TestApplication(&session, QStringLiteral("audio"), stats);
+        session.addContent(audio);
+        int activations = 0;
+        QObject::connect(&session, &Session::activated, &session, [&]() { ++activations; });
+        check(session.updateFromXml(Action::SessionAccept, answer(audio)), "initial acceptance failed");
+        pump();
+        auto video  = new TestApplication(&session, QStringLiteral("video"), stats);
+        auto zvideo = new TestApplication(&session, QStringLiteral("zvideo"), stats);
+        session.addContent(video);
+        session.addContent(zvideo);
+        auto both   = answer(video);
+        auto second = answer(zvideo);
+        both.appendChild(both.ownerDocument().importNode(second.firstChildElement(), true));
+        check(session.updateFromXml(Action::ContentAccept, both), "later acceptance failed");
+        delete video;
+        check(stats->starts == 1, "later application started inline");
+        pump();
+        check(zvideo->state() == State::Active && stats->starts == 2, "later surviving content did not start");
+        check(activations == 1, "content-accept reactivated Session");
     }
 
     qInfo("Jingle initial subset session-accept regressions passed");

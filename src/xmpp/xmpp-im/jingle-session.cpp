@@ -370,7 +370,7 @@ namespace XMPP { namespace Jingle {
              *      We prefer option (b) in our implementation.
              */
             typedef std::tuple<QPointer<Application>, OutgoingUpdateCB, bool> AckHndl;
-            QSet<Application *> rejectedInitialContent;
+            QSet<Application *>                                               rejectedInitialContent;
             if (role == Origin::Responder) {
                 int    acceptedInitialContent = 0;
                 Reason rejectionReason;
@@ -432,9 +432,8 @@ namespace XMPP { namespace Jingle {
             for (const auto &app : std::as_const(contentList)) {
                 QList<QDomElement> xml;
                 OutgoingUpdateCB   callback;
-                std::tie(xml, callback) = app->takeOutgoingUpdate();
-                const bool rejectedInitial
-                    = role == Origin::Responder && rejectedInitialContent.contains(app);
+                std::tie(xml, callback)    = app->takeOutgoingUpdate();
+                const bool rejectedInitial = role == Origin::Responder && rejectedInitialContent.contains(app);
                 if (!rejectedInitial)
                     contents += xml;
                 if (callback)
@@ -863,29 +862,39 @@ namespace XMPP { namespace Jingle {
                 return;
             // JTPush must send the acceptance IQ result before start() can send
             // transport traffic (in particular IBB <open/>, XEP-0261 section 2.1).
-            QTimer::singleShot(0, q,
-                               [this, session = QPointer<Session>(q), guardedApps = std::move(guardedApps),
-                                notifyActivated]() {
-                                   for (const auto &entry : guardedApps) {
-                                       if (!session || state != State::Active)
-                                           return;
-                                       const auto app = entry.application;
-                                       if (!app || contentList.value(entry.key) != app.data()
-                                           || app->state() != State::Accepted)
-                                           return;
+            QTimer::singleShot(
+                0, q, [this, session = QPointer<Session>(q), guardedApps = std::move(guardedApps), notifyActivated]() {
+                    for (const auto &entry : guardedApps) {
+                        if (!session || state != State::Active)
+                            return;
+                        const auto app = entry.application;
+                        if (!app || contentList.value(entry.key) != app.data() || app->state() != State::Accepted)
+                            continue;
 
-                                       app->start();
+                        app->start();
 
-                                       // start() is an application callback boundary too. Do not
-                                       // emit activated() if it removed content, terminated or
-                                       // destroyed the Session synchronously.
-                                       if (!session || state != State::Active || !entry.application
-                                           || contentList.value(entry.key) != entry.application.data())
-                                           return;
-                                   }
-                                   if (session && state == State::Active && notifyActivated)
-                                       emit q->activated();
-                               });
+                        // A callback may remove this content without cancelling
+                        // the Session. Other accepted contents must still start.
+                        if (!session || state != State::Active)
+                            return;
+                    }
+                    if (contentList.isEmpty()) {
+                        q->terminate(Reason::Success);
+                        return;
+                    }
+                    if (notifyActivated) {
+                        // Recheck the whole snapshot: a later start callback may
+                        // have removed an earlier application. Never activate on
+                        // behalf of a replacement object with the same content key.
+                        for (const auto &entry : guardedApps) {
+                            const auto app = entry.application;
+                            if (app && contentList.value(entry.key) == app.data() && app->state() < State::Finishing) {
+                                emit q->activated();
+                                return;
+                            }
+                        }
+                    }
+                });
         }
 
         bool handleIncomingSessionAccept(const QDomElement &jingleEl)
@@ -909,7 +918,7 @@ namespace XMPP { namespace Jingle {
             // Raw Application pointers returned by the parser are not stable:
             // stopping one omitted transport may synchronously delete a sibling,
             // an accepted content, or the Session itself.
-            auto guardedAccepted = snapshotContents(apps);
+            auto                guardedAccepted = snapshotContents(apps);
             QSet<Application *> accepted;
             for (const auto &entry : std::as_const(guardedAccepted)) {
                 if (entry.application)
@@ -926,15 +935,15 @@ namespace XMPP { namespace Jingle {
             }
 
             if (!omitted.isEmpty() && guardedAccepted.isEmpty()) {
-                lastError = Stanza::Error(Stanza::Error::ErrorType::Cancel,
-                                          Stanza::Error::ErrorCond::UnexpectedRequest);
+                lastError
+                    = Stanza::Error(Stanza::Error::ErrorType::Cancel, Stanza::Error::ErrorCond::UnexpectedRequest);
                 ErrorUtil::fill(jingleEl.ownerDocument(), *lastError, ErrorUtil::OutOfOrder);
                 return false;
             }
 
             QPointer<Session> session(q);
             const State       negotiationState = state;
-            const Reason      omittedReason(Reason::Decline, QStringLiteral("Initial content was not accepted by peer"));
+            const Reason omittedReason(Reason::Decline, QStringLiteral("Initial content was not accepted by peer"));
 
             for (const auto &entry : std::as_const(omitted)) {
                 if (!session)
