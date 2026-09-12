@@ -190,21 +190,20 @@ bool BundleRouter::registerOutgoingSsrc(const ContentKey &content, quint32 ssrc)
     }
 
     const auto existing = localSsrcRoutes_.constFind(ssrc);
-    if (existing != localSsrcRoutes_.cend()) {
-        if (existing.value() != route.value()) {
-            lastError_ = Error::AmbiguousRoute;
-            return false;
-        }
-        // A statically signaled source already has the required route.
-        lastError_ = Error::None;
-        return true;
+    if (existing != localSsrcRoutes_.cend() && existing.value() != route.value()) {
+        lastError_ = Error::AmbiguousRoute;
+        return false;
     }
     if (registeredOutgoingSsrcs_.size() >= MaxRegisteredOutgoingSsrcs) {
         lastError_ = Error::ResourceLimit;
         return false;
     }
 
-    localSsrcRoutes_.insert(ssrc, route.value());
+    // Runtime registration records the actual producer identity independently
+    // from any static source declaration. This lets it survive a later
+    // reconfiguration that removes the statically signalled SSRC.
+    if (existing == localSsrcRoutes_.cend())
+        localSsrcRoutes_.insert(ssrc, route.value());
     registeredOutgoingSsrcs_.insert(ssrc, content);
     lastError_ = Error::None;
     return true;
