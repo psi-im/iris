@@ -925,6 +925,13 @@ namespace XMPP { namespace Jingle {
                 }
             }
 
+            if (!omitted.isEmpty() && guardedAccepted.isEmpty()) {
+                lastError = Stanza::Error(Stanza::Error::ErrorType::Cancel,
+                                          Stanza::Error::ErrorCond::UnexpectedRequest);
+                ErrorUtil::fill(jingleEl.ownerDocument(), *lastError, ErrorUtil::OutOfOrder);
+                return false;
+            }
+
             QPointer<Session> session(q);
             const State       negotiationState = state;
             const Reason      omittedReason(Reason::Decline, QStringLiteral("Initial content was not accepted by peer"));
