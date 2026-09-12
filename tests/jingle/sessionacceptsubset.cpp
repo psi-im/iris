@@ -5,9 +5,13 @@
 #include <QSharedPointer>
 
 #include <iris/jingle-application.h>
-#include <iris/jingle-session.h>
 #include <iris/xmpp_client.h>
 #include <qca.h>
+
+// Exercise the same parser entry point that JTPush calls, without network I/O.
+#define private public
+#include <iris/jingle-session.h>
+#undef private
 
 #include <utility>
 
