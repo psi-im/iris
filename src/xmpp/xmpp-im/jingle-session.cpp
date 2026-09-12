@@ -840,26 +840,52 @@ namespace XMPP { namespace Jingle {
             return true;
         }
 
-        void startAcceptedContents(const QList<Application *> &apps, bool notifyActivated = false)
+        struct GuardedContent {
+            QPointer<Application> application;
+            ContentKey            key;
+        };
+
+        QList<GuardedContent> snapshotContents(const QList<Application *> &apps) const
         {
-            QList<QPointer<Application>> guardedApps;
+            QList<GuardedContent> guarded;
+            guarded.reserve(apps.size());
             for (auto app : apps) {
-                guardedApps.append(app);
+                if (app)
+                    guarded.append(GuardedContent { QPointer<Application>(app),
+                                                    ContentKey { app->contentName(), app->creator() } });
             }
+            return guarded;
+        }
+
+        void startAcceptedContents(QList<GuardedContent> guardedApps, bool notifyActivated = false)
+        {
+            if (guardedApps.isEmpty())
+                return;
             // JTPush must send the acceptance IQ result before start() can send
             // transport traffic (in particular IBB <open/>, XEP-0261 section 2.1).
-            QTimer::singleShot(0, q, [this, session = QPointer<Session>(q), guardedApps, notifyActivated]() {
-                for (const auto &app : guardedApps) {
-                    if (!session || state != State::Active)
-                        return;
-                    if (app && app->state() == State::Accepted
-                        && contentList.value(ContentKey { app->contentName(), app->creator() }) == app.data()) {
-                        app->start();
-                    }
-                }
-                if (session && state == State::Active && notifyActivated)
-                    emit q->activated();
-            });
+            QTimer::singleShot(0, q,
+                               [this, session = QPointer<Session>(q), guardedApps = std::move(guardedApps),
+                                notifyActivated]() {
+                                   for (const auto &entry : guardedApps) {
+                                       if (!session || state != State::Active)
+                                           return;
+                                       const auto app = entry.application;
+                                       if (!app || contentList.value(entry.key) != app.data()
+                                           || app->state() != State::Accepted)
+                                           return;
+
+                                       app->start();
+
+                                       // start() is an application callback boundary too. Do not
+                                       // emit activated() if it removed content, terminated or
+                                       // destroyed the Session synchronously.
+                                       if (!session || state != State::Active || !entry.application
+                                           || contentList.value(entry.key) != entry.application.data())
+                                           return;
+                                   }
+                                   if (session && state == State::Active && notifyActivated)
+                                       emit q->activated();
+                               });
         }
 
         bool handleIncomingSessionAccept(const QDomElement &jingleEl)
@@ -879,49 +905,111 @@ namespace XMPP { namespace Jingle {
                 return false;
             }
 
-            // A session-accept may accept only a subset of the initial offer.
-            // Commit omitted-content removal only after the complete answer has
-            // parsed successfully, so a malformed later content cannot partially
-            // mutate the session. Ordinary content-accept does not use this rule.
+            // Snapshot every parser result before the first external callback.
+            // Raw Application pointers returned by the parser are not stable:
+            // stopping one omitted transport may synchronously delete a sibling,
+            // an accepted content, or the Session itself.
+            auto guardedAccepted = snapshotContents(apps);
             QSet<Application *> accepted;
-            for (auto app : std::as_const(apps))
-                accepted.insert(app);
+            for (const auto &entry : std::as_const(guardedAccepted)) {
+                if (entry.application)
+                    accepted.insert(entry.application.data());
+            }
 
-            QList<Application *> omitted;
-            for (auto app : std::as_const(contentList)) {
+            QList<GuardedContent> omitted;
+            for (auto it = contentList.cbegin(); it != contentList.cend(); ++it) {
+                auto app = it.value();
                 if (app->creator() == role && app->flags().testFlag(Application::InitialApplication)
                     && app->state() == State::Pending && !accepted.contains(app)) {
-                    omitted.append(app);
+                    omitted.append(GuardedContent { QPointer<Application>(app), it.key() });
                 }
             }
 
             QPointer<Session> session(q);
+            const State       negotiationState = state;
             const Reason      omittedReason(Reason::Decline, QStringLiteral("Initial content was not accepted by peer"));
-            for (auto app : std::as_const(omitted)) {
-                signalingContent.remove(app);
-                initialIncomingUnacceptedContent.removeAll(app);
-                contentList.remove(ContentKey { app->contentName(), app->creator() });
 
-                QPointer<Application> application(app);
-                if (auto transport = app->transport()) {
-                    transport->disconnect(app);
+            for (const auto &entry : std::as_const(omitted)) {
+                if (!session)
+                    return true;
+                if (state != negotiationState)
+                    return true; // a reentrant cancellation/termination wins
+
+                auto application = entry.application;
+                if (!application || contentList.value(entry.key) != application.data())
+                    continue; // a previous callback already disposed of this sibling
+
+                // Detach before invoking any external code. From this point the
+                // current application is no longer owned by contentList, so this
+                // scope must delete it even if the Session disappears.
+                signalingContent.remove(application.data());
+                initialIncomingUnacceptedContent.removeAll(application.data());
+                contentList.remove(entry.key);
+
+                const auto transport = application->transport();
+                if (transport) {
+                    transport->disconnect(application.data());
                     transport->stop();
                 }
-                if (!session)
+
+                if (!session) {
+                    if (application)
+                        delete application.data();
                     return true;
+                }
+                if (state != negotiationState) {
+                    if (application)
+                        delete application.data();
+                    return true;
+                }
                 if (!application)
                     continue;
+
                 application->incomingRemove(omittedReason);
-                if (!session)
+
+                if (!session) {
+                    if (application)
+                        delete application.data();
                     return true;
+                }
+                if (state != negotiationState) {
+                    if (application)
+                        delete application.data();
+                    return true;
+                }
                 if (application)
                     delete application.data();
+
+                // Application destruction may itself synchronously dispose of
+                // the Session or change its state through connected callbacks.
+                if (!session)
+                    return true;
+                if (state != negotiationState)
+                    return true;
+            }
+
+            if (!session)
+                return true;
+            if (state != negotiationState)
+                return true;
+
+            // Every accepted application must still be the same object under
+            // the snapshotted key before committing Active. If an omitted-content
+            // callback invalidated one, acknowledge the peer's stanza but locally
+            // terminate instead of resurrecting a broken negotiation.
+            for (const auto &entry : std::as_const(guardedAccepted)) {
+                const auto application = entry.application;
+                if (!application || contentList.value(entry.key) != application.data()
+                    || application->state() != State::Accepted) {
+                    q->terminate(Reason::Decline, QStringLiteral("Accepted content disappeared during session-accept"));
+                    return true;
+                }
             }
 
             remoteGroups = *peerGroups;
             // Session acceptance completes signaling, not transport connectivity.
             state = State::Active;
-            startAcceptedContents(apps, true);
+            startAcceptedContents(std::move(guardedAccepted), true);
             planStep();
 
             return true;
@@ -939,8 +1027,9 @@ namespace XMPP { namespace Jingle {
                 return false;
             }
 
-            if (apps.size() && state == State::Active) {
-                startAcceptedContents(apps);
+            auto guardedApps = snapshotContents(apps);
+            if (!guardedApps.isEmpty() && state == State::Active) {
+                startAcceptedContents(std::move(guardedApps));
             }
             planStep();
 
