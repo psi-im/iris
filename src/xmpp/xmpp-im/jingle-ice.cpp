@@ -1075,14 +1075,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
             || d->network->components.size() != 1 || d->network->components[0].dtls
             || d->network->components[0].rawConnection)
             return false;
-        auto       profiles     = RTP::SrtpContext::supportedProfiles();
-        const auto dtlsProfiles = Dtls::supportedSRTPProfiles();
-        for (auto it = profiles.begin(); it != profiles.end();) {
-            if (!dtlsProfiles.contains(*it))
-                it = profiles.erase(it);
-            else
-                ++it;
-        }
+        auto profiles = RTP::supportedSecureRtpProfiles();
         if (profiles.isEmpty())
             return false;
         d->rtpProfiles                        = profiles;
