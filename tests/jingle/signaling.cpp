@@ -282,25 +282,32 @@ int main(int argc, char **argv)
     check(session.content(QStringLiteral("second"), Origin::Initiator) == second, "unrelated content removed");
 
     // Notification handlers may close the UI/session or remove another content.
-    for (bool destroySession : { false, true }) {
-        auto disposable = new Session(client.jingleManager(), Jid(QStringLiteral("peer@example.org/device")));
-        QPointer<Session> sessionGuard(disposable);
-        auto              a = new TestApplication(disposable, QStringLiteral("first"));
-        auto              b = new TestApplication(disposable, QStringLiteral("second"));
-        disposable->addContent(a);
-        disposable->addContent(b);
-        QPointer<TestApplication> bGuard(b);
-        QObject::connect(a, &Application::sendersChanged, a, [=](Origin) {
-            if (destroySession)
-                delete disposable;
+    // Both the generic direction signal and the peer-specific one must tolerate it.
+    for (bool peerSpecific : { false, true }) {
+        for (bool destroySession : { false, true }) {
+            auto disposable = new Session(client.jingleManager(), Jid(QStringLiteral("peer@example.org/device")));
+            QPointer<Session> sessionGuard(disposable);
+            auto              a = new TestApplication(disposable, QStringLiteral("first"));
+            auto              b = new TestApplication(disposable, QStringLiteral("second"));
+            disposable->addContent(a);
+            disposable->addContent(b);
+            QPointer<TestApplication> bGuard(b);
+            auto destroy = [=](Origin) {
+                if (destroySession)
+                    delete disposable;
+                else
+                    delete b;
+            };
+            if (peerSpecific)
+                QObject::connect(a, &Application::sendersChangedByPeer, a, destroy);
             else
-                delete b;
-        });
-        check(disposable->updateFromXml(Action::ContentModify, unsupportedBatch),
-              "content removal during direction notification failed");
-        check(!bGuard, "notification did not remove content");
-        if (sessionGuard)
-            delete disposable;
+                QObject::connect(a, &Application::sendersChanged, a, destroy);
+            check(disposable->updateFromXml(Action::ContentModify, unsupportedBatch),
+                  "content removal during direction notification failed");
+            check(!bGuard, "notification did not remove content");
+            if (sessionGuard)
+                delete disposable;
+        }
     }
 
     const Hash              hashA(Hash::Sha256, QByteArray(32, 'a'));
