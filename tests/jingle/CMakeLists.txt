@@ -28,6 +28,10 @@ add_executable(jingle_contentmodifyiqboundary_test contentmodifyiqboundary.cpp)
 target_link_libraries(jingle_contentmodifyiqboundary_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
     Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
 add_test(NAME jingle_contentmodify_iq_boundary COMMAND jingle_contentmodifyiqboundary_test)
+add_executable(jingle_contentmodifydispatcher_test contentmodifydispatcher.cpp)
+target_link_libraries(jingle_contentmodifydispatcher_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
+    Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
+add_test(NAME jingle_contentmodify_dispatcher COMMAND jingle_contentmodifydispatcher_test)
 add_executable(jingle_dtlssrtp_test dtlssrtp.cpp)
 # Dtls lives in irisnet but its fingerprint/XML helpers live in iris.
 target_link_libraries(jingle_dtlssrtp_test PRIVATE irisnet iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core

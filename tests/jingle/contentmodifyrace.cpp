@@ -379,4 +379,5 @@ int main(int argc, char **argv)
     }
 
     qInfo("Generic tie-break and content-modify race regressions passed");
+    return 0;
 }
