@@ -1,0 +1,45 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
+#define main iris_contentmodifyrace_legacy_main
+#include "contentmodifyrace.cpp"
+#undef main
+
+int main(int argc, char **argv)
+{
+    QCoreApplication app(argc, argv);
+    QCA::Initializer qca;
+    Client           client;
+    Result           success(client.rootTask(), true);
+
+    J::Session session(client.jingleManager(), Jid(QStringLiteral("peer@example.test/device")),
+                       J::Origin::Initiator);
+    auto content = new TestApplication(&session, J::Origin::Both, QStringLiteral("audio"), J::Origin::Initiator);
+    session.addContent(content);
+    content->activate();
+
+    bool ackNotificationEntered = false;
+    bool staleTieBreak           = false;
+    QObject::connect(content, &J::Application::sendersChanged, &app, [&](J::Origin senders) {
+        if (senders != J::Origin::Responder)
+            return;
+        ackNotificationEntered = true;
+
+        // The IQ result has already completed the outgoing Jingle action before
+        // Application callbacks are entered. A peer content-modify delivered
+        // reentrantly from this notification is a later action, not a crossed one.
+        staleTieBreak = session.shouldTieBreakIncoming(J::Action::ContentModify);
+    });
+
+    check(content->requestSenders(J::Origin::Responder), "direction request rejected");
+    check(content->evaluateOutgoingUpdate().action == J::Action::ContentModify,
+          "direction request was not evaluated as content-modify");
+    auto update = content->takeOutgoingUpdate();
+    acknowledge(update, &success);
+
+    check(ackNotificationEntered, "successful ACK did not notify the negotiated direction");
+    check(!staleTieBreak, "completed content-modify IQ remained collision-active inside its ACK callback");
+    check(!session.shouldTieBreakIncoming(J::Action::ContentModify),
+          "completed content-modify left stale collision state after its callback");
+
+    qInfo("Content-modify IQ lifetime regression passed");
+    return 0;
+}
