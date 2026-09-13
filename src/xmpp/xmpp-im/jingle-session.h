@@ -26,9 +26,139 @@
 #include <iris/xmpp-im/jingle-transport.h>
 #include <iris/xmpp-im/xmpp_features.h>
 
+#include <algorithm>
+#include <functional>
 #include <memory>
 
 namespace XMPP { namespace Jingle {
+
+    // Generic callback-driven collision coordinator. It intentionally knows
+    // nothing about Jingle/XEP tie-break semantics: registered owners decide
+    // whether a collision exists, what the immediate disposition is and, when
+    // needed, how a per-collision resolution state machine advances.
+    class TieBreakResolver {
+    public:
+        enum class IncomingDisposition { Pass, Reject };
+        enum class Event { IncomingApplied, IncomingRejected, LocalCompleted, Wake };
+        enum class ResolutionState { Waiting, Finished };
+
+        struct Context {
+            Action             incomingAction = Action::NoAction;
+            Action             localAction    = Action::NoAction;
+            const QDomElement *incoming       = nullptr;
+            const QDomElement *local          = nullptr;
+        };
+
+        struct Plan {
+            IncomingDisposition                          incoming = IncomingDisposition::Pass;
+            std::function<void()>                        immediate;
+            std::function<ResolutionState(Event event)> advance;
+        };
+
+        struct Callbacks {
+            std::function<bool(const Context &)> conflicts;
+            std::function<Plan(const Context &)> resolve;
+        };
+
+        struct Decision {
+            IncomingDisposition incoming   = IncomingDisposition::Pass;
+            quint64             resolution = 0;
+        };
+
+        using Registration = quint64;
+
+        Registration registerResolver(Action action, Callbacks callbacks)
+        {
+            if (!callbacks.conflicts || !callbacks.resolve)
+                return 0;
+            const auto id = ++nextRegistration_;
+            resolvers_[action].append(RegisteredResolver { id, std::move(callbacks) });
+            return id;
+        }
+
+        void unregisterResolver(Registration registration)
+        {
+            if (!registration)
+                return;
+            for (auto it = resolvers_.begin(); it != resolvers_.end();) {
+                auto &entries = it.value();
+                entries.erase(std::remove_if(entries.begin(), entries.end(), [registration](const auto &entry) {
+                                  return entry.registration == registration;
+                              }),
+                              entries.end());
+                if (entries.isEmpty())
+                    it = resolvers_.erase(it);
+                else
+                    ++it;
+            }
+        }
+
+        Decision resolve(const Context &context)
+        {
+            // Copy registrations so callbacks may safely register/unregister
+            // other resolvers while this collision is being decided.
+            const auto entries = resolvers_.value(context.incomingAction);
+            for (const auto &entry : entries) {
+                if (!entry.callbacks.conflicts(context))
+                    continue;
+
+                auto plan = entry.callbacks.resolve(context);
+                if (plan.immediate)
+                    plan.immediate();
+
+                quint64 resolution = 0;
+                if (plan.advance) {
+                    resolution = ++nextResolution_;
+                    resolutions_.insert(resolution,
+                                        ActiveResolution { context.incomingAction, std::move(plan.advance) });
+                }
+                return Decision { plan.incoming, resolution };
+            }
+            return {};
+        }
+
+        void notify(quint64 resolution, Event event)
+        {
+            if (!resolution)
+                return;
+            auto it = resolutions_.find(resolution);
+            if (it == resolutions_.end())
+                return;
+
+            auto advance = it->advance;
+            if (!advance || advance(event) == ResolutionState::Finished)
+                resolutions_.remove(resolution);
+        }
+
+        void notify(Action action, Event event)
+        {
+            QList<quint64> ids;
+            for (auto it = resolutions_.cbegin(); it != resolutions_.cend(); ++it) {
+                if (it->action == action)
+                    ids.append(it.key());
+            }
+            for (auto id : ids)
+                notify(id, event);
+        }
+
+        bool hasResolution(quint64 resolution) const { return resolutions_.contains(resolution); }
+        int  activeResolutionCount() const { return resolutions_.size(); }
+
+    private:
+        struct RegisteredResolver {
+            Registration registration;
+            Callbacks    callbacks;
+        };
+        struct ActiveResolution {
+            Action                                      action;
+            std::function<ResolutionState(Event event)> advance;
+        };
+
+        QHash<Action, QList<RegisteredResolver>> resolvers_;
+        QHash<quint64, ActiveResolution>         resolutions_;
+        quint64                                  nextRegistration_ = 0;
+        quint64                                  nextResolution_   = 0;
+    };
 
     // class Manager;
     class Application;
@@ -132,20 +262,62 @@ namespace XMPP { namespace Jingle {
         friend class PublicationManager;
         friend class JTPush;
 
+        void ensureTieBreakResolvers() const
+        {
+            if (tieBreakResolversReady_)
+                return;
+            tieBreakResolversReady_ = true;
+
+            auto registerInitiatorWins = [this](Action action, std::function<bool()> conflicts) {
+                tieBreakResolver_.registerResolver(
+                    action,
+                    TieBreakResolver::Callbacks {
+                        [conflicts = std::move(conflicts)](const TieBreakResolver::Context &) { return conflicts(); },
+                        [this](const TieBreakResolver::Context &) {
+                            TieBreakResolver::Plan plan;
+                            plan.incoming = role() == Origin::Initiator ? TieBreakResolver::IncomingDisposition::Reject
+                                                                       : TieBreakResolver::IncomingDisposition::Pass;
+                            return plan;
+                        } });
+            };
+
+            registerInitiatorWins(Action::ContentModify,
+                                  [this]() { return *contentModifyInFlight_ > 0; });
+
+            registerInitiatorWins(Action::TransportReplace, [this]() {
+                for (auto app : contentList()) {
+                    if (!app)
+                        continue;
+                    auto transport = app->transport();
+                    if (transport && transport->isLocal() && transport->state() == State::Unacked)
+                        return true;
+                }
+                return false;
+            });
+        }
+
         // Application callbacks keep this token alive until the corresponding
         // content-modify IQ has completed, even if the Application is removed first.
         std::shared_ptr<void> trackContentModify()
         {
+            ensureTieBreakResolvers();
             auto counter = contentModifyInFlight_;
             ++*counter;
             return std::shared_ptr<void>(counter.get(), [counter](int *) { --*counter; });
         }
 
-        // XEP-0166 existing-session tie-break is action-level: the initiator's
-        // in-flight content-modify wins before the responder payload is applied.
         bool shouldTieBreakIncoming(Action action) const
         {
-            return action == Action::ContentModify && role() == Origin::Initiator && *contentModifyInFlight_ > 0;
+            ensureTieBreakResolvers();
+            TieBreakResolver::Context context;
+            context.incomingAction = action;
+            context.localAction    = action;
+            const auto decision    = tieBreakResolver_.resolve(context);
+            if (decision.incoming == TieBreakResolver::IncomingDisposition::Reject) {
+                tieBreakResolver_.notify(decision.resolution, TieBreakResolver::Event::IncomingRejected);
+                return true;
+            }
+            return false;
         }
 
         QString                                   reserveSid();
@@ -155,7 +327,9 @@ namespace XMPP { namespace Jingle {
         static bool validBundleAnswer(const QList<ContentGroup> &offer, const QList<ContentGroup> &answer);
         bool        validLocalGroupings() const;
 
-        std::shared_ptr<int> contentModifyInFlight_ = std::make_shared<int>(0);
+        std::shared_ptr<int>      contentModifyInFlight_ = std::make_shared<int>(0);
+        mutable TieBreakResolver  tieBreakResolver_;
+        mutable bool              tieBreakResolversReady_ = false;
 
         class Private;
         std::unique_ptr<Private> d;
