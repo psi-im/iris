@@ -1,0 +1,90 @@
+name: Apply transport-reject atomicity guard
+
+on:
+  push:
+    branches:
+      - automation/fix-jingle-parser
+    paths:
+      - .automation-trigger-reject-atomicity
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: jingle/async-media
+          fetch-depth: 0
+
+      - name: Validate transport-reject signaling state before mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          header = Path('src/xmpp/xmpp-im/jingle-application.h')
+          text = header.read_text()
+          old = '        bool transportReplaceAwaitingAck() const;\n        bool incomingTransportAccept(const QDomElement &el);'
+          new = '        bool transportReplaceAwaitingAck() const;\n        bool transportReplaceInProgress() const;\n        bool incomingTransportAccept(const QDomElement &el);'
+          if old not in text:
+              raise SystemExit('application header insertion point not found')
+          header.write_text(text.replace(old, new, 1))
+
+          app = Path('src/xmpp/xmpp-im/jingle-application.cpp')
+          text = app.read_text()
+          old = '\n'.join([
+              '    bool Application::transportReplaceAwaitingAck() const',
+              '    {',
+              '        return _pendingTransportReplace == PendingTransportReplace::NeedAck;',
+              '    }',
+              '',
+              '    bool Application::incomingTransportAccept(const QDomElement &el)',
+          ])
+          new = '\n'.join([
+              '    bool Application::transportReplaceAwaitingAck() const',
+              '    {',
+              '        return _pendingTransportReplace == PendingTransportReplace::NeedAck;',
+              '    }',
+              '',
+              '    bool Application::transportReplaceInProgress() const',
+              '    {',
+              '        return _pendingTransportReplace == PendingTransportReplace::InProgress;',
+              '    }',
+              '',
+              '    bool Application::incomingTransportAccept(const QDomElement &el)',
+          ])
+          if old not in text:
+              raise SystemExit('application implementation insertion point not found')
+          app.write_text(text.replace(old, new, 1))
+
+          session = Path('src/xmpp/xmpp-im/jingle-session.cpp')
+          text = session.read_text()
+          old = '\n'.join([
+              '                if (!app || !app->transport() || !app->transport()->isLocal()',
+              '                    || transportEl.namespaceURI() != app->transport()->pad()->ns()) {',
+          ])
+          new = '\n'.join([
+              '                if (!app || !app->transport() || !app->transport()->isLocal()',
+              '                    || !app->transportReplaceInProgress()',
+              '                    || transportEl.namespaceURI() != app->transport()->pad()->ns()) {',
+          ])
+          if old not in text:
+              raise SystemExit('transport-reject validation point not found')
+          session.write_text(text.replace(old, new, 1))
+          PY
+
+      - name: Verify and push
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git diff -- src/xmpp/xmpp-im/jingle-application.h src/xmpp/xmpp-im/jingle-application.cpp src/xmpp/xmpp-im/jingle-session.cpp
+          git config user.name 'Sergei Ilinykh'
+          git config user.email 'rion4ik@gmail.com'
+          git add src/xmpp/xmpp-im/jingle-application.h src/xmpp/xmpp-im/jingle-application.cpp src/xmpp/xmpp-im/jingle-session.cpp
+          git commit -m 'Validate transport-reject batch state'
+          git push origin HEAD:jingle/async-media
