@@ -32,27 +32,17 @@
 
 namespace XMPP { namespace Jingle {
 
-    // Generic callback-driven collision coordinator. It intentionally knows
-    // nothing about Jingle/XEP tie-break semantics: registered owners decide
-    // whether a collision exists, what the immediate disposition is and, when
-    // needed, how a per-collision resolution state machine advances.
-    class TieBreakResolver {
+    // Callback-only collision coordinator. Context, decision and event types are
+    // supplied by its owner; the coordinator deliberately knows nothing about
+    // Jingle actions, XMPP stanzas, roles or any application/transport policy.
+    template <typename Context, typename Decision, typename Event> class TieBreakResolver {
     public:
-        enum class IncomingDisposition { Pass, Reject };
-        enum class Event { IncomingApplied, IncomingRejected, LocalCompleted, Wake };
         enum class ResolutionState { Waiting, Finished };
 
-        struct Context {
-            Action             incomingAction = Action::NoAction;
-            Action             localAction    = Action::NoAction;
-            const QDomElement *incoming       = nullptr;
-            const QDomElement *local          = nullptr;
-        };
-
         struct Plan {
-            IncomingDisposition                          incoming = IncomingDisposition::Pass;
-            std::function<void()>                        immediate;
-            std::function<ResolutionState(Event event)> advance;
+            Decision                                      decision {};
+            std::function<void()>                         immediate;
+            std::function<ResolutionState(const Event &)> advance;
         };
 
         struct Callbacks {
@@ -60,20 +50,20 @@ namespace XMPP { namespace Jingle {
             std::function<Plan(const Context &)> resolve;
         };
 
-        struct Decision {
-            IncomingDisposition incoming   = IncomingDisposition::Pass;
-            quint64             resolution = 0;
+        struct Result {
+            bool     handled    = false;
+            Decision decision   {};
+            quint64  resolution = 0;
         };
 
         using Registration = quint64;
 
-        Registration registerResolver(Action action, Callbacks callbacks)
+        Registration registerResolver(Callbacks callbacks)
         {
             if (!callbacks.conflicts || !callbacks.resolve)
                 return 0;
             const auto id = ++nextRegistration_;
-            resolvers_[action].append(
-                RegisteredResolver { id, std::make_shared<Callbacks>(std::move(callbacks)) });
+            resolvers_.append(RegisteredResolver { id, std::make_shared<Callbacks>(std::move(callbacks)) });
             return id;
         }
 
@@ -81,24 +71,17 @@ namespace XMPP { namespace Jingle {
         {
             if (!registration)
                 return;
-            for (auto it = resolvers_.begin(); it != resolvers_.end();) {
-                auto &entries = it.value();
-                entries.erase(std::remove_if(entries.begin(), entries.end(), [registration](const auto &entry) {
-                                  return entry.registration == registration;
-                              }),
-                              entries.end());
-                if (entries.isEmpty())
-                    it = resolvers_.erase(it);
-                else
-                    ++it;
-            }
+            resolvers_.erase(std::remove_if(resolvers_.begin(), resolvers_.end(), [registration](const auto &entry) {
+                                 return entry.registration == registration;
+                             }),
+                             resolvers_.end());
         }
 
-        Decision resolve(const Context &context)
+        Result resolve(const Context &context)
         {
-            // Copy only shared callback owners so a callback may safely
-            // unregister itself while its mutable state persists across calls.
-            const auto entries = resolvers_.value(context.incomingAction);
+            // Copy only shared callback owners so callbacks may unregister
+            // themselves while mutable callback state survives subsequent calls.
+            const auto entries = resolvers_;
             for (const auto &entry : entries) {
                 const auto callbacks = entry.callbacks;
                 if (!callbacks || !callbacks->conflicts(context))
@@ -111,15 +94,14 @@ namespace XMPP { namespace Jingle {
                 quint64 resolution = 0;
                 if (plan.advance) {
                     resolution = ++nextResolution_;
-                    resolutions_.insert(resolution,
-                                        ActiveResolution { context.incomingAction, std::move(plan.advance) });
+                    resolutions_.insert(resolution, ActiveResolution { std::move(plan.advance) });
                 }
-                return Decision { plan.incoming, resolution };
+                return Result { true, plan.decision, resolution };
             }
             return {};
         }
 
-        void notify(quint64 resolution, Event event)
+        void notify(quint64 resolution, const Event &event)
         {
             if (!resolution)
                 return;
@@ -127,22 +109,18 @@ namespace XMPP { namespace Jingle {
             if (it == resolutions_.end())
                 return;
 
-            // Remove the machine while invoking external code. This makes
-            // reentrant notifications harmless and, unlike copying std::function,
-            // preserves mutable state captured inside the callback across events.
+            // Remove the machine while invoking external code. Reentrant notify()
+            // of the same id is therefore harmless, and moving rather than copying
+            // std::function preserves mutable captures across events.
             auto active = std::move(it.value());
             resolutions_.erase(it);
             if (active.advance && active.advance(event) == ResolutionState::Waiting)
                 resolutions_.insert(resolution, std::move(active));
         }
 
-        void notify(Action action, Event event)
+        void notifyAll(const Event &event)
         {
-            QList<quint64> ids;
-            for (auto it = resolutions_.cbegin(); it != resolutions_.cend(); ++it) {
-                if (it->action == action)
-                    ids.append(it.key());
-            }
+            const auto ids = resolutions_.keys();
             for (auto id : ids)
                 notify(id, event);
         }
@@ -156,14 +134,13 @@ namespace XMPP { namespace Jingle {
             std::shared_ptr<Callbacks> callbacks;
         };
         struct ActiveResolution {
-            Action                                      action;
-            std::function<ResolutionState(Event event)> advance;
+            std::function<ResolutionState(const Event &)> advance;
         };
 
-        QHash<Action, QList<RegisteredResolver>> resolvers_;
-        QHash<quint64, ActiveResolution>         resolutions_;
-        quint64                                  nextRegistration_ = 0;
-        quint64                                  nextResolution_   = 0;
+        QList<RegisteredResolver>            resolvers_;
+        QHash<quint64, ActiveResolution>     resolutions_;
+        quint64                              nextRegistration_ = 0;
+        quint64                              nextResolution_   = 0;
     };
 
     // class Manager;
@@ -268,6 +245,13 @@ namespace XMPP { namespace Jingle {
         friend class PublicationManager;
         friend class JTPush;
 
+        enum class TieBreakIncoming { Pass, Reject };
+        enum class TieBreakEvent { IncomingApplied, IncomingRejected, LocalCompleted, Wake };
+        struct TieBreakContext {
+            Action incomingAction = Action::NoAction;
+        };
+        using SessionTieBreakResolver = TieBreakResolver<TieBreakContext, TieBreakIncoming, TieBreakEvent>;
+
         void ensureTieBreakResolvers() const
         {
             if (tieBreakResolversReady_)
@@ -276,18 +260,17 @@ namespace XMPP { namespace Jingle {
 
             // First consumer of the generic framework. transport-replace keeps
             // its existing handler for now because its tie-break path also
-            // performs transport-selection side effects that need the incoming
-            // stanza in the resolver context before it can be migrated safely.
-            tieBreakResolver_.registerResolver(
-                Action::ContentModify,
-                TieBreakResolver::Callbacks {
-                    [this](const TieBreakResolver::Context &) { return *contentModifyInFlight_ > 0; },
-                    [this](const TieBreakResolver::Context &) {
-                        TieBreakResolver::Plan plan;
-                        plan.incoming = role() == Origin::Initiator ? TieBreakResolver::IncomingDisposition::Reject
-                                                                   : TieBreakResolver::IncomingDisposition::Pass;
-                        return plan;
-                    } });
+            // performs transport-selection side effects that need richer owner
+            // context before it can be migrated without changing behaviour.
+            tieBreakResolver_.registerResolver(SessionTieBreakResolver::Callbacks {
+                [this](const TieBreakContext &context) {
+                    return context.incomingAction == Action::ContentModify && *contentModifyInFlight_ > 0;
+                },
+                [this](const TieBreakContext &) {
+                    SessionTieBreakResolver::Plan plan;
+                    plan.decision = role() == Origin::Initiator ? TieBreakIncoming::Reject : TieBreakIncoming::Pass;
+                    return plan;
+                } });
         }
 
         // Application callbacks keep this token alive until the corresponding
@@ -303,15 +286,12 @@ namespace XMPP { namespace Jingle {
         bool shouldTieBreakIncoming(Action action) const
         {
             ensureTieBreakResolvers();
-            TieBreakResolver::Context context;
-            context.incomingAction = action;
-            context.localAction    = action;
-            const auto decision    = tieBreakResolver_.resolve(context);
-            if (decision.incoming == TieBreakResolver::IncomingDisposition::Reject) {
-                tieBreakResolver_.notify(decision.resolution, TieBreakResolver::Event::IncomingRejected);
-                return true;
-            }
-            return false;
+            const auto result = tieBreakResolver_.resolve(TieBreakContext { action });
+            if (!result.handled || result.decision != TieBreakIncoming::Reject)
+                return false;
+            if (result.resolution)
+                tieBreakResolver_.notify(result.resolution, TieBreakEvent::IncomingRejected);
+            return true;
         }
 
         QString                                   reserveSid();
@@ -321,9 +301,9 @@ namespace XMPP { namespace Jingle {
         static bool validBundleAnswer(const QList<ContentGroup> &offer, const QList<ContentGroup> &answer);
         bool        validLocalGroupings() const;
 
-        std::shared_ptr<int>     contentModifyInFlight_ = std::make_shared<int>(0);
-        mutable TieBreakResolver tieBreakResolver_;
-        mutable bool             tieBreakResolversReady_ = false;
+        std::shared_ptr<int>           contentModifyInFlight_ = std::make_shared<int>(0);
+        mutable SessionTieBreakResolver tieBreakResolver_;
+        mutable bool                    tieBreakResolversReady_ = false;
 
         class Private;
         std::unique_ptr<Private> d;

@@ -159,51 +159,57 @@ static void acknowledge(const J::OutgoingUpdate &update, Task *result)
 
 static void testGenericResolver()
 {
-    J::TieBreakResolver resolver;
-    bool                retryReady = false;
-    int                 immediate  = 0;
-    int                 advances   = 0;
+    struct Context {
+        int kind = 0;
+    };
+    enum class Decision { Pass, Reject };
+    enum class Event { Rejected, Wake };
+    using Resolver = J::TieBreakResolver<Context, Decision, Event>;
 
-    const auto registration = resolver.registerResolver(
-        J::Action::ContentModify,
-        J::TieBreakResolver::Callbacks {
-            [](const J::TieBreakResolver::Context &context) {
-                return context.incomingAction == J::Action::ContentModify;
-            },
-            [&](const J::TieBreakResolver::Context &) {
-                J::TieBreakResolver::Plan plan;
-                plan.incoming  = J::TieBreakResolver::IncomingDisposition::Reject;
-                plan.immediate = [&]() { ++immediate; };
-                plan.advance   = [&](J::TieBreakResolver::Event event) {
-                    ++advances;
-                    return event == J::TieBreakResolver::Event::Wake && retryReady
-                        ? J::TieBreakResolver::ResolutionState::Finished
-                        : J::TieBreakResolver::ResolutionState::Waiting;
-                };
-                return plan;
-            } });
+    Resolver resolver;
+    bool     retryReady    = false;
+    int      immediate     = 0;
+    int      advances      = 0;
+    int      conflictCalls = 0;
+
+    const auto registration = resolver.registerResolver(Resolver::Callbacks {
+        [count = 0, &conflictCalls](const Context &context) mutable {
+            conflictCalls = ++count;
+            return context.kind == 7;
+        },
+        [&](const Context &) {
+            Resolver::Plan plan;
+            plan.decision  = Decision::Reject;
+            plan.immediate = [&]() { ++immediate; };
+            plan.advance   = [phase = 0, &advances, &retryReady](const Event &event) mutable {
+                advances = ++phase;
+                return event == Event::Wake && retryReady ? Resolver::ResolutionState::Finished
+                                                          : Resolver::ResolutionState::Waiting;
+            };
+            return plan;
+        } });
     check(registration != 0, "generic tie-break resolver registration failed");
 
-    J::TieBreakResolver::Context context;
-    context.incomingAction = J::Action::ContentModify;
-    context.localAction    = J::Action::ContentModify;
-    const auto decision    = resolver.resolve(context);
-    check(decision.incoming == J::TieBreakResolver::IncomingDisposition::Reject,
-          "generic resolver ignored registered disposition");
+    const auto first = resolver.resolve(Context { 0 });
+    check(!first.handled && conflictCalls == 1, "generic resolver did not preserve first callback invocation");
+
+    const auto decision = resolver.resolve(Context { 7 });
+    check(decision.handled && decision.decision == Decision::Reject && conflictCalls == 2,
+          "generic resolver ignored registered callback or lost mutable callback state");
     check(immediate == 1, "generic resolver did not run immediate callback exactly once");
     check(decision.resolution != 0 && resolver.hasResolution(decision.resolution),
           "generic resolver did not create per-collision state machine");
 
-    resolver.notify(decision.resolution, J::TieBreakResolver::Event::IncomingRejected);
-    check(resolver.hasResolution(decision.resolution), "resolution finished before retry condition became true");
+    resolver.notify(decision.resolution, Event::Rejected);
+    check(resolver.hasResolution(decision.resolution) && advances == 1,
+          "resolution finished before retry condition became true");
     retryReady = true;
-    resolver.notify(decision.resolution, J::TieBreakResolver::Event::Wake);
+    resolver.notify(decision.resolution, Event::Wake);
     check(!resolver.hasResolution(decision.resolution) && advances == 2,
-          "resolution did not finish through its callback-driven state machine");
+          "resolution did not preserve mutable state across events");
 
     resolver.unregisterResolver(registration);
-    check(resolver.resolve(context).incoming == J::TieBreakResolver::IncomingDisposition::Pass,
-          "unregistered resolver still handled a collision");
+    check(!resolver.resolve(Context { 7 }).handled, "unregistered resolver still handled a collision");
 }
 
 static void crossedContentModify(Client &client, Task *success, Task *failure, J::Origin initiatorTarget,
