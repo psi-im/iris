@@ -1,0 +1,56 @@
+name: Clean transport-replace docs formatting
+
+on:
+  push:
+    branches:
+      - automation/fix-jingle-parser
+    paths:
+      - .automation-trigger-cleanup-transport-docs
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: jingle/async-media
+          fetch-depth: 0
+
+      - name: Clean documentation formatting and ownership wording
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('docs/jingle.md')
+          text = path.read_text()
+          old = "\n\\\n## Transport failure and replacement\n"
+          if old not in text:
+              raise SystemExit('stray transport-replace heading escape not found')
+          text = text.replace(old, "\n## Transport failure and replacement\n", 1)
+          old = "2. keep the `Application` through `QPointer`, because it is QObject-owned by the session;"
+          new = "2. guard the `Application` through `QPointer`, because it is a QObject that the session may delete during a reentrant callback;"
+          if old not in text:
+              raise SystemExit('application ownership wording not found')
+          text = text.replace(old, new, 1)
+          old = "transaction/tie-break machinery.\n## Extending the stack\n"
+          if old not in text:
+              raise SystemExit('missing section separator anchor')
+          text = text.replace(old, "transaction/tie-break machinery.\n\n## Extending the stack\n", 1)
+          path.write_text(text)
+          PY
+
+      - name: Verify and push
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git diff -- docs/jingle.md
+          git config user.name 'Sergei Ilinykh'
+          git config user.email 'rion4ik@gmail.com'
+          git add docs/jingle.md
+          git commit -m 'Polish transport-replace documentation'
+          git push origin HEAD:jingle/async-media
