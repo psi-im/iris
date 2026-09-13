@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #include <QCoreApplication>
 #include <QDebug>
+#include <QPointer>
 #include <QtCrypto>
 #include <iris/jingle-application.h>
 #include <iris/jingle-session.h>
@@ -150,6 +151,23 @@ int main(int argc, char **argv)
         check(peerDirectionNotifications == 0, "outgoing content-modify ACK was reported as peer-originated");
         check(active.evaluateOutgoingUpdate().action == J::Action::NoAction,
               "successful direction request remained queued");
+    }
+
+    {
+        auto disposable = new J::Session(client.jingleManager(), Jid(QStringLiteral("peer@example.test/destructive")));
+        auto active     = new TestApplication(disposable, J::Origin::Responder);
+        disposable->addContent(active);
+        active->activate();
+        QPointer<J::Session> sessionGuard(disposable);
+        QObject::connect(active, &J::Application::sendersChanged, active,
+                         [disposable](J::Origin) { delete disposable; });
+
+        check(active->requestSenders(J::Origin::Both), "destructive ACK direction request rejected");
+        check(active->evaluateOutgoingUpdate().action == J::Action::ContentModify,
+              "destructive ACK direction was not queued");
+        auto update = active->takeOutgoingUpdate();
+        std::get<1>(update)(&success);
+        check(!sessionGuard, "outgoing sendersChanged handler did not destroy the session");
     }
 
     {
