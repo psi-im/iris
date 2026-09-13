@@ -1052,7 +1052,14 @@ namespace XMPP { namespace Jingle {
             return true;
         }
 
-        bool handleIncomingTransportReplace(const QDomElement &jingleEl)
+// transport-replace is deliberately handled in two phases. The first pass
+// parses and validates every content and snapshots (Application, ContentKey,
+// current Transport). Selector capability checks are reentrant boundaries: a
+// callback may remove a content or install a newer transport. The second pass
+// therefore mutates only entries whose object/key/transport identity still
+// matches the validation snapshot. This preserves the historical partial-batch
+// behavior without applying a candidate to superseded local state.
+bool handleIncomingTransportReplace(const QDomElement &jingleEl)
         {
             qDebug("handle incoming transport replace");
             struct ValidatedTransportReplace {
@@ -1184,7 +1191,12 @@ namespace XMPP { namespace Jingle {
             return true;
         }
 
-        bool handleIncomingTransportAccept(const QDomElement &jingleEl)
+// transport-accept is an acknowledgement of a transport-replace signaling
+// transaction, not merely a transport state update. Validate the whole batch
+// against PendingTransportReplace::InProgress before the first Transport::update().
+// Transport::update() is reentrant, so the apply pass uses guarded identity
+// snapshots and skips entries invalidated by an earlier sibling callback.
+bool handleIncomingTransportAccept(const QDomElement &jingleEl)
         {
             struct ValidatedTransportAccept {
                 QPointer<Application>   application;
@@ -1260,7 +1272,12 @@ namespace XMPP { namespace Jingle {
             return true;
         }
 
-        bool handleIncomingTransportReject(const QDomElement &jingleEl)
+// A peer transport-reject is valid only for a local replacement already in
+// PendingTransportReplace::InProgress. Validate the complete batch before
+// selecting any fallback. selectNextTransport() and selector callbacks may be
+// reentrant, so each second-pass entry is tied to the Application/key/transport
+// snapshot that was validated in the first pass.
+bool handleIncomingTransportReject(const QDomElement &jingleEl)
         {
             struct ValidatedTransportReject {
                 QPointer<Application>   application;

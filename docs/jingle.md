@@ -540,33 +540,167 @@ Rejecting the invitation is session termination with an appropriate Jingle reaso
 session->terminate(Jingle::Reason::Condition::Decline);
 ```
 
+\
 ## Transport failure and replacement
 
-Transport fallback is application-owned. `Application::setTransport()` wires:
+Transport fallback is application-owned. `Application::setTransport()` wires transport
+updates into the normal Jingle scheduler and `Transport::failed` into
+`Application::selectNextTransport()`. The selector owns policy: Jingle core does not hard-code
+an ICE/S5B/IBB fallback order.
 
-- `Transport::updated` to `Application::updated`;
-- `Transport::failed` to `Application::selectNextTransport()`.
+The implementation has **two distinct state machines** which must not be conflated:
 
-The selector tracks unused alternatives. If the failed/old transport may already be known to the
-peer, the application enters its transport-replace sub-state and emits a
-`transport-replace`/`transport-accept`/`transport-reject` sequence as required. If no usable
-transport remains, the application moves toward `content-remove` with `failed-transport`.
+- `Transport::State` describes the concrete transport implementation's lifecycle;
+- `Application::PendingTransportReplace` describes the XEP-0166 signaling transaction around
+  replacing the current transport.
+
+In particular, `Transport::State::Unacked` is **not** the lifetime of a `transport-replace` IQ.
+IBB happens to use `Unacked` while serializing some updates, while the built-in ICE transports
+can serialize their Jingle update and remain `ApprovedToSend`. Code deciding whether a
+`transport-replace` IQ is outstanding must use the application signaling state instead.
+
+| `PendingTransportReplace` | Meaning |
+| --- | --- |
+| `None` | No transport-replace transaction is active. |
+| `Planned` | A new local transport was selected, but its `transport-replace` has not been sent yet. |
+| `NeedAck` | Our `transport-replace` was serialized and the IQ result/error is still pending. |
+| `InProgress` | The replacement proposal is the current signaling attempt known to both sides; final `transport-accept` / `transport-reject` completion is pending. An incoming peer replacement enters this state while its IQ is being processed. |
+
+```mermaid
+stateDiagram-v2
+    [*] --> None
+    None --> Planned: local failure / select local successor
+    Planned --> NeedAck: serialize transport-replace
+    NeedAck --> InProgress: IQ result
+    NeedAck --> Planned: IQ error / select retry
+    None --> InProgress: accept peer transport-replace
+    InProgress --> None: transport-accept completes
+    InProgress --> Planned: transport-reject + local fallback
+    Planned --> None: replacement abandoned / content removed
+    InProgress --> None: peer-initiated accept IQ acknowledged
+```
+
+If no compatible fallback remains, `selectNextTransport()` moves the application toward
+`content-remove` with `failed-transport` rather than leaving a half-open replacement state.
+
+### Locally initiated replacement
+
+A local transport failure selects a successor and marks the signaling transaction `Planned`.
+When the scheduler serializes `transport-replace`, the state becomes `NeedAck`. The IQ result
+advances it to `InProgress`; a peer `transport-accept` then updates/starts the same transport
+instance and clears the signaling state. `transport-reject` selects another local candidate,
+returning to `Planned`.
+
+```mermaid
+sequenceDiagram
+    participant T as old Transport
+    participant A as Application
+    participant Sel as TransportSelector
+    participant S as Session scheduler
+    participant Peer as Remote peer
+    participant New as replacement Transport
+
+    T-->>A: failed()
+    A->>Sel: selectNextTransport()
+    Sel-->>A: New
+    A->>A: PendingTransportReplace = Planned
+    New-->>A: updated()
+    A-->>S: updated()
+    S->>A: takeOutgoingUpdate(TransportReplace)
+    A->>A: Planned -> NeedAck
+    S->>Peer: IQ set transport-replace
+    Peer-->>S: IQ result
+    S->>A: replacement ACK callback
+    A->>A: NeedAck -> InProgress
+    Peer->>S: IQ set transport-accept
+    S->>A: incomingTransportAccept()
+    A->>New: update(accept payload) / start()
+    A->>A: InProgress -> None
+    S-->>Peer: IQ result
+```
+
+The IQ completion callback is tied to the **specific transport instance** that produced the
+stanza. A stale ACK must not complete or start a newer replacement selected reentrantly while
+the old transport callback is running.
+
+### Peer-initiated replacement
+
+For a valid incoming `transport-replace`, Iris installs the remote proposal and enters
+`InProgress`. Once that transport has an outgoing acceptance update, the scheduler sends
+`transport-accept`. The IQ result completes only the snapshotted transport transaction and
+starts that same transport; it must not act on a newer transport selected by a callback.
+
+### Crossed transport-replace and tie-break
+
+XEP-0166 resolves simultaneous same-action requests in an existing session in favor of the
+session initiator. Iris therefore treats an incoming `transport-replace` as a collision when
+the local endpoint is the initiator and its matching application is in `NeedAck`. The losing
+incoming action is rejected with stanza `<conflict/>` plus Jingle `<tie-break/>`.
+
+There is an intentional historical optimization in the batch path: although the losing
+incoming action is rejected as a whole, already validated sibling remote transport proposals
+are still useful as **hints** to `TransportSelector::getAlikeTransport()`. Iris may preselect a
+compatible local sibling transport before retrying its own action. The losing remote transport
+is not installed, and a prepared local sibling that is about to be signaled is kept intact.
+Removing this behavior would add avoidable signaling round-trips and regress the original
+transport-replace design.
 
 ```mermaid
 flowchart TD
-    Fail["Transport failed"] --> More{"selector has another transport?"}
-    More -->|no| Remove["Application -> Finishing<br/>content-remove / failed-transport"]
-    More -->|yes| Select["selectNextTransport()"]
-    Select --> Known{"old transport may be known by peer?"}
-    Known -->|no| Prepare["prepare new transport"]
-    Known -->|yes| Replace["transport-replace negotiation"]
-    Replace --> Prepare
-    Prepare --> Conn["new Connection"]
+    Incoming["incoming transport-replace batch"] --> Validate["parse + validate every content"]
+    Validate --> Collision{"local initiator has NeedAck?"}
+    Collision -->|no| Apply["apply still-current validated replacements"]
+    Apply --> RejectUnsupported["queue transport-reject for unsupported siblings"]
+    Collision -->|yes| Hints["use valid sibling proposals as selector hints"]
+    Hints --> Tie["reject whole incoming action: conflict + tie-break"]
 ```
 
-This fallback mechanism is one reason a custom application should depend on
-`TransportSelector`, not directly instantiate a concrete ICE/S5B/IBB class.
+### Batch atomicity and reentrancy
 
+Transport callbacks and selector hooks are treated as reentrant boundaries. In particular,
+`TransportSelector::canReplace()`, `isTransportReplaceEnabled()`, `setTransport()`,
+`selectNextTransport()`, `Transport::update()` and transport IQ callbacks can synchronously
+emit signals or invoke application code. Such code may remove an application, destroy the
+session, or select a newer transport for the same content.
+
+For that reason the incoming replace/accept/reject handlers use a validate-then-apply pattern:
+
+1. identify content by stable `(creator, name)` `ContentKey`;
+2. keep the `Application` through `QPointer`, because it is QObject-owned by the session;
+3. snapshot the current transport through `QWeakPointer`, because transports are shared-pointer
+   owned and are not QObject children of the application;
+4. validate the complete signaling state required for the action before the first mutating
+   callback where protocol atomicity requires it;
+5. before each second-pass mutation, verify that the same application is still registered under
+   the same key and still owns the transport against which the candidate was validated.
+
+A stale snapshot is never allowed to overwrite newer local intent. For `transport-replace`, an
+unsupported sibling can still be returned in a queued `transport-reject`; this **partial batch
+success is intentional historical behavior**. By contrast, malformed duplicate identities and
+out-of-order accept/reject signaling are rejected before earlier siblings are committed.
+
+This also explains the ownership model. `Application::_transport` is a `QSharedPointer`; the
+base `Transport` constructor does not set the application as QObject parent. Mixing QObject
+parent ownership with `QSharedPointer` here would make destruction ambiguous. Use
+`QPointer<Application>` for application/session QObject lifetime and weak/shared transport
+pointers for transport lifetime and transaction identity.
+
+### Regression coverage
+
+The Jingle regression suite contains explicit cases for:
+
+- real ICE serialization not using `Transport::State::Unacked` as Jingle IQ state;
+- crossed initiator/responder replacement and sibling tie-break optimization;
+- duplicate and malformed `transport-replace`, `transport-accept` and `transport-reject`;
+- selector rejection and intentional mixed-batch partial success;
+- stale sibling mutation during replace/accept/reject callbacks;
+- whole-batch accept/reject signaling-state validation before side effects;
+- self-reentrancy where an old transport callback selects a newer local replacement;
+- stale outgoing transport IQ acknowledgements not completing a newer transport transaction.
+
+These tests are deliberately about signaling invariants rather than one concrete transport
+implementation. Keep them when refactoring transport replacement into more generic Jingle
+transaction/tie-break machinery.
 ## Extending the stack
 
 ### Adding an application type
@@ -621,11 +755,10 @@ network operations. In Qt code, `QPointer` is usually the appropriate guard.
 ## Implementation limits and regression checks
 
 The object model above is not a claim of complete XEP-0166 support. In particular,
-`Session::updateFromXml()` currently falls through to `feature-not-implemented` for
-`security-info` and `transport-reject`.
-The existence of corresponding enum values or outgoing serialization does not imply an
-implemented incoming handler. Transport fallback diagrams describe the intended flow through
-the implemented paths, not successful recovery from every possible peer response.
+`Session::updateFromXml()` still falls through to `feature-not-implemented` for `security-info`.
+Transport replacement, including incoming `transport-reject`, has dedicated handlers and
+regression coverage, but that does not imply successful recovery from every transport-specific
+failure or every peer implementation.
 
 `content-reject` removes a pending locally added content, stops its transport and notifies the
 application through `incomingRemove()`. Rejection of an initial or already accepted content is
