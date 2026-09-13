@@ -23,6 +23,22 @@ public:
     std::function<void()> onCanReplace;
 };
 
+class ReentrantUpdateTransport : public TestTransport {
+public:
+    using TestTransport::TestTransport;
+
+    bool update(const QDomElement &el) override
+    {
+        const bool ok = TestTransport::update(el);
+        auto       callback = std::move(onUpdate);
+        if (callback)
+            callback();
+        return ok;
+    }
+
+    std::function<void()> onUpdate;
+};
+
 static QDomElement makeUnqualifiedTransportReplace(QDomDocument &doc, const QString &name, J::Origin creator)
 {
     auto jingle = doc.createElementNS(J::NS, QStringLiteral("jingle"));
@@ -178,6 +194,29 @@ static void testResponderNeedAckStillYieldsToInitiator(Client &client)
     check(app->replaceInProgress(), "responder winner install did not enter InProgress");
 }
 
+static void testTieBreakCarriesConflictCondition(Client &client)
+{
+    J::Session session(client.jingleManager(), Jid(QStringLiteral("tie-break-wire@example.test/device")),
+                       J::Origin::Initiator);
+    auto local = makeTransport(session, J::Origin::Initiator, J::State::ApprovedToSend, QStringLiteral("local"));
+    auto app = addApplication(session, QStringLiteral("audio"), J::Origin::Initiator, local,
+                              std::make_unique<TestSelector>());
+    app->markReplaceAwaitingAck();
+
+    QDomDocument doc;
+    const bool ok = session.updateFromXml(
+        J::Action::TransportReplace,
+        makeReplace(doc, { { QStringLiteral("audio"), J::Origin::Initiator,
+                             TestTransportManager::namespaceUri(), QStringLiteral("crossed") } }));
+
+    const auto error = session.lastError();
+    check(!ok && error, "crossed transport-replace did not return an error");
+    check(error->condition == Stanza::Error::ErrorCond::Conflict,
+          "transport-replace tie-break did not use the stanza conflict condition");
+    check(J::ErrorUtil::jingleCondition(*error) == J::ErrorUtil::TieBreak,
+          "transport-replace conflict did not carry the Jingle tie-break condition");
+}
+
 static void testReentrantSiblingMutationInvalidatesValidatedCandidate(Client &client)
 {
     J::Session session(client.jingleManager(), Jid(QStringLiteral("reentrant@example.test/device")),
@@ -214,6 +253,48 @@ static void testReentrantSiblingMutationInvalidatesValidatedCandidate(Client &cl
           "unrelated sibling stopped progressing after reentrant local mutation");
 }
 
+static void testTransportAcceptSkipsReentrantStaleSibling(Client &client)
+{
+    J::Session session(client.jingleManager(), Jid(QStringLiteral("accept-reentrant@example.test/device")),
+                       J::Origin::Initiator);
+
+    auto audioPad = session.transportPadFactory(TestTransportManager::namespaceUri());
+    check(bool(audioPad), "test transport pad missing for reentrant transport-accept");
+    auto audioTransport = QSharedPointer<ReentrantUpdateTransport>::create(
+        audioPad, J::Origin::Initiator, QStringLiteral("audio-local"));
+    audioTransport->forceState(J::State::Pending);
+    auto audio = addApplication(session, QStringLiteral("audio"), J::Origin::Initiator, audioTransport,
+                                std::make_unique<TestSelector>());
+    audio->markReplaceInProgress();
+
+    auto videoOld = makeTransport(session, J::Origin::Initiator, J::State::Pending, QStringLiteral("video-old"));
+    auto video = addApplication(session, QStringLiteral("video"), J::Origin::Initiator, videoOld,
+                                std::make_unique<TestSelector>());
+    video->markReplaceInProgress();
+    auto videoNewLocal = makeTransport(session, J::Origin::Initiator, J::State::Created,
+                                       QStringLiteral("video-new-local"));
+
+    audioTransport->onUpdate = [video, videoNewLocal]() {
+        check(video->setTransport(videoNewLocal), "reentrant sibling replacement during transport-accept failed");
+    };
+
+    QDomDocument doc;
+    const bool ok = session.updateFromXml(
+        J::Action::TransportAccept,
+        makeReplace(doc,
+                    { { QStringLiteral("audio"), J::Origin::Initiator, TestTransportManager::namespaceUri(),
+                        QStringLiteral("audio-accepted") },
+                      { QStringLiteral("video"), J::Origin::Initiator, TestTransportManager::namespaceUri(),
+                        QStringLiteral("video-stale-accept") } }));
+
+    check(ok, "reentrant stale sibling made transport-accept reject the whole batch");
+    check(audio->replaceIdle() && audioTransport->starts() == 1,
+          "valid first transport-accept member did not complete normally");
+    check(video->transport().data() == videoNewLocal.data(),
+          "stale transport-accept overwrote the newer sibling transport");
+    check(video->replacePlanned(), "newer sibling transport lost its Planned replacement state");
+}
+
 int main(int argc, char **argv)
 {
     QCoreApplication application(argc, argv);
@@ -228,7 +309,10 @@ int main(int argc, char **argv)
     testPlannedLocalReplaceDoesNotTieBreak(client);
     testAcknowledgedLocalReplaceDoesNotTieBreak(client);
     testResponderNeedAckStillYieldsToInitiator(client);
+    testTieBreakCarriesConflictCondition(client);
     testReentrantSiblingMutationInvalidatesValidatedCandidate(client);
+    testTransportAcceptSkipsReentrantStaleSibling(client);
 
     qInfo("Transport-replace state matrix regressions passed");
+    return 0;
 }
