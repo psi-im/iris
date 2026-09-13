@@ -347,11 +347,10 @@ namespace XMPP { namespace Jingle {
             contentEl.setAttribute(QLatin1String("senders"), sendersAttribute(requested));
             _sendersUpdateInFlight = requested;
             return OutgoingUpdate { updates, [this, requested](Task *task) {
-                                       const bool latestIsThisRequest
-                                           = _requestedSenders && *_requestedSenders == requested;
+                                       const bool success = task && task->success();
                                        _sendersUpdateInFlight.reset();
 
-                                       if (task && task->success() && _senders != requested) {
+                                       if (success && _senders != requested) {
                                            _senders = requested;
                                            QPointer<Application> guard(this);
                                            emit sendersChanged(requested);
@@ -359,9 +358,10 @@ namespace XMPP { namespace Jingle {
                                                return;
                                        }
 
-                                       // A failed IQ is not retried forever. If policy changed while
-                                       // this request was in flight, retain only that newer intent.
-                                       if (latestIsThisRequest)
+                                       // A failed IQ is not retried forever. On success, inspect the
+                                       // current target after sendersChanged: a signal handler may have
+                                       // synchronously replaced the old target with a newer intent.
+                                       if (!success && _requestedSenders && *_requestedSenders == requested)
                                            _requestedSenders.reset();
                                        if (_requestedSenders && *_requestedSenders == _senders)
                                            _requestedSenders.reset();
