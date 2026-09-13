@@ -68,6 +68,13 @@ namespace XMPP { namespace Jingle {
         if (!supportsContentModify() || !isValidSenders(senders) || _state >= State::Finishing)
             return false;
 
+        if (!_sendersStateConnection) {
+            _sendersStateConnection = connect(this, &Application::stateChanged, this, [this](State state) {
+                if (state == State::Active && _requestedSenders && !_sendersUpdateInFlight)
+                    emit updated();
+            });
+        }
+
         // Before the initial content stanza is consumed by takeOutgoingUpdate(),
         // changing direction only changes the local proposal/answer. No
         // content-modify is needed yet.
