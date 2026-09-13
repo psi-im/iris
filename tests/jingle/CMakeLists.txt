@@ -69,6 +69,10 @@ add_executable(jingle_transportacceptatomicity_test transportacceptatomicity.cpp
 target_link_libraries(jingle_transportacceptatomicity_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
     Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
 add_test(NAME jingle_transportaccept_atomicity COMMAND jingle_transportacceptatomicity_test)
+add_executable(jingle_transportacceptackreentrancy_test transportacceptackreentrancy.cpp)
+target_link_libraries(jingle_transportacceptackreentrancy_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
+    Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
+add_test(NAME jingle_transportaccept_ack_reentrancy COMMAND jingle_transportacceptackreentrancy_test)
 add_executable(jingle_transportreplacecorrectness_test transportreplacecorrectness.cpp)
 target_link_libraries(jingle_transportreplacecorrectness_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
     Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
