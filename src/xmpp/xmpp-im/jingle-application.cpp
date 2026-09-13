@@ -353,7 +353,10 @@ namespace XMPP { namespace Jingle {
 
                                        if (task && task->success() && _senders != requested) {
                                            _senders = requested;
+                                           QPointer<Application> guard(this);
                                            emit sendersChanged(requested);
+                                           if (!guard)
+                                               return;
                                        }
 
                                        // A failed IQ is not retried forever. If policy changed while
