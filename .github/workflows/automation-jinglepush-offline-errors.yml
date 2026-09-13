@@ -1,0 +1,47 @@
+name: Make Jingle push errors testable offline
+
+on:
+  push:
+    branches:
+      - automation/fix-jingle-parser
+    paths:
+      - .automation-trigger-jinglepush-offline-errors
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: jingle/async-media
+          fetch-depth: 0
+      - name: Add offline stanza namespace fallback
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('src/xmpp/xmpp-im/jingle.cpp')
+          s = p.read_text()
+          old1 = '''            Stanza::Error error(errType, errCond, text);\n            auto          errEl = error.toXml(*client()->doc(), client()->stream().baseNS());\n'''
+          new1 = '''            Stanza::Error error(errType, errCond, text);\n            const auto baseNS = client()->hasStream() ? client()->stream().baseNS() : QStringLiteral("jabber:client");\n            auto       errEl  = error.toXml(*client()->doc(), baseNS);\n'''
+          old2 = '''            resp.appendChild(error.toXml(*client()->doc(), client()->stream().baseNS()));\n'''
+          new2 = '''            const auto baseNS = client()->hasStream() ? client()->stream().baseNS() : QStringLiteral("jabber:client");\n            resp.appendChild(error.toXml(*client()->doc(), baseNS));\n'''
+          if old1 not in s or old2 not in s:
+              raise SystemExit('JTPush error serialization anchors not found')
+          s = s.replace(old1, new1, 1).replace(old2, new2, 1)
+          p.write_text(s)
+          PY
+      - name: Verify and push
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/xmpp/xmpp-im/jingle.cpp
+          git commit -m 'Allow offline Jingle push error serialization'
+          git push origin HEAD:jingle/async-media
