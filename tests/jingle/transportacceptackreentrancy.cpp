@@ -52,6 +52,11 @@ int main(int argc, char **argv)
     appPtr->markReplaceInProgress();
 
     auto newerLocal = makeTransport(session, J::Origin::Initiator, J::State::Created, QStringLiteral("new-local"));
+
+    // The transport-specific ACK callback is a reentrant boundary. It installs a
+    // newer local replacement before Application's outer TransportAccept callback
+    // resumes. The old IQ result belongs to `remote`; it must not clear Planned or
+    // start whichever transport happens to be current after the nested callback.
     remote->onAck = [appPtr, newerLocal]() {
         check(appPtr->setTransport(newerLocal), "reentrant transport-accept ACK could not install newer local transport");
         check(appPtr->replacePlanned(), "newer local transport was not marked as a planned replacement");
