@@ -27,12 +27,72 @@
 
 namespace XMPP { namespace Jingle {
 
+    static bool isValidSenders(Origin senders)
+    {
+        return senders == Origin::None || senders == Origin::Both || senders == Origin::Initiator
+            || senders == Origin::Responder;
+    }
+
+    static QString sendersAttribute(Origin senders)
+    {
+        switch (senders) {
+        case Origin::None:
+            return QStringLiteral("none");
+        case Origin::Both:
+            return QStringLiteral("both");
+        case Origin::Initiator:
+            return QStringLiteral("initiator");
+        case Origin::Responder:
+            return QStringLiteral("responder");
+        }
+        return {};
+    }
+
     void Application::incomingContentModify(Origin senders)
     {
-        if (!supportsContentModify() || _senders == senders)
+        if (!supportsContentModify() || !isValidSenders(senders) || _senders == senders)
             return;
         _senders = senders;
         emit sendersChanged(senders);
+
+        if (_requestedSenders && !_sendersUpdateInFlight) {
+            if (*_requestedSenders == _senders)
+                _requestedSenders.reset();
+            else
+                emit updated();
+        }
+    }
+
+    bool Application::requestSenders(Origin senders)
+    {
+        if (!supportsContentModify() || !isValidSenders(senders) || _state >= State::Finishing)
+            return false;
+
+        // Before the initial content stanza is consumed by takeOutgoingUpdate(),
+        // changing direction only changes the local proposal/answer. No
+        // content-modify is needed yet.
+        if (_state <= State::ApprovedToSend && !_sendersUpdateInFlight) {
+            _requestedSenders.reset();
+            if (_senders != senders) {
+                _senders = senders;
+                emit sendersChanged(senders);
+            }
+            return true;
+        }
+
+        // If another direction change is already in flight, asking for the
+        // currently negotiated value is still meaningful: it supersedes the
+        // in-flight request once its IQ result arrives.
+        if (!_sendersUpdateInFlight && _senders == senders) {
+            _requestedSenders.reset();
+            return true;
+        }
+        if (_requestedSenders && *_requestedSenders == senders)
+            return true;
+
+        _requestedSenders = senders;
+        emit updated();
+        return true;
     }
 
     class ConnectionWaiter : public QObject {
@@ -199,9 +259,16 @@ namespace XMPP { namespace Jingle {
             }
             break;
         case State::Active:
-            if (_transport->hasUpdates())
+            // Preserve the action priority defined by Action: flush transport
+            // updates before changing media direction.
+            if (_transport->hasUpdates()) {
                 _update = { Action::TransportInfo, Reason() };
-
+            } else if (_requestedSenders && !_sendersUpdateInFlight) {
+                if (*_requestedSenders == _senders)
+                    _requestedSenders.reset();
+                else
+                    _update = { Action::ContentModify, Reason() };
+            }
             break;
         default:
             break;
@@ -254,6 +321,37 @@ namespace XMPP { namespace Jingle {
                                        if (task->success())
                                            setState(State::Connecting);
                                    } };
+        case Action::ContentModify: {
+            Q_ASSERT(_state == State::Active);
+            Q_ASSERT(_requestedSenders);
+            Q_ASSERT(!_sendersUpdateInFlight);
+            const auto requested = *_requestedSenders;
+
+            // XEP-0166 makes senders mandatory for content-modify. ContentBase
+            // normally omits the default value "both", so force the attribute
+            // for every direction here.
+            contentEl.setAttribute(QLatin1String("senders"), sendersAttribute(requested));
+            _sendersUpdateInFlight = requested;
+            return OutgoingUpdate { updates, [this, requested](Task *task) {
+                                       const bool latestIsThisRequest
+                                           = _requestedSenders && *_requestedSenders == requested;
+                                       _sendersUpdateInFlight.reset();
+
+                                       if (task && task->success() && _senders != requested) {
+                                           _senders = requested;
+                                           emit sendersChanged(requested);
+                                       }
+
+                                       // A failed IQ is not retried forever. If policy changed while
+                                       // this request was in flight, retain only that newer intent.
+                                       if (latestIsThisRequest)
+                                           _requestedSenders.reset();
+                                       if (_requestedSenders && *_requestedSenders == _senders)
+                                           _requestedSenders.reset();
+                                       if (_requestedSenders)
+                                           emit updated();
+                                   } };
+        }
         case Action::TransportInfo:
             Q_ASSERT(_transport->hasUpdates());
             std::tie(transportEl, transportCB) = wrapOutgoingTransportUpdate();
