@@ -177,7 +177,13 @@ namespace XMPP { namespace Jingle {
         virtual void remove(Reason::Condition cond = Reason::Success, const QString &comment = QString()) = 0;
 
         virtual void incomingRemove(const Reason &r) = 0;
-        void         incomingTransportAccept(const QDomElement &el);
+
+        // Signaling-level transport-replace state. Unlike Transport::State this
+        // tracks the Jingle IQ transaction itself and therefore works for ICE
+        // transports whose transport-info updates do not move through Unacked.
+        bool transportReplaceAwaitingAck() const;
+        bool incomingTransportAccept(const QDomElement &el);
+        bool incomingTransportReject();
 
     protected:
         /**
@@ -224,9 +230,9 @@ namespace XMPP { namespace Jingle {
         Origin  _senders;
 
         // Latest local direction intent and the value currently awaiting IQ ack.
-        std::optional<Origin>    _requestedSenders;
-        std::optional<Origin>    _sendersUpdateInFlight;
-        QMetaObject::Connection  _sendersStateConnection;
+        std::optional<Origin>   _requestedSenders;
+        std::optional<Origin>   _sendersUpdateInFlight;
+        QMetaObject::Connection _sendersStateConnection;
 
         // current transport. either local or remote. has info about origin and state
         QSharedPointer<Transport>          _transport;
