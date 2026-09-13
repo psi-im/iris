@@ -1,0 +1,73 @@
+name: Apply transport-accept atomicity guard
+
+on:
+  push:
+    branches:
+      - automation/fix-jingle-parser
+    paths:
+      - .automation-trigger-accept-atomicity
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: jingle/async-media
+          fetch-depth: 0
+
+      - name: Validate transport-accept signaling state before mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/xmpp/xmpp-im/jingle-session.cpp')
+          text = path.read_text()
+          start = text.index('        bool handleIncomingTransportAccept(const QDomElement &jingleEl)')
+          end = text.index('\n        bool handleIncomingTransportReject(const QDomElement &jingleEl)', start)
+          block = text[start:end]
+          old = '\n'.join([
+              '                if (!app || !app->transport() || app->transport()->creator() != role',
+              '                    || app->transport()->state() != State::Pending || transportNS != app->transport()->pad()->ns()) {',
+              '                    // ignore out of order',
+              '                    qInfo("ignore out of order transport-accept");',
+              '                    continue;',
+              '                }',
+              '                updates.append(ValidatedTransportAccept { QPointer<Application>(app), key,',
+          ])
+          new = '\n'.join([
+              '                if (!app || !app->transport() || app->transport()->creator() != role',
+              '                    || app->transport()->state() != State::Pending || transportNS != app->transport()->pad()->ns()) {',
+              '                    // ignore out of order',
+              '                    qInfo("ignore out of order transport-accept");',
+              '                    continue;',
+              '                }',
+              '                if (!app->transportReplaceInProgress()) {',
+              '                    lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,',
+              '                                                    XMPP::Stanza::Error::ErrorCond::BadRequest);',
+              '                    return false;',
+              '                }',
+              '                updates.append(ValidatedTransportAccept { QPointer<Application>(app), key,',
+          ])
+          if old not in block:
+              raise SystemExit('transport-accept validation point not found')
+          block = block.replace(old, new, 1)
+          path.write_text(text[:start] + block + text[end:])
+          PY
+
+      - name: Verify and push
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git diff -- src/xmpp/xmpp-im/jingle-session.cpp
+          git config user.name 'Sergei Ilinykh'
+          git config user.email 'rion4ik@gmail.com'
+          git add src/xmpp/xmpp-im/jingle-session.cpp
+          git commit -m 'Validate transport-accept batch state'
+          git push origin HEAD:jingle/async-media
