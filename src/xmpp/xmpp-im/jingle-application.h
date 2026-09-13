@@ -182,6 +182,7 @@ namespace XMPP { namespace Jingle {
         // tracks the Jingle IQ transaction itself and therefore works for ICE
         // transports whose transport-info updates do not move through Unacked.
         bool transportReplaceAwaitingAck() const;
+        bool transportReplaceInProgress() const;
         bool incomingTransportAccept(const QDomElement &el);
         bool incomingTransportReject();
 

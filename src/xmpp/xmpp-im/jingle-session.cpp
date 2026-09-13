@@ -1283,6 +1283,7 @@ namespace XMPP { namespace Jingle {
 
                 auto app = contentList.value(key);
                 if (!app || !app->transport() || !app->transport()->isLocal()
+                    || !app->transportReplaceInProgress()
                     || transportEl.namespaceURI() != app->transport()->pad()->ns()) {
                     lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,
                                                     XMPP::Stanza::Error::ErrorCond::UnexpectedRequest);

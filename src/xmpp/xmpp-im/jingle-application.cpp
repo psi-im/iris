@@ -502,6 +502,11 @@ namespace XMPP { namespace Jingle {
         return _pendingTransportReplace == PendingTransportReplace::NeedAck;
     }
 
+    bool Application::transportReplaceInProgress() const
+    {
+        return _pendingTransportReplace == PendingTransportReplace::InProgress;
+    }
+
     bool Application::incomingTransportAccept(const QDomElement &el)
     {
         if (_pendingTransportReplace != PendingTransportReplace::InProgress || !_transport)
