@@ -1,0 +1,55 @@
+name: Register content-modify dispatcher regression
+
+on:
+  push:
+    branches:
+      - automation/fix-jingle-parser
+    paths:
+      - .automation-trigger-contentmodify-dispatcher
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: jingle/async-media
+          fetch-depth: 0
+      - name: Register dispatcher regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          cmake = Path('tests/jingle/CMakeLists.txt')
+          text = cmake.read_text()
+          anchor = '''add_executable(jingle_contentmodifyiqboundary_test contentmodifyiqboundary.cpp)\ntarget_link_libraries(jingle_contentmodifyiqboundary_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core\n    Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)\nadd_test(NAME jingle_contentmodify_iq_boundary COMMAND jingle_contentmodifyiqboundary_test)\n'''
+          addition = anchor + '''add_executable(jingle_contentmodifydispatcher_test contentmodifydispatcher.cpp)\ntarget_link_libraries(jingle_contentmodifydispatcher_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core\n    Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)\nadd_test(NAME jingle_contentmodify_dispatcher COMMAND jingle_contentmodifydispatcher_test)\n'''
+          if anchor not in text:
+              raise SystemExit('content-modify IQ boundary CMake anchor not found')
+          if 'jingle_contentmodifydispatcher_test' in text:
+              raise SystemExit('dispatcher regression already registered')
+          cmake.write_text(text.replace(anchor, addition, 1))
+
+          race = Path('tests/jingle/contentmodifyrace.cpp')
+          text = race.read_text()
+          old = '''    qInfo("Generic tie-break and content-modify race regressions passed");\n}\n'''
+          new = '''    qInfo("Generic tie-break and content-modify race regressions passed");\n    return 0;\n}\n'''
+          if old not in text:
+              raise SystemExit('contentmodifyrace main tail not found')
+          race.write_text(text.replace(old, new, 1))
+          PY
+      - name: Verify and push
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add tests/jingle/CMakeLists.txt tests/jingle/contentmodifyrace.cpp
+          git commit -m 'Register content-modify dispatcher regression'
+          git push origin HEAD:jingle/async-media
