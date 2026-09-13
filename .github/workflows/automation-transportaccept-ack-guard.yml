@@ -1,0 +1,47 @@
+name: Guard transport-accept ACK identity
+
+on:
+  push:
+    branches:
+      - automation/fix-jingle-parser
+    paths:
+      - .automation-trigger-transportaccept-ack-guard
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: jingle/async-media
+          fetch-depth: 0
+
+      - name: Bind transport-accept ACK to producing transport
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('src/xmpp/xmpp-im/jingle-application.cpp')
+          text = path.read_text()
+          old = '''        case Action::TransportAccept:\n            Q_ASSERT(_transport->hasUpdates());\n            std::tie(transportEl, transportCB) = wrapOutgoingTransportUpdate();\n            contentEl.appendChild(transportEl);\n            return OutgoingUpdate { updates, [this, transportCB](Task *task) {\n                                       transportCB(task);\n                                       if (task->success()) {\n                                           _pendingTransportReplace = PendingTransportReplace::None;\n                                           if (_state == State::Connecting || _state == State::Active)\n                                               _transport->start();\n                                       }\n                                       // else transport will report failure from its callback => select next tran.\n                                   } };\n'''
+          new = '''        case Action::TransportAccept: {\n            Q_ASSERT(_transport->hasUpdates());\n            const auto accepted = _transport.toWeakRef();\n            std::tie(transportEl, transportCB) = wrapOutgoingTransportUpdate();\n            contentEl.appendChild(transportEl);\n            return OutgoingUpdate { updates,\n                                    [this, guard = QPointer<Application>(this), accepted, transportCB](Task *task) {\n                                        transportCB(task);\n                                        if (!guard)\n                                            return;\n                                        auto expected = accepted.lock();\n                                        if (!expected || _transport != expected\n                                            || _pendingTransportReplace != PendingTransportReplace::InProgress)\n                                            return;\n\n                                        if (task && task->success()) {\n                                            _pendingTransportReplace = PendingTransportReplace::None;\n                                            if (_state == State::Connecting || _state == State::Active)\n                                                expected->start();\n                                        }\n                                        // Else the transport callback owns failure/fallback handling.\n                                    } };\n        }\n'''
+          if old not in text:
+              raise SystemExit('TransportAccept outgoing callback block not found')
+          path.write_text(text.replace(old, new, 1))
+          PY
+
+      - name: Verify and push
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git diff -- src/xmpp/xmpp-im/jingle-application.cpp
+          git config user.name 'Sergei Ilinykh'
+          git config user.email 'rion4ik@gmail.com'
+          git add src/xmpp/xmpp-im/jingle-application.cpp
+          git commit -m 'Guard transport-accept ACK identity'
+          git push origin HEAD:jingle/async-media
