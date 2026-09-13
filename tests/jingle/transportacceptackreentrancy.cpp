@@ -69,6 +69,8 @@ int main(int argc, char **argv)
     check(bool(ack), "transport-accept had no ACK callback");
     ack(&success);
 
+    // Transaction identity has three observable parts here: current transport,
+    // signaling state and start side effect. The stale ACK must preserve all three.
     check(appPtr->transport().data() == newerLocal.data(),
           "old transport-accept ACK replaced the newer reentrant transport");
     check(appPtr->replacePlanned(),
