@@ -1,6 +1,7 @@
 # Native RTP, asynchronous media and DTLS-SRTP
 
-This document describes Iris at commit `36f9e3a`. It is implementation documentation,
+This document describes Iris at commit `be3833e` and the adjacent Psi `c8821dbe` /
+psimedia `b4139cbd` integration. It is implementation documentation,
 not a development roadmap. [Jingle architecture](jingle.md) describes the generic signaling
 and file-transfer lifecycle. Media capture, codecs, playback, device policy and RTP generation
 remain outside Iris.
@@ -270,6 +271,54 @@ before notifying consumers. These notifications do not change capture permission
 Incoming content-modify updates senders for applications that opt in. The RTP packet gate
 observes senders; backend capture/direction policy remains an external integration concern.
 Description-info is advisory, not an arbitrary replacement offer.
+
+Outgoing direction changes use Application::requestSenders(); latest queued intent and
+the in-flight IQ value are separate. Successful local ACKs emit sendersChanged, while peer
+modifications additionally emit sendersChangedByPeer. The current dispatcher lacks conflict
+resolution for crossed content-modify actions. Clients must also distinguish a failed request
+from a still-pending target; no dedicated completion notification currently provides that.
+
+## Psi and psimedia production boundary
+
+Psi uses the existing AvCall, BackendSession and native Iris RTP application, not a second
+Jingle stack. AvCallPolicy contains pure capability/direction predicates; the production
+capability transaction installs the provider before advertising updated features. Audio
+hotplug adjusts local direction intent and transmit policy. Actual capture still requires
+consent, sender permission and an available input; signaling Active alone is insufficient.
+
+GstRtpSessionContext now owns one RtpSessionBridge per media type. The bridge is connected
+to the production packet path, not only an isolated test. Encoder/decoder work stays on
+the existing GLib worker; bridge control and queued user delivery use its Qt owner thread.
+
+```mermaid
+flowchart LR
+    W[RtpWorker encoder/payloader] -->|semantic RTP bytes| B[RtpSessionBridge rtpsession]
+    B -->|RTP or RTCP| C[GstRtpChannel / Psi adapter]
+    C --> I[Iris authenticated packet transport]
+    I -->|RTP or RTCP| B
+    B -->|received RTP| D[RtpWorker depayloader/decoder]
+```
+
+Negotiated RTP PTs are applied at the payloader rather than rewritten in outgoing bytes.
+Opus RTP clock/channels are distinct from raw audio input format. Current production codec
+selection is Opus/VP8; generic retained fmtp does not prove complete codec-specific support.
+The legacy worker discards GstBuffer timestamps: the byte-oriented bridge input stamps its
+own pipeline running time. This is not proof of capture-time-accurate SR mapping or A/V sync.
+
+Delivery queues have packet, byte and age bounds (network 256 packets, media 128 packets,
+512 KiB each, 1 s age checked on queue activity). Generation invalidation and guarded owner
+callbacks protect stop/restart delivery. These bounds do not bound all GStreamer queues or
+the duration of a continuously replenished delivery loop.
+
+Live input-ID changes call RtpWorker::setInputDevices. With an existing sendbin the current
+implementation cleans up both send and receive pipelines and recreates them; context and
+rtpsession bridges remain alive. It is not an isolated per-source replacement. Live/file
+transitions are excluded from this rebuild condition and must not be treated as a supported
+capture-switch guarantee. Audio-only sender regression checks late attach/detach/reattach
+RTP, not physical source closure or uninterrupted video/receive playback.
+
+Production bridge wiring is therefore implemented, while complete hotplug/privacy, recovery,
+timing and live interoperability validation remain separate gates. Live BUNDLE is still absent.
 
 DTLS fingerprint/setup negotiation is carried in transport descriptions. A generic
 security-info handler is not a prerequisite for that path. Transport replacement for an RTP

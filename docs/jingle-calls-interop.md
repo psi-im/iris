@@ -2,7 +2,37 @@
 
 This document records verified call-stack baselines and interoperability results. It intentionally distinguishes source-level support, synthetic tests, real packet-path tests and calls against external peers.
 
-## Current Iris snapshot — 36f9e3a
+## Current audit snapshot — 2026-09-13
+
+Reviewed ranges:
+
+- Psi `9421bd0e` → `c8821dbe`.
+- Iris `ba784334` → `be3833e`.
+- psimedia `ab15f68` → `b4139cbd`.
+
+Local Iris build used one `-j2` job, Qt 6.10.2 / QCA3 3.0.3 with SRTP and SCTP.
+Serial CTest with loopback socket permission: **24/24 passed**. This includes the new
+content-modify, content-modify-race and RTP direction tests. The standalone Psi
+`src/avcall/unittest/policy.cpp` was compiled and passed separately; this is not a full Psi build.
+
+An extra temporary reproducer using the actual Iris Application/ACK code and Psi policy
+helper confirms two uncovered scenarios: crossed requests leave divergent senders, and a
+failed request is discarded by Iris while the client policy still suppresses the same target.
+This is application/helper-level evidence plus dispatcher source review, not a live two-peer
+XMPP run. Permanent two-Session/controller regressions remain required.
+
+psimedia runtime tests were not run locally: `gstreamer-app-1.0` development pkg-config
+dependency is missing. New remote CI runs, sanitizer runs and live calls were not verified
+in this audit. Source review confirms production bridge wiring and live-ID rebuild, but also
+the exclusion of live/file transitions and the reset of receive/video alongside mic changes.
+The audio-only sender test is not evidence of physical capture release or A/V continuity.
+
+See [the development plan](jingle-calls-implementation-plan.md#2-новый-audit-gate-исправления-доказательства-и-оставшиеся-проблемы)
+for corrective actions and required regression scenarios, and
+[native RTP architecture](jingle-rtp-design.md#psi-and-psimedia-production-boundary)
+for the current production packet path. No Conversations parity or live BUNDLE is claimed.
+
+## Earlier Iris snapshot — 36f9e3a
 
 Reviewed changes from `7c0acb0c7dc45a9173faba5521f551916e9d67d7` to
 `36f9e3ac5e326633b56cd24c2d2c8dea4b638732`: guarded initial-subset cleanup,

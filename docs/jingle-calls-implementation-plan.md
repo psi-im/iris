@@ -1,6 +1,6 @@
 # Native Jingle calls: план продолжения для нового чата с Sol
 
-Актуализировано 2026-09-12 по последнему аудиту. Это самостоятельное задание для продолжения существующей реализации, а не предложение спроектировать стек заново. Начать с проверки веток/коммитов через GitHub connector и CI evidence новых исправлений. Старые исправленные замечания не реализовывать повторно.
+Актуализировано 2026-09-13 по последнему аудиту. Это самостоятельное задание для продолжения существующей реализации, а не предложение спроектировать стек заново. Начать с проверки веток/коммитов через GitHub connector и CI evidence новых исправлений. Старые исправленные замечания не реализовывать повторно.
 
 ## 1. Контекст, репозитории и границы достоверности
 
@@ -19,29 +19,23 @@ Checkout и установка dependencies внутри CI job допустим
 Не утверждать, что workflow запущен/прошёл, по одному созданному commit или зелёному старому PR.
 Не требовать от пользователя клонирования/локальной сборки ради операций, доступных в CI.
 
-| Репозиторий | Рабочая ветка / ориентир | Последний просмотренный commit | Глубина проверки |
-| --- | --- | --- | --- |
-| psi-im/iris | jingle/async-media | 36f9e3ac5e326633b56cd24c2d2c8dea4b638732 | Полный аудит delta от 7c0acb0 + локальные tests у аудитора |
-| psi-im/psi | ai/jingle-native-calls | 9421bd0e3df1008d2b3cb1783d945061035d6333 | Просмотр исправлений после 250c1f6a; новый CI не проверен аудитором |
-| psi-im/psimedia | jingle/rtcp-session | ab15f6829be56921920188f2381feebdd9d9d0ca | Просмотр исправлений после cbf3365; не полный аудит и не новый test run |
-| QCA3 | Существующая зависимость проекта | Pin брать из workflow/build configuration | Публичный DTLS/SRTP API уже есть; изменений здесь этап не требует |
+| Репозиторий | Ветка | Проверенный диапазон |
+| --- | --- | --- |
+| psi-im/psi | ai/jingle-native-calls | 9421bd0e3df1008d2b3cb1783d945061035d6333 → c8821dbeb30096e5aca1462cb2e660ad3705a5ad |
+| psi-im/iris | jingle/async-media | ba784334f2ef480a3090f0e161341c5cdcbc252d → be3833e32afa56424965c390a564f628da64a9e1 |
+| psi-im/psimedia | jingle/rtcp-session | ab15f6829be56921920188f2381feebdd9d9d0ca → b4139cbddde3d9439568f4d59cf0af390dd7432f |
 
-Обозначения IRIS, PSI, MEDIA ниже — корни соответствующих GitHub репозиториев, не пути
-в среде Sol. Проверять актуальные branch heads перед работой; таблица — checkpoint, не вечный pin.
+IRIS/PSI/MEDIA ниже означают корни GitHub репозиториев. Проверить remote heads перед
+работой. Аудит касается этих диапазонов, не неполученных commits.
+Iris subset/acceptance P0.1 уже опубликован: не просить пользователя публиковать его заново.
+QCA3 и libSRTP сохраняются, оснований менять crypto backend этот аудит не даёт.
 
-**Особое внимание: исправление Iris P0.1 может ещё отсутствовать на GitHub.**
-После 36f9e3a аудитор изменил локальные jingle-session.cpp и tests/jingle/sessionacceptsubset.cpp:
-surviving contents продолжают queued start, empty Session завершается, lifetime guards сохранены.
-На этом рабочем дереве штатные тесты прошли 21/21 (Qt 6.10.2, QCA3 3.0.3, SRTP/SCTP enabled).
-Это результат аудитора, не CI результата удалённого commit. Проверить наличие patch в GitHub.
-Если его нет — попросить пользователя опубликовать уже готовый patch; не реализовывать
-параллельно то же исправление. То же относится к публикации этого документа.
-
-Прежние замечания Psi/psimedia относились к 250c1f6a/cbf3365 **до git pull пользователя**.
-Нельзя переносить их на 9421bd0e/ab15f68 как доказанные оставшиеся баги.
-Новые изменения адресуют P0.2–P0.5/P0.7, но просмотр diff не равен полному закрытию verification gate.
-Старый cross-repo smoke (Psi 250c1f6a + semantic psimedia API) не подтверждает новые hashes.
-**Реальных peer-to-peer звонков в известном нам отчёте ещё не было.**
+Старые P0 исправления не реализовывать повторно. Новые проблемы и verification gaps —
+в разделе 2. Source review не означает доказанную эксплуатацию каждой потенциальной гонки.
+Локально у аудитора недоступен gstreamer-app-1.0 development package: новые psimedia
+runtime regressions не запускались. Результаты Iris и точный объём проверки записаны в
+jingle-calls-interop.md. Новые GitHub CI runs в этом аудите не проверялись.
+Реальные peer-to-peer звонки по-прежнему не подтверждены.
 
 ### PR stack и CI
 
@@ -50,12 +44,34 @@ surviving contents продолжают queued start, empty Session заверш
 - Iris #92 docs/jingle-architecture → #93 jingle/ice-udp1 → #94 jingle/group-negotiation → #95 jingle/rtp-extensions → #96 jingle/async-media.
 - Psi #968 ai/jingle-native-calls — основной call stack.
 - psimedia #15 → #16 — stacked работа, semantic packet API head a99960959.
-- psimedia jingle/rtcp-session — experimental bridge, просмотренный HEAD ab15f68.
+- psimedia jingle/rtcp-session — experimental bridge, просмотренный HEAD b4139cbd.
 - Psi #969 ci/psimedia-integration — отдельный real-provider smoke workflow. Перед окончательным merge вернуть нейтральную master/master конфигурацию, не оставлять временные branch pins.
 
 Исторический failing job: 103558912674, Psi 250c1f6a, psimedia cbf3365, GStreamer 1.24.2. Он не характеризует новые исправления. Найти актуальные runs и сверить реальные checkout hashes. Slash branches и ai/** могут пропускаться старыми workflows; смотреть выполненные jobs, не только общий PR status.
 
 Нужные gates: Psi modern, legacy/Win7 profile, cross-repo real psimedia smoke, isolated psimedia tests, Iris standalone QCA3+SRTP. В GitHub CI --parallel 4 допустим. Не создавать дублирующие runs одного и того же patch без причины; локальные сборки Sol не выполняет.
+
+### Дисциплина веток, PR и CI opt-in
+
+Продолжать существующие рабочие ветки и PR stack. Не создавать branch/PR на каждый test,
+fixup или попытку CI. Новый PR — только для самостоятельной логической границы или
+реально необходимого stack, с кратким объяснением; не мержить без разрешения пользователя.
+
+ai/** специально допускают частые commits без автоматического запуска тяжёлых pipelines.
+Это намеренная политика, а не баг. По умолчанию использовать workflow_dispatch на выбранном
+checkpoint. Можно отдельно реализовать opt-in по маркеру commit message, например
+[run-ci], если это упрощает работу Sol; это пока предложение, не существующая возможность.
+
+Важно: branches-ignore: ai/** / push branches: master отбрасывают событие ДО job if.
+Одного contains(head_commit.message, '[run-ci]') в job недостаточно. Если добавлять marker:
+разрешить соответствующий push event и gate тяжёлые jobs: non-ai branch ИЛИ marker,
+сохранив explicit workflow_dispatch. Для pull_request поля head_commit нет: выбрать
+отдельную проверку head commit через API/gate job или оставить ai PR manual-only.
+Никогда не подставлять commit text в shell как код; не использовать pull_request_target
+для исполнения недоверенного branch code с secrets. Проверить матрицу ai/no-marker,
+ai/marker, normal push, ai PR, manual dispatch, зависимые jobs/skips и concurrency.
+Документировать стоимость: workflow event может появляться на каждый push, даже если
+тяжёлые jobs skipped. Если нужен буквально ноль runs — сохранить manual-only режим.
 
 ### Что уже реализовано — не повторять
 
@@ -82,117 +98,136 @@ PRtpPacket::Type имеет underlying int, Rtp=0, Rtcp=1. Сохранены la
 
 - Production ICE::Pad::connectionFor всё ещё создаёт отдельный IceConnection на Transport. Live BUNDLE не подключён и не должен рекламироваться.
 - SharedRtcp — результат router, **не готовый group-level ingress media engine**.
-- RtpSessionBridge существует в MEDIA/gstprovider/rtpsessionbridge.{h,cpp}, но не подключён к production RtpWorker.
+- RtpSessionBridge подключён к production GstRtpSessionContext/RtpWorker packet path; это уже не задача «подключить с нуля».
 - Bridge входит в gstprovidersrc SOURCES безусловно: experimental runtime isolation не означает build isolation.
-- Один общий send/receive RTP session state на media type — направление интеграции; два независимых rtpsession для encoder и decoder запрещены.
+- Один общий send/receive rtpsession на media type уже находится в GstRtpSessionContext; сохранить его при исправлении capture lifecycle.
 - rtpsession не заменяет jitter buffer, depayloader/decoder, congestion/retransmission implementation.
 - RTCP generation использовать реальным action signal send-rtcp-full, не выдуманной C-функцией.
 - JMI, live BUNDLE, полноценный feedback и network recovery остаются дальнейшими этапами.
 
 Смежные документы: [архитектура](jingle.md), [RTP design](jingle-rtp-design.md), [interop status](jingle-calls-interop.md). Исправлять устаревшие status statements без выдуманных результатов и без истории исправленных багов в описании текущей архитектуры.
 
-## 2. P0: статус исправлений и обязательная проверка
+## 2. Новый audit gate: исправления, доказательства и оставшиеся проблемы
 
-Не переписывать исправления по старому описанию багов. Сначала прочитать актуальный код и
-тесты, затем проверить CI. Для нового доказанного дефекта: reproducer → fix → regression →
-adjacent checks. Все исполнения выполняются CI, включая reproducer на исходном commit,
-если для этого есть подходящий workflow.
+### Уже реализовано — сохранить
 
-### P0.1 — исправлено в рабочем дереве Iris у аудитора
+- Iris P0.1 subset/reentrancy и P0.6 runtime SSRC retention.
+- Iris outgoing requestSenders, queued/in-flight targets, explicit senders XML, Active wakeup,
+  destructive notification guards и reentrant newer intent из ACK callback.
+- Psi capability transaction теперь общая для production и regression; pure AvCallPolicy
+  покрывает capability/transmit/direction predicates. Закрытие incoming dialog отвергает call.
+- psimedia construction cleanup, directional caps и owner-thread delivery.
+- P1a isolated tests: packet semantics/statistics/SR, periodic RTCP, bounded delivery и teardown.
+- Production bridge wiring (62643dc), negotiated PT на payloader, raw Opus format отдельно
+  от RTP clock/channels, disabled GstRtpChannel::write mutex fix (3d715ae).
+- Late live input attach/detach/reattach и production sender regression добавлены (b4139cb).
+  Это не закрытие всей privacy/hotplug/receive/A/V матрицы.
 
-Guarded subset cleanup, cancellation-wins и отклонение пустого initial answer сохранены.
-startAcceptedContents пропускает исчезнувшие contents; Session cancellation/deletion прерывает
-batch. Initial activation требует surviving nonterminal content исходного snapshot;
-empty Session завершается, поздний content-accept не повторяет activated.
+### A1 [P1] Crossed content-modify не сходится к одному negotiated state
 
-tests/jingle/sessionacceptsubset.cpp покрывает удаление до dispatch, self/sibling deletion
-из start, удаление всех, terminate/delete Session и поздний multi-content accept.
-Тест падал до исправления; полный набор после patch — 21/21 у аудитора.
-Сначала обеспечить доступность готового patch в GitHub, затем подтвердить CI на его SHA.
+IRIS/src/xmpp/xmpp-im/jingle-application.cpp, incomingContentModify и outgoing ACK;
+jingle-session.cpp, handleIncomingContentModify.
 
-### P0.2 — Psi capability transaction реализована; проверить CI и полноту теста
+При двух in-flight противоположных requests обе стороны применяют peer update, затем
+каждая успешным ACK восстанавливает собственное requested значение. Результат — разные
+senders без оставшегося update. Session dispatcher не проверяет конфликт content-modify.
+Новые тесты проверяют supersession, но не два peers с одновременным действием.
 
-Исправление 19ad0393, regression 6160d849, CI wiring 748cab22/9421bd0e.
-Файлы PSI/src/avcall/avcall.cpp, tests/avcall/backend-lifecycle/tst_capability_refresh.cpp,
-его CMakeLists.txt, packaging/windows/build_profile_msvc.ps1.
+Решение: применить existing-session tie-break XEP-0166 §7.2.16 — initiator выигрывает.
+Разрешать конфликт до peer notification/изменения media policy, вернуть conflict/tie-break
+для проигрывающего действия. На responder проигравший ACK не должен перезаписать принятое
+решение initiator. Разделить проигравшую transaction и действительно более новый local intent,
+не стирать последний запрос и не устраивать бесконечный обмен contrary requests.
 
-AvCallManager отключает независимую подписку PsiAccount, устанавливает новый provider
-до updateFeatures; namespaces задаются до первого refresh. Presence обновляется при смене
-advertised media set, backend-only изменение не должно создавать лишний broadcast.
+Добавить two-Session dispatcher-level regression, не только вызовы Application напрямую:
+оба роли, один и несколько contents, IQ success/error order, crossed identical/different
+directions, terminal/removal во время ACK. Проверить одинаковый итоговый state и packet gates.
+Ссылка: https://xmpp.org/extensions/xep-0166.html#def-action-tie
 
-Проверить: audio+video → audio-only → unavailable → available; initial async probe;
-соответствие discovery/caps hash/provider snapshot; неизменный media set при смене backend;
-сохранение provider snapshot у живых sessions. Убедиться, что regression проверяет реальный
-порядок integration, а не только его копию в тесте. CI modern и применимый legacy профиль.
+В аудите временный Application-level reproducer с реальными ACK callbacks подтвердил
+divergence. Dispatcher-level отсутствие tie-break сверено по коду; two-peer runtime ещё
+не проверен. Перенести сценарий в постоянный integration test, не считать временный файл CI gate.
 
-### P0.3 — construction cleanup реализован; подтвердить обе сборочные конфигурации
+### A2 [P2] Psi policy target остаётся pending после IQ error
 
-MEDIA/gstprovider/rtpsessionbridge.cpp: 6444231 заменяет проблемные goto на early-return
-cleanup; отдельно освобождает unparented элементы, включая session/pipeline.
-Смежные fixes 80d8c23/9f125c7/57ad8e9 исправляют build integration.
+PSI/src/avcall/avcall.cpp: syncAudioDirection/applicationSendersChanged;
+avcallpolicy.h: shouldRequestSenders. IRIS/Application ACK callback.
 
-Не считать bridge всё ещё некомпилируемым по старому cbf3365.
-Проверить CI с PSIMEDIA_BUILD_TESTS=OFF и ON, создание настоящего provider;
-partial factory failure, request-pad/link failure и повторный cleanup.
-Различать ownership до/после gst_bin_add_many; не исключать файл из production build ради green.
+Iris сбрасывает _requestedSenders после error неизменённого запроса, но не уведомляет Psi
+о завершении. audioPolicyTarget очищается только при совпадающем sendersChanged.
+Сценарий: receive-only → mic available → Both request → IQ error; повторная синхронизация
+с тем же desired Both подавляется, хотя Iris уже ничего не отправляет/не ждёт.
 
-### P0.4 — owner-thread delivery реализована; проверить гонки и shutdown
+Нужен explicit completion/failure contract с identity/revision запроса либо единый владелец
+pending intent. Нельзя сбрасывать более новый target при завершении старого. Определить
+bounded retry / новый user-device event / явную ошибку; не ретраить бесконечно на каждом
+capabilitiesChanged. Не выдавать requestSenders()==true за подтверждение peer.
+Тест должен связывать реальный Iris ACK callback с production policy/controller и проверять
+success, failure, timeout, supersession и повторный event. Pure boolean matrix недостаточна.
 
-MEDIA/gstprovider/rtpsessionbridge.{h,cpp}: 65aef35/45d8d53; regression 02ab467.
-Bridge теперь QObject. Управление и user handlers — owner thread; streaming callbacks
-ставят данные в bounded queues. Есть generation invalidation, mutex, QPointer guards;
-GstBuffer для очереди получает собственный ref. Больше не описывать его как plain object
-с прямыми вызовами пользовательского кода из streaming thread.
+Временный reproducer на реальном Iris callback + Psi AvCallPolicy подтвердил suppression
+после failure. Штатный policy.cpp отдельно проходит: комбинация уровней в нём не покрыта.
 
-Проверить код и CI scenarios:
+### A3 [P1 privacy, оставшийся старый gap] Live/file switch оставляет прежний capture source
 
-- stop/delete из delivery callback, no access after deletion и никаких held locks при callback;
-- stop/restart с queued old-generation data; stale continuation не трогает новое поколение;
-- concurrent sendRtp/receivePacket против stop при живом объекте;
-- destruction только owner thread, после прекращения внешних producer calls;
-- pipeline quiescence до освобождения callback target, request pads и buffer refs;
-- ограничение очередей и fair/bounded delivery: bounded backlog сам по себе не гарантирует,
-  что drain loop не монополизирует owner event loop при постоянном producer;
-- все очереди, включая appsrc/appsink, а не только handoff, имеют осмысленную pressure policy.
+MEDIA/gstprovider/rtpworker_devices.cpp: setInputDevices; rtpworker.cpp: setupSendRecv;
+gstrtpsessioncontext.cpp: setFileInput/setFileDataInput/setAudioInputDevice.
 
-Это checklist, а не утверждение о найденных новых дефектах.
-ASan/UBSan и отдельный TSan CI run желательны до production integration.
-Не подавлять reports blanket suppression и не объявлять unsupported sanitizer успешным.
+Rebuild выполняется только если и прежний, и новый source — live (пустые infile/indata).
+При live microphone → file/data выбор новых полей не пересоздаёт существующий sendbin:
+setupSendRecv пропускает startSend, поэтому старый mic может продолжать capture/output.
+Обратный переход тоже оставляет старый источник. Это не новая доказанная регрессия b4139cb,
+но privacy-цель нового механизма не закрыта для публичного source-selection API.
 
-### P0.5 — directional caps разделены; проверить реальные packet semantics
+Сравнивать полноценную source identity/mode (none/live/file/data), не только ain/vin.
+Перед commit нового режима отозвать старый capture/output, затем применить новый либо
+остаться без capture с явной ошибкой. Если live file switching пока не поддерживается —
+явно отказать и прекратить старый capture, не молча сохранить mic.
+Regression: nonfinite live source → file → live, file-data замена, invalid new source,
+detach, rapid updates, cancel во время rebuild. Проверять остановку/освобождение source,
+а не только отсутствие RTP: pauseAudio сам по себе лишь packet gate.
 
-03bafab/18ddfee + regression 8e76d8a.
-MEDIA/gstprovider/rtpsessionbridge.cpp хранит localPayloadCaps_, remotePayloadCaps_ и
-нормализованный общий payloadCaps_ для rtpsession request-pt-map.
+### A4 [P2 architecture/coverage] Hotplug reset слишком широк для заявленной независимости media
 
-Проверить допустимую асимметрию fmtp, reject несовместимого codec/rate, rollback без
-повреждения предыдущей конфигурации, update while running и lock ordering при clear-pt-map.
-Проверять реальный PT/SSRC/clock-rate/report result, не только bool setPayloads.
-Не подменять codec-specific negotiation общим равенством caps или потерей параметров.
+setInputDevices вызывает cleanup(), который удаляет sendbin И recvbin, audio/video sources,
+audio sink и меняет clocks. Смена одного mic затрагивает playback и video, а не только input.
+Нынешний sender test не проверяет receive, соседнее media или физическое закрытие mic;
+finite first source уже достигает EOS до detach, поэтому это слабый privacy oracle.
 
-### P0.6 — runtime SSRC retention закрыто в Iris
+Не объявлять бесшовный hotplug по этому тесту. Предпочтительно выделить controlled
+send/source lifecycle и сохранять unaffected receive/video; если общий reset пока необходим,
+задокументировать interruption и протестировать восстановление всех направлений.
+Согласовать clocks/base-time, SSRC sequence/timestamp continuity либо явную смену SSRC,
+SR state, queued packets/generation и bounded failure. Не сохранять rtpsession state
+формально, игнорируя реальный reset payloader.
 
-8461f5e + tests a1ae1ac, jingle_rtprouter прошёл у аудитора.
-Runtime registration переживает удаление static declaration того же content.
-Сохранить collisions, bounds, idempotence, transactional configure и независимое unregister.
-Это не доказательство production BUNDLE.
+Production regression: непрерывные receive audio + send video во время mic swap/detach;
+callback/element state подтверждает закрытие старого source; no-capture negotiation;
+invalid replacement; отсутствие RTP после revocation и возобновление нового media.
+Не переносить этот teardown policy в Iris или создавать второй media engine.
 
-### P0.7 — lifetime теста исправлен; сохранить failure-path проверки
+### Дополнительные обязательные проверки P1b, не новые доказанные дефекты
 
-34ecb00: callback-owned state объявляется до bridge и переживает его destruction.
-Дополнительные owner-thread тесты покрывают shutdown. Проверить early return после start,
-feed/wait failure и teardown под sanitizer, а не только happy path.
+- Legacy byte edge теряет исходные GstBuffer timestamps; bridge ставит time-of-arrival.
+  Проверить SR RTP↔NTP mapping и A/V sync под queueing/encoder delay и hotplug.
+- Bounded handoff queues не ограничивают appsrc/appsink целиком; drain loop должен давать
+  owner event loop обрабатывать stop/timers при постоянном producer. Проверить byte/age limits.
+- Input ID replacement без изменения capability booleans и явная смена настроек пользователем:
+  проверить, что реальные notifications доходят до AvCall, а не только pure predicate.
+- Runtime bridge bus error должен доходить до provider error path; PLAYING success не
+  доказательство дальнейшего здоровья pipeline.
+- Pending/new media в уже active call не должно включать capture до собственного
+  authenticated Application Active. Проверить реальный controller, не только shouldTransmit.
+- SharedRtcp/FCI/XR и shared association остаются P2, не закрыты packet-type tests.
 
-### Общий P0/P1a gate
+### Housekeeping Sol — выполнена локально после аудита
 
-Новые commits e8426c2/3e01197/ab15f68 добавляют diagnostics и packet-semantics regression
-MEDIA/tests/rtpsessionbridge_packets.cpp. c9e3ff0/30fd6d6 уточняют ожидание RTCP scheduler.
-Проверить, что оба теста реально зарегистрированы и исполнены в CI на новых hashes.
-Не ослаблять RTCP assertion ради scheduler timing.
-
-SharedRtcp остаётся data type, а не production media ingress. Проверка FCI/XR references
-и live group delivery относятся к P2, не закрываются тестом общего packet-type case.
-До production нужны подтверждённые P0 regressions и P1a runtime evidence, а не только build.
+Удалена неиспользуемая cleanupSend declaration, license headers rtpworker.h/rwcontrol.cpp
+возвращены к исходному тексту без несвязанных правок. CTest timeout для
+rtpsessioncontext_sender увеличен с 20 до 45 s; внутренние ожидания не менялись.
+Проверить публикацию этих локальных изменений на GitHub, не дублировать patch.
+Общий deadline внутри теста и actual CI execution остаются verification задачами;
+увеличенный timeout сам по себе не исправляет deadlock и не доказывает прохождение теста.
 
 ## 3. Архитектурные инварианты при дальнейшей работе
 
@@ -211,7 +246,7 @@ SharedRtcp остаётся data type, а не production media ingress. Про�
 
 ### P1a. Изолированный RTP/RTCP bridge: доказать runtime поведение
 
-Через CI подтвердить tests ON и исполнение обоих актуальных bridge regression targets из CMakeLists.txt. Сначала оценить уже добавленное покрытие P0.3–P0.7, расширять только реальные пробелы. До прохождения этих проверок production RtpWorker не подключать.
+Через CI подтвердить tests ON и исполнение актуальных bridge/periodic/backpressure/packet и production sender targets из CMakeLists.txt. Сначала оценить уже добавленное покрытие, расширять только реальные пробелы. Production wiring уже есть: до закрытия gate не считать его готовым к release.
 
 Минимальные наблюдения:
 
@@ -227,11 +262,11 @@ send-rtcp-full может планировать отправку по прав�
 
 Для cross-repo gate через #969 печатать фактические hashes и версии. Не запускать workflow на старых pins и не приписывать его результат новому HEAD.
 
-### P1b. Production RtpWorker integration без transport topology
+### P1b. Довести существующую production integration без transport topology
 
 Сначала прочитать MEDIA/gstprovider/rtpworker.{h,cpp}, pipeline.*, bins.*, gstrtpsessioncontext.*, gstrtpchannel.* и rwcontrol.*. Сделать краткую карту существующих send/receive pipelines, ownership и потоков до правки.
 
-Предлагаемые изменения — расширение этих файлов и RtpSessionBridge, не новая независимая media system:
+Wiring уже реализован. Сверить перечисленный контракт с кодом и закрыть A3/A4, не подключать bridge повторно:
 
 - Один rtpsession на media type, общий для encoding output и network input. Не создавать отдельную session для send и recv.
 - Encoder/payloader RTP → bridge send; bridge network output → semantic PRtpPacket; network input Type::Rtp/Type::Rtcp → соответствующий bridge ingress; receive RTP → существующий receive pipeline.
@@ -449,7 +484,7 @@ flowchart TD
    параллельную инфраструктуру без необходимости. Cross-repo #969 остаётся staging gate.
 4. Job должен печатать Psi/Iris/psimedia SHA (включая фактический submodule override),
    Qt/QCA/provider/libSRTP/GStreamer versions, build options и список CTest tests.
-   Не считать checkout старого Iris submodule проверкой нового acceptance patch.
+   Не считать checkout старого Iris submodule проверкой новых sender fixes.
 5. Build QCA3+SRTP Iris standalone tests и реальные psimedia targets; CTest
    --output-on-failure, повторы lifecycle/race tests по необходимости.
    Установку Qt/GStreamer/libSRTP выполняет runner workflow; без hardcoded путей машины автора.
@@ -462,9 +497,8 @@ flowchart TD
    Не выдумывать URL/результаты. Если connector не даёт logs/dispatch — запросить
    конкретный run или действие пользователя, не объявлять отсутствие Qt локально блокером проекта.
 
-Локальный результат аудитора Iris 21/21 — полезная отдельная запись, но не замена CI для
-текущей cross-repo комбинации. Новые Psi/psimedia tests в этом обсуждении ещё не запускались
-аудитором; CI результаты предстоит подтвердить.
+Локальные результаты аудитора Iris — полезная отдельная запись, но не замена CI для
+текущей cross-repo комбинации. Новые psimedia tests не запущены из-за отсутствующего development dependency; CI результаты предстоит подтвердить.
 
 ### Production и ручная проверка
 
@@ -517,7 +551,7 @@ Performance измерять отдельно: media encoding CPU, SRTP packet p
 
 ## 8. Как выполнять и сдавать работу
 
-Начать с remote heads и CI evidence через connector. Подтвердить новые P0 исправления и наличие локального acceptance patch аудитора на GitHub; исправлять только выявленные пробелы. Затем P1a isolated runtime → P1b production worker → P1c native peer checks. P2 live BUNDLE, P3 JMI, P4 feedback/control, P5 recovery и P6 release выполняются по зависимостям наблюдённого peer. Не возвращаться к созданию уже существующих interfaces с нуля.
+Начать с remote heads и CI evidence через connector. Подтвердить текущие CI gates; закрыть A1–A4 и verification gaps, не повторять опубликованные subset fixes. Затем P1a isolated runtime → P1b production worker → P1c native peer checks. P2 live BUNDLE, P3 JMI, P4 feedback/control, P5 recovery и P6 release выполняются по зависимостям наблюдённого peer. Не возвращаться к созданию уже существующих interfaces с нуля.
 
 Каждый завершённый подпункт сопровождать:
 

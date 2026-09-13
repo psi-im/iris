@@ -639,7 +639,18 @@ changing negotiation state or replacing its transport. This notification is sign
 permission to activate media capture: the media adapter must independently enforce local consent.
 Callbacks must not run nested event loops. No `content-accept` is generated in response.
 An omitted `senders` means `both`; explicit `none` disables both sending directions.
-There is no dedicated outgoing direction-change API yet.
+`Application::requestSenders()` requests an outgoing direction change. Before the initial
+content stanza is consumed it updates the proposal; afterwards it retains the latest intent
+until Active and sends content-modify with an explicit senders attribute. The negotiated
+value changes on successful IQ acknowledgement. A newer request can supersede an in-flight
+target; a failed unchanged target is discarded rather than retried indefinitely.
+`sendersChanged` reports local and remote changes; `sendersChangedByPeer` distinguishes
+incoming modifications. Neither signal grants capture consent.
+
+Current limitations: overlapping peer/local content-modify actions do not implement the
+existing-session tie-break rule, and there is no explicit failed-request completion signal
+for a client that retains its own policy target. See the current development-plan audit gate
+before relying on convergence under crossed requests or retry after IQ failure.
 
 `description-info` validates content identities and description namespaces before dispatching to
 `Application::incomingDescriptionInfo()`. This hook processes advisory parameters without
