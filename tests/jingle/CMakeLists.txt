@@ -53,6 +53,10 @@ add_executable(jingle_transportreplacematrix_test transportreplacematrix.cpp)
 target_link_libraries(jingle_transportreplacematrix_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
     Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
 add_test(NAME jingle_transportreplace_matrix COMMAND jingle_transportreplacematrix_test)
+add_executable(jingle_transportacceptselfreentrancy_test transportacceptselfreentrancy.cpp)
+target_link_libraries(jingle_transportacceptselfreentrancy_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
+    Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
+add_test(NAME jingle_transportaccept_self_reentrancy COMMAND jingle_transportacceptselfreentrancy_test)
 add_executable(jingle_transportreplacecorrectness_test transportreplacecorrectness.cpp)
 target_link_libraries(jingle_transportreplacecorrectness_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
     Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
