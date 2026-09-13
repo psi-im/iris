@@ -1186,9 +1186,15 @@ namespace XMPP { namespace Jingle {
 
         bool handleIncomingTransportAccept(const QDomElement &jingleEl)
         {
-            QString                                    contentTag(QStringLiteral("content"));
-            QVector<QPair<Application *, QDomElement>> updates;
-            QSet<ContentKey>                           seen;
+            struct ValidatedTransportAccept {
+                QPointer<Application>   application;
+                ContentKey              key;
+                QWeakPointer<Transport> current;
+                QDomElement             transport;
+            };
+            QString                           contentTag(QStringLiteral("content"));
+            QVector<ValidatedTransportAccept> updates;
+            QSet<ContentKey>                  seen;
             for (QDomElement ce = jingleEl.firstChildElement(contentTag); !ce.isNull();
                  ce             = ce.nextSiblingElement(contentTag)) {
                 ContentBase cb(ce);
@@ -1214,7 +1220,8 @@ namespace XMPP { namespace Jingle {
                     qInfo("ignore out of order transport-accept");
                     continue;
                 }
-                updates.append(qMakePair(app, transportEl));
+                updates.append(ValidatedTransportAccept { QPointer<Application>(app), key,
+                                                          app->transport().toWeakRef(), transportEl });
             }
 
             if (seen.isEmpty()) {
@@ -1223,14 +1230,27 @@ namespace XMPP { namespace Jingle {
                 return false;
             }
 
-            for (auto &u : updates) {
-                if (!u.first->incomingTransportAccept(u.second)) {
+            QPointer<Session> session(q);
+            for (const auto &entry : std::as_const(updates)) {
+                if (!session)
+                    return true;
+                auto app              = entry.application;
+                auto currentTransport = entry.current.lock();
+                if (!app || contentList.value(entry.key) != app.data() || !currentTransport
+                    || app->transport() != currentTransport)
+                    continue; // superseded or removed by a previous reentrant callback
+
+                if (!app->incomingTransportAccept(entry.transport)) {
+                    if (!session)
+                        return true;
                     lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,
                                                     XMPP::Stanza::Error::ErrorCond::BadRequest);
                     return false;
                 }
             }
 
+            if (!session)
+                return true;
             planStep();
             return true;
         }
