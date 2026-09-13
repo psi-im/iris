@@ -109,12 +109,16 @@ int main(int argc, char **argv)
 
     {
         TestApplication initial(&session);
-        int directionNotifications = 0;
+        int directionNotifications     = 0;
+        int peerDirectionNotifications = 0;
         QObject::connect(&initial, &J::Application::sendersChanged, &app,
                          [&](J::Origin) { ++directionNotifications; });
+        QObject::connect(&initial, &J::Application::sendersChangedByPeer, &app,
+                         [&](J::Origin) { ++peerDirectionNotifications; });
         check(initial.requestSenders(J::Origin::Responder), "initial direction request rejected");
         check(initial.senders() == J::Origin::Responder, "initial direction was not changed synchronously");
         check(directionNotifications == 1, "initial direction change was not notified");
+        check(peerDirectionNotifications == 0, "local initial direction was reported as peer-originated");
         check(initial.evaluateOutgoingUpdate().action == J::Action::NoAction,
               "initial direction unexpectedly queued content-modify");
     }
@@ -124,9 +128,12 @@ int main(int argc, char **argv)
     {
         TestApplication active(&session, J::Origin::Responder);
         active.activate();
-        int directionNotifications = 0;
+        int directionNotifications     = 0;
+        int peerDirectionNotifications = 0;
         QObject::connect(&active, &J::Application::sendersChanged, &app,
                          [&](J::Origin) { ++directionNotifications; });
+        QObject::connect(&active, &J::Application::sendersChangedByPeer, &app,
+                         [&](J::Origin) { ++peerDirectionNotifications; });
 
         check(active.requestSenders(J::Origin::Both), "active direction request rejected");
         check(active.senders() == J::Origin::Responder, "direction changed before content-modify ACK");
@@ -140,6 +147,7 @@ int main(int argc, char **argv)
         std::get<1>(update)(&success);
         check(active.senders() == J::Origin::Both, "successful content-modify did not commit direction");
         check(directionNotifications == 1, "successful content-modify did not notify direction change once");
+        check(peerDirectionNotifications == 0, "outgoing content-modify ACK was reported as peer-originated");
         check(active.evaluateOutgoingUpdate().action == J::Action::NoAction,
               "successful direction request remained queued");
     }
@@ -147,6 +155,29 @@ int main(int argc, char **argv)
     {
         TestApplication active(&session);
         active.activate();
+        int directionNotifications     = 0;
+        int peerDirectionNotifications = 0;
+        QObject::connect(&active, &J::Application::sendersChanged, &app,
+                         [&](J::Origin) { ++directionNotifications; });
+        QObject::connect(&active, &J::Application::sendersChangedByPeer, &app,
+                         [&](J::Origin) { ++peerDirectionNotifications; });
+
+        active.incomingContentModify(J::Origin::Responder);
+        check(active.senders() == J::Origin::Responder, "incoming content-modify did not change direction");
+        check(directionNotifications == 1, "incoming content-modify did not notify general direction change");
+        check(peerDirectionNotifications == 1, "incoming content-modify did not notify peer-originated change");
+
+        active.incomingContentModify(J::Origin::Responder);
+        check(directionNotifications == 1, "idempotent incoming content-modify notified general change twice");
+        check(peerDirectionNotifications == 1, "idempotent incoming content-modify notified peer change twice");
+    }
+
+    {
+        TestApplication active(&session);
+        active.activate();
+        int peerDirectionNotifications = 0;
+        QObject::connect(&active, &J::Application::sendersChangedByPeer, &app,
+                         [&](J::Origin) { ++peerDirectionNotifications; });
 
         check(active.requestSenders(J::Origin::Responder), "first superseding direction request rejected");
         check(active.evaluateOutgoingUpdate().action == J::Action::ContentModify,
@@ -158,6 +189,7 @@ int main(int argc, char **argv)
         check(active.requestSenders(J::Origin::Both), "newer direction request rejected while IQ was in flight");
         std::get<1>(first)(&success);
         check(active.senders() == J::Origin::Responder, "first ACK did not commit its negotiated direction");
+        check(peerDirectionNotifications == 0, "superseded outgoing ACK was reported as peer-originated");
         check(active.evaluateOutgoingUpdate().action == J::Action::ContentModify,
               "newer direction intent was lost after first ACK");
         auto second = active.takeOutgoingUpdate();
@@ -165,6 +197,7 @@ int main(int argc, char **argv)
               "newer direction did not serialize explicit senders=both");
         std::get<1>(second)(&success);
         check(active.senders() == J::Origin::Both, "newer direction was not committed after ACK");
+        check(peerDirectionNotifications == 0, "newer outgoing ACK was reported as peer-originated");
         check(active.evaluateOutgoingUpdate().action == J::Action::NoAction,
               "superseded direction remained queued");
     }

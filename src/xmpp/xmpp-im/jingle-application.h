@@ -197,6 +197,9 @@ namespace XMPP { namespace Jingle {
                         // takeOutgoingUpdate() eventually
         void stateChanged(State);
         void sendersChanged(Origin);
+        // Emitted only when the negotiated direction changes due to a peer content-modify.
+        // Local proposals and acknowledgements of our own content-modify do not emit it.
+        void sendersChangedByPeer(Origin);
 
     protected:
         State            _state = State::Created;
