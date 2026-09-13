@@ -226,7 +226,7 @@ namespace XMPP { namespace Jingle {
             } else if (_transport->hasUpdates() && _transport->state() == State::ApprovedToSend) {
                 if (_pendingTransportReplace == PendingTransportReplace::Planned) {
                     _update = { Action::TransportReplace, _transportReplaceReason };
-                } else if (inTrReplace) { // both sides already know it's replace. but not accepted yet
+                } else if (inTrReplace) { // both sides already know it's replace. but not accepted yet.
                     _update = { _transport->isLocal() ? Action::TransportInfo : Action::TransportAccept, Reason() };
                 } else
                     _update = { _pad->session()->role() == _creator ? Action::ContentAdd : Action::ContentAccept,
