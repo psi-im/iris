@@ -1,0 +1,113 @@
+name: Apply content-modify IQ lifetime fix
+
+on:
+  push:
+    branches:
+      - automation/fix-jingle-parser
+    paths:
+      - .automation-trigger-contentmodify-iq-lifetime
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: jingle/async-media
+          fetch-depth: 0
+      - name: Bind tie-break lifetime to the Jingle IQ
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(text, old, new, label):
+              if old not in text:
+                  raise SystemExit(f'{label} anchor not found')
+              return text.replace(old, new, 1)
+
+          # Session owns the lifetime of an outgoing Jingle action. Application
+          # callbacks run after the IQ has already completed and therefore must
+          # not keep a tie-break collision alive.
+          h = Path('src/xmpp/xmpp-im/jingle-session.h')
+          text = h.read_text()
+          text = replace_once(
+              text,
+              '                    return context.incomingAction == Action::ContentModify && *contentModifyInFlight_ > 0;\n',
+              '                    return context.incomingAction == Action::ContentModify && outgoingActionInFlight_\n'
+              '                        && *outgoingActionInFlight_ == Action::ContentModify;\n',
+              'resolver conflict')
+          old = '''        // Application callbacks keep this token alive until the corresponding\n        // content-modify IQ has completed, even if the Application is removed first.\n        std::shared_ptr<void> trackContentModify()\n        {\n            ensureTieBreakResolvers();\n            auto counter = contentModifyInFlight_;\n            ++*counter;\n            return std::shared_ptr<void>(counter.get(), [counter](int *) { --*counter; });\n        }\n\n'''
+          new = '''        // One outgoing Jingle IQ is serialized at a time. Tie-break lifetime\n        // follows that IQ, not the Application callbacks invoked after its result.\n        void outgoingActionStarted(Action action)\n        {\n            ensureTieBreakResolvers();\n            outgoingActionInFlight_ = action;\n        }\n\n        void outgoingActionFinished(Action action)\n        {\n            if (!outgoingActionInFlight_ || *outgoingActionInFlight_ != action)\n                return;\n            outgoingActionInFlight_.reset();\n            tieBreakResolver_.notifyAll(TieBreakEvent::LocalCompleted);\n        }\n\n'''
+          text = replace_once(text, old, new, 'trackContentModify')
+          text = replace_once(
+              text,
+              '        std::shared_ptr<int>           contentModifyInFlight_ = std::make_shared<int>(0);\n',
+              '        std::optional<Action>           outgoingActionInFlight_;\n',
+              'contentModifyInFlight member')
+          h.write_text(text)
+
+          a = Path('src/xmpp/xmpp-im/jingle-application.cpp')
+          text = a.read_text()
+          text = replace_once(
+              text,
+              '            const auto requested   = *_requestedSenders;\n            auto       transaction = _pad->session()->trackContentModify();\n',
+              '            const auto requested = *_requestedSenders;\n',
+              'application transaction creation')
+          text = replace_once(
+              text,
+              '                                    [this, requested, transaction = std::move(transaction)](Task *task) mutable {\n',
+              '                                    [this, requested](Task *task) {\n',
+              'application transaction capture')
+          text = replace_once(text, '                                        transaction.reset();\n', '', 'transaction reset')
+          a.write_text(text)
+
+          s = Path('src/xmpp/xmpp-im/jingle-session.cpp')
+          text = s.read_text()
+          text = replace_once(
+              text,
+              '            QObject::connect(jt, &JT::finished, q, [jt, jingle, callback, this]() {\n                waitingAck = false;\n                if (callback) {\n',
+              '            QObject::connect(jt, &JT::finished, q, [jt, jingle, callback, this]() {\n                waitingAck = false;\n                q->outgoingActionFinished(jingle.action());\n                if (callback) {\n',
+              'sendJingle completion')
+          text = replace_once(
+              text,
+              '            waitingAck = true;\n            jt->go(true);\n',
+              '            waitingAck = true;\n            q->outgoingActionStarted(action);\n            jt->go(true);\n',
+              'sendJingle start')
+          text = replace_once(
+              text,
+              '        void setSessionFinished()\n        {\n            state = State::Finished;\n',
+              '        void setSessionFinished()\n        {\n            q->outgoingActionInFlight_.reset();\n            state = State::Finished;\n',
+              'session finish cleanup')
+          s.write_text(text)
+
+          t = Path('tests/jingle/contentmodifyrace.cpp')
+          text = t.read_text()
+          text = replace_once(
+              text,
+              '    auto initiatorUpdate = initiatorApp->takeOutgoingUpdate();\n    auto responderUpdate = responderApp->takeOutgoingUpdate();\n\n    check(initiator.shouldTieBreakIncoming(J::Action::ContentModify),\n',
+              '    auto initiatorUpdate = initiatorApp->takeOutgoingUpdate();\n    auto responderUpdate = responderApp->takeOutgoingUpdate();\n    initiator.outgoingActionStarted(J::Action::ContentModify);\n    responder.outgoingActionStarted(J::Action::ContentModify);\n\n    check(initiator.shouldTieBreakIncoming(J::Action::ContentModify),\n',
+              'crossed action start')
+          old = '''    if (responderResultFirst) {\n        acknowledge(responderUpdate, failure);\n        acknowledge(initiatorUpdate, success);\n    } else {\n        acknowledge(initiatorUpdate, success);\n        acknowledge(responderUpdate, failure);\n    }\n'''
+          new = '''    if (responderResultFirst) {\n        responder.outgoingActionFinished(J::Action::ContentModify);\n        acknowledge(responderUpdate, failure);\n        initiator.outgoingActionFinished(J::Action::ContentModify);\n        acknowledge(initiatorUpdate, success);\n    } else {\n        initiator.outgoingActionFinished(J::Action::ContentModify);\n        acknowledge(initiatorUpdate, success);\n        responder.outgoingActionFinished(J::Action::ContentModify);\n        acknowledge(responderUpdate, failure);\n    }\n'''
+          text = replace_once(text, old, new, 'crossed completion order')
+          old = '''        auto audioUpdate = audio->takeOutgoingUpdate();\n        auto videoUpdate = video->takeOutgoingUpdate();\n        check(initiator.shouldTieBreakIncoming(J::Action::ContentModify),\n              "multi-content collision did not enable resolver");\n        acknowledge(audioUpdate, &success);\n        check(initiator.shouldTieBreakIncoming(J::Action::ContentModify),\n              "collision cleared while sibling content callback was still pending");\n        delete video;\n        check(initiator.shouldTieBreakIncoming(J::Action::ContentModify),\n              "removed Application prematurely cleared collision lifetime");\n        std::get<1>(videoUpdate) = {};\n        check(!initiator.shouldTieBreakIncoming(J::Action::ContentModify),\n              "destroyed pending callback left stale collision state");\n'''
+          new = '''        auto audioUpdate = audio->takeOutgoingUpdate();\n        auto videoUpdate = video->takeOutgoingUpdate();\n        initiator.outgoingActionStarted(J::Action::ContentModify);\n        check(initiator.shouldTieBreakIncoming(J::Action::ContentModify),\n              "multi-content collision did not enable resolver");\n        delete video;\n        std::get<1>(videoUpdate) = {};\n        check(initiator.shouldTieBreakIncoming(J::Action::ContentModify),\n              "removed Application prematurely cleared the still-pending IQ collision");\n        initiator.outgoingActionFinished(J::Action::ContentModify);\n        check(!initiator.shouldTieBreakIncoming(J::Action::ContentModify),\n              "completed multi-content IQ left stale collision state");\n        acknowledge(audioUpdate, &success);\n'''
+          text = replace_once(text, old, new, 'multi-content lifetime')
+          t.write_text(text)
+          PY
+      - name: Verify and push
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/xmpp/xmpp-im/jingle-session.h src/xmpp/xmpp-im/jingle-session.cpp \
+                  src/xmpp/xmpp-im/jingle-application.cpp tests/jingle/contentmodifyrace.cpp
+          git commit -m 'Bind Jingle tie-break lifetime to IQ transactions'
+          git push origin HEAD:jingle/async-media
