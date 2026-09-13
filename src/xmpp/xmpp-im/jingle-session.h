@@ -72,7 +72,8 @@ namespace XMPP { namespace Jingle {
             if (!callbacks.conflicts || !callbacks.resolve)
                 return 0;
             const auto id = ++nextRegistration_;
-            resolvers_[action].append(RegisteredResolver { id, std::move(callbacks) });
+            resolvers_[action].append(
+                RegisteredResolver { id, std::make_shared<Callbacks>(std::move(callbacks)) });
             return id;
         }
 
@@ -95,14 +96,15 @@ namespace XMPP { namespace Jingle {
 
         Decision resolve(const Context &context)
         {
-            // Copy registrations so callbacks may safely register/unregister
-            // other resolvers while this collision is being decided.
+            // Copy only shared callback owners so a callback may safely
+            // unregister itself while its mutable state persists across calls.
             const auto entries = resolvers_.value(context.incomingAction);
             for (const auto &entry : entries) {
-                if (!entry.callbacks.conflicts(context))
+                const auto callbacks = entry.callbacks;
+                if (!callbacks || !callbacks->conflicts(context))
                     continue;
 
-                auto plan = entry.callbacks.resolve(context);
+                auto plan = callbacks->resolve(context);
                 if (plan.immediate)
                     plan.immediate();
 
@@ -125,9 +127,13 @@ namespace XMPP { namespace Jingle {
             if (it == resolutions_.end())
                 return;
 
-            auto advance = it->advance;
-            if (!advance || advance(event) == ResolutionState::Finished)
-                resolutions_.remove(resolution);
+            // Remove the machine while invoking external code. This makes
+            // reentrant notifications harmless and, unlike copying std::function,
+            // preserves mutable state captured inside the callback across events.
+            auto active = std::move(it.value());
+            resolutions_.erase(it);
+            if (active.advance && active.advance(event) == ResolutionState::Waiting)
+                resolutions_.insert(resolution, std::move(active));
         }
 
         void notify(Action action, Event event)
@@ -146,8 +152,8 @@ namespace XMPP { namespace Jingle {
 
     private:
         struct RegisteredResolver {
-            Registration registration;
-            Callbacks    callbacks;
+            Registration               registration;
+            std::shared_ptr<Callbacks> callbacks;
         };
         struct ActiveResolution {
             Action                                      action;
@@ -268,32 +274,20 @@ namespace XMPP { namespace Jingle {
                 return;
             tieBreakResolversReady_ = true;
 
-            auto registerInitiatorWins = [this](Action action, std::function<bool()> conflicts) {
-                tieBreakResolver_.registerResolver(
-                    action,
-                    TieBreakResolver::Callbacks {
-                        [conflicts = std::move(conflicts)](const TieBreakResolver::Context &) { return conflicts(); },
-                        [this](const TieBreakResolver::Context &) {
-                            TieBreakResolver::Plan plan;
-                            plan.incoming = role() == Origin::Initiator ? TieBreakResolver::IncomingDisposition::Reject
-                                                                       : TieBreakResolver::IncomingDisposition::Pass;
-                            return plan;
-                        } });
-            };
-
-            registerInitiatorWins(Action::ContentModify,
-                                  [this]() { return *contentModifyInFlight_ > 0; });
-
-            registerInitiatorWins(Action::TransportReplace, [this]() {
-                for (auto app : contentList()) {
-                    if (!app)
-                        continue;
-                    auto transport = app->transport();
-                    if (transport && transport->isLocal() && transport->state() == State::Unacked)
-                        return true;
-                }
-                return false;
-            });
+            // First consumer of the generic framework. transport-replace keeps
+            // its existing handler for now because its tie-break path also
+            // performs transport-selection side effects that need the incoming
+            // stanza in the resolver context before it can be migrated safely.
+            tieBreakResolver_.registerResolver(
+                Action::ContentModify,
+                TieBreakResolver::Callbacks {
+                    [this](const TieBreakResolver::Context &) { return *contentModifyInFlight_ > 0; },
+                    [this](const TieBreakResolver::Context &) {
+                        TieBreakResolver::Plan plan;
+                        plan.incoming = role() == Origin::Initiator ? TieBreakResolver::IncomingDisposition::Reject
+                                                                   : TieBreakResolver::IncomingDisposition::Pass;
+                        return plan;
+                    } });
         }
 
         // Application callbacks keep this token alive until the corresponding
@@ -327,9 +321,9 @@ namespace XMPP { namespace Jingle {
         static bool validBundleAnswer(const QList<ContentGroup> &offer, const QList<ContentGroup> &answer);
         bool        validLocalGroupings() const;
 
-        std::shared_ptr<int>      contentModifyInFlight_ = std::make_shared<int>(0);
-        mutable TieBreakResolver  tieBreakResolver_;
-        mutable bool              tieBreakResolversReady_ = false;
+        std::shared_ptr<int>     contentModifyInFlight_ = std::make_shared<int>(0);
+        mutable TieBreakResolver tieBreakResolver_;
+        mutable bool             tieBreakResolversReady_ = false;
 
         class Private;
         std::unique_ptr<Private> d;
