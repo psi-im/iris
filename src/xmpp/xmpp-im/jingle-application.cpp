@@ -408,19 +408,29 @@ namespace XMPP { namespace Jingle {
                                         selectNextTransport();
                                     } };
         }
-        case Action::TransportAccept:
+        case Action::TransportAccept: {
             Q_ASSERT(_transport->hasUpdates());
+            const auto accepted = _transport.toWeakRef();
             std::tie(transportEl, transportCB) = wrapOutgoingTransportUpdate();
             contentEl.appendChild(transportEl);
-            return OutgoingUpdate { updates, [this, transportCB](Task *task) {
-                                       transportCB(task);
-                                       if (task->success()) {
-                                           _pendingTransportReplace = PendingTransportReplace::None;
-                                           if (_state == State::Connecting || _state == State::Active)
-                                               _transport->start();
-                                       }
-                                       // else transport will report failure from its callback => select next tran.
-                                   } };
+            return OutgoingUpdate { updates,
+                                    [this, guard = QPointer<Application>(this), accepted, transportCB](Task *task) {
+                                        transportCB(task);
+                                        if (!guard)
+                                            return;
+                                        auto expected = accepted.lock();
+                                        if (!expected || _transport != expected
+                                            || _pendingTransportReplace != PendingTransportReplace::InProgress)
+                                            return;
+
+                                        if (task && task->success()) {
+                                            _pendingTransportReplace = PendingTransportReplace::None;
+                                            if (_state == State::Connecting || _state == State::Active)
+                                                expected->start();
+                                        }
+                                        // Else the transport callback owns failure/fallback handling.
+                                    } };
+        }
         default:
             break;
         }
