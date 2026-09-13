@@ -327,13 +327,13 @@ static void testResponderAcceptsInitiatorWinner(Client &client)
     auto old = makeTransport(session, J::Origin::Responder, J::State::Unacked, QStringLiteral("old"));
     auto selector = std::make_unique<TestSelector>();
     TestSelector *selectorRaw = nullptr;
-    auto app = addApplication(session, QStringLiteral("audio"), J::Origin::Initiator, old, std::move(selector),
+    auto app = addApplication(session, QStringLiteral("audio"), J::Origin::Responder, old, std::move(selector),
                               &selectorRaw);
 
     QDomDocument doc;
     const bool ok = session.updateFromXml(
         J::Action::TransportReplace,
-        makeReplace(doc, { { QStringLiteral("audio"), J::Origin::Initiator,
+        makeReplace(doc, { { QStringLiteral("audio"), J::Origin::Responder,
                              TestTransportManager::namespaceUri(), QStringLiteral("winner") } }));
     check(ok && !isTieBreak(session), "responder rejected initiator transport-replace winner");
     check(app->transport().data() != old.data() && app->transport()->creator() == J::Origin::Initiator,
