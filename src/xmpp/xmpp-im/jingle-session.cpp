@@ -491,7 +491,7 @@ namespace XMPP { namespace Jingle {
             auto    tel = contentEl.firstChildElement(QLatin1String("transport"));
             QString transportNS;
             if (tel.isNull() || (transportNS = tel.namespaceURI()).isEmpty()) {
-                TransportResult { false, Reason::NoReason, QSharedPointer<Transport>() };
+                return TransportResult { false, Reason::NoReason, QSharedPointer<Transport>() };
             }
             auto trPad = q->transportPadFactory(transportNS);
             if (!trPad) {
