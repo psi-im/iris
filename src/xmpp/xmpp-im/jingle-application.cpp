@@ -377,21 +377,37 @@ namespace XMPP { namespace Jingle {
             std::tie(transportEl, transportCB) = wrapOutgoingTransportUpdate();
             contentEl.appendChild(transportEl);
             return OutgoingUpdate { updates, transportCB };
-        case Action::TransportReplace:
+        case Action::TransportReplace: {
             Q_ASSERT(_transport->hasUpdates());
+            const auto replacement = _transport.toWeakRef();
             std::tie(transportEl, transportCB) = wrapOutgoingTransportUpdate();
             contentEl.appendChild(transportEl);
-            if (_pendingTransportReplace == PendingTransportReplace::Planned) {
+            if (_pendingTransportReplace == PendingTransportReplace::Planned)
                 _pendingTransportReplace = PendingTransportReplace::NeedAck;
-            }
             if (_update.reason.isValid())
                 updates << _update.reason.toXml(doc);
-            return OutgoingUpdate { updates, [this, transportCB](Task *task) {
-                                       transportCB(task);
-                                       if (task->success())
-                                           _pendingTransportReplace = PendingTransportReplace::InProgress;
-                                       // else transport will report failure from its callback => select next tran.
-                                   } };
+            return OutgoingUpdate { updates,
+                                    [this, guard = QPointer<Application>(this), replacement, transportCB](Task *task) {
+                                        transportCB(task);
+                                        if (!guard)
+                                            return;
+                                        auto expected = replacement.lock();
+                                        if (!expected || _transport != expected
+                                            || _pendingTransportReplace != PendingTransportReplace::NeedAck)
+                                            return;
+
+                                        if (task && task->success()) {
+                                            _pendingTransportReplace = PendingTransportReplace::InProgress;
+                                            return;
+                                        }
+
+                                        // The peer did not acknowledge this replacement. Do not leave
+                                        // the application blocked in NeedAck; move to the next local
+                                        // candidate (or content-remove if none remain).
+                                        _pendingTransportReplace = PendingTransportReplace::Planned;
+                                        selectNextTransport();
+                                    } };
+        }
         case Action::TransportAccept:
             Q_ASSERT(_transport->hasUpdates());
             std::tie(transportEl, transportCB) = wrapOutgoingTransportUpdate();
@@ -481,14 +497,34 @@ namespace XMPP { namespace Jingle {
         return !_transport || _transportSelector->compare(t, _transport) > 0;
     }
 
-    void Application::incomingTransportAccept(const QDomElement &el)
+    bool Application::transportReplaceAwaitingAck() const
     {
-        if (_pendingTransportReplace != PendingTransportReplace::InProgress) {
-            return; // ignore out of order
-        }
+        return _pendingTransportReplace == PendingTransportReplace::NeedAck;
+    }
+
+    bool Application::incomingTransportAccept(const QDomElement &el)
+    {
+        if (_pendingTransportReplace != PendingTransportReplace::InProgress || !_transport)
+            return false;
+        if (!_transport->update(el))
+            return false;
+
         _pendingTransportReplace = PendingTransportReplace::None;
-        if (_transport->update(el) && _state >= State::Connecting)
+        if (_state >= State::Connecting)
             _transport->start();
+        return true;
+    }
+
+    bool Application::incomingTransportReject()
+    {
+        if (_pendingTransportReplace != PendingTransportReplace::InProgress || !_transport || !_transport->isLocal())
+            return false;
+
+        // The peer rejected the current proposal. Any selected successor is a
+        // fresh proposal and must be signalled with another transport-replace.
+        _pendingTransportReplace = PendingTransportReplace::Planned;
+        selectNextTransport();
+        return true;
     }
 
     bool Application::isTransportReplaceEnabled() const { return true; }
