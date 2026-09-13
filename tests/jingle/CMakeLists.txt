@@ -57,6 +57,10 @@ add_executable(jingle_transportacceptselfreentrancy_test transportacceptselfreen
 target_link_libraries(jingle_transportacceptselfreentrancy_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
     Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
 add_test(NAME jingle_transportaccept_self_reentrancy COMMAND jingle_transportacceptselfreentrancy_test)
+add_executable(jingle_transportrejectreentrancy_test transportrejectreentrancy.cpp)
+target_link_libraries(jingle_transportrejectreentrancy_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
+    Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
+add_test(NAME jingle_transportreject_reentrancy COMMAND jingle_transportrejectreentrancy_test)
 add_executable(jingle_transportreplacecorrectness_test transportreplacecorrectness.cpp)
 target_link_libraries(jingle_transportreplacecorrectness_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
     Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
