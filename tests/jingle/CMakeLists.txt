@@ -57,6 +57,13 @@ add_test(NAME jingle_transportreplace_malformed_accept
     COMMAND jingle_transportreplacecorrectness_test malformed-accept)
 add_test(NAME jingle_transportreplace_duplicate_content
     COMMAND jingle_transportreplacecorrectness_test duplicate-content)
+add_executable(jingle_transportreplaceprotocol_test transportreplaceprotocol.cpp)
+target_link_libraries(jingle_transportreplaceprotocol_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
+    Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
+add_test(NAME jingle_transportreplace_transport_reject
+    COMMAND jingle_transportreplaceprotocol_test transport-reject)
+add_test(NAME jingle_transportreplace_malformed_accept_session
+    COMMAND jingle_transportreplaceprotocol_test malformed-accept)
 add_executable(jingle_groupnegotiation_test groupnegotiation.cpp)
 target_link_libraries(jingle_groupnegotiation_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core)
 add_test(NAME jingle_groupnegotiation COMMAND jingle_groupnegotiation_test)
