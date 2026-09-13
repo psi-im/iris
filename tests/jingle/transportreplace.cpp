@@ -2,6 +2,7 @@
 #include <QCoreApplication>
 #include <QDebug>
 #include <QDomDocument>
+#include <QPointer>
 #include <QtCrypto>
 
 #include <iris/jingle-application.h>
@@ -38,13 +39,12 @@ class TestTransportManager;
 class TestTransportPad : public J::TransportManagerPad {
 public:
     TestTransportPad(J::Session *session, TestTransportManager *manager) : session_(session), manager_(manager) { }
-
-    J::Session             *session() const override { return session_; }
-    QString                 ns() const override;
-    J::TransportManager    *manager() const override;
+    J::Session          *session() const override { return session_; }
+    QString              ns() const override;
+    J::TransportManager *manager() const override;
 
 private:
-    J::Session          *session_;
+    J::Session           *session_;
     TestTransportManager *manager_;
 };
 
@@ -58,24 +58,20 @@ public:
     void forceState(J::State state) { setState(state); }
     void setHasUpdates(bool value) { hasUpdates_ = value; }
     int  starts() const { return starts_; }
-    int  prepares() const { return prepares_; }
     const QString &id() const { return id_; }
 
     void prepare() override
     {
-        ++prepares_;
         if (state() < J::State::ApprovedToSend)
             setState(J::State::ApprovedToSend);
         hasUpdates_ = true;
         emit updated();
     }
-
     void start() override
     {
         ++starts_;
         setState(J::State::Active);
     }
-
     bool update(const QDomElement &el) override
     {
         if (el.attribute(QStringLiteral("parse")) == QLatin1String("fail"))
@@ -85,9 +81,7 @@ public:
             setState(J::State::Pending);
         return true;
     }
-
     bool hasUpdates() const override { return hasUpdates_; }
-
     J::OutgoingTransportInfoUpdate takeOutgoingUpdate(bool ensureTransportElement) override
     {
         if (!hasUpdates_ && !ensureTransportElement)
@@ -97,13 +91,10 @@ public:
         hasUpdates_ = false;
         setState(J::State::Unacked);
         return { el, [self = QPointer<TestTransport>(this)](Task *task) {
-                    if (!self)
-                        return;
-                    if (task && task->success())
+                    if (self && task && task->success())
                         self->setState(J::State::Pending);
                 } };
     }
-
     bool isValid() const override { return true; }
     J::TransportFeatures features() const override { return J::TransportFeature::Reliable; }
     J::Connection::Ptr addChannel(J::TransportFeatures, const QString &, int) override { return {}; }
@@ -113,33 +104,24 @@ private:
     QString id_;
     bool    hasUpdates_ = false;
     int     starts_     = 0;
-    int     prepares_   = 0;
 };
 
 class TestTransportManager : public J::TransportManager {
 public:
     static QString namespaceUri() { return QStringLiteral("urn:iris:test:transport-replace"); }
-
     J::TransportFeatures features() const override { return J::TransportFeature::Reliable; }
     void setJingleManager(J::Manager *manager) override { manager_ = manager; }
-
     QSharedPointer<J::Transport> newTransport(const J::TransportManagerPad::Ptr &pad, J::Origin creator) override
     {
-        auto transport = QSharedPointer<TestTransport>::create(pad, creator);
-        created_.append(transport.toWeakRef());
-        return transport;
+        return QSharedPointer<TestTransport>::create(pad, creator);
     }
-
     J::TransportManagerPad *pad(J::Session *session) override { return new TestTransportPad(session, this); }
     void closeAll(const QString & = QString()) override { }
     QStringList ns() const override { return { namespaceUri() }; }
     QStringList discoFeatures() const override { return { namespaceUri() }; }
 
-    int createdCount() const { return created_.size(); }
-
 private:
-    J::Manager                           *manager_ = nullptr;
-    QList<QWeakPointer<TestTransport>>    created_;
+    J::Manager *manager_ = nullptr;
 };
 
 QString TestTransportPad::ns() const { return TestTransportManager::namespaceUri(); }
@@ -148,7 +130,6 @@ J::TransportManager *TestTransportPad::manager() const { return manager_; }
 class TestAppPad : public J::ApplicationManagerPad {
 public:
     explicit TestAppPad(J::Session *session) : session_(session) { }
-
     J::Session            *session() const override { return session_; }
     QString                ns() const override { return QStringLiteral("urn:iris:test:application"); }
     J::ApplicationManager *manager() const override { return nullptr; }
@@ -167,7 +148,6 @@ public:
             return {};
         return next_.takeFirst();
     }
-
     QSharedPointer<J::Transport> getAlikeTransport(QSharedPointer<J::Transport>) override
     {
         ++getAlikeCalls;
@@ -175,32 +155,25 @@ public:
         alike_.clear();
         return result;
     }
-
     bool replace(QSharedPointer<J::Transport>, QSharedPointer<J::Transport>) override
     {
         ++replaceCalls;
         return allowReplace;
     }
-
     void backupTransport(QSharedPointer<J::Transport> transport) override
     {
         ++backupCalls;
         next_.append(std::move(transport));
     }
-
     bool hasMoreTransports() const override { return bool(alike_) || !next_.isEmpty(); }
     bool hasTransport(QSharedPointer<J::Transport>) const override { return allowCanReplace; }
-
     bool canReplace(QSharedPointer<J::Transport>, QSharedPointer<J::Transport>) override
     {
         ++canReplaceCalls;
         return allowCanReplace;
     }
-
     int compare(QSharedPointer<J::Transport>, QSharedPointer<J::Transport>) const override { return 1; }
-
     void setAlike(const QSharedPointer<J::Transport> &transport) { alike_ = transport; }
-    void addNext(const QSharedPointer<J::Transport> &transport) { next_.append(transport); }
 
     bool allowCanReplace = true;
     bool allowReplace    = true;
@@ -217,7 +190,7 @@ private:
 
 class TestApplication : public J::Application {
 public:
-    TestApplication(J::Session *session, QString name, J::Origin creator) : replaceEnabled_(true)
+    TestApplication(J::Session *session, QString name, J::Origin creator)
     {
         _pad.reset(new TestAppPad(session));
         _contentName = std::move(name);
@@ -232,7 +205,6 @@ public:
         _transportSelector = std::move(selector);
         return raw;
     }
-
     void setReplaceEnabled(bool enabled) { replaceEnabled_ = enabled; }
     void markReplacePlanned() { _pendingTransportReplace = PendingTransportReplace::Planned; }
     void markReplaceInProgress() { _pendingTransportReplace = PendingTransportReplace::InProgress; }
@@ -248,7 +220,6 @@ public:
         _state = state;
         emit stateChanged(state);
     }
-
     const std::optional<Stanza::Error> &lastError() const override { return error_; }
     J::Reason lastReason() const override { return {}; }
     SetDescError setRemoteOffer(const QDomElement &) override { return Unparsed; }
@@ -264,16 +235,12 @@ public:
 protected:
     void prepareTransport() override
     {
-        ++prepareTransportCalls;
         if (_transport)
             _transport->prepare();
     }
 
-public:
-    int prepareTransportCalls = 0;
-
 private:
-    bool                         replaceEnabled_;
+    bool                         replaceEnabled_ = true;
     std::optional<Stanza::Error> error_;
 };
 
@@ -338,7 +305,7 @@ static void testInitiatorLocalUnackedTieBreak(Client &client)
     J::Session session(client.jingleManager(), Jid(QStringLiteral("peer@example.test/device")), J::Origin::Initiator);
     auto old = makeTransport(session, J::Origin::Initiator, J::State::Unacked, QStringLiteral("old"));
     auto selector = std::make_unique<TestSelector>();
-    selector->allowCanReplace = false; // Collision must win before selector compatibility is consulted.
+    selector->allowCanReplace = false;
     TestSelector *selectorRaw = nullptr;
     auto app = addApplication(session, QStringLiteral("audio"), J::Origin::Initiator, old, std::move(selector),
                               &selectorRaw);
@@ -348,7 +315,6 @@ static void testInitiatorLocalUnackedTieBreak(Client &client)
         J::Action::TransportReplace,
         makeReplace(doc, { { QStringLiteral("audio"), J::Origin::Initiator,
                              TestTransportManager::namespaceUri(), QStringLiteral("incoming") } }));
-
     check(!ok && isTieBreak(session), "initiator did not tie-break crossed transport-replace");
     check(app->transport().data() == old.data(), "tie-break replaced the initiator transport");
     check(selectorRaw->canReplaceCalls == 0 && selectorRaw->replaceCalls == 0,
@@ -369,7 +335,6 @@ static void testResponderAcceptsInitiatorWinner(Client &client)
         J::Action::TransportReplace,
         makeReplace(doc, { { QStringLiteral("audio"), J::Origin::Initiator,
                              TestTransportManager::namespaceUri(), QStringLiteral("winner") } }));
-
     check(ok && !isTieBreak(session), "responder rejected initiator transport-replace winner");
     check(app->transport().data() != old.data() && app->transport()->creator() == J::Origin::Initiator,
           "responder did not install initiator transport");
@@ -386,13 +351,11 @@ static void testInitiatorPendingTransportAcceptsRemoteReplace(Client &client)
     auto old = makeTransport(session, J::Origin::Initiator, J::State::Pending, QStringLiteral("old"));
     auto app = addApplication(session, QStringLiteral("audio"), J::Origin::Initiator, old,
                               std::make_unique<TestSelector>());
-
     QDomDocument doc;
     const bool ok = session.updateFromXml(
         J::Action::TransportReplace,
         makeReplace(doc, { { QStringLiteral("audio"), J::Origin::Initiator,
                              TestTransportManager::namespaceUri(), QStringLiteral("remote") } }));
-
     check(ok && !isTieBreak(session), "acknowledged local transport incorrectly caused tie-break");
     check(app->transport().data() != old.data() && app->replaceInProgress(),
           "remote replacement was not installed after local transport ACK");
@@ -404,13 +367,11 @@ static void testRemoteUnackedTransportDoesNotTieBreak(Client &client)
     auto old = makeTransport(session, J::Origin::Responder, J::State::Unacked, QStringLiteral("old-remote"));
     auto app = addApplication(session, QStringLiteral("audio"), J::Origin::Initiator, old,
                               std::make_unique<TestSelector>());
-
     QDomDocument doc;
     const bool ok = session.updateFromXml(
         J::Action::TransportReplace,
         makeReplace(doc, { { QStringLiteral("audio"), J::Origin::Initiator,
                              TestTransportManager::namespaceUri(), QStringLiteral("new-remote") } }));
-
     check(ok && !isTieBreak(session), "remote Unacked transport incorrectly caused tie-break");
     check(app->transport().data() != old.data(), "remote replacement was not installed");
 }
@@ -418,11 +379,9 @@ static void testRemoteUnackedTransportDoesNotTieBreak(Client &client)
 static void testBatchTieBreakReevaluatesSiblingTransport(Client &client)
 {
     J::Session session(client.jingleManager(), Jid(QStringLiteral("peer@example.test/device")), J::Origin::Initiator);
-
     auto audioOld = makeTransport(session, J::Origin::Initiator, J::State::Unacked, QStringLiteral("audio-old"));
     auto audio = addApplication(session, QStringLiteral("audio"), J::Origin::Initiator, audioOld,
                                 std::make_unique<TestSelector>());
-
     auto videoOld = makeTransport(session, J::Origin::Responder, J::State::Active, QStringLiteral("video-old"));
     auto videoSelector = std::make_unique<TestSelector>();
     auto videoRetry = makeTransport(session, J::Origin::Initiator, J::State::Created, QStringLiteral("video-local"));
@@ -439,7 +398,6 @@ static void testBatchTieBreakReevaluatesSiblingTransport(Client &client)
                         QStringLiteral("audio-remote") },
                       { QStringLiteral("video"), J::Origin::Initiator, TestTransportManager::namespaceUri(),
                         QStringLiteral("video-remote") } }));
-
     check(!ok && isTieBreak(session), "batch collision did not return tie-break");
     check(audio->transport().data() == audioOld.data(), "colliding content changed its transport");
     check(video->transport().data() == videoRetry.data(),
@@ -452,11 +410,8 @@ static void testBatchTieBreakReevaluatesSiblingTransport(Client &client)
 static void testBatchTieBreakKeepsPreparedLocalSibling(Client &client)
 {
     J::Session session(client.jingleManager(), Jid(QStringLiteral("peer@example.test/device")), J::Origin::Initiator);
-
     auto audioOld = makeTransport(session, J::Origin::Initiator, J::State::Unacked, QStringLiteral("audio-old"));
-    addApplication(session, QStringLiteral("audio"), J::Origin::Initiator, audioOld,
-                   std::make_unique<TestSelector>());
-
+    addApplication(session, QStringLiteral("audio"), J::Origin::Initiator, audioOld, std::make_unique<TestSelector>());
     auto videoOld = makeTransport(session, J::Origin::Initiator, J::State::ApprovedToSend, QStringLiteral("video-old"));
     auto videoSelector = std::make_unique<TestSelector>();
     auto videoRetry = makeTransport(session, J::Origin::Initiator, J::State::Created, QStringLiteral("video-retry"));
@@ -473,7 +428,6 @@ static void testBatchTieBreakKeepsPreparedLocalSibling(Client &client)
                         QStringLiteral("audio-remote") },
                       { QStringLiteral("video"), J::Origin::Initiator, TestTransportManager::namespaceUri(),
                         QStringLiteral("video-remote") } }));
-
     check(!ok && isTieBreak(session), "prepared-local batch collision did not tie-break");
     check(video->transport().data() == videoOld.data(), "tie-break replaced a not-yet-sent local sibling transport");
     check(videoSelectorRaw->getAlikeCalls == 0 && videoSelectorRaw->replaceCalls == 0,
@@ -483,7 +437,6 @@ static void testBatchTieBreakKeepsPreparedLocalSibling(Client &client)
 static void testMalformedBatchAbortsBeforeTieBreakSideEffects(Client &client)
 {
     J::Session session(client.jingleManager(), Jid(QStringLiteral("peer@example.test/device")), J::Origin::Initiator);
-
     auto audioOld = makeTransport(session, J::Origin::Initiator, J::State::Unacked, QStringLiteral("audio-old"));
     auto audio = addApplication(session, QStringLiteral("audio"), J::Origin::Initiator, audioOld,
                                 std::make_unique<TestSelector>());
@@ -499,7 +452,6 @@ static void testMalformedBatchAbortsBeforeTieBreakSideEffects(Client &client)
                         QStringLiteral("audio-remote") },
                       { QStringLiteral("video"), J::Origin::Initiator, TestTransportManager::namespaceUri(),
                         QStringLiteral("broken"), false } }));
-
     check(!ok && !isTieBreak(session), "malformed batch was incorrectly reported as tie-break");
     check(audio->transport().data() == audioOld.data() && video->transport().data() == videoOld.data(),
           "malformed batch mutated transports before validation completed");
@@ -511,13 +463,11 @@ static void testUnknownTransportIsRejectedWithoutMutation(Client &client)
     auto old = makeTransport(session, J::Origin::Initiator, J::State::Pending, QStringLiteral("old"));
     auto app = addApplication(session, QStringLiteral("audio"), J::Origin::Initiator, old,
                               std::make_unique<TestSelector>());
-
     QDomDocument doc;
     const bool ok = session.updateFromXml(
         J::Action::TransportReplace,
         makeReplace(doc, { { QStringLiteral("audio"), J::Origin::Initiator,
                              QStringLiteral("urn:iris:test:unknown-transport"), QStringLiteral("unknown") } }));
-
     check(ok && app->transport().data() == old.data(), "unsupported transport mutated existing transport");
 }
 
@@ -532,7 +482,6 @@ static void testDisabledAndSelectorRejectedReplaceRemainUnchanged(Client &client
         auto app = addApplication(session, QStringLiteral("audio"), J::Origin::Initiator, old, std::move(selector),
                                   &selectorRaw);
         app->setReplaceEnabled(false);
-
         QDomDocument doc;
         const bool ok = session.updateFromXml(
             J::Action::TransportReplace,
@@ -542,7 +491,6 @@ static void testDisabledAndSelectorRejectedReplaceRemainUnchanged(Client &client
         check(selectorRaw->canReplaceCalls == 1 && selectorRaw->replaceCalls == 0,
               "disabled transport-replace unexpectedly called selector replace");
     }
-
     {
         J::Session session(client.jingleManager(), Jid(QStringLiteral("selector@example.test/device")),
                            J::Origin::Initiator);
@@ -552,7 +500,6 @@ static void testDisabledAndSelectorRejectedReplaceRemainUnchanged(Client &client
         TestSelector *selectorRaw = nullptr;
         auto app = addApplication(session, QStringLiteral("audio"), J::Origin::Initiator, old, std::move(selector),
                                   &selectorRaw);
-
         QDomDocument doc;
         const bool ok = session.updateFromXml(
             J::Action::TransportReplace,
@@ -573,7 +520,6 @@ static void testTieBreakDominatesUnsupportedSibling(Client &client)
     auto videoOld = makeTransport(session, J::Origin::Responder, J::State::Active, QStringLiteral("video-old"));
     auto video = addApplication(session, QStringLiteral("video"), J::Origin::Initiator, videoOld,
                                 std::make_unique<TestSelector>());
-
     QDomDocument doc;
     const bool ok = session.updateFromXml(
         J::Action::TransportReplace,
@@ -582,7 +528,6 @@ static void testTieBreakDominatesUnsupportedSibling(Client &client)
                         QStringLiteral("audio-remote") },
                       { QStringLiteral("video"), J::Origin::Initiator,
                         QStringLiteral("urn:iris:test:unknown-transport"), QStringLiteral("unsupported") } }));
-
     check(!ok && isTieBreak(session), "tie-break did not dominate unsupported sibling in same IQ");
     check(audio->transport().data() == audioOld.data() && video->transport().data() == videoOld.data(),
           "mixed tie-break/unsupported batch mutated current transports");
@@ -597,7 +542,6 @@ static void testOutgoingReplaceLifecycle(Client &client, Task *success)
     auto app = addApplication(session, QStringLiteral("audio"), J::Origin::Initiator, replacement,
                               std::make_unique<TestSelector>(), nullptr, J::State::Connecting);
     app->markReplacePlanned();
-
     check(app->evaluateOutgoingUpdate().action == J::Action::TransportReplace,
           "planned replacement did not evaluate to transport-replace");
     auto update = app->takeOutgoingUpdate();
@@ -616,7 +560,6 @@ static void testRemoteTransportAcceptLifecycle(Client &client, Task *success)
     auto app = addApplication(session, QStringLiteral("audio"), J::Origin::Initiator, remote,
                               std::make_unique<TestSelector>(), nullptr, J::State::Connecting);
     app->markReplaceInProgress();
-
     check(app->evaluateOutgoingUpdate().action == J::Action::TransportAccept,
           "remote replacement did not evaluate to transport-accept");
     auto update = app->takeOutgoingUpdate();
@@ -633,13 +576,11 @@ static void testIncomingTransportAcceptIgnoresOutOfOrder(Client &client)
     auto local = makeTransport(session, J::Origin::Initiator, J::State::Pending, QStringLiteral("local"));
     auto app = addApplication(session, QStringLiteral("audio"), J::Origin::Initiator, local,
                               std::make_unique<TestSelector>(), nullptr, J::State::Connecting);
-
     QDomDocument doc;
     auto transport = doc.createElementNS(TestTransportManager::namespaceUri(), QStringLiteral("transport"));
     transport.setAttribute(QStringLiteral("id"), QStringLiteral("accepted"));
     app->incomingTransportAccept(transport);
     check(local->starts() == 0 && app->replaceIdle(), "out-of-order transport-accept changed replacement state");
-
     app->markReplaceInProgress();
     app->incomingTransportAccept(transport);
     check(local->starts() == 1 && app->replaceIdle(), "valid transport-accept did not complete replacement");
