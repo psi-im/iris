@@ -1055,9 +1055,16 @@ namespace XMPP { namespace Jingle {
         bool handleIncomingTransportReplace(const QDomElement &jingleEl)
         {
             qDebug("handle incoming transport replace");
-            QVector<std::tuple<Application *, QSharedPointer<Transport>, QDomElement>> passed;
-            QList<QDomElement>                                                         toReject;
-            QSet<ContentKey>                                                            seen;
+            struct ValidatedTransportReplace {
+                QPointer<Application>     application;
+                ContentKey                key;
+                QWeakPointer<Transport>   current;
+                QSharedPointer<Transport> incoming;
+                QDomElement               content;
+            };
+            QVector<ValidatedTransportReplace> passed;
+            QList<QDomElement>                  toReject;
+            QSet<ContentKey>                    seen;
             QString                                                                     contentTag(QStringLiteral("content"));
             bool                                                                        doTieBreak = false;
             for (QDomElement ce = jingleEl.firstChildElement(contentTag); !ce.isNull();
@@ -1120,7 +1127,8 @@ namespace XMPP { namespace Jingle {
                     continue;
                 }
 
-                passed.append(std::make_tuple(app, transport, ce));
+                passed.append(ValidatedTransportReplace { QPointer<Application>(app), key,
+                                                           app->transport().toWeakRef(), transport, ce });
             }
 
             if (seen.isEmpty()) {
@@ -1133,19 +1141,28 @@ namespace XMPP { namespace Jingle {
             // the initiator tie-break, the whole incoming action is rejected,
             // but sibling remote transports are still useful as hints for
             // selecting compatible local transports before we retry.
-            for (auto &v : passed) {
-                Application              *app;
-                QSharedPointer<Transport> transport;
-                QDomElement               ce;
-                std::tie(app, transport, ce) = v;
+            for (const auto &entry : std::as_const(passed)) {
+                auto app                = entry.application;
+                auto validatedTransport = entry.current.lock();
+                const bool currentEntry = app && contentList.value(entry.key) == app.data() && validatedTransport
+                    && app->transport() == validatedTransport;
+                if (!currentEntry) {
+                    // A callback during validation of a sibling may have removed
+                    // this content or selected a newer transport. Never apply a
+                    // candidate validated against superseded local state.
+                    if (!doTieBreak && app && contentList.value(entry.key) == app.data())
+                        toReject.append(entry.content);
+                    continue;
+                }
+
                 if (doTieBreak) {
-                    if (app->transport()->creator() == role && app->transport()->state() < State::Unacked)
+                    if (validatedTransport->creator() == role && validatedTransport->state() < State::Unacked)
                         continue; // a prepared local transport will be sent shortly
-                    app->selectNextTransport(transport);
-                } else if (!app->setTransport(transport)) {
+                    app->selectNextTransport(entry.incoming);
+                } else if (!app->setTransport(entry.incoming)) {
                     // app should generate transport accept eventually. content-accept will
                     // work too if the content wasn't accepted yet
-                    toReject.append(ce);
+                    toReject.append(entry.content);
                 }
             }
 

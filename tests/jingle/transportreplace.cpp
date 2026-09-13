@@ -617,4 +617,5 @@ int main(int argc, char **argv)
     testIncomingTransportAcceptIgnoresOutOfOrder(client);
 
     qInfo("Transport-replace legacy behavior regressions passed");
+    return 0;
 }
