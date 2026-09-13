@@ -221,6 +221,36 @@ int main(int argc, char **argv)
     }
 
     {
+        TestApplication active(&session, J::Origin::Responder);
+        active.activate();
+        bool reentered = false;
+        QObject::connect(&active, &J::Application::sendersChanged, &app, [&](J::Origin senders) {
+            if (!reentered && senders == J::Origin::Both) {
+                reentered = true;
+                check(active.requestSenders(J::Origin::Initiator),
+                      "reentrant direction request from ACK notification was rejected");
+            }
+        });
+
+        check(active.requestSenders(J::Origin::Both), "reentrant ACK setup request rejected");
+        check(active.evaluateOutgoingUpdate().action == J::Action::ContentModify,
+              "reentrant ACK setup direction was not queued");
+        auto first = active.takeOutgoingUpdate();
+        std::get<1>(first)(&success);
+        check(reentered, "ACK did not invoke reentrant direction handler");
+        check(active.senders() == J::Origin::Both, "ACK did not commit direction before reentrant request");
+        check(active.evaluateOutgoingUpdate().action == J::Action::ContentModify,
+              "reentrant direction intent was lost after ACK callback");
+        auto second = active.takeOutgoingUpdate();
+        check(firstContent(second).attribute(QStringLiteral("senders")) == QLatin1String("initiator"),
+              "reentrant direction intent serialized incorrectly");
+        std::get<1>(second)(&success);
+        check(active.senders() == J::Origin::Initiator, "reentrant direction was not committed after ACK");
+        check(active.evaluateOutgoingUpdate().action == J::Action::NoAction,
+              "reentrant direction remained queued after ACK");
+    }
+
+    {
         TestApplication active(&session);
         active.activate();
         check(active.requestSenders(J::Origin::Initiator), "failing direction request rejected locally");
