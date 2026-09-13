@@ -1,0 +1,83 @@
+name: Apply transport-accept self-reentrancy guard
+
+on:
+  push:
+    branches:
+      - automation/fix-jingle-parser
+    paths:
+      - .automation-trigger-accept-self
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: jingle/async-media
+          fetch-depth: 0
+
+      - name: Guard accepted transport identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/xmpp/xmpp-im/jingle-application.cpp')
+          text = path.read_text()
+          old = '''    bool Application::incomingTransportAccept(const QDomElement &el)
+    {
+        if (_pendingTransportReplace != PendingTransportReplace::InProgress || !_transport)
+            return false;
+        if (!_transport->update(el))
+            return false;
+
+        _pendingTransportReplace = PendingTransportReplace::None;
+        if (_state >= State::Connecting)
+            _transport->start();
+        return true;
+    }
+'''
+          new = '''    bool Application::incomingTransportAccept(const QDomElement &el)
+    {
+        if (_pendingTransportReplace != PendingTransportReplace::InProgress || !_transport)
+            return false;
+
+        const auto expected = _transport;
+        QPointer<Application> guard(this);
+        if (!expected->update(el))
+            return false;
+        if (!guard)
+            return true;
+
+        // update() is transport-specific and may synchronously select a newer
+        // replacement. The peer accepted expected, so never let that old
+        // acknowledgement complete or start the newer local transaction.
+        if (_transport != expected || _pendingTransportReplace != PendingTransportReplace::InProgress)
+            return true;
+
+        _pendingTransportReplace = PendingTransportReplace::None;
+        if (_state >= State::Connecting)
+            expected->start();
+        return true;
+    }
+'''
+          if old not in text:
+              raise SystemExit('incomingTransportAccept block not found')
+          path.write_text(text.replace(old, new, 1))
+          PY
+
+      - name: Verify and push
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git diff -- src/xmpp/xmpp-im/jingle-application.cpp
+          git config user.name 'Sergei Ilinykh'
+          git config user.email 'rion4ik@gmail.com'
+          git add src/xmpp/xmpp-im/jingle-application.cpp
+          git commit -m 'Guard transport-accept transaction identity'
+          git push origin HEAD:jingle/async-media
