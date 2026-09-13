@@ -62,6 +62,8 @@ target_link_libraries(jingle_transportreplaceprotocol_test PRIVATE iris Qt${QT_D
     Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
 add_test(NAME jingle_transportreplace_transport_reject
     COMMAND jingle_transportreplaceprotocol_test transport-reject)
+add_test(NAME jingle_transportreplace_failed_iq_fallback
+    COMMAND jingle_transportreplaceprotocol_test failed-iq-fallback)
 add_test(NAME jingle_transportreplace_malformed_accept_session
     COMMAND jingle_transportreplaceprotocol_test malformed-accept)
 add_executable(jingle_groupnegotiation_test groupnegotiation.cpp)
