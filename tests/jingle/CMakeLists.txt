@@ -77,6 +77,10 @@ add_test(NAME jingle_transportreplace_failed_iq_fallback
     COMMAND jingle_transportreplaceprotocol_test failed-iq-fallback)
 add_test(NAME jingle_transportreplace_malformed_accept_session
     COMMAND jingle_transportreplaceprotocol_test malformed-accept)
+add_test(NAME jingle_transportreplace_duplicate_accept
+    COMMAND jingle_transportreplaceprotocol_test duplicate-accept)
+add_test(NAME jingle_transportreplace_duplicate_reject
+    COMMAND jingle_transportreplaceprotocol_test duplicate-reject)
 add_executable(jingle_groupnegotiation_test groupnegotiation.cpp)
 target_link_libraries(jingle_groupnegotiation_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core)
 add_test(NAME jingle_groupnegotiation COMMAND jingle_groupnegotiation_test)
