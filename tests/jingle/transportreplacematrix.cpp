@@ -4,9 +4,24 @@
 // matrix below exercises exactly the same fake transports/selectors as the
 // historical-behavior suite without duplicating several hundred lines of test
 // plumbing. Rename its standalone entry point while including it here.
+#include <functional>
+
 #define main iris_transportreplace_legacy_main
 #include "transportreplace.cpp"
 #undef main
+
+class ReentrantCanReplaceSelector : public TestSelector {
+public:
+    bool canReplace(QSharedPointer<J::Transport> oldTransport, QSharedPointer<J::Transport> newTransport) override
+    {
+        auto callback = std::move(onCanReplace);
+        if (callback)
+            callback();
+        return TestSelector::canReplace(std::move(oldTransport), std::move(newTransport));
+    }
+
+    std::function<void()> onCanReplace;
+};
 
 static QDomElement makeUnqualifiedTransportReplace(QDomDocument &doc, const QString &name, J::Origin creator)
 {
@@ -163,6 +178,42 @@ static void testResponderNeedAckStillYieldsToInitiator(Client &client)
     check(app->replaceInProgress(), "responder winner install did not enter InProgress");
 }
 
+static void testReentrantSiblingMutationInvalidatesValidatedCandidate(Client &client)
+{
+    J::Session session(client.jingleManager(), Jid(QStringLiteral("reentrant@example.test/device")),
+                       J::Origin::Initiator);
+
+    auto audioOld = makeTransport(session, J::Origin::Initiator, J::State::Pending, QStringLiteral("audio-old"));
+    auto audio = addApplication(session, QStringLiteral("audio"), J::Origin::Initiator, audioOld,
+                                std::make_unique<TestSelector>());
+    auto audioNewLocal = makeTransport(session, J::Origin::Initiator, J::State::Created,
+                                       QStringLiteral("audio-new-local"));
+
+    auto videoOld = makeTransport(session, J::Origin::Initiator, J::State::Pending, QStringLiteral("video-old"));
+    auto videoSelector = std::make_unique<ReentrantCanReplaceSelector>();
+    videoSelector->onCanReplace = [audio, audioNewLocal]() {
+        check(audio->setTransport(audioNewLocal), "reentrant local transport change failed");
+    };
+    auto video = addApplication(session, QStringLiteral("video"), J::Origin::Initiator, videoOld,
+                                std::move(videoSelector));
+
+    QDomDocument doc;
+    const bool ok = session.updateFromXml(
+        J::Action::TransportReplace,
+        makeReplace(doc,
+                    { { QStringLiteral("audio"), J::Origin::Initiator, TestTransportManager::namespaceUri(),
+                        QStringLiteral("audio-remote-stale") },
+                      { QStringLiteral("video"), J::Origin::Initiator, TestTransportManager::namespaceUri(),
+                        QStringLiteral("video-remote") } }));
+
+    check(ok && !isTieBreak(session), "reentrant transport-replace batch was rejected");
+    check(audio->transport().data() == audioNewLocal.data(),
+          "second pass overwrote a newer reentrant local transport with a stale validated candidate");
+    check(audio->replacePlanned(), "newer reentrant local transport lost its Planned replacement state");
+    check(video->transport().data() != videoOld.data() && video->replaceInProgress(),
+          "unrelated sibling stopped progressing after reentrant local mutation");
+}
+
 int main(int argc, char **argv)
 {
     QCoreApplication application(argc, argv);
@@ -177,6 +228,7 @@ int main(int argc, char **argv)
     testPlannedLocalReplaceDoesNotTieBreak(client);
     testAcknowledgedLocalReplaceDoesNotTieBreak(client);
     testResponderNeedAckStillYieldsToInitiator(client);
+    testReentrantSiblingMutationInvalidatesValidatedCandidate(client);
 
     qInfo("Transport-replace state matrix regressions passed");
 }
