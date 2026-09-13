@@ -1,0 +1,46 @@
+name: Register content-modify IQ boundary regression
+
+on:
+  push:
+    branches:
+      - automation/fix-jingle-parser
+    paths:
+      - .automation-trigger-contentmodify-iqboundary
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: jingle/async-media
+          fetch-depth: 0
+      - name: Register regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('tests/jingle/CMakeLists.txt')
+          text = path.read_text()
+          anchor = '''add_executable(jingle_contentmodifyrace_test contentmodifyrace.cpp)\ntarget_link_libraries(jingle_contentmodifyrace_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core\n    Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)\nadd_test(NAME jingle_contentmodifyrace COMMAND jingle_contentmodifyrace_test)\n'''
+          addition = anchor + '''add_executable(jingle_contentmodifyiqboundary_test contentmodifyiqboundary.cpp)\ntarget_link_libraries(jingle_contentmodifyiqboundary_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core\n    Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)\nadd_test(NAME jingle_contentmodify_iq_boundary COMMAND jingle_contentmodifyiqboundary_test)\n'''
+          if anchor not in text:
+              raise SystemExit('contentmodifyrace CMake anchor not found')
+          if 'jingle_contentmodifyiqboundary_test' in text:
+              raise SystemExit('contentmodify IQ boundary regression already registered')
+          path.write_text(text.replace(anchor, addition, 1))
+          PY
+      - name: Verify and push
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add tests/jingle/CMakeLists.txt
+          git commit -m 'Run content-modify IQ lifetime regression'
+          git push origin HEAD:jingle/async-media
