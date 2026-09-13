@@ -1257,8 +1257,13 @@ namespace XMPP { namespace Jingle {
 
         bool handleIncomingTransportReject(const QDomElement &jingleEl)
         {
-            QList<QPointer<Application>> updates;
-            QSet<ContentKey>             seen;
+            struct ValidatedTransportReject {
+                QPointer<Application>   application;
+                ContentKey              key;
+                QWeakPointer<Transport> current;
+            };
+            QVector<ValidatedTransportReject> updates;
+            QSet<ContentKey>                  seen;
             for (auto ce = jingleEl.firstChildElement(QStringLiteral("content")); !ce.isNull();
                  ce      = ce.nextSiblingElement(QStringLiteral("content"))) {
                 ContentBase cb(ce);
@@ -1284,7 +1289,8 @@ namespace XMPP { namespace Jingle {
                     ErrorUtil::fill(jingleEl.ownerDocument(), *lastError, ErrorUtil::OutOfOrder);
                     return false;
                 }
-                updates.append(QPointer<Application>(app));
+                updates.append(ValidatedTransportReject { QPointer<Application>(app), key,
+                                                          app->transport().toWeakRef() });
             }
 
             if (updates.isEmpty()) {
@@ -1293,20 +1299,30 @@ namespace XMPP { namespace Jingle {
                 return false;
             }
 
-            for (const auto &app : std::as_const(updates)) {
-                if (!app)
-                    continue;
+            QPointer<Session> session(q);
+            for (const auto &entry : std::as_const(updates)) {
+                if (!session)
+                    return true;
+                auto app              = entry.application;
+                auto currentTransport = entry.current.lock();
+                if (!app || contentList.value(entry.key) != app.data() || !currentTransport
+                    || app->transport() != currentTransport)
+                    continue; // superseded or removed by a previous reentrant callback
+
                 if (!app->incomingTransportReject()) {
+                    if (!session)
+                        return true;
                     lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,
                                                     XMPP::Stanza::Error::ErrorCond::UnexpectedRequest);
                     ErrorUtil::fill(jingleEl.ownerDocument(), *lastError, ErrorUtil::OutOfOrder);
                     return false;
                 }
             }
+            if (!session)
+                return true;
             planStep();
             return true;
         }
-
         bool handleIncomingContentModify(const QDomElement &jingleEl)
         {
             QList<QPair<QPointer<Application>, Origin>> updates;
