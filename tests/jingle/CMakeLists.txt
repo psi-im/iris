@@ -16,6 +16,10 @@ target_link_libraries(jingle_signaling_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VE
     Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
 enable_testing()
 add_test(NAME jingle_signaling COMMAND jingle_signaling_test)
+add_executable(jingle_contentmodify_test contentmodify.cpp)
+target_link_libraries(jingle_contentmodify_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
+    Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
+add_test(NAME jingle_contentmodify COMMAND jingle_contentmodify_test)
 add_executable(jingle_dtlssrtp_test dtlssrtp.cpp)
 # Dtls lives in irisnet but its fingerprint/XML helpers live in iris.
 target_link_libraries(jingle_dtlssrtp_test PRIVATE irisnet iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
