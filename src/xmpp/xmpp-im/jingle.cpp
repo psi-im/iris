@@ -476,7 +476,8 @@ namespace XMPP { namespace Jingle {
             auto          resp = createIQ(client()->doc(), "error", iq.attribute(QStringLiteral("from")),
                                           iq.attribute(QStringLiteral("id")));
             Stanza::Error error(errType, errCond, text);
-            auto          errEl = error.toXml(*client()->doc(), client()->stream().baseNS());
+            const auto baseNS = client()->hasStream() ? client()->stream().baseNS() : QStringLiteral("jabber:client");
+            auto       errEl  = error.toXml(*client()->doc(), baseNS);
             if (!jingleErr.isNull()) {
                 errEl.appendChild(jingleErr);
             }
@@ -495,7 +496,8 @@ namespace XMPP { namespace Jingle {
         {
             auto resp = createIQ(client()->doc(), "error", iq.attribute(QStringLiteral("from")),
                                  iq.attribute(QStringLiteral("id")));
-            resp.appendChild(error.toXml(*client()->doc(), client()->stream().baseNS()));
+            const auto baseNS = client()->hasStream() ? client()->stream().baseNS() : QStringLiteral("jabber:client");
+            resp.appendChild(error.toXml(*client()->doc(), baseNS));
             client()->send(resp);
         }
     };
