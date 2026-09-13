@@ -1,0 +1,98 @@
+name: Add transport-replace Doxygen v2
+
+on:
+  push:
+    branches:
+      - automation/fix-jingle-parser
+    paths:
+      - .automation-trigger-transport-replace-doxygen-v2
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: jingle/async-media
+          fetch-depth: 0
+
+      - name: Expand transport-replace API comments
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          header_path = Path('src/xmpp/xmpp-im/jingle-application.h')
+          header = header_path.read_text()
+
+          def replace_preceding_doxygen(signature, comment):
+              global header
+              pos = header.index(signature)
+              start = header.rfind('        /**', 0, pos)
+              if start < 0:
+                  raise SystemExit(f'doxygen start not found for {signature}')
+              close = header.index('        */\n', start) + len('        */\n')
+              if close > pos:
+                  raise SystemExit(f'doxygen range overlaps signature {signature}')
+              header = header[:start] + comment + header[close:]
+
+          replace_preceding_doxygen(
+              '        bool setTransport(const QSharedPointer<Transport> &transport, const Reason &reason = Reason());',
+              '''        /**\n         * @brief Validate and install a new current transport.\n         *\n         * Replacement policy is delegated to TransportSelector::replace(). When the\n         * application already has a transport, this method also derives the Jingle\n         * transport-replace signaling state for the new instance and disconnects the\n         * superseded transport. Transport::State is not the lifetime of the\n         * transport-replace IQ; see PendingTransportReplace.\n         *\n         * The transport is retained by QSharedPointer. It is intentionally not made a\n         * QObject child of Application, because transport callbacks may outlive one\n         * signaling step and can hold shared references of their own.\n         *\n         * @param transport Candidate transport to make current.\n         * @param reason Optional failure reason carried into a subsequent replacement.\n         * @return true if the selector accepted and installed the transport.\n         */\n''')
+
+          replace_preceding_doxygen(
+              '        bool selectNextTransport(const QSharedPointer<Transport> alikeTransport = QSharedPointer<Transport>());',
+              '''        /**\n         * @brief Select the next compatible local transport after failure/replacement.\n         *\n         * When @p alikeTransport is supplied, it is an advisory peer proposal used by\n         * TransportSelector::getAlikeTransport() to choose an efficient compatible local\n         * retry. The peer transport itself is not implicitly installed. If no candidate\n         * remains, the application moves toward content-remove with failed-transport.\n         * Selector calls and emitted signals are reentrant boundaries.\n         *\n         * @param alikeTransport Optional remote transport used only as a selection hint.\n         * @return true if a successor transport was installed.\n         */\n''')
+
+          replace_preceding_doxygen(
+              '        virtual bool isTransportReplaceEnabled() const;',
+              '''        /**\n         * @brief Return whether this application currently permits transport replacement.\n         *\n         * Incoming transport-replace validation calls this before mutation. Overrides\n         * should behave as a capability/state query and avoid unrelated side effects.\n         */\n''')
+
+          old_start = header.index('        // Signaling-level transport-replace state.')
+          old_end = header.index('        bool incomingTransportReject();\n', old_start) + len('        bool incomingTransportReject();\n')
+          public_block = '''        /**\n         * @brief Whether our current transport-replace IQ is awaiting its IQ result.\n         *\n         * This is signaling state (`NeedAck`). Never infer the same fact from\n         * Transport::State::Unacked: transport implementations, notably ICE, do not\n         * share one transport-state transition for Jingle IQ lifetime.\n         */\n        bool transportReplaceAwaitingAck() const;\n\n        /**\n         * @brief Whether the current replacement is in the post-IQ negotiation phase.\n         *\n         * `InProgress` means the replacement proposal is the current signaling attempt\n         * known to the peer and is waiting for transport-accept/reject completion.\n         */\n        bool transportReplaceInProgress() const;\n\n        /**\n         * @brief Apply a validated peer transport-accept to the current replacement.\n         *\n         * Transport::update() may reenter application code and install a newer transport.\n         * Completion therefore belongs only to the transport instance snapshotted when\n         * this call started; an old acknowledgement must not complete/start a newer one.\n         * @return false if there is no matching InProgress transaction or parsing fails.\n         */\n        bool incomingTransportAccept(const QDomElement &el);\n\n        /**\n         * @brief Apply a validated peer transport-reject to the current local replacement.\n         *\n         * A handled rejection returns the signaling state to Planned and asks the\n         * TransportSelector for the next local candidate. `true` means the rejection was\n         * consumed even when no fallback exists and content removal is scheduled.\n         * @return false if the current transaction is not a rejectable local replacement.\n         */\n        bool incomingTransportReject();\n'''
+          header = header[:old_start] + public_block + header[old_end:]
+
+          enum_start = header.index('        enum class PendingTransportReplace {')
+          enum_end = header.index('        };\n', enum_start) + len('        };\n')
+          enum_block = '''        /**\n         * XEP-0166 transport-replace signaling state for this content.\n         *\n         * This state machine is orthogonal to Transport::State. `NeedAck` is the only\n         * state that means a locally generated transport-replace IQ is outstanding;\n         * `InProgress` is the subsequent accept/reject phase (or an incoming peer\n         * replacement currently being negotiated).\n         */\n        enum class PendingTransportReplace {\n            None,      ///< No transport-replace signaling transaction is active.\n            Planned,   ///< A local successor is selected but not signaled yet.\n            NeedAck,   ///< transport-replace was sent; waiting for its IQ result/error.\n            InProgress ///< Proposal is current; waiting for transport-accept/reject completion.\n        };\n'''
+          header = header[:enum_start] + enum_block + header[enum_end:]
+
+          old = '''        // current transport. either local or remote. has info about origin and state\n        QSharedPointer<Transport>          _transport;\n        std::unique_ptr<TransportSelector> _transportSelector;\n\n        // if transport-replace is in progress. will be set to true when accepted by both sides.\n        PendingTransportReplace _pendingTransportReplace = PendingTransportReplace::None;\n\n        // while it's valid - we are in unaccepted yet transport-replace\n        Reason _transportReplaceReason;\n'''
+          new = '''        // Current transport uses shared ownership, independently of QObject parentage.\n        // Session handlers pair QPointer<Application> with weak/shared transport snapshots\n        // so reentrant callbacks cannot apply stale signaling to a newer transport instance.\n        QSharedPointer<Transport>          _transport;\n        std::unique_ptr<TransportSelector> _transportSelector;\n\n        // Jingle signaling transaction state for replacing _transport. Do not derive it\n        // from Transport::State; concrete transports use those states differently.\n        PendingTransportReplace _pendingTransportReplace = PendingTransportReplace::None;\n\n        // Reason attached to the pending replacement when the previous transport failed.\n        Reason _transportReplaceReason;\n'''
+          if old not in header:
+              raise SystemExit('transport member block not found')
+          header = header.replace(old, new, 1)
+          header_path.write_text(header)
+
+          impl_path = Path('src/xmpp/xmpp-im/jingle-application.cpp')
+          impl = impl_path.read_text()
+          replace_marker = '        case Action::TransportReplace: {\n'
+          if replace_marker not in impl:
+              raise SystemExit('TransportReplace outgoing marker not found')
+          impl = impl.replace(replace_marker,
+              '''        // transport-replace IQ lifetime belongs to PendingTransportReplace, not\n        // Transport::State. Capture the concrete transport as transaction identity:\n        // its callback is a reentrant boundary and may install a newer replacement.\n        case Action::TransportReplace: {\n''', 1)
+
+          accept_marker = '        case Action::TransportAccept: {\n'
+          if accept_marker not in impl:
+              raise SystemExit('TransportAccept outgoing marker not found')
+          impl = impl.replace(accept_marker,
+              '''        // This ACK completes a peer-initiated replacement. The transport callback may\n        // reenter and select another transport, so completion is tied to the transport\n        // instance that produced this stanza, not whatever _transport points to later.\n        case Action::TransportAccept: {\n''', 1)
+          impl_path.write_text(impl)
+          PY
+
+      - name: Verify and push
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git diff -- src/xmpp/xmpp-im/jingle-application.h src/xmpp/xmpp-im/jingle-application.cpp
+          git config user.name 'Sergei Ilinykh'
+          git config user.email 'rion4ik@gmail.com'
+          git add src/xmpp/xmpp-im/jingle-application.h src/xmpp/xmpp-im/jingle-application.cpp
+          git commit -m 'Document transport-replace application state'
+          git push origin HEAD:jingle/async-media
