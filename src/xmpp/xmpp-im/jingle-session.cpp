@@ -1220,6 +1220,11 @@ namespace XMPP { namespace Jingle {
                     qInfo("ignore out of order transport-accept");
                     continue;
                 }
+                if (!app->transportReplaceInProgress()) {
+                    lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,
+                                                    XMPP::Stanza::Error::ErrorCond::BadRequest);
+                    return false;
+                }
                 updates.append(ValidatedTransportAccept { QPointer<Application>(app), key,
                                                           app->transport().toWeakRef(), transportEl });
             }
