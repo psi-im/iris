@@ -37,6 +37,11 @@ target_include_directories(jingle_iceudp_test PRIVATE ../../src/xmpp/xmpp-im)
 target_link_libraries(jingle_iceudp_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
     Qt${QT_DEFAULT_MAJOR_VERSION}::Network Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
 add_test(NAME jingle_iceudp COMMAND jingle_iceudp_test)
+add_executable(jingle_icereplacestate_test icereplacestate.cpp)
+target_link_libraries(jingle_icereplacestate_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
+    Qt${QT_DEFAULT_MAJOR_VERSION}::Network Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
+add_test(NAME jingle_icereplacestate COMMAND jingle_icereplacestate_test)
+set_tests_properties(jingle_icereplacestate PROPERTIES TIMEOUT 15)
 add_executable(jingle_transportselection_test transportselection.cpp)
 target_link_libraries(jingle_transportselection_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core)
 add_test(NAME jingle_transportselection COMMAND jingle_transportselection_test)
