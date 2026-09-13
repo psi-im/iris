@@ -63,6 +63,9 @@ jobs:
 
           session = Path('src/xmpp/xmpp-im/jingle-session.cpp')
           text = session.read_text()
+          start = text.index('        bool handleIncomingTransportReject(const QDomElement &jingleEl)')
+          end = text.index('\n        bool handleIncomingContentModify(const QDomElement &jingleEl)', start)
+          block = text[start:end]
           old = '\n'.join([
               '                if (!app || !app->transport() || !app->transport()->isLocal()',
               '                    || transportEl.namespaceURI() != app->transport()->pad()->ns()) {',
@@ -72,9 +75,10 @@ jobs:
               '                    || !app->transportReplaceInProgress()',
               '                    || transportEl.namespaceURI() != app->transport()->pad()->ns()) {',
           ])
-          if old not in text:
+          if old not in block:
               raise SystemExit('transport-reject validation point not found')
-          session.write_text(text.replace(old, new, 1))
+          block = block.replace(old, new, 1)
+          session.write_text(text[:start] + block + text[end:])
           PY
 
       - name: Verify and push
