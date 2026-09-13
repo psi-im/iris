@@ -1,0 +1,116 @@
+name: Apply transport-reject reentrancy guard
+
+on:
+  push:
+    branches:
+      - automation/fix-jingle-parser
+    paths:
+      - .automation-trigger-reject-reentrancy
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: jingle/async-media
+          fetch-depth: 0
+
+      - name: Guard rejected transport identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/xmpp/xmpp-im/jingle-session.cpp')
+          text = path.read_text()
+          start = text.index('        bool handleIncomingTransportReject(const QDomElement &jingleEl)')
+          end = text.index('\n        bool handleIncomingContentModify(const QDomElement &jingleEl)', start)
+          replacement = '\n'.join([
+              '        bool handleIncomingTransportReject(const QDomElement &jingleEl)',
+              '        {',
+              '            struct ValidatedTransportReject {',
+              '                QPointer<Application>   application;',
+              '                ContentKey              key;',
+              '                QWeakPointer<Transport> current;',
+              '            };',
+              '            QVector<ValidatedTransportReject> updates;',
+              '            QSet<ContentKey>                  seen;',
+              '            for (auto ce = jingleEl.firstChildElement(QStringLiteral("content")); !ce.isNull();',
+              '                 ce      = ce.nextSiblingElement(QStringLiteral("content"))) {',
+              '                ContentBase cb(ce);',
+              '                auto        transportEl = ce.firstChildElement(QStringLiteral("transport"));',
+              '                if (!cb.isValid() || transportEl.isNull() || transportEl.namespaceURI().isEmpty()) {',
+              '                    lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,',
+              '                                                    XMPP::Stanza::Error::ErrorCond::BadRequest);',
+              '                    return false;',
+              '                }',
+              '                const ContentKey key { cb.name, cb.creator };',
+              '                if (seen.contains(key)) {',
+              '                    lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,',
+              '                                                    XMPP::Stanza::Error::ErrorCond::BadRequest);',
+              '                    return false;',
+              '                }',
+              '                seen.insert(key);',
+              '',
+              '                auto app = contentList.value(key);',
+              '                if (!app || !app->transport() || !app->transport()->isLocal()',
+              '                    || transportEl.namespaceURI() != app->transport()->pad()->ns()) {',
+              '                    lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,',
+              '                                                    XMPP::Stanza::Error::ErrorCond::UnexpectedRequest);',
+              '                    ErrorUtil::fill(jingleEl.ownerDocument(), *lastError, ErrorUtil::OutOfOrder);',
+              '                    return false;',
+              '                }',
+              '                updates.append(ValidatedTransportReject { QPointer<Application>(app), key,',
+              '                                                          app->transport().toWeakRef() });',
+              '            }',
+              '',
+              '            if (updates.isEmpty()) {',
+              '                lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,',
+              '                                                XMPP::Stanza::Error::ErrorCond::BadRequest);',
+              '                return false;',
+              '            }',
+              '',
+              '            QPointer<Session> session(q);',
+              '            for (const auto &entry : std::as_const(updates)) {',
+              '                if (!session)',
+              '                    return true;',
+              '                auto app              = entry.application;',
+              '                auto currentTransport = entry.current.lock();',
+              '                if (!app || contentList.value(entry.key) != app.data() || !currentTransport',
+              '                    || app->transport() != currentTransport)',
+              '                    continue; // superseded or removed by a previous reentrant callback',
+              '',
+              '                if (!app->incomingTransportReject()) {',
+              '                    if (!session)',
+              '                        return true;',
+              '                    lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,',
+              '                                                    XMPP::Stanza::Error::ErrorCond::UnexpectedRequest);',
+              '                    ErrorUtil::fill(jingleEl.ownerDocument(), *lastError, ErrorUtil::OutOfOrder);',
+              '                    return false;',
+              '                }',
+              '            }',
+              '            if (!session)',
+              '                return true;',
+              '            planStep();',
+              '            return true;',
+              '        }',
+          ])
+          path.write_text(text[:start] + replacement + text[end:])
+          PY
+
+      - name: Verify and push
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git diff -- src/xmpp/xmpp-im/jingle-session.cpp
+          git config user.name 'Sergei Ilinykh'
+          git config user.email 'rion4ik@gmail.com'
+          git add src/xmpp/xmpp-im/jingle-session.cpp
+          git commit -m 'Guard transport-reject batch identity'
+          git push origin HEAD:jingle/async-media
