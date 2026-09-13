@@ -237,6 +237,8 @@ static void crossedContentModify(Client &client, Task *success, Task *failure, J
           "responder crossed request was not evaluated");
     auto initiatorUpdate = initiatorApp->takeOutgoingUpdate();
     auto responderUpdate = responderApp->takeOutgoingUpdate();
+    initiator.outgoingActionStarted(J::Action::ContentModify);
+    responder.outgoingActionStarted(J::Action::ContentModify);
 
     check(initiator.shouldTieBreakIncoming(J::Action::ContentModify),
           "initiator dispatcher did not reject crossed content-modify");
@@ -251,10 +253,14 @@ static void crossedContentModify(Client &client, Task *success, Task *failure, J
     check(initiatorApp->senders() == J::Origin::Both, "losing responder direction leaked into initiator state");
 
     if (responderResultFirst) {
+        responder.outgoingActionFinished(J::Action::ContentModify);
         acknowledge(responderUpdate, failure);
+        initiator.outgoingActionFinished(J::Action::ContentModify);
         acknowledge(initiatorUpdate, success);
     } else {
+        initiator.outgoingActionFinished(J::Action::ContentModify);
         acknowledge(initiatorUpdate, success);
+        responder.outgoingActionFinished(J::Action::ContentModify);
         acknowledge(responderUpdate, failure);
     }
 
@@ -342,17 +348,17 @@ int main(int argc, char **argv)
         video->evaluateOutgoingUpdate();
         auto audioUpdate = audio->takeOutgoingUpdate();
         auto videoUpdate = video->takeOutgoingUpdate();
+        initiator.outgoingActionStarted(J::Action::ContentModify);
         check(initiator.shouldTieBreakIncoming(J::Action::ContentModify),
               "multi-content collision did not enable resolver");
-        acknowledge(audioUpdate, &success);
-        check(initiator.shouldTieBreakIncoming(J::Action::ContentModify),
-              "collision cleared while sibling content callback was still pending");
         delete video;
-        check(initiator.shouldTieBreakIncoming(J::Action::ContentModify),
-              "removed Application prematurely cleared collision lifetime");
         std::get<1>(videoUpdate) = {};
+        check(initiator.shouldTieBreakIncoming(J::Action::ContentModify),
+              "removed Application prematurely cleared the still-pending IQ collision");
+        initiator.outgoingActionFinished(J::Action::ContentModify);
         check(!initiator.shouldTieBreakIncoming(J::Action::ContentModify),
-              "destroyed pending callback left stale collision state");
+              "completed multi-content IQ left stale collision state");
+        acknowledge(audioUpdate, &success);
     }
 
     // Transport signaling keeps its existing priority over a queued direction

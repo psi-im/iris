@@ -264,7 +264,8 @@ namespace XMPP { namespace Jingle {
             // context before it can be migrated without changing behaviour.
             tieBreakResolver_.registerResolver(SessionTieBreakResolver::Callbacks {
                 [this](const TieBreakContext &context) {
-                    return context.incomingAction == Action::ContentModify && *contentModifyInFlight_ > 0;
+                    return context.incomingAction == Action::ContentModify && outgoingActionInFlight_
+                        && *outgoingActionInFlight_ == Action::ContentModify;
                 },
                 [this](const TieBreakContext &) {
                     SessionTieBreakResolver::Plan plan;
@@ -273,14 +274,20 @@ namespace XMPP { namespace Jingle {
                 } });
         }
 
-        // Application callbacks keep this token alive until the corresponding
-        // content-modify IQ has completed, even if the Application is removed first.
-        std::shared_ptr<void> trackContentModify()
+        // One outgoing Jingle IQ is serialized at a time. Tie-break lifetime
+        // follows that IQ, not the Application callbacks invoked after its result.
+        void outgoingActionStarted(Action action)
         {
             ensureTieBreakResolvers();
-            auto counter = contentModifyInFlight_;
-            ++*counter;
-            return std::shared_ptr<void>(counter.get(), [counter](int *) { --*counter; });
+            outgoingActionInFlight_ = action;
+        }
+
+        void outgoingActionFinished(Action action)
+        {
+            if (!outgoingActionInFlight_ || *outgoingActionInFlight_ != action)
+                return;
+            outgoingActionInFlight_.reset();
+            tieBreakResolver_.notifyAll(TieBreakEvent::LocalCompleted);
         }
 
         bool shouldTieBreakIncoming(Action action) const
@@ -301,7 +308,7 @@ namespace XMPP { namespace Jingle {
         static bool validBundleAnswer(const QList<ContentGroup> &offer, const QList<ContentGroup> &answer);
         bool        validLocalGroupings() const;
 
-        std::shared_ptr<int>           contentModifyInFlight_ = std::make_shared<int>(0);
+        std::optional<Action>           outgoingActionInFlight_;
         mutable SessionTieBreakResolver tieBreakResolver_;
         mutable bool                    tieBreakResolversReady_ = false;
 

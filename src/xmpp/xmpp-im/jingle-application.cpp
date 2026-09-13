@@ -339,8 +339,7 @@ namespace XMPP { namespace Jingle {
             Q_ASSERT(_state == State::Active);
             Q_ASSERT(_requestedSenders);
             Q_ASSERT(!_sendersUpdateInFlight);
-            const auto requested   = *_requestedSenders;
-            auto       transaction = _pad->session()->trackContentModify();
+            const auto requested = *_requestedSenders;
 
             // XEP-0166 makes senders mandatory for content-modify. ContentBase
             // normally omits the default value "both", so force the attribute
@@ -348,7 +347,7 @@ namespace XMPP { namespace Jingle {
             contentEl.setAttribute(QLatin1String("senders"), sendersAttribute(requested));
             _sendersUpdateInFlight = requested;
             return OutgoingUpdate { updates,
-                                    [this, requested, transaction = std::move(transaction)](Task *task) mutable {
+                                    [this, requested](Task *task) {
                                         const bool success = task && task->success();
                                         _sendersUpdateInFlight.reset();
 
@@ -369,7 +368,6 @@ namespace XMPP { namespace Jingle {
                                             _requestedSenders.reset();
                                         if (_requestedSenders)
                                             emit updated();
-                                        transaction.reset();
                                     } };
         }
         case Action::TransportInfo:

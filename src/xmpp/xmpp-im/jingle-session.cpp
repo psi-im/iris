@@ -115,6 +115,7 @@ namespace XMPP { namespace Jingle {
 
         void setSessionFinished()
         {
+            q->outgoingActionInFlight_.reset();
             state = State::Finished;
             emit q->terminated();
             signalingContent.clear();
@@ -206,6 +207,7 @@ namespace XMPP { namespace Jingle {
             jt->request(otherParty, xml);
             QObject::connect(jt, &JT::finished, q, [jt, jingle, callback, this]() {
                 waitingAck = false;
+                q->outgoingActionFinished(jingle.action());
                 if (callback) {
                     callback(jt);
                 }
@@ -215,6 +217,7 @@ namespace XMPP { namespace Jingle {
                 planStep();
             });
             waitingAck = true;
+            q->outgoingActionStarted(action);
             jt->go(true);
         }
 
