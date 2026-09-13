@@ -9,6 +9,7 @@
 #include <iris/jingle-session.h>
 #undef private
 #include <iris/xmpp_client.h>
+#include <iris/xmpp_task.h>
 
 #include <memory>
 
@@ -20,6 +21,17 @@ static void check(bool ok, const char *message)
     if (!ok)
         qFatal("%s", message);
 }
+
+class Result : public Task {
+public:
+    Result(Task *parent, bool ok) : Task(parent)
+    {
+        if (ok)
+            setSuccess();
+        else
+            setError(500);
+    }
+};
 
 class TestTransportManager;
 
@@ -43,10 +55,15 @@ public:
     }
 
     void forceState(J::State state) { setState(state); }
+    void setHasUpdates(bool value) { hasUpdates_ = value; }
     const QString &id() const { return id_; }
     int starts() const { return starts_; }
 
-    void prepare() override { setState(J::State::ApprovedToSend); }
+    void prepare() override
+    {
+        setState(J::State::ApprovedToSend);
+        hasUpdates_ = true;
+    }
     void start() override
     {
         ++starts_;
@@ -59,8 +76,16 @@ public:
         id_ = el.attribute(QStringLiteral("id"));
         return true;
     }
-    bool hasUpdates() const override { return false; }
-    J::OutgoingTransportInfoUpdate takeOutgoingUpdate(bool) override { return {}; }
+    bool hasUpdates() const override { return hasUpdates_; }
+    J::OutgoingTransportInfoUpdate takeOutgoingUpdate(bool ensureTransportElement) override
+    {
+        if (!hasUpdates_ && !ensureTransportElement)
+            return {};
+        auto el = pad()->doc()->createElementNS(pad()->ns(), QStringLiteral("transport"));
+        el.setAttribute(QStringLiteral("id"), id_);
+        hasUpdates_ = false;
+        return { el, [](Task *) { } };
+    }
     bool isValid() const override { return true; }
     J::TransportFeatures features() const override { return J::TransportFeature::Reliable; }
     J::Connection::Ptr addChannel(J::TransportFeatures, const QString &, int) override { return {}; }
@@ -68,7 +93,8 @@ public:
 
 private:
     QString id_;
-    int     starts_ = 0;
+    bool    hasUpdates_ = false;
+    int     starts_     = 0;
 };
 
 class TestTransportManager : public J::TransportManager {
@@ -153,7 +179,9 @@ public:
         _transportSelector = std::move(selector);
         return raw;
     }
+    void markReplacePlanned() { _pendingTransportReplace = PendingTransportReplace::Planned; }
     void markReplaceInProgress() { _pendingTransportReplace = PendingTransportReplace::InProgress; }
+    bool replaceNeedAck() const { return _pendingTransportReplace == PendingTransportReplace::NeedAck; }
     bool replaceInProgress() const { return _pendingTransportReplace == PendingTransportReplace::InProgress; }
     bool replacePlanned() const { return _pendingTransportReplace == PendingTransportReplace::Planned; }
 
@@ -236,6 +264,33 @@ static void testTransportRejectSelectsFallback(Client &client)
           "transport-reject did not run through transport selector recovery");
 }
 
+static void testFailedIqSelectsFallback(Client &client)
+{
+    J::Session session(client.jingleManager(), Jid(QStringLiteral("peer@example.test/device")), J::Origin::Initiator);
+    auto rejected = makeTransport(session, J::Origin::Initiator, J::State::ApprovedToSend, QStringLiteral("rejected"));
+    rejected->setHasUpdates(true);
+    auto fallback = makeTransport(session, J::Origin::Initiator, J::State::Created, QStringLiteral("fallback"));
+    auto selector = std::make_unique<TestSelector>();
+    selector->setNext(fallback);
+    TestSelector *selectorRaw = nullptr;
+    auto app = addApplication(session, rejected, std::move(selector), &selectorRaw);
+    app->markReplacePlanned();
+
+    check(app->evaluateOutgoingUpdate().action == J::Action::TransportReplace,
+          "planned replacement did not evaluate to transport-replace");
+    auto update = app->takeOutgoingUpdate();
+    check(app->replaceNeedAck(), "outgoing transport-replace did not enter NeedAck");
+    const auto &ack = std::get<1>(update);
+    check(bool(ack), "outgoing transport-replace had no ACK callback");
+    Result failure(client.rootTask(), false);
+    ack(&failure);
+
+    check(app->transport().data() == fallback.data(), "failed transport-replace IQ did not select fallback transport");
+    check(app->replacePlanned(), "fallback after failed transport-replace IQ was not planned for signaling");
+    check(selectorRaw->getNextCalls == 1 && selectorRaw->replaceCalls == 1,
+          "failed transport-replace IQ did not run through transport selector recovery");
+}
+
 static void testMalformedTransportAcceptRejectedAtomically(Client &client)
 {
     J::Session session(client.jingleManager(), Jid(QStringLiteral("peer@example.test/device")), J::Origin::Initiator);
@@ -267,6 +322,8 @@ int main(int argc, char **argv)
 
     if (test == QLatin1String("transport-reject"))
         testTransportRejectSelectsFallback(client);
+    else if (test == QLatin1String("failed-iq-fallback"))
+        testFailedIqSelectsFallback(client);
     else if (test == QLatin1String("malformed-accept"))
         testMalformedTransportAcceptRejectedAtomically(client);
     else
