@@ -26,6 +26,8 @@
 #include <iris/xmpp-im/jingle-transport.h>
 #include <iris/xmpp-im/xmpp_features.h>
 
+#include <memory>
+
 namespace XMPP { namespace Jingle {
 
     // class Manager;
@@ -125,15 +127,35 @@ namespace XMPP { namespace Jingle {
         void newContentReceived();
 
     private:
+        friend class Application;
         friend class Manager;
         friend class PublicationManager;
         friend class JTPush;
+
+        // Application callbacks keep this token alive until the corresponding
+        // content-modify IQ has completed, even if the Application is removed first.
+        std::shared_ptr<void> trackContentModify()
+        {
+            auto counter = contentModifyInFlight_;
+            ++*counter;
+            return std::shared_ptr<void>(counter.get(), [counter](int *) { --*counter; });
+        }
+
+        // XEP-0166 existing-session tie-break is action-level: the initiator's
+        // in-flight content-modify wins before the responder payload is applied.
+        bool shouldTieBreakIncoming(Action action) const
+        {
+            return action == Action::ContentModify && role() == Origin::Initiator && *contentModifyInFlight_ > 0;
+        }
+
         QString                                   reserveSid();
         bool                                      incomingInitiate(const Jingle &jingle, const QDomElement &jingleEl);
         bool                                      updateFromXml(Action action, const QDomElement &jingleEl);
         static std::optional<QList<ContentGroup>> parseGroupings(const QDomElement &jingleEl);
         static bool validBundleAnswer(const QList<ContentGroup> &offer, const QList<ContentGroup> &answer);
         bool        validLocalGroupings() const;
+
+        std::shared_ptr<int> contentModifyInFlight_ = std::make_shared<int>(0);
 
         class Private;
         std::unique_ptr<Private> d;

@@ -455,6 +455,10 @@ namespace XMPP { namespace Jingle {
                     }
                     return true;
                 }
+                if (session->shouldTieBreakIncoming(jingle.action())) {
+                    respondTieBreak(iq);
+                    return true;
+                }
                 if (!session->updateFromXml(jingle.action(), jingleEl)) {
                     respondError(iq, *session->lastError());
                     return true;

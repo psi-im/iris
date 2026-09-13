@@ -3,7 +3,9 @@
 #include <QDebug>
 #include <QtCrypto>
 #include <iris/jingle-application.h>
+#define private public
 #include <iris/jingle-session.h>
+#undef private
 #include <iris/xmpp_client.h>
 #include <iris/xmpp_task.h>
 
@@ -63,11 +65,13 @@ public:
 
 class TestApplication : public J::Application {
 public:
-    explicit TestApplication(J::Session *session, J::Origin senders = J::Origin::Both)
+    explicit TestApplication(J::Session *session, J::Origin senders = J::Origin::Both,
+                             const QString &contentName = QStringLiteral("audio"),
+                             J::Origin creator = J::Origin::Initiator)
     {
         _pad.reset(new TestPad(session));
-        _contentName = QStringLiteral("audio");
-        _creator     = J::Origin::Initiator;
+        _contentName = contentName;
+        _creator     = creator;
         _senders     = senders;
     }
 
@@ -126,11 +130,79 @@ static QDomElement firstContent(const J::OutgoingUpdate &update)
     return elements.first();
 }
 
+static QDomElement payload(const J::OutgoingUpdate &update)
+{
+    QDomDocument doc;
+    auto         jingle = doc.createElementNS(J::NS, QStringLiteral("jingle"));
+    for (const auto &element : std::get<0>(update))
+        jingle.appendChild(doc.importNode(element, true));
+    doc.appendChild(jingle);
+    return jingle;
+}
+
 static void acknowledge(const J::OutgoingUpdate &update, Task *result)
 {
     const auto &callback = std::get<1>(update);
     check(bool(callback), "outgoing update has no ACK callback");
     callback(result);
+}
+
+static void crossedContentModify(Client &client, Task *success, Task *failure, J::Origin initiatorTarget,
+                                 J::Origin responderTarget, bool responderResultFirst)
+{
+    J::Session initiator(client.jingleManager(), Jid(QStringLiteral("responder@example.test/device")),
+                         J::Origin::Initiator);
+    J::Session responder(client.jingleManager(), Jid(QStringLiteral("initiator@example.test/device")),
+                         J::Origin::Responder);
+
+    // Use a responder-created content so Session::addContent() produces the same
+    // creator key on the responder that the initiator serializes in content-modify.
+    auto initiatorApp = new TestApplication(&initiator, J::Origin::Both, QStringLiteral("audio"), J::Origin::Responder);
+    auto responderApp = new TestApplication(&responder, J::Origin::Both, QStringLiteral("audio"), J::Origin::Responder);
+    initiator.addContent(initiatorApp);
+    responder.addContent(responderApp);
+    initiatorApp->activate();
+    responderApp->activate();
+
+    check(initiatorApp->requestSenders(initiatorTarget), "initiator crossed direction request rejected");
+    check(responderApp->requestSenders(responderTarget), "responder crossed direction request rejected");
+    check(initiatorApp->evaluateOutgoingUpdate().action == J::Action::ContentModify,
+          "initiator crossed request was not evaluated");
+    check(responderApp->evaluateOutgoingUpdate().action == J::Action::ContentModify,
+          "responder crossed request was not evaluated");
+    auto initiatorUpdate = initiatorApp->takeOutgoingUpdate();
+    auto responderUpdate = responderApp->takeOutgoingUpdate();
+
+    check(initiator.shouldTieBreakIncoming(J::Action::ContentModify),
+          "initiator dispatcher did not select content-modify tie-break");
+    check(!responder.shouldTieBreakIncoming(J::Action::ContentModify),
+          "responder incorrectly selected content-modify tie-break");
+    check(!initiator.shouldTieBreakIncoming(J::Action::TransportInfo),
+          "content-modify state leaked into an unrelated action");
+
+    // JTPush rejects the responder's crossed action before updateFromXml(). The
+    // responder accepts the initiator action through the real Session parser.
+    check(responder.updateFromXml(J::Action::ContentModify, payload(initiatorUpdate)),
+          "responder rejected initiator content-modify");
+    check(responderApp->senders() == initiatorTarget, "responder did not apply initiator direction");
+    check(initiatorApp->senders() == J::Origin::Both, "losing responder direction leaked into initiator state");
+
+    if (responderResultFirst) {
+        acknowledge(responderUpdate, failure);
+        acknowledge(initiatorUpdate, success);
+    } else {
+        acknowledge(initiatorUpdate, success);
+        acknowledge(responderUpdate, failure);
+    }
+
+    check(initiatorApp->senders() == initiatorTarget && responderApp->senders() == initiatorTarget,
+          "crossed content-modify did not converge to initiator state");
+    check(!initiator.shouldTieBreakIncoming(J::Action::ContentModify)
+              && !responder.shouldTieBreakIncoming(J::Action::ContentModify),
+          "crossed content-modify left a transaction marked in flight");
+    check(initiatorApp->evaluateOutgoingUpdate().action == J::Action::NoAction
+              && responderApp->evaluateOutgoingUpdate().action == J::Action::NoAction,
+          "crossed content-modify left a redundant direction update");
 }
 
 int main(int argc, char **argv)
@@ -223,6 +295,43 @@ int main(int argc, char **argv)
               "newer intent serialized incorrectly after IQ failure");
         acknowledge(second, &success);
         check(active.senders() == J::Origin::Initiator, "newer intent did not commit after older IQ failure");
+    }
+
+    // The JTPush collision predicate and the existing Application ACK callbacks
+    // together must converge both roles to the initiator's action, independent
+    // of IQ result ordering and whether the crossed directions differ.
+    crossedContentModify(client, &success, &failure, J::Origin::Initiator, J::Origin::Responder, true);
+    crossedContentModify(client, &success, &failure, J::Origin::Responder, J::Origin::Responder, false);
+
+    // The tie-break is action-level and outlives an Application removed before
+    // the IQ result. The retained callback token represents the still-pending JT.
+    {
+        J::Session initiator(client.jingleManager(), Jid(QStringLiteral("multi@example.test/device")),
+                             J::Origin::Initiator);
+        auto audio = new TestApplication(&initiator, J::Origin::Both, QStringLiteral("audio"));
+        auto video = new TestApplication(&initiator, J::Origin::Both, QStringLiteral("video"));
+        initiator.addContent(audio);
+        initiator.addContent(video);
+        audio->activate();
+        video->activate();
+        check(audio->requestSenders(J::Origin::Initiator) && video->requestSenders(J::Origin::Responder),
+              "multi-content direction request rejected");
+        check(audio->evaluateOutgoingUpdate().action == J::Action::ContentModify
+                  && video->evaluateOutgoingUpdate().action == J::Action::ContentModify,
+              "multi-content direction request was not evaluated");
+        auto audioUpdate = audio->takeOutgoingUpdate();
+        auto videoUpdate = video->takeOutgoingUpdate();
+        check(initiator.shouldTieBreakIncoming(J::Action::ContentModify),
+              "multi-content in-flight update did not enable tie-break");
+        acknowledge(audioUpdate, &success);
+        check(initiator.shouldTieBreakIncoming(J::Action::ContentModify),
+              "tie-break cleared while a sibling content was still in flight");
+        delete video;
+        check(initiator.shouldTieBreakIncoming(J::Action::ContentModify),
+              "removed application prematurely cleared action-level tie-break");
+        std::get<1>(videoUpdate) = {};
+        check(!initiator.shouldTieBreakIncoming(J::Action::ContentModify),
+              "completed removed-content transaction left stale tie-break state");
     }
 
     // Transport signaling has protocol priority and must not consume the queued

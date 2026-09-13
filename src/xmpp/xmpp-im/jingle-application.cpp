@@ -339,35 +339,38 @@ namespace XMPP { namespace Jingle {
             Q_ASSERT(_state == State::Active);
             Q_ASSERT(_requestedSenders);
             Q_ASSERT(!_sendersUpdateInFlight);
-            const auto requested = *_requestedSenders;
+            const auto requested   = *_requestedSenders;
+            auto       transaction = _pad->session()->trackContentModify();
 
             // XEP-0166 makes senders mandatory for content-modify. ContentBase
             // normally omits the default value "both", so force the attribute
             // for every direction here.
             contentEl.setAttribute(QLatin1String("senders"), sendersAttribute(requested));
             _sendersUpdateInFlight = requested;
-            return OutgoingUpdate { updates, [this, requested](Task *task) {
-                                       const bool success = task && task->success();
-                                       _sendersUpdateInFlight.reset();
+            return OutgoingUpdate { updates,
+                                    [this, requested, transaction = std::move(transaction)](Task *task) mutable {
+                                        const bool success = task && task->success();
+                                        _sendersUpdateInFlight.reset();
 
-                                       if (success && _senders != requested) {
-                                           _senders = requested;
-                                           QPointer<Application> guard(this);
-                                           emit sendersChanged(requested);
-                                           if (!guard)
-                                               return;
-                                       }
+                                        if (success && _senders != requested) {
+                                            _senders = requested;
+                                            QPointer<Application> guard(this);
+                                            emit sendersChanged(requested);
+                                            if (!guard)
+                                                return;
+                                        }
 
-                                       // A failed IQ is not retried forever. On success, inspect the
-                                       // current target after sendersChanged: a signal handler may have
-                                       // synchronously replaced the old target with a newer intent.
-                                       if (!success && _requestedSenders && *_requestedSenders == requested)
-                                           _requestedSenders.reset();
-                                       if (_requestedSenders && *_requestedSenders == _senders)
-                                           _requestedSenders.reset();
-                                       if (_requestedSenders)
-                                           emit updated();
-                                   } };
+                                        // A failed IQ is not retried forever. On success, inspect the
+                                        // current target after sendersChanged: a signal handler may have
+                                        // synchronously replaced the old target with a newer intent.
+                                        if (!success && _requestedSenders && *_requestedSenders == requested)
+                                            _requestedSenders.reset();
+                                        if (_requestedSenders && *_requestedSenders == _senders)
+                                            _requestedSenders.reset();
+                                        if (_requestedSenders)
+                                            emit updated();
+                                        transaction.reset();
+                                    } };
         }
         case Action::TransportInfo:
             Q_ASSERT(_transport->hasUpdates());
