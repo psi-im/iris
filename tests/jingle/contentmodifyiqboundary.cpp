@@ -3,6 +3,9 @@
 #include "contentmodifyrace.cpp"
 #undef main
 
+// This regression deliberately drives the Application ACK callback directly: it
+// isolates the semantic boundary between an already completed IQ transaction and
+// reentrant application notifications executed from that completion.
 int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
