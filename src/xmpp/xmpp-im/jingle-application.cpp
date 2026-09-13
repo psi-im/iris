@@ -53,8 +53,14 @@ namespace XMPP { namespace Jingle {
         if (!supportsContentModify() || !isValidSenders(senders) || _senders == senders)
             return;
         _senders = senders;
+
+        QPointer<Application> guard(this);
         emit sendersChanged(senders);
+        if (!guard)
+            return;
         emit sendersChangedByPeer(senders);
+        if (!guard)
+            return;
 
         if (_requestedSenders && !_sendersUpdateInFlight) {
             if (*_requestedSenders == _senders)
@@ -497,10 +503,8 @@ namespace XMPP { namespace Jingle {
             if (transport->isLocal()) {
                 auto ts = _transport->state() == State::Finished ? _transport->prevState() : _transport->state();
                 if (_transport->isRemote() || ts > State::Unacked) {
-                    // if remote knows of the current transport
                     _pendingTransportReplace = PendingTransportReplace::Planned;
                 } else if (_transport->isLocal() && ts == State::Unacked) {
-                    // if remote may know but we don't know yet about it
                     _pendingTransportReplace = PendingTransportReplace::NeedAck;
                 }
             } else {
