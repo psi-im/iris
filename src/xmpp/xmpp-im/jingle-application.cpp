@@ -506,15 +506,25 @@ namespace XMPP { namespace Jingle {
     {
         if (_pendingTransportReplace != PendingTransportReplace::InProgress || !_transport)
             return false;
-        if (!_transport->update(el))
+
+        const auto expected = _transport;
+        QPointer<Application> guard(this);
+        if (!expected->update(el))
             return false;
+        if (!guard)
+            return true;
+
+        // update() is transport-specific and may synchronously select a newer
+        // replacement. The peer accepted expected, so never let that old
+        // acknowledgement complete or start the newer local transaction.
+        if (_transport != expected || _pendingTransportReplace != PendingTransportReplace::InProgress)
+            return true;
 
         _pendingTransportReplace = PendingTransportReplace::None;
         if (_state >= State::Connecting)
-            _transport->start();
+            expected->start();
         return true;
     }
-
     bool Application::incomingTransportReject()
     {
         if (_pendingTransportReplace != PendingTransportReplace::InProgress || !_transport || !_transport->isLocal())
