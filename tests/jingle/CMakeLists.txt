@@ -57,6 +57,8 @@ add_test(NAME jingle_transportreplace_malformed_accept
     COMMAND jingle_transportreplacecorrectness_test malformed-accept)
 add_test(NAME jingle_transportreplace_duplicate_content
     COMMAND jingle_transportreplacecorrectness_test duplicate-content)
+add_test(NAME jingle_transportreplace_missing_transport
+    COMMAND jingle_transportreplacecorrectness_test missing-transport)
 add_executable(jingle_transportreplaceprotocol_test transportreplaceprotocol.cpp)
 target_link_libraries(jingle_transportreplaceprotocol_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
     Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
