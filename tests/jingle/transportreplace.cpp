@@ -207,6 +207,7 @@ public:
     }
     void setReplaceEnabled(bool enabled) { replaceEnabled_ = enabled; }
     void markReplacePlanned() { _pendingTransportReplace = PendingTransportReplace::Planned; }
+    void markReplaceAwaitingAck() { _pendingTransportReplace = PendingTransportReplace::NeedAck; }
     void markReplaceInProgress() { _pendingTransportReplace = PendingTransportReplace::InProgress; }
     bool replacePlanned() const { return _pendingTransportReplace == PendingTransportReplace::Planned; }
     bool replaceNeedAck() const { return _pendingTransportReplace == PendingTransportReplace::NeedAck; }
@@ -309,6 +310,7 @@ static void testInitiatorLocalUnackedTieBreak(Client &client)
     TestSelector *selectorRaw = nullptr;
     auto app = addApplication(session, QStringLiteral("audio"), J::Origin::Initiator, old, std::move(selector),
                               &selectorRaw);
+    app->markReplaceAwaitingAck();
 
     QDomDocument doc;
     const bool ok = session.updateFromXml(
@@ -382,6 +384,7 @@ static void testBatchTieBreakReevaluatesSiblingTransport(Client &client)
     auto audioOld = makeTransport(session, J::Origin::Initiator, J::State::Unacked, QStringLiteral("audio-old"));
     auto audio = addApplication(session, QStringLiteral("audio"), J::Origin::Initiator, audioOld,
                                 std::make_unique<TestSelector>());
+    audio->markReplaceAwaitingAck();
     auto videoOld = makeTransport(session, J::Origin::Responder, J::State::Active, QStringLiteral("video-old"));
     auto videoSelector = std::make_unique<TestSelector>();
     auto videoRetry = makeTransport(session, J::Origin::Initiator, J::State::Created, QStringLiteral("video-local"));
@@ -411,7 +414,9 @@ static void testBatchTieBreakKeepsPreparedLocalSibling(Client &client)
 {
     J::Session session(client.jingleManager(), Jid(QStringLiteral("peer@example.test/device")), J::Origin::Initiator);
     auto audioOld = makeTransport(session, J::Origin::Initiator, J::State::Unacked, QStringLiteral("audio-old"));
-    addApplication(session, QStringLiteral("audio"), J::Origin::Initiator, audioOld, std::make_unique<TestSelector>());
+    auto audio = addApplication(session, QStringLiteral("audio"), J::Origin::Initiator, audioOld,
+                                std::make_unique<TestSelector>());
+    audio->markReplaceAwaitingAck();
     auto videoOld = makeTransport(session, J::Origin::Initiator, J::State::ApprovedToSend, QStringLiteral("video-old"));
     auto videoSelector = std::make_unique<TestSelector>();
     auto videoRetry = makeTransport(session, J::Origin::Initiator, J::State::Created, QStringLiteral("video-retry"));
@@ -440,6 +445,7 @@ static void testMalformedBatchAbortsBeforeTieBreakSideEffects(Client &client)
     auto audioOld = makeTransport(session, J::Origin::Initiator, J::State::Unacked, QStringLiteral("audio-old"));
     auto audio = addApplication(session, QStringLiteral("audio"), J::Origin::Initiator, audioOld,
                                 std::make_unique<TestSelector>());
+    audio->markReplaceAwaitingAck();
     auto videoOld = makeTransport(session, J::Origin::Responder, J::State::Active, QStringLiteral("video-old"));
     auto video = addApplication(session, QStringLiteral("video"), J::Origin::Initiator, videoOld,
                                 std::make_unique<TestSelector>());
@@ -517,6 +523,7 @@ static void testTieBreakDominatesUnsupportedSibling(Client &client)
     auto audioOld = makeTransport(session, J::Origin::Initiator, J::State::Unacked, QStringLiteral("audio-old"));
     auto audio = addApplication(session, QStringLiteral("audio"), J::Origin::Initiator, audioOld,
                                 std::make_unique<TestSelector>());
+    audio->markReplaceAwaitingAck();
     auto videoOld = makeTransport(session, J::Origin::Responder, J::State::Active, QStringLiteral("video-old"));
     auto video = addApplication(session, QStringLiteral("video"), J::Origin::Initiator, videoOld,
                                 std::make_unique<TestSelector>());
