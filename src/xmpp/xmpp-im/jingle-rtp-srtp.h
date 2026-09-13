@@ -16,6 +16,11 @@ namespace XMPP::Jingle::RTP {
 // RFC 7983 classification only, not packet authentication or validation.
 enum class DatagramKind { Unknown, Stun, Zrtp, Dtls, Turn, Rtp, Rtcp };
 IRIS_EXPORT DatagramKind classifyDatagram(const QByteArray &);
+// Runtime DTLS-SRTP profiles usable by both the currently loaded QCA provider
+// and the linked libSRTP backend. An empty list means native secure RTP is
+// unavailable; plain DTLS may still be usable for SCTP/data channels. Callers
+// should snapshot this result when deciding which media capabilities to expose.
+IRIS_EXPORT QStringList supportedSecureRtpProfiles();
 // One bidirectional protection context per authenticated DTLS association/BUNDLE
 // group, not per content or peer JID. All access must be serialized by the owner.
 // This class does not authenticate signaling or fingerprints: the caller may

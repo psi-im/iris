@@ -12,13 +12,14 @@ The implementation is intentionally split into two planes:
   `Connection` objects used by the application to move bytes or datagrams.
 
 For the native Iris stack, the relevant entry point is `XMPP::Client::jingleManager()`.
-`XMPP::Client` currently creates the Jingle manager, registers the built-in file-transfer
-application, and registers S5B, IBB and ICE transport managers.
+`XMPP::Client` creates the Jingle manager and registers the file-transfer application and S5B,
+IBB and ICE transports. The Jingle manager also owns the native RTP application manager,
+accessible through `rtpManager()`, and the separate publication manager. RTP requires a
+client-installed media provider and explicitly enabled transport namespaces.
 
-> **Scope:** Psi also has an external RTP Jingle implementation. It registers the RTP description
-> namespace with `Manager::addExternalManager()`, which tells the Iris Jingle task not to consume
-> those sessions. The architecture below describes sessions handled by the native Iris Jingle
-> stack.
+All sessions described here use the native Iris dispatcher; there is no external-manager
+bypass. RTP uses an authenticated packet interface rather than the file-transfer `Connection`
+interface. See [native RTP architecture](jingle-rtp-design.md) for that data path.
 
 ## From XEP-0166 concepts to Iris objects
 
@@ -167,15 +168,15 @@ flowchart LR
 
 ## Built-in native Jingle pieces
 
-At client construction time Iris registers the file-transfer application and three transport
-managers:
+Iris supplies file-transfer and RTP applications and three transport managers:
 
 | Implementation | Namespace | Relevant manager features |
 | --- | --- | --- |
 | File transfer | `urn:xmpp:jingle:apps:file-transfer:5` | Requires a reliable, ordered, data-oriented transport. |
+| RTP | `urn:xmpp:jingle:apps:rtp:1` | Client-installed `MediaProvider`; packet-capable endpoints require authenticated RTP/RTCP mux. |
 | S5B | `urn:xmpp:jingle:transports:s5b:1` | `Reliable`, `Ordered`, `Fast`, `DataOriented`. |
 | IBB | `urn:xmpp:jingle:transports:ibb:1` | `AlwaysConnect`, `Reliable`, `Ordered`, `DataOriented`. |
-| ICE | `urn:xmpp:jingle:transports:ice:0` | Supports a broader feature set including reliable/unreliable and message/live-oriented modes; see `jingle-ice.cpp`. |
+| ICE | `urn:xmpp:jingle:transports:ice:0`, `urn:xmpp:jingle:transports:ice-udp:1` | One manager with namespace-specific wire profiles; mode/build-dependent transport features. |
 
 `Manager::availableTransports()` filters managers by required features. The application still owns
 the final policy through `TransportSelector`; Jingle core deliberately does not hard-code a single
@@ -359,13 +360,24 @@ overtaking the acknowledgement ([XEP-0261, section 2.1](https://xmpp.org/extensi
 Incoming `content-accept` in an active session uses the same deferred start, without emitting
 another `activated()`. Queued starts check session state, content membership and application state.
 
+Initial acceptance may select a nonempty subset of pending contents. Omitted contents are
+detached and cleaned up using guarded object snapshots; cancellation or session destruction
+during cleanup prevents committing Active. Ordinary content-accept does not perform this
+initial-subset cleanup.
+
+The queued batch skips removed, destroyed or no-longer-Accepted applications and continues
+with the remaining accepted contents. Every callback boundary checks Session lifetime and
+Active state. Initial activation requires a surviving nonterminal content from the original
+snapshot; a replacement object with the same key does not qualify. An empty Session terminates
+without activation. The same helper serves later acceptance without re-emitting activated().
+
 The deferred-start ordering assumes the normal single-threaded, non-reentrant IQ dispatch:
 application parsing callbacks must not spin a nested event loop.
 
 ## Incoming session lifecycle
 
 Incoming Jingle IQs are consumed by the internal `JTPush` task. Before creating a native session it
-checks the external-manager bypass, allowed-party policy, redirection, duplicate SID and tie-break
+checks allowed-party policy, redirection, duplicate SID and tie-break
 conditions.
 
 A responder `Session` is deliberately **not** registered merely because a syntactically valid
@@ -641,9 +653,9 @@ pending-content rejection, session destruction with
 remaining contents, and DTLS fingerprint comparison. Run with:
 
 ```sh
-cmake -S tests/jingle -B build/jingle-tests -DUSE_QT6=ON -DIRIS_SYSTEM_QCA=3
+cmake -S tests/jingle -B build/jingle-tests -DUSE_QT6=ON -DIRIS_SYSTEM_QCA=3 -DIRIS_ENABLE_SRTP=ON
 cmake --build build/jingle-tests -j2
-ctest --test-dir build/jingle-tests --output-on-failure
+ctest --test-dir build/jingle-tests --output-on-failure -j1
 ```
 
 The DTLS-SRTP integration test requires a QCA3 provider supporting
@@ -663,10 +675,11 @@ success/failure and callbacks outliving their transport. A non-null IQ task is n
 success: acknowledgement handlers inspect `Task::success()`.
 `jingle_rtpmedia` uses the local ICE path with native RTP Applications and mock media endpoints,
 checking authenticated attachment, direction/payload filtering and teardown. The media API is
-documented in [RTP extension design](jingle-rtp-design.md#media-integration); no psimedia adapter
+documented in [native RTP architecture](jingle-rtp-design.md#media-integration); no psimedia adapter
 or external-client call is exercised by this test.
 
-For the proposed RTP/security extension boundaries, see [RTP and DTLS design](jingle-rtp-design.md).
+For the implemented RTP/security interfaces, asynchronous operations and the boundary between
+standalone group/router models and production transports, see [native RTP architecture](jingle-rtp-design.md).
 
 This document covers ordinary session signaling and data transport. It does **not** validate
 the separate PubSub authority/reconciliation machinery in `PublicationManager` (`jingle-pub.*`).
@@ -700,6 +713,11 @@ The main implementation files are:
 - `jingle-connection.h`, `jingle-connection.cpp` — application data connection abstraction;
 - `jingle-nstransportslist.*` — namespace-list transport selector;
 - `jingle-ft.*` — XEP-0234 file-transfer application and pad;
+- `jingle-rtp.*`, `jingle-rtp-media.cpp` — native RTP application, media interfaces and asynchronous operation scheduler;
+- `jingle-rtp-description.*`, `jingle-rtp-negotiation.*`, `jingle-rtp-info.*` — RTP XML, negotiation and notifications;
+- `jingle-rtp-srtp.*` — authenticated packet interface and SRTP association binding;
+- `jingle-rtp-router_p.*`, `jingle-group-negotiation_p.h`, `jingle-ice-group_p.h` — standalone routing and group models, not live BUNDLE;
+- `jingle-ice-udp.*` — standard ICE-UDP wire codec;
 - `jingle-s5b.*`, `jingle-ibb.*`, `jingle-ice.*` — built-in transport implementations;
 - `jingle-pub.*` — Jingle session publication support, adjacent to the ordinary XEP-0166 session
   lifecycle documented here.

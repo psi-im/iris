@@ -203,6 +203,7 @@ target_sources(iris PRIVATE
     xmpp-im/jingle-rtp-description.cpp
     xmpp-im/jingle-rtp-negotiation.cpp
     xmpp-im/jingle-rtp.cpp
+    xmpp-im/jingle-rtp-media.cpp
     xmpp-im/jingle-rtp-info.cpp
     xmpp-im/jingle-rtp-srtp.cpp
     xmpp-im/jingle-rtp-router_p.cpp

@@ -297,6 +297,8 @@ int main(int argc, char **argv)
     check(!XMPP::Jingle::RTP::SrtpContext::supportedProfiles().isEmpty(), "libSRTP backend unavailable");
 #endif
 #if QCA_MAJOR_VERSION >= 3
+    check(!XMPP::Jingle::RTP::supportedSecureRtpProfiles().isEmpty(),
+          "no common runtime DTLS-SRTP profile");
     check(Dtls::supportedSRTPProfiles().contains(QStringLiteral("SRTP_AES128_CM_HMAC_SHA1_80")),
           "a QCA3 DTLS-SRTP provider is required for this test");
     QCA::CertificateOptions options;

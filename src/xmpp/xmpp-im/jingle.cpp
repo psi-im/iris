@@ -386,17 +386,10 @@ namespace XMPP { namespace Jingle {
     class JTPush : public Task {
         Q_OBJECT
 
-        QList<QString> externalManagers;
-        QList<QString> externalSessions;
-
     public:
         JTPush(Task *parent) : Task(parent) { }
 
         ~JTPush() { }
-
-        inline void addExternalManager(const QString &ns) { externalManagers.append(ns); }
-        inline void forgetExternalSession(const QString &sid) { externalSessions.removeOne(sid); }
-        inline void registerExternalSession(const QString &sid) { externalSessions.append(sid); }
 
         bool take(const QDomElement &iq)
         {
@@ -415,25 +408,6 @@ namespace XMPP { namespace Jingle {
             if (!jingle.isValid()) {
                 respondError(iq, Stanza::Error::ErrorType::Cancel, Stanza::Error::ErrorCond::BadRequest);
                 return true;
-            }
-
-            if (externalManagers.size()) {
-                if (jingle.action() == Action::SessionInitiate) {
-                    auto cname = QString::fromLatin1("content");
-                    auto dname = QString::fromLatin1("description");
-                    for (auto n = jingleEl.firstChildElement(cname); !n.isNull(); n = n.nextSiblingElement(cname)) {
-                        auto del = n.firstChildElement(dname);
-                        if (!del.isNull() && externalManagers.contains(del.namespaceURI())) {
-                            externalSessions.append(jingle.sid());
-                            return false;
-                        }
-                    }
-                } else if (externalSessions.contains(jingle.sid())) {
-                    if (jingle.action() == Action::SessionTerminate) {
-                        externalSessions.removeOne(jingle.sid());
-                    }
-                    return false;
-                }
             }
 
             QString fromStr(iq.attribute(QStringLiteral("from")));
@@ -597,12 +571,6 @@ namespace XMPP { namespace Jingle {
 
     PublicationManager *Manager::publicationManager() const { return d->publicationManager.get(); }
     RTP::Manager       *Manager::rtpManager() const { return d->rtpManager.get(); }
-
-    void Manager::addExternalManager(const QString &ns) { d->pushTask->addExternalManager(ns); }
-
-    void Manager::registerExternalSession(const QString &sid) { d->pushTask->registerExternalSession(sid); }
-
-    void Manager::forgetExternalSession(const QString &sid) { d->pushTask->forgetExternalSession(sid); }
 
     void Manager::setRedirection(const Jid &to) { d->redirectionJid = to; }
 

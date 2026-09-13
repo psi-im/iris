@@ -369,19 +369,29 @@ namespace XMPP { namespace Jingle {
              *         b) don't send content-accept and accept everything with session-accept
              *      We prefer option (b) in our implementation.
              */
-            typedef std::tuple<QPointer<Application>, OutgoingUpdateCB> AckHndl;
+            typedef std::tuple<QPointer<Application>, OutgoingUpdateCB, bool> AckHndl;
+            QSet<Application *>                                               rejectedInitialContent;
             if (role == Origin::Responder) {
+                int    acceptedInitialContent = 0;
+                Reason rejectionReason;
                 for (const auto &c : std::as_const(initialIncomingUnacceptedContent)) {
                     auto out = c->evaluateOutgoingUpdate();
-                    if (out.action == Action::ContentReject) {
-                        lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,
-                                                        XMPP::Stanza::Error::ErrorCond::BadRequest);
-                        setSessionFinished();
-                        return true;
+                    if (out.action == Action::ContentAccept) {
+                        ++acceptedInitialContent;
+                        continue;
                     }
-                    if (out.action != Action::ContentAccept) {
-                        return false; // keep waiting.
+                    if (out.action == Action::ContentReject || out.action == Action::ContentRemove) {
+                        rejectedInitialContent.insert(c);
+                        if (!rejectionReason.isValid() && out.reason.isValid())
+                            rejectionReason = out.reason;
+                        continue;
                     }
+                    return false; // keep waiting.
+                }
+                if (!acceptedInitialContent) {
+                    q->terminate(rejectionReason.isValid() ? rejectionReason.condition() : Reason::Decline,
+                                 rejectionReason.text());
+                    return true;
                 }
             } else {
                 for (const auto &c : std::as_const(contentList)) {
@@ -422,12 +432,16 @@ namespace XMPP { namespace Jingle {
             for (const auto &app : std::as_const(contentList)) {
                 QList<QDomElement> xml;
                 OutgoingUpdateCB   callback;
-                std::tie(xml, callback) = app->takeOutgoingUpdate();
-                contents += xml;
-                // p->setState(State::Unacked);
-                if (callback) {
-                    acceptApps.append(AckHndl { app, callback });
-                }
+                std::tie(xml, callback)    = app->takeOutgoingUpdate();
+                const bool rejectedInitial = role == Origin::Responder && rejectedInitialContent.contains(app);
+                if (!rejectedInitial)
+                    contents += xml;
+                if (callback)
+                    acceptApps.append(AckHndl { app, callback, !rejectedInitial });
+            }
+            if (contents.isEmpty()) {
+                q->terminate(Reason::Decline, QStringLiteral("No initial content was accepted"));
+                return true;
             }
 
             state = State::Unacked;
@@ -440,13 +454,13 @@ namespace XMPP { namespace Jingle {
                 }
                 state = finalState;
                 for (const auto &h : acceptApps) {
-                    auto app      = std::get<0>(h);
-                    auto callback = std::get<1>(h);
+                    auto app         = std::get<0>(h);
+                    auto callback    = std::get<1>(h);
+                    auto shouldStart = std::get<2>(h);
                     if (app) {
                         callback(jt);
-                        if (role == Origin::Responder) {
+                        if (role == Origin::Responder && shouldStart)
                             app->start();
-                        }
                     }
                 }
                 if (finalState == State::Active) {
@@ -825,26 +839,62 @@ namespace XMPP { namespace Jingle {
             return true;
         }
 
-        void startAcceptedContents(const QList<Application *> &apps, bool notifyActivated = false)
+        struct GuardedContent {
+            QPointer<Application> application;
+            ContentKey            key;
+        };
+
+        QList<GuardedContent> snapshotContents(const QList<Application *> &apps) const
         {
-            QList<QPointer<Application>> guardedApps;
+            QList<GuardedContent> guarded;
+            guarded.reserve(apps.size());
             for (auto app : apps) {
-                guardedApps.append(app);
+                if (app)
+                    guarded.append(GuardedContent { QPointer<Application>(app),
+                                                    ContentKey { app->contentName(), app->creator() } });
             }
+            return guarded;
+        }
+
+        void startAcceptedContents(QList<GuardedContent> guardedApps, bool notifyActivated = false)
+        {
+            if (guardedApps.isEmpty())
+                return;
             // JTPush must send the acceptance IQ result before start() can send
             // transport traffic (in particular IBB <open/>, XEP-0261 section 2.1).
-            QTimer::singleShot(0, q, [this, session = QPointer<Session>(q), guardedApps, notifyActivated]() {
-                for (const auto &app : guardedApps) {
-                    if (!session || state != State::Active)
-                        return;
-                    if (app && app->state() == State::Accepted
-                        && contentList.value(ContentKey { app->contentName(), app->creator() }) == app.data()) {
+            QTimer::singleShot(
+                0, q, [this, session = QPointer<Session>(q), guardedApps = std::move(guardedApps), notifyActivated]() {
+                    for (const auto &entry : guardedApps) {
+                        if (!session || state != State::Active)
+                            return;
+                        const auto app = entry.application;
+                        if (!app || contentList.value(entry.key) != app.data() || app->state() != State::Accepted)
+                            continue;
+
                         app->start();
+
+                        // A callback may remove this content without cancelling
+                        // the Session. Other accepted contents must still start.
+                        if (!session || state != State::Active)
+                            return;
                     }
-                }
-                if (session && state == State::Active && notifyActivated)
-                    emit q->activated();
-            });
+                    if (contentList.isEmpty()) {
+                        q->terminate(Reason::Success);
+                        return;
+                    }
+                    if (notifyActivated) {
+                        // Recheck the whole snapshot: a later start callback may
+                        // have removed an earlier application. Never activate on
+                        // behalf of a replacement object with the same content key.
+                        for (const auto &entry : guardedApps) {
+                            const auto app = entry.application;
+                            if (app && contentList.value(entry.key) == app.data() && app->state() < State::Finishing) {
+                                emit q->activated();
+                                return;
+                            }
+                        }
+                    }
+                });
         }
 
         bool handleIncomingSessionAccept(const QDomElement &jingleEl)
@@ -864,10 +914,118 @@ namespace XMPP { namespace Jingle {
                 return false;
             }
 
+            // Snapshot every parser result before the first external callback.
+            // Raw Application pointers returned by the parser are not stable:
+            // stopping one omitted transport may synchronously delete a sibling,
+            // an accepted content, or the Session itself.
+            auto                guardedAccepted = snapshotContents(apps);
+            QSet<Application *> accepted;
+            for (const auto &entry : std::as_const(guardedAccepted)) {
+                if (entry.application)
+                    accepted.insert(entry.application.data());
+            }
+
+            QList<GuardedContent> omitted;
+            for (auto it = contentList.cbegin(); it != contentList.cend(); ++it) {
+                auto app = it.value();
+                if (app->creator() == role && app->flags().testFlag(Application::InitialApplication)
+                    && app->state() == State::Pending && !accepted.contains(app)) {
+                    omitted.append(GuardedContent { QPointer<Application>(app), it.key() });
+                }
+            }
+
+            if (!omitted.isEmpty() && guardedAccepted.isEmpty()) {
+                lastError
+                    = Stanza::Error(Stanza::Error::ErrorType::Cancel, Stanza::Error::ErrorCond::UnexpectedRequest);
+                ErrorUtil::fill(jingleEl.ownerDocument(), *lastError, ErrorUtil::OutOfOrder);
+                return false;
+            }
+
+            QPointer<Session> session(q);
+            const State       negotiationState = state;
+            const Reason omittedReason(Reason::Decline, QStringLiteral("Initial content was not accepted by peer"));
+
+            for (const auto &entry : std::as_const(omitted)) {
+                if (!session)
+                    return true;
+                if (state != negotiationState)
+                    return true; // a reentrant cancellation/termination wins
+
+                auto application = entry.application;
+                if (!application || contentList.value(entry.key) != application.data())
+                    continue; // a previous callback already disposed of this sibling
+
+                // Detach before invoking any external code. From this point the
+                // current application is no longer owned by contentList, so this
+                // scope must delete it even if the Session disappears.
+                signalingContent.remove(application.data());
+                initialIncomingUnacceptedContent.removeAll(application.data());
+                contentList.remove(entry.key);
+
+                const auto transport = application->transport();
+                if (transport) {
+                    transport->disconnect(application.data());
+                    transport->stop();
+                }
+
+                if (!session) {
+                    if (application)
+                        delete application.data();
+                    return true;
+                }
+                if (state != negotiationState) {
+                    if (application)
+                        delete application.data();
+                    return true;
+                }
+                if (!application)
+                    continue;
+
+                application->incomingRemove(omittedReason);
+
+                if (!session) {
+                    if (application)
+                        delete application.data();
+                    return true;
+                }
+                if (state != negotiationState) {
+                    if (application)
+                        delete application.data();
+                    return true;
+                }
+                if (application)
+                    delete application.data();
+
+                // Application destruction may itself synchronously dispose of
+                // the Session or change its state through connected callbacks.
+                if (!session)
+                    return true;
+                if (state != negotiationState)
+                    return true;
+            }
+
+            if (!session)
+                return true;
+            if (state != negotiationState)
+                return true;
+
+            // Every accepted application must still be the same object under
+            // the snapshotted key before committing Active. If an omitted-content
+            // callback invalidated one, acknowledge the peer's stanza but locally
+            // terminate instead of resurrecting a broken negotiation.
+            for (const auto &entry : std::as_const(guardedAccepted)) {
+                const auto application = entry.application;
+                if (!application || contentList.value(entry.key) != application.data()
+                    || application->state() != State::Accepted) {
+                    q->terminate(Reason::Decline, QStringLiteral("Accepted content disappeared during session-accept"));
+                    return true;
+                }
+            }
+
             remoteGroups = *peerGroups;
             // Session acceptance completes signaling, not transport connectivity.
             state = State::Active;
-            startAcceptedContents(apps, true);
+            startAcceptedContents(std::move(guardedAccepted), true);
             planStep();
 
             return true;
@@ -885,8 +1043,9 @@ namespace XMPP { namespace Jingle {
                 return false;
             }
 
-            if (apps.size() && state == State::Active) {
-                startAcceptedContents(apps);
+            auto guardedApps = snapshotContents(apps);
+            if (!guardedApps.isEmpty() && state == State::Active) {
+                startAcceptedContents(std::move(guardedApps));
             }
             planStep();
 

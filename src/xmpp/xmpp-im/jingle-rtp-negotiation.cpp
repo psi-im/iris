@@ -240,13 +240,23 @@ Negotiation::Result Negotiation::setRemoteOffer(const Description &offer, const 
     auto proposed = codecs.makeAnswer(*snapshot(*value));
     if (!proposed)
         return Result::UnsupportedMedia;
-    auto answer = snapshot(*proposed);
-    if (!answer)
+    return setRemoteOffer(*value, *proposed);
+}
+
+Negotiation::Result Negotiation::setRemoteOffer(const Description &offer, const Description &localAnswer)
+{
+    if (state_ != State::Empty)
+        return Result::WrongState;
+    auto remote = snapshot(offer);
+    if (!remote)
         return Result::InvalidDescription;
-    if (!compatible(*value, *answer))
+    auto local = snapshot(localAnswer);
+    if (!local)
+        return Result::InvalidDescription;
+    if (!compatible(*remote, *local))
         return Result::IncompatibleAnswer;
-    remote_ = std::move(value);
-    local_  = std::move(answer);
+    remote_ = std::move(remote);
+    local_  = std::move(local);
     state_  = State::Accepted;
     return Result::Ok;
 }

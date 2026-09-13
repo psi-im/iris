@@ -23,6 +23,7 @@
 #include <iris/iris_export.h>
 
 #include <iris/xmpp-im/jingle-transport.h>
+#include <QMetaObject>
 #include <optional>
 
 class QTimer;
@@ -122,6 +123,14 @@ namespace XMPP { namespace Jingle {
          */
         void incomingContentModify(Origin senders);
 
+        /** Request a media-direction change.
+         * Before the initial content stanza leaves this endpoint, the local proposal
+         * is updated synchronously. Afterwards the latest request is queued until the
+         * application is active and sent as content-modify. The negotiated direction
+         * changes only after the peer acknowledges that request.
+         */
+        bool requestSenders(Origin senders);
+
         /**
          * @brief evaluateOutgoingUpdate computes and prepares next update which will be taken with takeOutgoingUpdate
          *   The updated will be taked immediately if considered to be most preferred among other updates types of
@@ -188,6 +197,9 @@ namespace XMPP { namespace Jingle {
                         // takeOutgoingUpdate() eventually
         void stateChanged(State);
         void sendersChanged(Origin);
+        // Emitted only when the negotiated direction changes due to a peer content-modify.
+        // Local proposals and acknowledgements of our own content-modify do not emit it.
+        void sendersChangedByPeer(Origin);
 
     protected:
         State            _state = State::Created;
@@ -210,6 +222,11 @@ namespace XMPP { namespace Jingle {
         QString _contentName;
         Origin  _creator;
         Origin  _senders;
+
+        // Latest local direction intent and the value currently awaiting IQ ack.
+        std::optional<Origin>    _requestedSenders;
+        std::optional<Origin>    _sendersUpdateInFlight;
+        QMetaObject::Connection  _sendersStateConnection;
 
         // current transport. either local or remote. has info about origin and state
         QSharedPointer<Transport>          _transport;

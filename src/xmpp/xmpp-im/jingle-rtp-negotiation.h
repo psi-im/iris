@@ -28,6 +28,10 @@ public:
 
     Result setLocalOffer(const Description &);
     Result setRemoteOffer(const Description &, const CodecNegotiator &);
+    // Commit an answer prepared asynchronously by the media backend. Both
+    // descriptions are validated and snapshotted atomically; failure leaves the
+    // negotiation empty.
+    Result setRemoteOffer(const Description &offer, const Description &localAnswer);
     Result setRemoteAnswer(const Description &, const CodecNegotiator &);
     State  state() const { return state_; }
     // Detached copies: modifying extension QDomElements cannot change snapshots.
