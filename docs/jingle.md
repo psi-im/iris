@@ -540,7 +540,6 @@ Rejecting the invitation is session termination with an appropriate Jingle reaso
 session->terminate(Jingle::Reason::Condition::Decline);
 ```
 
-\
 ## Transport failure and replacement
 
 Transport fallback is application-owned. `Application::setTransport()` wires transport
@@ -666,7 +665,7 @@ session, or select a newer transport for the same content.
 For that reason the incoming replace/accept/reject handlers use a validate-then-apply pattern:
 
 1. identify content by stable `(creator, name)` `ContentKey`;
-2. keep the `Application` through `QPointer`, because it is QObject-owned by the session;
+2. guard the `Application` through `QPointer`, because it is a QObject that the session may delete during a reentrant callback;
 3. snapshot the current transport through `QWeakPointer`, because transports are shared-pointer
    owned and are not QObject children of the application;
 4. validate the complete signaling state required for the action before the first mutating
@@ -701,6 +700,7 @@ The Jingle regression suite contains explicit cases for:
 These tests are deliberately about signaling invariants rather than one concrete transport
 implementation. Keep them when refactoring transport replacement into more generic Jingle
 transaction/tie-break machinery.
+
 ## Extending the stack
 
 ### Adding an application type
