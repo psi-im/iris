@@ -44,6 +44,19 @@ add_executable(jingle_transportreplace_test transportreplace.cpp)
 target_link_libraries(jingle_transportreplace_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
     Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
 add_test(NAME jingle_transportreplace COMMAND jingle_transportreplace_test)
+add_executable(jingle_transportreplacecorrectness_test transportreplacecorrectness.cpp)
+target_link_libraries(jingle_transportreplacecorrectness_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
+    Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
+add_test(NAME jingle_transportreplace_inflight_without_unacked
+    COMMAND jingle_transportreplacecorrectness_test inflight-without-unacked)
+add_test(NAME jingle_transportreplace_unacked_without_replace
+    COMMAND jingle_transportreplacecorrectness_test unacked-without-replace)
+add_test(NAME jingle_transportreplace_failed_iq
+    COMMAND jingle_transportreplacecorrectness_test failed-iq)
+add_test(NAME jingle_transportreplace_malformed_accept
+    COMMAND jingle_transportreplacecorrectness_test malformed-accept)
+add_test(NAME jingle_transportreplace_duplicate_content
+    COMMAND jingle_transportreplacecorrectness_test duplicate-content)
 add_executable(jingle_groupnegotiation_test groupnegotiation.cpp)
 target_link_libraries(jingle_groupnegotiation_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core)
 add_test(NAME jingle_groupnegotiation COMMAND jingle_groupnegotiation_test)
