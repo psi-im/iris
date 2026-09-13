@@ -267,6 +267,17 @@ static QDomElement makeReplace(QDomDocument &doc, const QList<QString> &ids)
     return jingle;
 }
 
+static QDomElement makeReplaceWithoutTransport(QDomDocument &doc)
+{
+    auto jingle = doc.createElementNS(J::NS, QStringLiteral("jingle"));
+    doc.appendChild(jingle);
+    auto content = doc.createElementNS(J::NS, QStringLiteral("content"));
+    J::ContentBase::setCreatorAttr(content, J::Origin::Initiator);
+    content.setAttribute(QStringLiteral("name"), QStringLiteral("audio"));
+    jingle.appendChild(content);
+    return jingle;
+}
+
 static bool isTieBreak(const J::Session &session)
 {
     const auto error = session.lastError();
@@ -367,6 +378,23 @@ static void testDuplicateContentReplaceIsAtomic(Client &client)
     check(selectorRaw->replaceCalls == 0, "duplicate transport-replace reached selector before validation completed");
 }
 
+static void testMissingTransportReplaceIsMalformed(Client &client)
+{
+    J::Session session(client.jingleManager(), Jid(QStringLiteral("peer@example.test/device")), J::Origin::Initiator);
+    auto local = makeTransport(session, J::Origin::Initiator, J::State::Pending, QStringLiteral("current"));
+    auto selector = std::make_unique<TestSelector>();
+    TestSelector *selectorRaw = nullptr;
+    auto app = addApplication(session, local, std::move(selector), &selectorRaw, J::State::Active);
+
+    QDomDocument doc;
+    const bool ok = session.updateFromXml(J::Action::TransportReplace, makeReplaceWithoutTransport(doc));
+
+    check(!ok, "transport-replace without a transport element was accepted as an unsupported transport");
+    check(app->transport().data() == local.data(), "malformed transport-replace changed current transport");
+    check(selectorRaw->canReplaceCalls == 0 && selectorRaw->replaceCalls == 0,
+          "malformed transport-replace reached selector");
+}
+
 int main(int argc, char **argv)
 {
     QCoreApplication application(argc, argv);
@@ -389,6 +417,8 @@ int main(int argc, char **argv)
         testMalformedTransportAcceptDoesNotFinishReplace(client);
     else if (test == QLatin1String("duplicate-content"))
         testDuplicateContentReplaceIsAtomic(client);
+    else if (test == QLatin1String("missing-transport"))
+        testMissingTransportReplaceIsMalformed(client);
     else
         qFatal("unknown transport-replace correctness case: %s", qPrintable(test));
 
