@@ -23,6 +23,7 @@
 #include <iris/iris_export.h>
 
 #include <iris/xmpp-im/jingle-transport.h>
+#include <QMetaObject>
 #include <optional>
 
 class QTimer;
@@ -220,8 +221,9 @@ namespace XMPP { namespace Jingle {
         Origin  _senders;
 
         // Latest local direction intent and the value currently awaiting IQ ack.
-        std::optional<Origin> _requestedSenders;
-        std::optional<Origin> _sendersUpdateInFlight;
+        std::optional<Origin>    _requestedSenders;
+        std::optional<Origin>    _sendersUpdateInFlight;
+        QMetaObject::Connection  _sendersStateConnection;
 
         // current transport. either local or remote. has info about origin and state
         QSharedPointer<Transport>          _transport;
