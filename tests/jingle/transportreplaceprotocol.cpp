@@ -243,6 +243,22 @@ static QDomElement payload(QDomDocument &doc, const QString &transportId = {}, b
     return jingle;
 }
 
+static QDomElement duplicatePayload(QDomDocument &doc, const QString &transportId)
+{
+    auto jingle = doc.createElementNS(J::NS, QStringLiteral("jingle"));
+    doc.appendChild(jingle);
+    for (int i = 0; i < 2; ++i) {
+        auto content = doc.createElementNS(J::NS, QStringLiteral("content"));
+        J::ContentBase::setCreatorAttr(content, J::Origin::Initiator);
+        content.setAttribute(QStringLiteral("name"), QStringLiteral("audio"));
+        auto transport = doc.createElementNS(TestTransportManager::namespaceUri(), QStringLiteral("transport"));
+        transport.setAttribute(QStringLiteral("id"), transportId);
+        content.appendChild(transport);
+        jingle.appendChild(content);
+    }
+    return jingle;
+}
+
 static void testTransportRejectSelectsFallback(Client &client)
 {
     J::Session session(client.jingleManager(), Jid(QStringLiteral("peer@example.test/device")), J::Origin::Initiator);
@@ -308,6 +324,46 @@ static void testMalformedTransportAcceptRejectedAtomically(Client &client)
           "malformed transport-accept changed or started the current transport");
 }
 
+static void testDuplicateTransportAcceptRejectedBeforeMutation(Client &client)
+{
+    J::Session session(client.jingleManager(), Jid(QStringLiteral("duplicate-accept@example.test/device")),
+                       J::Origin::Initiator);
+    auto local = makeTransport(session, J::Origin::Initiator, J::State::Pending, QStringLiteral("local"));
+    auto app = addApplication(session, local, std::make_unique<TestSelector>());
+    app->markReplaceInProgress();
+
+    QDomDocument doc;
+    const bool ok = session.updateFromXml(J::Action::TransportAccept,
+                                          duplicatePayload(doc, QStringLiteral("duplicate")));
+
+    check(!ok, "duplicate transport-accept contents were accepted");
+    check(app->transport().data() == local.data() && app->replaceInProgress() && local->starts() == 0,
+          "duplicate transport-accept mutated replacement state before rejection");
+}
+
+static void testDuplicateTransportRejectRejectedBeforeRecovery(Client &client)
+{
+    J::Session session(client.jingleManager(), Jid(QStringLiteral("duplicate-reject@example.test/device")),
+                       J::Origin::Initiator);
+    auto local = makeTransport(session, J::Origin::Initiator, J::State::Pending, QStringLiteral("local"));
+    auto fallback = makeTransport(session, J::Origin::Initiator, J::State::Created, QStringLiteral("fallback"));
+    auto selector = std::make_unique<TestSelector>();
+    selector->setNext(fallback);
+    TestSelector *selectorRaw = nullptr;
+    auto app = addApplication(session, local, std::move(selector), &selectorRaw);
+    app->markReplaceInProgress();
+
+    QDomDocument doc;
+    const bool ok = session.updateFromXml(J::Action::TransportReject,
+                                          duplicatePayload(doc, QStringLiteral("duplicate")));
+
+    check(!ok, "duplicate transport-reject contents were accepted");
+    check(app->transport().data() == local.data() && app->replaceInProgress(),
+          "duplicate transport-reject changed current replacement before rejection");
+    check(selectorRaw->getNextCalls == 0 && selectorRaw->replaceCalls == 0,
+          "duplicate transport-reject started fallback recovery before rejection");
+}
+
 int main(int argc, char **argv)
 {
     QCoreApplication application(argc, argv);
@@ -326,8 +382,13 @@ int main(int argc, char **argv)
         testFailedIqSelectsFallback(client);
     else if (test == QLatin1String("malformed-accept"))
         testMalformedTransportAcceptRejectedAtomically(client);
+    else if (test == QLatin1String("duplicate-accept"))
+        testDuplicateTransportAcceptRejectedBeforeMutation(client);
+    else if (test == QLatin1String("duplicate-reject"))
+        testDuplicateTransportRejectRejectedBeforeRecovery(client);
     else
         qFatal("unknown transport-replace protocol case: %s", qPrintable(test));
 
     qInfo() << "Transport-replace protocol case passed:" << test;
+    return 0;
 }
