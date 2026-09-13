@@ -377,6 +377,9 @@ namespace XMPP { namespace Jingle {
             std::tie(transportEl, transportCB) = wrapOutgoingTransportUpdate();
             contentEl.appendChild(transportEl);
             return OutgoingUpdate { updates, transportCB };
+        // transport-replace IQ lifetime belongs to PendingTransportReplace, not
+        // Transport::State. Capture the concrete transport as transaction identity:
+        // its callback is a reentrant boundary and may install a newer replacement.
         case Action::TransportReplace: {
             Q_ASSERT(_transport->hasUpdates());
             const auto replacement = _transport.toWeakRef();
@@ -408,6 +411,9 @@ namespace XMPP { namespace Jingle {
                                         selectNextTransport();
                                     } };
         }
+        // This ACK completes a peer-initiated replacement. The transport callback may
+        // reenter and select another transport, so completion is tied to the transport
+        // instance that produced this stanza, not whatever _transport points to later.
         case Action::TransportAccept: {
             Q_ASSERT(_transport->hasUpdates());
             const auto accepted = _transport.toWeakRef();

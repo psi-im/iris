@@ -142,22 +142,43 @@ namespace XMPP { namespace Jingle {
         virtual OutgoingUpdate takeOutgoingUpdate();
 
         /**
-         * @brief setTransport checks if transport is compatible and stores it
-         * @param transport
-         * @return false if not compatible
+         * @brief Validate and install a new current transport.
+         *
+         * Replacement policy is delegated to TransportSelector::replace(). When the
+         * application already has a transport, this method also derives the Jingle
+         * transport-replace signaling state for the new instance and disconnects the
+         * superseded transport. Transport::State is not the lifetime of the
+         * transport-replace IQ; see PendingTransportReplace.
+         *
+         * The transport is retained by QSharedPointer. It is intentionally not made a
+         * QObject child of Application, because transport callbacks may outlive one
+         * signaling step and can hold shared references of their own.
+         *
+         * @param transport Candidate transport to make current.
+         * @param reason Optional failure reason carried into a subsequent replacement.
+         * @return true if the selector accepted and installed the transport.
          */
         bool setTransport(const QSharedPointer<Transport> &transport, const Reason &reason = Reason());
 
         /**
-         * @brief selectNextTransport selects next transport from compatible transports list.
-         *   The list is usually stored in the application
-         * @return
+         * @brief Select the next compatible local transport after failure/replacement.
+         *
+         * When @p alikeTransport is supplied, it is an advisory peer proposal used by
+         * TransportSelector::getAlikeTransport() to choose an efficient compatible local
+         * retry. The peer transport itself is not implicitly installed. If no candidate
+         * remains, the application moves toward content-remove with failed-transport.
+         * Selector calls and emitted signals are reentrant boundaries.
+         *
+         * @param alikeTransport Optional remote transport used only as a selection hint.
+         * @return true if a successor transport was installed.
          */
         bool selectNextTransport(const QSharedPointer<Transport> alikeTransport = QSharedPointer<Transport>());
 
         /**
-         * @brief Checks where transport-replace is possible atm
-         * @return
+         * @brief Return whether this application currently permits transport replacement.
+         *
+         * Incoming transport-replace validation calls this before mutation. Overrides
+         * should behave as a capability/state query and avoid unrelated side effects.
          */
         virtual bool isTransportReplaceEnabled() const;
 
@@ -178,12 +199,41 @@ namespace XMPP { namespace Jingle {
 
         virtual void incomingRemove(const Reason &r) = 0;
 
-        // Signaling-level transport-replace state. Unlike Transport::State this
-        // tracks the Jingle IQ transaction itself and therefore works for ICE
-        // transports whose transport-info updates do not move through Unacked.
+        /**
+         * @brief Whether our current transport-replace IQ is awaiting its IQ result.
+         *
+         * This is signaling state (`NeedAck`). Never infer the same fact from
+         * Transport::State::Unacked: transport implementations, notably ICE, do not
+         * share one transport-state transition for Jingle IQ lifetime.
+         */
         bool transportReplaceAwaitingAck() const;
+
+        /**
+         * @brief Whether the current replacement is in the post-IQ negotiation phase.
+         *
+         * `InProgress` means the replacement proposal is the current signaling attempt
+         * known to the peer and is waiting for transport-accept/reject completion.
+         */
         bool transportReplaceInProgress() const;
+
+        /**
+         * @brief Apply a validated peer transport-accept to the current replacement.
+         *
+         * Transport::update() may reenter application code and install a newer transport.
+         * Completion therefore belongs only to the transport instance snapshotted when
+         * this call started; an old acknowledgement must not complete/start a newer one.
+         * @return false if there is no matching InProgress transaction or parsing fails.
+         */
         bool incomingTransportAccept(const QDomElement &el);
+
+        /**
+         * @brief Apply a validated peer transport-reject to the current local replacement.
+         *
+         * A handled rejection returns the signaling state to Planned and asks the
+         * TransportSelector for the next local candidate. `true` means the rejection was
+         * consumed even when no fallback exists and content removal is scheduled.
+         * @return false if the current transaction is not a rejectable local replacement.
+         */
         bool incomingTransportReject();
 
     protected:
@@ -212,11 +262,19 @@ namespace XMPP { namespace Jingle {
         State            _state = State::Created;
         ApplicationFlags _flags;
 
+        /**
+         * XEP-0166 transport-replace signaling state for this content.
+         *
+         * This state machine is orthogonal to Transport::State. `NeedAck` is the only
+         * state that means a locally generated transport-replace IQ is outstanding;
+         * `InProgress` is the subsequent accept/reject phase (or an incoming peer
+         * replacement currently being negotiated).
+         */
         enum class PendingTransportReplace {
-            None,      // not in the replace mode
-            Planned,   // didn't send a replacement yet. working on it.
-            NeedAck,   // we sent replacement. waiting for iq ack
-            InProgress // not yet accepted but acknowledged
+            None,      ///< No transport-replace signaling transaction is active.
+            Planned,   ///< A local successor is selected but not signaled yet.
+            NeedAck,   ///< transport-replace was sent; waiting for its IQ result/error.
+            InProgress ///< Proposal is current; waiting for transport-accept/reject completion.
         };
 
         // has to be set when whatever way remote knows about the current transport
@@ -235,14 +293,17 @@ namespace XMPP { namespace Jingle {
         std::optional<Origin>   _sendersUpdateInFlight;
         QMetaObject::Connection _sendersStateConnection;
 
-        // current transport. either local or remote. has info about origin and state
+        // Current transport uses shared ownership, independently of QObject parentage.
+        // Session handlers pair QPointer<Application> with weak/shared transport snapshots
+        // so reentrant callbacks cannot apply stale signaling to a newer transport instance.
         QSharedPointer<Transport>          _transport;
         std::unique_ptr<TransportSelector> _transportSelector;
 
-        // if transport-replace is in progress. will be set to true when accepted by both sides.
+        // Jingle signaling transaction state for replacing _transport. Do not derive it
+        // from Transport::State; concrete transports use those states differently.
         PendingTransportReplace _pendingTransportReplace = PendingTransportReplace::None;
 
-        // while it's valid - we are in unaccepted yet transport-replace
+        // Reason attached to the pending replacement when the previous transport failed.
         Reason _transportReplaceReason;
 
         // when set the content will be removed with this reason
