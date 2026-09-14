@@ -323,7 +323,7 @@ namespace XMPP { namespace Jingle {
 
         // Registration is declared after the resolver so it is destroyed
         // first and never leaves TieBreaker with a dangling callback.
-        std::unique_ptr<ContentModifyTieBreakResolver> _contentModifyTieBreakResolver;
+        std::unique_ptr<TieBreaker::Resolver>           _contentModifyTieBreakResolver;
         TieBreaker::Registration                       _contentModifyTieBreakRegistration;
     };
 
