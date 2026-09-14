@@ -23,6 +23,7 @@
 #include <iris/iris_export.h>
 
 #include <iris/xmpp-im/jingle-application.h>
+#include <iris/xmpp-im/jingle-tiebreaker.h>
 #include <iris/xmpp-im/jingle-transport.h>
 #include <iris/xmpp-im/xmpp_features.h>
 

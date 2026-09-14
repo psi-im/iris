@@ -31,7 +31,6 @@
 #include <optional>
 
 #include <functional>
-#include <memory>
 
 class QDomDocument;
 class QDomElement;
@@ -138,94 +137,6 @@ namespace Jingle {
 #else
     inline size_t qHash(const XMPP::Jingle::Action &o, size_t seed = 0) { return ::qHash(int(o), seed); }
 #endif
-
-    /**
-     * Session-scoped coordinator for simultaneous Jingle actions.
-     *
-     * The coordinator owns only IQ transaction lifetime and resolver dispatch.
-     * Application, transport and pad implementations register action-specific
-     * resolvers and keep all semantic conflict/retry policy in those owners.
-     */
-    class IRIS_EXPORT TieBreaker {
-        struct SharedState;
-
-    public:
-        enum class Solution {
-  Continue, ///< Tie-break does not intervene; process the incoming IQ normally.
-  Break,    ///< Reject the whole incoming IQ with conflict/tie-break.
-  Postpone  ///< Process normally, but preserve local intent if our IQ later fails.
-        };
-
-        enum class RemoteResult { Applied, Rejected };
-
-        struct RetryContext {
-  const QDomElement   &localData;
-  const Stanza::Error &localError;
-  RemoteResult         remoteResult;
-        };
-
-        class Resolver {
-        public:
-  virtual ~Resolver() = default;
-  virtual Solution resolve(const QDomElement &localData, const QDomElement &remoteData)
-  {
-      Q_UNUSED(localData);
-      Q_UNUSED(remoteData);
-      return Solution::Continue;
-  }
-  virtual void retry(const RetryContext &context) { Q_UNUSED(context); }
-        };
-
-        class Registration {
-  friend class TieBreaker;
-
-        public:
-  Registration() = default;
-  ~Registration();
-  Registration(Registration &&other) noexcept;
-  Registration &operator=(Registration &&other) noexcept;
-  Registration(const Registration &)            = delete;
-  Registration &operator=(const Registration &) = delete;
-
-  explicit operator bool() const { return id_ != 0; }
-  bool isPostponed() const;
-
-        private:
-  Registration(std::weak_ptr<SharedState> state, quint64 id);
-  void reset();
-
-  std::weak_ptr<SharedState> state_;
-  quint64                    id_ = 0;
-        };
-
-        struct Resolution {
-  Solution solution = Solution::Continue;
-  quint64  id       = 0;
-        };
-
-        TieBreaker();
-        ~TieBreaker();
-        TieBreaker(const TieBreaker &)            = delete;
-        TieBreaker &operator=(const TieBreaker &) = delete;
-
-        Registration registerResolver(Action action, Resolver *resolver);
-
-        // One Session currently serializes outgoing Jingle IQs, but explicit
-        // transaction ids keep postponed work tied to the IQ that caused it.
-        quint64 outgoingStarted(Action action, const QDomElement &localData);
-        void    outgoingFinished(quint64 transaction, const std::optional<Stanza::Error> &error);
-        void    outgoingCallbacksFinished(quint64 transaction);
-
-        Resolution resolveIncoming(Action action, const QDomElement &remoteData);
-        void       incomingFinished(quint64 resolution, RemoteResult result);
-
-        // Cancel transient arbitration state. Registrations stay valid until
-        // their RAII handles are destroyed with their owning session objects.
-        void clear();
-
-    private:
-        std::shared_ptr<SharedState> state_;
-    };
 
     /*
     Categorization by speed, reliability and connectivity
