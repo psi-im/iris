@@ -1,0 +1,46 @@
+name: Document Jingle TieBreaker
+
+on:
+  push:
+    branches:
+      - automation/fix-jingle-parser
+    paths:
+      - .automation-trigger-document-tiebreaker
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout helper branch
+        uses: actions/checkout@v4
+        with:
+          ref: automation/fix-jingle-parser
+          path: helper
+      - name: Checkout target branch
+        uses: actions/checkout@v4
+        with:
+          ref: jingle/async-media
+          fetch-depth: 0
+          path: target
+      - name: Document TieBreaker
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 helper/.automation-document-tiebreaker.py
+      - name: Verify and push
+        working-directory: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          for f in docs/jingle.md docs/jingle-calls-implementation-plan.md; do
+            test "$(tail -c 1 "$f" | od -An -t x1 | tr -d ' \n')" = 0a
+          done
+          git config user.name 'Sergei Ilinykh'
+          git config user.email 'rion4ik@gmail.com'
+          git add docs/jingle.md docs/jingle-calls-implementation-plan.md
+          git commit -m 'Document session-scoped Jingle tie-break arbitration'
+          git push origin HEAD:jingle/async-media
