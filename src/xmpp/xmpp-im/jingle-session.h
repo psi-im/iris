@@ -32,117 +32,6 @@
 
 namespace XMPP { namespace Jingle {
 
-    // Callback-only collision coordinator. Context, decision and event types are
-    // supplied by its owner; the coordinator deliberately knows nothing about
-    // Jingle actions, XMPP stanzas, roles or any application/transport policy.
-    template <typename Context, typename Decision, typename Event> class TieBreakResolver {
-    public:
-        enum class ResolutionState { Waiting, Finished };
-
-        struct Plan {
-            Decision                                      decision {};
-            std::function<void()>                         immediate;
-            std::function<ResolutionState(const Event &)> advance;
-        };
-
-        struct Callbacks {
-            std::function<bool(const Context &)> conflicts;
-            std::function<Plan(const Context &)> resolve;
-        };
-
-        struct Result {
-            bool     handled    = false;
-            Decision decision   {};
-            quint64  resolution = 0;
-        };
-
-        using Registration = quint64;
-
-        Registration registerResolver(Callbacks callbacks)
-        {
-            if (!callbacks.conflicts || !callbacks.resolve)
-                return 0;
-            const auto id = ++nextRegistration_;
-            resolvers_.append(RegisteredResolver { id, std::make_shared<Callbacks>(std::move(callbacks)) });
-            return id;
-        }
-
-        void unregisterResolver(Registration registration)
-        {
-            if (!registration)
-                return;
-            resolvers_.erase(std::remove_if(resolvers_.begin(), resolvers_.end(), [registration](const auto &entry) {
-                                 return entry.registration == registration;
-                             }),
-                             resolvers_.end());
-        }
-
-        Result resolve(const Context &context)
-        {
-            // Copy only shared callback owners so callbacks may unregister
-            // themselves while mutable callback state survives subsequent calls.
-            const auto entries = resolvers_;
-            for (const auto &entry : entries) {
-                const auto callbacks = entry.callbacks;
-                if (!callbacks || !callbacks->conflicts(context))
-                    continue;
-
-                auto plan = callbacks->resolve(context);
-                if (plan.immediate)
-                    plan.immediate();
-
-                quint64 resolution = 0;
-                if (plan.advance) {
-                    resolution = ++nextResolution_;
-                    resolutions_.insert(resolution, ActiveResolution { std::move(plan.advance) });
-                }
-                return Result { true, plan.decision, resolution };
-            }
-            return {};
-        }
-
-        void notify(quint64 resolution, const Event &event)
-        {
-            if (!resolution)
-                return;
-            auto it = resolutions_.find(resolution);
-            if (it == resolutions_.end())
-                return;
-
-            // Remove the machine while invoking external code. Reentrant notify()
-            // of the same id is therefore harmless, and moving rather than copying
-            // std::function preserves mutable captures across events.
-            auto active = std::move(it.value());
-            resolutions_.erase(it);
-            if (active.advance && active.advance(event) == ResolutionState::Waiting)
-                resolutions_.insert(resolution, std::move(active));
-        }
-
-        void notifyAll(const Event &event)
-        {
-            const auto ids = resolutions_.keys();
-            for (auto id : ids)
-                notify(id, event);
-        }
-
-        bool hasResolution(quint64 resolution) const { return resolutions_.contains(resolution); }
-        int  activeResolutionCount() const { return resolutions_.size(); }
-
-    private:
-        struct RegisteredResolver {
-            Registration               registration;
-            std::shared_ptr<Callbacks> callbacks;
-        };
-        struct ActiveResolution {
-            std::function<ResolutionState(const Event &)> advance;
-        };
-
-        QList<RegisteredResolver>            resolvers_;
-        QHash<quint64, ActiveResolution>     resolutions_;
-        quint64                              nextRegistration_ = 0;
-        quint64                              nextResolution_   = 0;
-    };
-
     // class Manager;
     class Application;
 
@@ -178,6 +67,9 @@ namespace XMPP { namespace Jingle {
         bool isGroupingAllowed() const;
 
         std::optional<Stanza::Error> lastError() const;
+
+        TieBreaker       *tieBreaker();
+        const TieBreaker *tieBreaker() const;
 
         /**
          * @brief Create a local application for a new Jingle content.
@@ -245,62 +137,6 @@ namespace XMPP { namespace Jingle {
         friend class PublicationManager;
         friend class JTPush;
 
-        enum class TieBreakIncoming { Pass, Reject };
-        enum class TieBreakEvent { IncomingApplied, IncomingRejected, LocalCompleted, Wake };
-        struct TieBreakContext {
-            Action incomingAction = Action::NoAction;
-        };
-        using SessionTieBreakResolver = TieBreakResolver<TieBreakContext, TieBreakIncoming, TieBreakEvent>;
-
-        void ensureTieBreakResolvers() const
-        {
-            if (tieBreakResolversReady_)
-                return;
-            tieBreakResolversReady_ = true;
-
-            // First consumer of the generic framework. transport-replace keeps
-            // its existing handler for now because its tie-break path also
-            // performs transport-selection side effects that need richer owner
-            // context before it can be migrated without changing behaviour.
-            tieBreakResolver_.registerResolver(SessionTieBreakResolver::Callbacks {
-                [this](const TieBreakContext &context) {
-                    return context.incomingAction == Action::ContentModify && outgoingActionInFlight_
-                        && *outgoingActionInFlight_ == Action::ContentModify;
-                },
-                [this](const TieBreakContext &) {
-                    SessionTieBreakResolver::Plan plan;
-                    plan.decision = role() == Origin::Initiator ? TieBreakIncoming::Reject : TieBreakIncoming::Pass;
-                    return plan;
-                } });
-        }
-
-        // One outgoing Jingle IQ is serialized at a time. Tie-break lifetime
-        // follows that IQ, not the Application callbacks invoked after its result.
-        void outgoingActionStarted(Action action)
-        {
-            ensureTieBreakResolvers();
-            outgoingActionInFlight_ = action;
-        }
-
-        void outgoingActionFinished(Action action)
-        {
-            if (!outgoingActionInFlight_ || *outgoingActionInFlight_ != action)
-                return;
-            outgoingActionInFlight_.reset();
-            tieBreakResolver_.notifyAll(TieBreakEvent::LocalCompleted);
-        }
-
-        bool shouldTieBreakIncoming(Action action) const
-        {
-            ensureTieBreakResolvers();
-            const auto result = tieBreakResolver_.resolve(TieBreakContext { action });
-            if (!result.handled || result.decision != TieBreakIncoming::Reject)
-                return false;
-            if (result.resolution)
-                tieBreakResolver_.notify(result.resolution, TieBreakEvent::IncomingRejected);
-            return true;
-        }
-
         QString                                   reserveSid();
         bool                                      incomingInitiate(const Jingle &jingle, const QDomElement &jingleEl);
         bool                                      updateFromXml(Action action, const QDomElement &jingleEl);
@@ -308,9 +144,7 @@ namespace XMPP { namespace Jingle {
         static bool validBundleAnswer(const QList<ContentGroup> &offer, const QList<ContentGroup> &answer);
         bool        validLocalGroupings() const;
 
-        std::optional<Action>           outgoingActionInFlight_;
-        mutable SessionTieBreakResolver tieBreakResolver_;
-        mutable bool                    tieBreakResolversReady_ = false;
+        TieBreaker tieBreaker_;
 
         class Private;
         std::unique_ptr<Private> d;

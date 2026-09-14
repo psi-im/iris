@@ -115,7 +115,7 @@ namespace XMPP { namespace Jingle {
 
         void setSessionFinished()
         {
-            q->outgoingActionInFlight_.reset();
+            q->tieBreaker()->clear();
             state = State::Finished;
             emit q->terminated();
             signalingContent.clear();
@@ -205,19 +205,23 @@ namespace XMPP { namespace Jingle {
             }
             auto jt = new JT(manager->client()->rootTask());
             jt->request(otherParty, xml);
-            QObject::connect(jt, &JT::finished, q, [jt, jingle, callback, this]() {
+            const auto tieBreakTransaction = q->tieBreaker()->outgoingStarted(action, xml);
+            QObject::connect(jt, &JT::finished, q, [jt, callback, tieBreakTransaction, this]() {
                 waitingAck = false;
-                q->outgoingActionFinished(jingle.action());
-                if (callback) {
+                const auto error = jt->success() ? std::optional<Stanza::Error>()
+                                                 : std::optional<Stanza::Error>(jt->error());
+                QPointer<Session> session(q);
+                q->tieBreaker()->outgoingFinished(tieBreakTransaction, error);
+                if (callback)
                     callback(jt);
-                }
-                if (!jt->success()) {
+                if (!session)
+                    return;
+                if (!jt->success())
                     lastError = jt->error();
-                }
+                q->tieBreaker()->outgoingCallbacksFinished(tieBreakTransaction);
                 planStep();
             });
             waitingAck = true;
-            q->outgoingActionStarted(action);
             jt->go(true);
         }
 
@@ -1573,6 +1577,9 @@ bool handleIncomingTransportReject(const QDomElement &jingleEl)
     bool Session::isGroupingAllowed() const { return d->groupingAllowed; }
 
     std::optional<XMPP::Stanza::Error> Session::lastError() const { return d->lastError; }
+
+    TieBreaker *Session::tieBreaker() { return &tieBreaker_; }
+    const TieBreaker *Session::tieBreaker() const { return &tieBreaker_; }
 
     Application *Session::newContent(const QString &ns, Origin senders)
     {
