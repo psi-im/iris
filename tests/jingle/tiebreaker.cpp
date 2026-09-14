@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #include <QCoreApplication>
 #include <QDomDocument>
-#include <iris/jingle.h>
+#include <iris/jingle-tiebreaker.h>
 
 using namespace XMPP;
 namespace J = XMPP::Jingle;
@@ -27,6 +27,7 @@ public:
     int                      retryCalls = 0;
     QString                  localName;
     QString                  remoteName;
+    QString                  retryRemoteName;
     J::TieBreaker::RemoteResult remoteResult = J::TieBreaker::RemoteResult::Rejected;
 
     J::TieBreaker::Solution resolve(const QDomElement &local, const QDomElement &remote) override
@@ -40,8 +41,9 @@ public:
     void retry(const J::TieBreaker::RetryContext &context) override
     {
         ++retryCalls;
-        localName    = context.localData.attribute(QStringLiteral("name"));
-        remoteResult = context.remoteResult;
+        localName       = context.localData.attribute(QStringLiteral("name"));
+        retryRemoteName = context.remoteData.attribute(QStringLiteral("name"));
+        remoteResult    = context.remoteResult;
     }
 };
 
@@ -80,8 +82,9 @@ int main(int argc, char **argv)
         == J::TieBreaker::Solution::Continue,
     "completed IQ remained visible as a simultaneous action");
         tieBreaker.outgoingCallbacksFinished(tx);
-        check(resolver.retryCalls == 1 && resolver.remoteResult == J::TieBreaker::RemoteResult::Applied,
-    "failed postponed IQ did not retry after owner callback");
+        check(resolver.retryCalls == 1 && resolver.remoteResult == J::TieBreaker::RemoteResult::Applied
+                  && resolver.retryRemoteName == QLatin1String("remote"),
+    "failed postponed IQ did not retry with full collision context after owner callback");
         check(!registration.isPostponed(), "retry left registration postponed");
     }
 
@@ -117,6 +120,8 @@ int main(int argc, char **argv)
   = tieBreaker.resolveIncoming(J::Action::ContentModify, jingle(remoteDoc, QStringLiteral("remote")));
         check(result.solution == J::TieBreaker::Solution::Break && result.id == 0,
     "Break did not dominate Postpone");
+        check(postpone.resolveCalls == 1 && breaker.resolveCalls == 1,
+    "Break short-circuited another resolver instead of evaluating the full action");
         check(!postponeRegistration.isPostponed() && !breakRegistration.isPostponed(),
     "Break armed postponed retry state");
     }

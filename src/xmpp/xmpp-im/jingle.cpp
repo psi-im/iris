@@ -530,6 +530,8 @@ namespace XMPP { namespace Jingle {
 
     QDomDocument *SessionManagerPad::doc() const { return session()->manager()->client()->doc(); }
 
+    TieBreaker *SessionManagerPad::tieBreaker() const { return session()->tieBreaker(); }
+
     //----------------------------------------------------------------------------
     // Manager
     //----------------------------------------------------------------------------

@@ -14,6 +14,7 @@
 #include <iris/xmpp-im/jingle.h>
 
 #include <memory>
+#include <optional>
 
 namespace XMPP { namespace Jingle {
 
@@ -38,6 +39,7 @@ namespace XMPP { namespace Jingle {
 
         struct RetryContext {
   const QDomElement   &localData;
+  const QDomElement   &remoteData;
   const Stanza::Error &localError;
   RemoteResult         remoteResult;
         };

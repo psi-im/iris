@@ -48,6 +48,76 @@ namespace XMPP { namespace Jingle {
         return {};
     }
 
+    class Application::ContentModifyTieBreakResolver : public TieBreaker::Resolver {
+    public:
+        explicit ContentModifyTieBreakResolver(Application *application) : application_(application),
+            key_(application->_contentName, application->_creator)
+        {
+        }
+
+        TieBreaker::Solution resolve(const QDomElement &localData, const QDomElement &remoteData) override
+        {
+            if (!contains(localData) || !contains(remoteData))
+                return TieBreaker::Solution::Continue;
+
+            const auto application = application_.data();
+            if (!application || !application->_pad || !application->_pad->session())
+                return TieBreaker::Solution::Continue;
+
+            switch (application->_pad->session()->role()) {
+            case Origin::Initiator:
+                return TieBreaker::Solution::Break;
+            case Origin::Responder:
+                return TieBreaker::Solution::Postpone;
+            default:
+                return TieBreaker::Solution::Continue;
+            }
+        }
+
+        void retry(const TieBreaker::RetryContext &context) override
+        {
+            Q_UNUSED(context);
+            auto application = application_.data();
+            if (!application || application->_state >= State::Finishing || application->_sendersUpdateInFlight
+                || !application->_requestedSenders)
+                return;
+
+            if (*application->_requestedSenders == application->_senders) {
+                application->_requestedSenders.reset();
+                return;
+            }
+            emit application->updated();
+        }
+
+    private:
+        bool contains(const QDomElement &jingle) const
+        {
+            for (auto element = jingle.firstChildElement(); !element.isNull(); element = element.nextSiblingElement()) {
+                const auto name = element.localName().isEmpty() ? element.tagName() : element.localName();
+                if (name != QLatin1String("content"))
+                    continue;
+                const ContentBase content(element);
+                if (content.isValid() && ContentKey { content.name, content.creator } == key_)
+                    return true;
+            }
+            return false;
+        }
+
+        QPointer<Application> application_;
+        ContentKey            key_;
+    };
+
+    Application::~Application() = default;
+
+    void Application::ensureContentModifyTieBreakResolver()
+    {
+        if (_contentModifyTieBreakRegistration || !_pad || !_pad->session())
+            return;
+        _contentModifyTieBreakResolver = std::make_unique<ContentModifyTieBreakResolver>(this);
+        _contentModifyTieBreakRegistration
+            = _pad->tieBreaker()->registerResolver(Action::ContentModify, _contentModifyTieBreakResolver.get());
+    }
+
     void Application::incomingContentModify(Origin senders)
     {
         if (!supportsContentModify() || !isValidSenders(senders) || _senders == senders)
@@ -340,6 +410,7 @@ namespace XMPP { namespace Jingle {
             Q_ASSERT(_requestedSenders);
             Q_ASSERT(!_sendersUpdateInFlight);
             const auto requested = *_requestedSenders;
+            ensureContentModifyTieBreakResolver();
 
             // XEP-0166 makes senders mandatory for content-modify. ContentBase
             // normally omits the default value "both", so force the attribute
@@ -348,7 +419,8 @@ namespace XMPP { namespace Jingle {
             _sendersUpdateInFlight = requested;
             return OutgoingUpdate { updates,
                                     [this, requested](Task *task) {
-                                        const bool success = task && task->success();
+                                        const bool success   = task && task->success();
+                                        const bool postponed = _contentModifyTieBreakRegistration.isPostponed();
                                         _sendersUpdateInFlight.reset();
 
                                         if (success && _senders != requested) {
@@ -359,14 +431,15 @@ namespace XMPP { namespace Jingle {
                                                 return;
                                         }
 
-                                        // A failed IQ is not retried forever. On success, inspect the
-                                        // current target after sendersChanged: a signal handler may have
-                                        // synchronously replaced the old target with a newer intent.
-                                        if (!success && _requestedSenders && *_requestedSenders == requested)
+                                        // A generic failure drops an unchanged request as before. A
+                                        // postponed crossed action keeps its local intent until TieBreaker
+                                        // calls retry() after this owner callback has fully completed.
+                                        if (!success && !postponed && _requestedSenders
+                                            && *_requestedSenders == requested)
                                             _requestedSenders.reset();
                                         if (_requestedSenders && *_requestedSenders == _senders)
                                             _requestedSenders.reset();
-                                        if (_requestedSenders)
+                                        if (_requestedSenders && !postponed)
                                             emit updated();
                                     } };
         }

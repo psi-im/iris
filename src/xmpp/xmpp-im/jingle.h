@@ -44,6 +44,7 @@ namespace Jingle {
 
     class Manager;
     class Session;
+    class TieBreaker;
     namespace RTP {
         class Manager;
     }
@@ -332,6 +333,7 @@ namespace Jingle {
         virtual QDomElement takeOutgoingSessionInfoUpdate();
         virtual QString     ns() const      = 0;
         virtual Session    *session() const = 0;
+        TieBreaker         *tieBreaker() const;
 
         virtual void onLocalAccepted(); // changing to prepare state
         virtual void onSend();          // local stuff is prepared we are going to send it to remote

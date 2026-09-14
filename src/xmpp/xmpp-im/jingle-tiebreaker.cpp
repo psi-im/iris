@@ -12,6 +12,7 @@
 
 #include <QDomElement>
 #include <QHash>
+#include <QMap>
 
 namespace XMPP { namespace Jingle {
 
@@ -32,11 +33,12 @@ namespace XMPP { namespace Jingle {
         struct PendingResolution {
   quint64                     id = 0;
   quint64                     transaction = 0;
+  QDomElement                 remoteData;
   QList<quint64>              resolvers;
   std::optional<RemoteResult> remoteResult;
         };
 
-        QHash<quint64, ResolverEntry>      resolvers;
+        QMap<quint64, ResolverEntry>       resolvers;
         QHash<quint64, Transaction>        transactions;
         QHash<quint64, PendingResolution> resolutions;
         quint64                            currentOutgoing = 0;
@@ -93,13 +95,14 @@ namespace XMPP { namespace Jingle {
   // create another outgoing Jingle action.
   const auto transactionId = transaction->id;
   const auto localData     = transaction->localData;
+  const auto remoteData    = resolution->remoteData;
   const auto localError    = *transaction->error;
   const auto remoteResult  = *resolution->remoteResult;
   const auto resolverIds   = resolution->resolvers;
   releaseResolution(resolutionId);
   maybeReleaseTransaction(transactionId);
 
-  const RetryContext context { localData, localError, remoteResult };
+  const RetryContext context { localData, remoteData, localError, remoteResult };
   for (auto resolverId : resolverIds) {
       auto entry = resolvers.find(resolverId);
       if (entry != resolvers.end() && entry->resolver)
@@ -222,21 +225,30 @@ namespace XMPP { namespace Jingle {
         }
 
         QList<quint64> postponed;
+        bool           shouldBreak = false;
         for (auto resolverId : resolverIds) {
   auto entry = state_->resolvers.find(resolverId);
   if (entry == state_->resolvers.end() || !entry->resolver)
       continue;
   const auto solution = entry->resolver->resolve(transaction->localData, remoteData);
   if (solution == Solution::Break)
-      return { Solution::Break, 0 };
-  if (solution == Solution::Postpone && state_->resolvers.contains(resolverId))
+      shouldBreak = true;
+  else if (solution == Solution::Postpone && state_->resolvers.contains(resolverId))
       postponed.append(resolverId);
         }
+
+        // Resolve every registered owner even when one already requested Break:
+        // transport/application resolvers may use resolve() to update local hints.
+        // The aggregate wire decision is still deterministic: Break dominates
+        // Postpone, and Postpone dominates Continue.
+        if (shouldBreak)
+  return { Solution::Break, 0 };
         if (postponed.isEmpty())
   return {};
 
         const auto id = ++state_->nextResolution;
-        state_->resolutions.insert(id, SharedState::PendingResolution { id, transaction->id, postponed, {} });
+        state_->resolutions.insert(
+  id, SharedState::PendingResolution { id, transaction->id, remoteData, postponed, {} });
         for (auto resolverId : postponed) {
   auto entry = state_->resolvers.find(resolverId);
   if (entry != state_->resolvers.end())

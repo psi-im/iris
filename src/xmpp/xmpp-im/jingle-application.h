@@ -23,6 +23,7 @@
 #include <iris/iris_export.h>
 
 #include <iris/xmpp-im/jingle-transport.h>
+#include <iris/xmpp-im/jingle-tiebreaker.h>
 #include <QMetaObject>
 #include <optional>
 
@@ -75,6 +76,8 @@ namespace XMPP { namespace Jingle {
             UserFlag           = 0x100
         };
         Q_DECLARE_FLAGS(ApplicationFlags, ApplicationFlag)
+
+        ~Application() override;
 
         virtual void setState(State state) = 0; // likely just remember the state and not generate any signals
         virtual const std::optional<XMPP::Stanza::Error> &lastError() const  = 0;
@@ -313,6 +316,15 @@ namespace XMPP { namespace Jingle {
         Update _update;
 
         QTimer *transportInitTimer = nullptr;
+
+    private:
+        class ContentModifyTieBreakResolver;
+        void ensureContentModifyTieBreakResolver();
+
+        // Registration is declared after the resolver so it is destroyed
+        // first and never leaves TieBreaker with a dangling callback.
+        std::unique_ptr<ContentModifyTieBreakResolver> _contentModifyTieBreakResolver;
+        TieBreaker::Registration                       _contentModifyTieBreakRegistration;
     };
 
     inline bool operator<(const Application::Update &a, const Application::Update &b)
