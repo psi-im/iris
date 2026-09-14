@@ -125,6 +125,22 @@ PRtpPacket::Type имеет underlying int, Rtp=0, Rtcp=1. Сохранены la
 
 ### A1 [P1] Crossed content-modify не сходится к одному negotiated state
 
+Статус реализации 2026-09-14: arbitration вынесен в session-owned `Jingle::TieBreaker` с
+динамической регистрацией resolver-ов по `Jingle::Action`. Контракт resolver-а:
+`Continue`, `Break`, `Postpone`; все resolver-ы совпавшего action вызываются, итоговый приоритет
+`Break > Postpone > Continue`. `Postpone` привязан к конкретному outgoing IQ transaction и вызывает
+`retry()` только если этот локальный IQ завершился ошибкой; успешный IQ означает, что peer принял
+локальное предложение и recovery не нужен. `retry()` запускается после owner ACK/error callbacks
+и получает local/remote XML, local stanza error и outcome обработки remote action.
+
+`content-modify` мигрирован первым consumer-ом на Application-level resolver по `(creator,name)`:
+initiator возвращает `Break`, responder — `Postpone`; повторная отправка использует актуальный
+Application intent, а не старый stanza snapshot. Dispatcher остаётся общей pre-parse точкой.
+`transport-replace` пока намеренно НЕ мигрирован: при переносе необходимо сохранить исторические
+sibling transport hints (`getAlikeTransport()`/`selectNextTransport(remoteHint)`), partial batch
+semantics и reentrancy guards. CI этого нового refactor-а считать закрывающим gate только после
+отдельного успешного run на актуальном head.
+
 IRIS/src/xmpp/xmpp-im/jingle-application.cpp, incomingContentModify и outgoing ACK;
 jingle-session.cpp, handleIncomingContentModify.
 
