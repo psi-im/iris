@@ -1,0 +1,48 @@
+name: Migrate content-modify TieBreaker tests
+
+on:
+  push:
+    branches:
+      - automation/fix-jingle-parser
+    paths:
+      - .automation-trigger-migrate-contentmodify-tests
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout helper branch
+        uses: actions/checkout@v4
+        with:
+          ref: automation/fix-jingle-parser
+          path: helper
+      - name: Checkout target branch
+        uses: actions/checkout@v4
+        with:
+          ref: jingle/async-media
+          fetch-depth: 0
+          path: target
+      - name: Migrate tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 helper/.automation-migrate-contentmodify-tests.py
+      - name: Verify and push
+        working-directory: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          for f in tests/jingle/contentmodifyrace.cpp tests/jingle/contentmodifyiqboundary.cpp tests/jingle/contentmodifydispatcher.cpp; do
+            test "$(tail -c 1 "$f" | od -An -t x1 | tr -d ' \n')" = 0a
+          done
+          ! grep -R "outgoingActionStarted\|outgoingActionFinished\|shouldTieBreakIncoming\|TieBreakResolver<" \
+              tests/jingle/contentmodifyrace.cpp tests/jingle/contentmodifyiqboundary.cpp tests/jingle/contentmodifydispatcher.cpp
+          git config user.name 'Sergei Ilinykh'
+          git config user.email 'rion4ik@gmail.com'
+          git add tests/jingle/contentmodifyrace.cpp tests/jingle/contentmodifyiqboundary.cpp tests/jingle/contentmodifydispatcher.cpp
+          git commit -m 'Migrate content-modify regressions to TieBreaker'
+          git push origin HEAD:jingle/async-media
