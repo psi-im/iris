@@ -1,0 +1,638 @@
+name: Apply session TieBreaker refactor
+
+on:
+  push:
+    branches:
+      - automation/fix-jingle-parser
+    paths:
+      - .automation-trigger-session-tiebreaker
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: jingle/async-media
+          fetch-depth: 0
+      - name: Install session-scoped TieBreaker
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(text, old, new, label):
+              if old not in text:
+                  raise SystemExit(f'{label} anchor not found')
+              return text.replace(old, new, 1)
+
+          # Public Jingle-specific arbitration API. It is generic across Jingle
+          # actions/owners, not across arbitrary protocols.
+          p = Path('src/xmpp/xmpp-im/jingle.h')
+          text = p.read_text()
+          text = replace_once(text, '#include <functional>\n', '#include <functional>\n#include <memory>\n', 'jingle.h memory include')
+          anchor = '''#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)\n    inline uint qHash(const XMPP::Jingle::Action &o, uint seed = 0) { return ::qHash(int(o), seed); }\n#else\n    inline size_t qHash(const XMPP::Jingle::Action &o, size_t seed = 0) { return ::qHash(int(o), seed); }\n#endif\n\n'''
+          api = r'''#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+    inline uint qHash(const XMPP::Jingle::Action &o, uint seed = 0) { return ::qHash(int(o), seed); }
+#else
+    inline size_t qHash(const XMPP::Jingle::Action &o, size_t seed = 0) { return ::qHash(int(o), seed); }
+#endif
+
+    /**
+     * Session-scoped coordinator for simultaneous Jingle actions.
+     *
+     * The coordinator owns only IQ transaction lifetime and resolver dispatch.
+     * Application, transport and pad implementations register action-specific
+     * resolvers and keep all semantic conflict/retry policy in those owners.
+     */
+    class IRIS_EXPORT TieBreaker {
+        struct SharedState;
+
+    public:
+        enum class Solution {
+            Continue, ///< Tie-break does not intervene; process the incoming IQ normally.
+            Break,    ///< Reject the whole incoming IQ with conflict/tie-break.
+            Postpone  ///< Process normally, but preserve local intent if our IQ later fails.
+        };
+
+        enum class RemoteResult { Applied, Rejected };
+
+        struct RetryContext {
+            const QDomElement   &localData;
+            const Stanza::Error &localError;
+            RemoteResult         remoteResult;
+        };
+
+        class Resolver {
+        public:
+            virtual ~Resolver() = default;
+            virtual Solution resolve(const QDomElement &localData, const QDomElement &remoteData)
+            {
+                Q_UNUSED(localData);
+                Q_UNUSED(remoteData);
+                return Solution::Continue;
+            }
+            virtual void retry(const RetryContext &context) { Q_UNUSED(context); }
+        };
+
+        class Registration {
+            friend class TieBreaker;
+
+        public:
+            Registration() = default;
+            ~Registration();
+            Registration(Registration &&other) noexcept;
+            Registration &operator=(Registration &&other) noexcept;
+            Registration(const Registration &)            = delete;
+            Registration &operator=(const Registration &) = delete;
+
+            explicit operator bool() const { return id_ != 0; }
+            bool isPostponed() const;
+
+        private:
+            Registration(std::weak_ptr<SharedState> state, quint64 id);
+            void reset();
+
+            std::weak_ptr<SharedState> state_;
+            quint64                    id_ = 0;
+        };
+
+        struct Resolution {
+            Solution solution = Solution::Continue;
+            quint64  id       = 0;
+        };
+
+        TieBreaker();
+        ~TieBreaker();
+        TieBreaker(const TieBreaker &)            = delete;
+        TieBreaker &operator=(const TieBreaker &) = delete;
+
+        Registration registerResolver(Action action, Resolver *resolver);
+
+        // One Session currently serializes outgoing Jingle IQs, but explicit
+        // transaction ids keep postponed work tied to the IQ that caused it.
+        quint64 outgoingStarted(Action action, const QDomElement &localData);
+        void    outgoingFinished(quint64 transaction, const std::optional<Stanza::Error> &error);
+        void    outgoingCallbacksFinished(quint64 transaction);
+
+        Resolution resolveIncoming(Action action, const QDomElement &remoteData);
+        void       incomingFinished(quint64 resolution, RemoteResult result);
+
+        // Cancel transient arbitration state. Registrations stay valid until
+        // their RAII handles are destroyed with their owning session objects.
+        void clear();
+
+    private:
+        std::shared_ptr<SharedState> state_;
+    };
+
+'''
+          text = replace_once(text, anchor, api, 'TieBreaker API insertion')
+          p.write_text(text)
+
+          # Remove the protocol-agnostic template and Session-level content-modify adapter.
+          p = Path('src/xmpp/xmpp-im/jingle-session.h')
+          text = p.read_text()
+          start = text.index('    // Callback-only collision coordinator.')
+          end = text.index('    // class Manager;', start)
+          text = text[:start] + text[end:]
+          text = replace_once(
+              text,
+              '        std::optional<Stanza::Error> lastError() const;\n\n',
+              '        std::optional<Stanza::Error> lastError() const;\n\n        TieBreaker       *tieBreaker();\n        const TieBreaker *tieBreaker() const;\n\n',
+              'Session TieBreaker accessors')
+          start = text.index('        enum class TieBreakIncoming')
+          end = text.index('        QString                                   reserveSid();', start)
+          text = text[:start] + text[end:]
+          old_fields = '''        std::optional<Action>           outgoingActionInFlight_;\n        mutable SessionTieBreakResolver tieBreakResolver_;\n        mutable bool                    tieBreakResolversReady_ = false;\n'''
+          text = replace_once(text, old_fields, '        TieBreaker tieBreaker_;\n', 'Session TieBreaker fields')
+          p.write_text(text)
+
+          # Implement the transaction coordinator next to the Jingle wire model.
+          p = Path('src/xmpp/xmpp-im/jingle.cpp')
+          text = p.read_text()
+          text = replace_once(text, '#include <QDomElement>\n#include <QMap>\n', '#include <QDomElement>\n#include <QHash>\n#include <QMap>\n', 'jingle.cpp QHash include')
+          anchor = '    class Jingle::Private : public QSharedData {\n'
+          impl = r'''    struct TieBreaker::SharedState {
+        struct ResolverEntry {
+            Action    action = Action::NoAction;
+            Resolver *resolver = nullptr;
+            int       postponed = 0;
+        };
+        struct Transaction {
+            quint64                      id = 0;
+            Action                       action = Action::NoAction;
+            QDomElement                  localData;
+            bool                         finished = false;
+            bool                         callbacksFinished = false;
+            std::optional<Stanza::Error> error;
+        };
+        struct PendingResolution {
+            quint64                     id = 0;
+            quint64                     transaction = 0;
+            QList<quint64>              resolvers;
+            std::optional<RemoteResult> remoteResult;
+        };
+
+        QHash<quint64, ResolverEntry>      resolvers;
+        QHash<quint64, Transaction>        transactions;
+        QHash<quint64, PendingResolution> resolutions;
+        quint64                            currentOutgoing = 0;
+        quint64                            nextResolver = 0;
+        quint64                            nextTransaction = 0;
+        quint64                            nextResolution = 0;
+
+        QList<quint64> resolutionsFor(quint64 transaction) const
+        {
+            QList<quint64> result;
+            for (auto it = resolutions.cbegin(); it != resolutions.cend(); ++it) {
+                if (it->transaction == transaction)
+                    result.append(it.key());
+            }
+            return result;
+        }
+
+        void releaseResolution(quint64 id)
+        {
+            auto it = resolutions.find(id);
+            if (it == resolutions.end())
+                return;
+            const auto resolverIds = it->resolvers;
+            resolutions.erase(it);
+            for (auto resolverId : resolverIds) {
+                auto resolver = resolvers.find(resolverId);
+                if (resolver != resolvers.end() && resolver->postponed > 0)
+                    --resolver->postponed;
+            }
+        }
+
+        void maybeReleaseTransaction(quint64 id)
+        {
+            auto it = transactions.find(id);
+            if (it == transactions.end() || !it->finished || !it->callbacksFinished)
+                return;
+            if (!resolutionsFor(id).isEmpty())
+                return;
+            transactions.erase(it);
+        }
+
+        void tryRetry(quint64 resolutionId)
+        {
+            auto resolution = resolutions.find(resolutionId);
+            if (resolution == resolutions.end() || !resolution->remoteResult)
+                return;
+            auto transaction = transactions.find(resolution->transaction);
+            if (transaction == transactions.end() || !transaction->finished || !transaction->callbacksFinished
+                || !transaction->error)
+                return;
+
+            // Copy everything a callback may need before removing the pending
+            // resolution. retry() may synchronously unregister resolvers or
+            // create another outgoing Jingle action.
+            const auto transactionId = transaction->id;
+            const auto localData     = transaction->localData;
+            const auto localError    = *transaction->error;
+            const auto remoteResult  = *resolution->remoteResult;
+            const auto resolverIds   = resolution->resolvers;
+            releaseResolution(resolutionId);
+            maybeReleaseTransaction(transactionId);
+
+            const RetryContext context { localData, localError, remoteResult };
+            for (auto resolverId : resolverIds) {
+                auto entry = resolvers.find(resolverId);
+                if (entry != resolvers.end() && entry->resolver)
+                    entry->resolver->retry(context);
+            }
+        }
+    };
+
+    TieBreaker::Registration::Registration(std::weak_ptr<SharedState> state, quint64 id) :
+        state_(std::move(state)), id_(id)
+    {
+    }
+
+    TieBreaker::Registration::~Registration() { reset(); }
+
+    TieBreaker::Registration::Registration(Registration &&other) noexcept :
+        state_(std::move(other.state_)), id_(other.id_)
+    {
+        other.id_ = 0;
+    }
+
+    TieBreaker::Registration &TieBreaker::Registration::operator=(Registration &&other) noexcept
+    {
+        if (this == &other)
+            return *this;
+        reset();
+        state_    = std::move(other.state_);
+        id_       = other.id_;
+        other.id_ = 0;
+        return *this;
+    }
+
+    void TieBreaker::Registration::reset()
+    {
+        if (!id_)
+            return;
+        if (auto state = state_.lock())
+            state->resolvers.remove(id_);
+        id_ = 0;
+        state_.reset();
+    }
+
+    bool TieBreaker::Registration::isPostponed() const
+    {
+        if (!id_)
+            return false;
+        if (auto state = state_.lock()) {
+            const auto it = state->resolvers.constFind(id_);
+            return it != state->resolvers.cend() && it->postponed > 0;
+        }
+        return false;
+    }
+
+    TieBreaker::TieBreaker() : state_(std::make_shared<SharedState>()) { }
+    TieBreaker::~TieBreaker() = default;
+
+    TieBreaker::Registration TieBreaker::registerResolver(Action action, Resolver *resolver)
+    {
+        if (!resolver || action == Action::NoAction)
+            return {};
+        auto id = ++state_->nextResolver;
+        state_->resolvers.insert(id, SharedState::ResolverEntry { action, resolver, 0 });
+        return Registration(state_, id);
+    }
+
+    quint64 TieBreaker::outgoingStarted(Action action, const QDomElement &localData)
+    {
+        const auto id = ++state_->nextTransaction;
+        state_->transactions.insert(id, SharedState::Transaction { id, action, localData });
+        state_->currentOutgoing = id;
+        return id;
+    }
+
+    void TieBreaker::outgoingFinished(quint64 transactionId, const std::optional<Stanza::Error> &error)
+    {
+        auto transaction = state_->transactions.find(transactionId);
+        if (transaction == state_->transactions.end())
+            return;
+        if (state_->currentOutgoing == transactionId)
+            state_->currentOutgoing = 0; // clear collision lifetime before owner callbacks
+        transaction->finished = true;
+        transaction->error    = error;
+
+        if (!error) {
+            // The peer accepted our proposal. A postponed local intent therefore
+            // needs no tie-break recovery, irrespective of the remote IQ outcome.
+            const auto resolutions = state_->resolutionsFor(transactionId);
+            for (auto resolution : resolutions)
+                state_->releaseResolution(resolution);
+        } else {
+            const auto resolutions = state_->resolutionsFor(transactionId);
+            for (auto resolution : resolutions)
+                state_->tryRetry(resolution);
+        }
+        state_->maybeReleaseTransaction(transactionId);
+    }
+
+    void TieBreaker::outgoingCallbacksFinished(quint64 transactionId)
+    {
+        auto transaction = state_->transactions.find(transactionId);
+        if (transaction == state_->transactions.end())
+            return;
+        transaction->callbacksFinished = true;
+        const auto resolutions          = state_->resolutionsFor(transactionId);
+        for (auto resolution : resolutions)
+            state_->tryRetry(resolution);
+        state_->maybeReleaseTransaction(transactionId);
+    }
+
+    TieBreaker::Resolution TieBreaker::resolveIncoming(Action action, const QDomElement &remoteData)
+    {
+        auto transaction = state_->transactions.constFind(state_->currentOutgoing);
+        if (transaction == state_->transactions.cend() || transaction->action != action)
+            return {};
+
+        QList<quint64> resolverIds;
+        for (auto it = state_->resolvers.cbegin(); it != state_->resolvers.cend(); ++it) {
+            if (it->action == action)
+                resolverIds.append(it.key());
+        }
+
+        QList<quint64> postponed;
+        for (auto resolverId : resolverIds) {
+            auto entry = state_->resolvers.find(resolverId);
+            if (entry == state_->resolvers.end() || !entry->resolver)
+                continue;
+            const auto solution = entry->resolver->resolve(transaction->localData, remoteData);
+            if (solution == Solution::Break)
+                return { Solution::Break, 0 };
+            if (solution == Solution::Postpone && state_->resolvers.contains(resolverId))
+                postponed.append(resolverId);
+        }
+        if (postponed.isEmpty())
+            return {};
+
+        const auto id = ++state_->nextResolution;
+        state_->resolutions.insert(id, SharedState::PendingResolution { id, transaction->id, postponed, {} });
+        for (auto resolverId : postponed) {
+            auto entry = state_->resolvers.find(resolverId);
+            if (entry != state_->resolvers.end())
+                ++entry->postponed;
+        }
+        return { Solution::Postpone, id };
+    }
+
+    void TieBreaker::incomingFinished(quint64 resolutionId, RemoteResult result)
+    {
+        if (!resolutionId)
+            return;
+        auto resolution = state_->resolutions.find(resolutionId);
+        if (resolution == state_->resolutions.end())
+            return;
+        resolution->remoteResult = result;
+        state_->tryRetry(resolutionId);
+    }
+
+    void TieBreaker::clear()
+    {
+        state_->currentOutgoing = 0;
+        state_->transactions.clear();
+        state_->resolutions.clear();
+        for (auto it = state_->resolvers.begin(); it != state_->resolvers.end(); ++it)
+            it->postponed = 0;
+    }
+
+'''
+          text = replace_once(text, anchor, impl + anchor, 'TieBreaker implementation insertion')
+          p.write_text(text)
+
+          # Session owns the coordinator and feeds it exact outgoing-IQ lifetime.
+          p = Path('src/xmpp/xmpp-im/jingle-session.cpp')
+          text = p.read_text()
+          text = replace_once(text, '            q->outgoingActionInFlight_.reset();\n', '            q->tieBreaker()->clear();\n', 'session finish TieBreaker clear')
+          old = '''            auto jt = new JT(manager->client()->rootTask());\n            jt->request(otherParty, xml);\n            QObject::connect(jt, &JT::finished, q, [jt, jingle, callback, this]() {\n                waitingAck = false;\n                q->outgoingActionFinished(jingle.action());\n                if (callback) {\n                    callback(jt);\n                }\n                if (!jt->success()) {\n                    lastError = jt->error();\n                }\n                planStep();\n            });\n            waitingAck = true;\n            q->outgoingActionStarted(action);\n            jt->go(true);\n'''
+          new = '''            auto jt = new JT(manager->client()->rootTask());\n            jt->request(otherParty, xml);\n            const auto tieBreakTransaction = q->tieBreaker()->outgoingStarted(action, xml);\n            QObject::connect(jt, &JT::finished, q, [jt, callback, tieBreakTransaction, this]() {\n                waitingAck = false;\n                const auto error = jt->success() ? std::optional<Stanza::Error>()\n                                                 : std::optional<Stanza::Error>(jt->error());\n                QPointer<Session> session(q);\n                q->tieBreaker()->outgoingFinished(tieBreakTransaction, error);\n                if (callback)\n                    callback(jt);\n                if (!session)\n                    return;\n                if (!jt->success())\n                    lastError = jt->error();\n                q->tieBreaker()->outgoingCallbacksFinished(tieBreakTransaction);\n                planStep();\n            });\n            waitingAck = true;\n            jt->go(true);\n'''
+          text = replace_once(text, old, new, 'sendJingle TieBreaker lifecycle')
+          text = replace_once(
+              text,
+              '    std::optional<XMPP::Stanza::Error> Session::lastError() const { return d->lastError; }\n\n',
+              '    std::optional<XMPP::Stanza::Error> Session::lastError() const { return d->lastError; }\n\n'
+              '    TieBreaker *Session::tieBreaker() { return &tieBreaker_; }\n'
+              '    const TieBreaker *Session::tieBreaker() const { return &tieBreaker_; }\n\n',
+              'Session TieBreaker accessor implementation')
+          p.write_text(text)
+
+          # Dispatch every existing-session Jingle IQ through the coordinator and
+          # report regular parsing outcome back to a postponed resolution.
+          p = Path('src/xmpp/xmpp-im/jingle.cpp')
+          text = p.read_text()
+          old = '''                if (session->shouldTieBreakIncoming(jingle.action())) {\n                    respondTieBreak(iq);\n                    return true;\n                }\n                if (!session->updateFromXml(jingle.action(), jingleEl)) {\n                    respondError(iq, *session->lastError());\n                    return true;\n                }\n'''
+          new = '''                const auto tieBreak = session->tieBreaker()->resolveIncoming(jingle.action(), jingleEl);\n                if (tieBreak.solution == TieBreaker::Solution::Break) {\n                    respondTieBreak(iq);\n                    return true;\n                }\n\n                QPointer<Session> sessionGuard(session);\n                const bool        applied = session->updateFromXml(jingle.action(), jingleEl);\n                if (sessionGuard) {\n                    sessionGuard->tieBreaker()->incomingFinished(\n                        tieBreak.id, applied ? TieBreaker::RemoteResult::Applied : TieBreaker::RemoteResult::Rejected);\n                }\n                if (!applied) {\n                    if (sessionGuard && sessionGuard->lastError())\n                        respondError(iq, *sessionGuard->lastError());\n                    else\n                        respondError(iq, Stanza::Error::ErrorType::Cancel, Stanza::Error::ErrorCond::BadRequest);\n                    return true;\n                }\n'''
+          text = replace_once(text, old, new, 'JTPush TieBreaker dispatch')
+          p.write_text(text)
+
+          # Focused lifecycle regression for the manager itself.
+          p = Path('tests/jingle/tiebreaker.cpp')
+          p.write_text(r'''// SPDX-License-Identifier: LGPL-2.1-or-later
+#include <QCoreApplication>
+#include <QDomDocument>
+#include <iris/jingle.h>
+
+using namespace XMPP;
+namespace J = XMPP::Jingle;
+
+static void check(bool ok, const char *message)
+{
+    if (!ok)
+        qFatal("%s", message);
+}
+
+static QDomElement jingle(QDomDocument &doc, const QString &name)
+{
+    auto el = doc.createElementNS(J::NS, QStringLiteral("jingle"));
+    el.setAttribute(QStringLiteral("name"), name);
+    doc.appendChild(el);
+    return el;
+}
+
+class Resolver : public J::TieBreaker::Resolver {
+public:
+    J::TieBreaker::Solution solution = J::TieBreaker::Solution::Continue;
+    int                      resolveCalls = 0;
+    int                      retryCalls = 0;
+    QString                  localName;
+    QString                  remoteName;
+    J::TieBreaker::RemoteResult remoteResult = J::TieBreaker::RemoteResult::Rejected;
+
+    J::TieBreaker::Solution resolve(const QDomElement &local, const QDomElement &remote) override
+    {
+        ++resolveCalls;
+        localName  = local.attribute(QStringLiteral("name"));
+        remoteName = remote.attribute(QStringLiteral("name"));
+        return solution;
+    }
+
+    void retry(const J::TieBreaker::RetryContext &context) override
+    {
+        ++retryCalls;
+        localName    = context.localData.attribute(QStringLiteral("name"));
+        remoteResult = context.remoteResult;
+    }
+};
+
+int main(int argc, char **argv)
+{
+    QCoreApplication app(argc, argv);
+    const Stanza::Error error(Stanza::Error::ErrorType::Cancel, Stanza::Error::ErrorCond::Conflict);
+
+    // Resolvers are keyed by Action and receive the exact local/remote XML.
+    {
+        J::TieBreaker tieBreaker;
+        Resolver      resolver;
+        resolver.solution = J::TieBreaker::Solution::Postpone;
+        auto registration = tieBreaker.registerResolver(J::Action::ContentModify, &resolver);
+        QDomDocument localDoc, remoteDoc;
+        const auto local  = jingle(localDoc, QStringLiteral("local"));
+        const auto remote = jingle(remoteDoc, QStringLiteral("remote"));
+        const auto tx     = tieBreaker.outgoingStarted(J::Action::ContentModify, local);
+
+        check(tieBreaker.resolveIncoming(J::Action::TransportInfo, remote).solution
+                  == J::TieBreaker::Solution::Continue,
+              "unrelated action reached a content-modify resolver");
+        const auto resolution = tieBreaker.resolveIncoming(J::Action::ContentModify, remote);
+        check(resolution.solution == J::TieBreaker::Solution::Postpone && resolution.id != 0,
+              "postpone resolver was not armed");
+        check(resolver.resolveCalls == 1 && resolver.localName == QLatin1String("local")
+                  && resolver.remoteName == QLatin1String("remote"),
+              "resolver did not receive local/remote Jingle data");
+        check(registration.isPostponed(), "registration did not expose postponed state");
+
+        tieBreaker.incomingFinished(resolution.id, J::TieBreaker::RemoteResult::Applied);
+        tieBreaker.outgoingFinished(tx, error);
+        check(resolver.retryCalls == 0, "retry ran before owner IQ callback finished");
+        // The transaction is no longer in flight before that callback.
+        check(tieBreaker.resolveIncoming(J::Action::ContentModify, remote).solution
+                  == J::TieBreaker::Solution::Continue,
+              "completed IQ remained visible as a simultaneous action");
+        tieBreaker.outgoingCallbacksFinished(tx);
+        check(resolver.retryCalls == 1 && resolver.remoteResult == J::TieBreaker::RemoteResult::Applied,
+              "failed postponed IQ did not retry after owner callback");
+        check(!registration.isPostponed(), "retry left registration postponed");
+    }
+
+    // Success means the peer accepted our local proposal: no retry is necessary.
+    {
+        J::TieBreaker tieBreaker;
+        Resolver      resolver;
+        resolver.solution = J::TieBreaker::Solution::Postpone;
+        auto registration = tieBreaker.registerResolver(J::Action::ContentModify, &resolver);
+        QDomDocument localDoc, remoteDoc;
+        const auto tx = tieBreaker.outgoingStarted(J::Action::ContentModify,
+                                                    jingle(localDoc, QStringLiteral("accepted")));
+        const auto resolution
+            = tieBreaker.resolveIncoming(J::Action::ContentModify, jingle(remoteDoc, QStringLiteral("remote")));
+        tieBreaker.outgoingFinished(tx, std::nullopt);
+        tieBreaker.outgoingCallbacksFinished(tx);
+        tieBreaker.incomingFinished(resolution.id, J::TieBreaker::RemoteResult::Rejected);
+        check(resolver.retryCalls == 0 && !registration.isPostponed(),
+              "accepted local proposal incorrectly retried postponed intent");
+    }
+
+    // Break dominates earlier Postpone decisions and must not arm retry state.
+    {
+        J::TieBreaker tieBreaker;
+        Resolver      postpone, breaker;
+        postpone.solution = J::TieBreaker::Solution::Postpone;
+        breaker.solution  = J::TieBreaker::Solution::Break;
+        auto postponeRegistration = tieBreaker.registerResolver(J::Action::ContentModify, &postpone);
+        auto breakRegistration    = tieBreaker.registerResolver(J::Action::ContentModify, &breaker);
+        QDomDocument localDoc, remoteDoc;
+        tieBreaker.outgoingStarted(J::Action::ContentModify, jingle(localDoc, QStringLiteral("local")));
+        const auto result
+            = tieBreaker.resolveIncoming(J::Action::ContentModify, jingle(remoteDoc, QStringLiteral("remote")));
+        check(result.solution == J::TieBreaker::Solution::Break && result.id == 0,
+              "Break did not dominate Postpone");
+        check(!postponeRegistration.isPostponed() && !breakRegistration.isPostponed(),
+              "Break armed postponed retry state");
+    }
+
+    // Remote processing may finish after our error. retry waits for both facts.
+    {
+        J::TieBreaker tieBreaker;
+        Resolver      resolver;
+        resolver.solution = J::TieBreaker::Solution::Postpone;
+        auto registration = tieBreaker.registerResolver(J::Action::ContentModify, &resolver);
+        QDomDocument localDoc, remoteDoc;
+        const auto tx = tieBreaker.outgoingStarted(J::Action::ContentModify, jingle(localDoc, QStringLiteral("local")));
+        const auto resolution
+            = tieBreaker.resolveIncoming(J::Action::ContentModify, jingle(remoteDoc, QStringLiteral("remote")));
+        tieBreaker.outgoingFinished(tx, error);
+        tieBreaker.outgoingCallbacksFinished(tx);
+        check(resolver.retryCalls == 0, "retry ran before remote processing completed");
+        tieBreaker.incomingFinished(resolution.id, J::TieBreaker::RemoteResult::Rejected);
+        check(resolver.retryCalls == 1 && resolver.remoteResult == J::TieBreaker::RemoteResult::Rejected,
+              "remote rejection was not delivered to retry");
+    }
+
+    // Destroying a registration or clearing the Session state cancels callbacks.
+    {
+        J::TieBreaker tieBreaker;
+        Resolver      resolver;
+        resolver.solution = J::TieBreaker::Solution::Postpone;
+        J::TieBreaker::Registration registration
+            = tieBreaker.registerResolver(J::Action::ContentModify, &resolver);
+        QDomDocument localDoc, remoteDoc;
+        const auto tx = tieBreaker.outgoingStarted(J::Action::ContentModify, jingle(localDoc, QStringLiteral("local")));
+        const auto resolution
+            = tieBreaker.resolveIncoming(J::Action::ContentModify, jingle(remoteDoc, QStringLiteral("remote")));
+        check(registration.isPostponed(), "teardown test did not arm postpone");
+        registration = {};
+        tieBreaker.incomingFinished(resolution.id, J::TieBreaker::RemoteResult::Applied);
+        tieBreaker.outgoingFinished(tx, error);
+        tieBreaker.outgoingCallbacksFinished(tx);
+        check(resolver.retryCalls == 0, "destroyed resolver registration was called");
+
+        Resolver second;
+        second.solution = J::TieBreaker::Solution::Postpone;
+        auto secondRegistration = tieBreaker.registerResolver(J::Action::ContentModify, &second);
+        QDomDocument localDoc2, remoteDoc2;
+        const auto tx2 = tieBreaker.outgoingStarted(J::Action::ContentModify, jingle(localDoc2, QStringLiteral("two")));
+        const auto resolution2
+            = tieBreaker.resolveIncoming(J::Action::ContentModify, jingle(remoteDoc2, QStringLiteral("remote-two")));
+        check(secondRegistration.isPostponed(), "clear test did not arm postpone");
+        tieBreaker.clear();
+        tieBreaker.incomingFinished(resolution2.id, J::TieBreaker::RemoteResult::Applied);
+        tieBreaker.outgoingFinished(tx2, error);
+        tieBreaker.outgoingCallbacksFinished(tx2);
+        check(second.retryCalls == 0 && !secondRegistration.isPostponed(),
+              "clear left stale postponed callbacks");
+    }
+
+    return 0;
+}
+''')
+
+          p = Path('tests/jingle/CMakeLists.txt')
+          text = p.read_text()
+          anchor = '''add_test(NAME jingle_signaling COMMAND jingle_signaling_test)\n'''
+          addition = '''add_test(NAME jingle_signaling COMMAND jingle_signaling_test)\nadd_executable(jingle_tiebreaker_test tiebreaker.cpp)\ntarget_link_libraries(jingle_tiebreaker_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core\n    Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)\nadd_test(NAME jingle_tiebreaker COMMAND jingle_tiebreaker_test)\n'''
+          text = replace_once(text, anchor, addition, 'TieBreaker test registration')
+          p.write_text(text)
+          PY
+      - name: Verify and push
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git config user.name 'Sergei Ilinykh'
+          git config user.email 'rion4ik@gmail.com'
+          git add src/xmpp/xmpp-im/jingle.h src/xmpp/xmpp-im/jingle.cpp \
+                  src/xmpp/xmpp-im/jingle-session.h src/xmpp/xmpp-im/jingle-session.cpp \
+                  tests/jingle/CMakeLists.txt tests/jingle/tiebreaker.cpp
+          git commit -m 'Add session-scoped Jingle tie-break manager'
+          git push origin HEAD:jingle/async-media
