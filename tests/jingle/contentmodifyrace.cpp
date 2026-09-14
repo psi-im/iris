@@ -2,6 +2,7 @@
 #include <QCoreApplication>
 #include <QDebug>
 #include <QtCrypto>
+#include <initializer_list>
 #include <iris/jingle-application.h>
 #define private public
 #include <iris/jingle-session.h>
@@ -134,21 +135,28 @@ static QDomElement firstContent(const J::OutgoingUpdate &update)
 // stanza parser puts an unprefixed <content/> under the Jingle default namespace
 // into urn:xmpp:jingle:1. Recreate that parsed shape here instead of merely
 // importing the DOM node, which would preserve its empty namespaceURI().
-static QDomElement payload(const J::OutgoingUpdate &update)
+static QDomElement payload(std::initializer_list<const J::OutgoingUpdate *> updates)
 {
     QDomDocument doc;
     auto         jingle = doc.createElementNS(J::NS, QStringLiteral("jingle"));
-    for (const auto &element : std::get<0>(update)) {
-        auto content = doc.createElementNS(J::NS, QStringLiteral("content"));
-        for (const auto &name : { QStringLiteral("creator"), QStringLiteral("name"), QStringLiteral("senders") }) {
-            if (element.hasAttribute(name))
-                content.setAttribute(name, element.attribute(name));
+    for (const auto *update : updates) {
+        check(update, "null outgoing update");
+        for (const auto &element : std::get<0>(*update)) {
+            if (element.tagName() != QLatin1String("content"))
+                continue;
+            auto content = doc.createElementNS(J::NS, QStringLiteral("content"));
+            for (const auto &name : { QStringLiteral("creator"), QStringLiteral("name"), QStringLiteral("senders") }) {
+                if (element.hasAttribute(name))
+                    content.setAttribute(name, element.attribute(name));
+            }
+            jingle.appendChild(content);
         }
-        jingle.appendChild(content);
     }
     doc.appendChild(jingle);
     return jingle;
 }
+
+static QDomElement payload(const J::OutgoingUpdate &update) { return payload({ &update }); }
 
 static void acknowledge(const J::OutgoingUpdate &update, Task *result)
 {
@@ -157,59 +165,24 @@ static void acknowledge(const J::OutgoingUpdate &update, Task *result)
     callback(result);
 }
 
-static void testGenericResolver()
+static quint64 startContentModify(J::Session &session,
+                                  std::initializer_list<const J::OutgoingUpdate *> updates)
 {
-    struct Context {
-        int kind = 0;
-    };
-    enum class Decision { Pass, Reject };
-    enum class Event { Rejected, Wake };
-    using Resolver = J::TieBreakResolver<Context, Decision, Event>;
+    return session.tieBreaker()->outgoingStarted(J::Action::ContentModify, payload(updates));
+}
 
-    Resolver resolver;
-    bool     retryReady    = false;
-    int      immediate     = 0;
-    int      advances      = 0;
-    int      conflictCalls = 0;
+static std::optional<Stanza::Error> failedIqError()
+{
+    return Stanza::Error(Stanza::Error::ErrorType::Cancel, Stanza::Error::ErrorCond::Conflict);
+}
 
-    const auto registration = resolver.registerResolver(Resolver::Callbacks {
-        [count = 0, &conflictCalls](const Context &context) mutable {
-            conflictCalls = ++count;
-            return context.kind == 7;
-        },
-        [&](const Context &) {
-            Resolver::Plan plan;
-            plan.decision  = Decision::Reject;
-            plan.immediate = [&]() { ++immediate; };
-            plan.advance   = [phase = 0, &advances, &retryReady](const Event &event) mutable {
-                advances = ++phase;
-                return event == Event::Wake && retryReady ? Resolver::ResolutionState::Finished
-                                                          : Resolver::ResolutionState::Waiting;
-            };
-            return plan;
-        } });
-    check(registration != 0, "generic tie-break resolver registration failed");
-
-    const auto first = resolver.resolve(Context { 0 });
-    check(!first.handled && conflictCalls == 1, "generic resolver did not preserve first callback invocation");
-
-    const auto decision = resolver.resolve(Context { 7 });
-    check(decision.handled && decision.decision == Decision::Reject && conflictCalls == 2,
-          "generic resolver ignored registered callback or lost mutable callback state");
-    check(immediate == 1, "generic resolver did not run immediate callback exactly once");
-    check(decision.resolution != 0 && resolver.hasResolution(decision.resolution),
-          "generic resolver did not create per-collision state machine");
-
-    resolver.notify(decision.resolution, Event::Rejected);
-    check(resolver.hasResolution(decision.resolution) && advances == 1,
-          "resolution finished before retry condition became true");
-    retryReady = true;
-    resolver.notify(decision.resolution, Event::Wake);
-    check(!resolver.hasResolution(decision.resolution) && advances == 2,
-          "resolution did not preserve mutable state across events");
-
-    resolver.unregisterResolver(registration);
-    check(!resolver.resolve(Context { 7 }).handled, "unregistered resolver still handled a collision");
+static void finishContentModify(J::Session &session, quint64 transaction, bool success, Task *task,
+                                std::initializer_list<const J::OutgoingUpdate *> updates)
+{
+    session.tieBreaker()->outgoingFinished(transaction, success ? std::optional<Stanza::Error>() : failedIqError());
+    for (const auto *update : updates)
+        acknowledge(*update, task);
+    session.tieBreaker()->outgoingCallbacksFinished(transaction);
 }
 
 static void crossedContentModify(Client &client, Task *success, Task *failure, J::Origin initiatorTarget,
@@ -237,38 +210,45 @@ static void crossedContentModify(Client &client, Task *success, Task *failure, J
           "responder crossed request was not evaluated");
     auto initiatorUpdate = initiatorApp->takeOutgoingUpdate();
     auto responderUpdate = responderApp->takeOutgoingUpdate();
-    initiator.outgoingActionStarted(J::Action::ContentModify);
-    responder.outgoingActionStarted(J::Action::ContentModify);
+    const auto initiatorTransaction = startContentModify(initiator, { &initiatorUpdate });
+    const auto responderTransaction = startContentModify(responder, { &responderUpdate });
 
-    check(initiator.shouldTieBreakIncoming(J::Action::ContentModify),
-          "initiator dispatcher did not reject crossed content-modify");
-    check(!responder.shouldTieBreakIncoming(J::Action::ContentModify),
-          "responder incorrectly rejected initiator content-modify");
-    check(!initiator.shouldTieBreakIncoming(J::Action::TransportInfo),
+    const auto initiatorResolution
+        = initiator.tieBreaker()->resolveIncoming(J::Action::ContentModify, payload(responderUpdate));
+    const auto responderResolution
+        = responder.tieBreaker()->resolveIncoming(J::Action::ContentModify, payload(initiatorUpdate));
+    check(initiatorResolution.solution == J::TieBreaker::Solution::Break,
+          "initiator resolver did not reject crossed content-modify");
+    check(responderResolution.solution == J::TieBreaker::Solution::Postpone && responderResolution.id != 0,
+          "responder resolver did not postpone its losing local intent");
+    check(initiator.tieBreaker()->resolveIncoming(J::Action::TransportInfo, payload(responderUpdate)).solution
+              == J::TieBreaker::Solution::Continue,
           "content-modify collision leaked into unrelated action");
 
     check(responder.updateFromXml(J::Action::ContentModify, payload(initiatorUpdate)),
           "responder rejected initiator content-modify");
+    responder.tieBreaker()->incomingFinished(responderResolution.id, J::TieBreaker::RemoteResult::Applied);
     check(responderApp->senders() == initiatorTarget, "responder did not apply initiator direction");
     check(initiatorApp->senders() == J::Origin::Both, "losing responder direction leaked into initiator state");
 
     if (responderResultFirst) {
-        responder.outgoingActionFinished(J::Action::ContentModify);
-        acknowledge(responderUpdate, failure);
-        initiator.outgoingActionFinished(J::Action::ContentModify);
-        acknowledge(initiatorUpdate, success);
+        finishContentModify(responder, responderTransaction, false, failure, { &responderUpdate });
+        finishContentModify(initiator, initiatorTransaction, true, success, { &initiatorUpdate });
     } else {
-        initiator.outgoingActionFinished(J::Action::ContentModify);
-        acknowledge(initiatorUpdate, success);
-        responder.outgoingActionFinished(J::Action::ContentModify);
-        acknowledge(responderUpdate, failure);
+        finishContentModify(initiator, initiatorTransaction, true, success, { &initiatorUpdate });
+        finishContentModify(responder, responderTransaction, false, failure, { &responderUpdate });
     }
 
     check(initiatorApp->senders() == initiatorTarget && responderApp->senders() == initiatorTarget,
           "crossed content-modify did not converge to initiator state");
-    check(!initiator.shouldTieBreakIncoming(J::Action::ContentModify)
-              && !responder.shouldTieBreakIncoming(J::Action::ContentModify),
+    check(initiator.tieBreaker()->resolveIncoming(J::Action::ContentModify, payload(responderUpdate)).solution
+                  == J::TieBreaker::Solution::Continue
+              && responder.tieBreaker()->resolveIncoming(J::Action::ContentModify, payload(initiatorUpdate)).solution
+                  == J::TieBreaker::Solution::Continue,
           "crossed content-modify left collision state in flight");
+    check(responderApp->evaluateOutgoingUpdate().action
+              == (responderTarget == initiatorTarget ? J::Action::NoAction : J::Action::ContentModify),
+          "postponed responder intent was not reconciled after the losing IQ failed");
 }
 
 int main(int argc, char **argv)
@@ -277,8 +257,6 @@ int main(int argc, char **argv)
     QCA::Initializer qca;
     Client           client;
     Result           success(client.rootTask(), true), failure(client.rootTask(), false);
-
-    testGenericResolver();
 
     // A direction intent queued before Active wakes exactly when it becomes
     // legal to send content-modify.
@@ -348,17 +326,21 @@ int main(int argc, char **argv)
         video->evaluateOutgoingUpdate();
         auto audioUpdate = audio->takeOutgoingUpdate();
         auto videoUpdate = video->takeOutgoingUpdate();
-        initiator.outgoingActionStarted(J::Action::ContentModify);
-        check(initiator.shouldTieBreakIncoming(J::Action::ContentModify),
+        const auto transaction = startContentModify(initiator, { &audioUpdate, &videoUpdate });
+        check(initiator.tieBreaker()->resolveIncoming(J::Action::ContentModify, payload(audioUpdate)).solution
+                  == J::TieBreaker::Solution::Break,
               "multi-content collision did not enable resolver");
         delete video;
         std::get<1>(videoUpdate) = {};
-        check(initiator.shouldTieBreakIncoming(J::Action::ContentModify),
+        check(initiator.tieBreaker()->resolveIncoming(J::Action::ContentModify, payload(audioUpdate)).solution
+                  == J::TieBreaker::Solution::Break,
               "removed Application prematurely cleared the still-pending IQ collision");
-        initiator.outgoingActionFinished(J::Action::ContentModify);
-        check(!initiator.shouldTieBreakIncoming(J::Action::ContentModify),
+        initiator.tieBreaker()->outgoingFinished(transaction, std::nullopt);
+        check(initiator.tieBreaker()->resolveIncoming(J::Action::ContentModify, payload(audioUpdate)).solution
+                  == J::TieBreaker::Solution::Continue,
               "completed multi-content IQ left stale collision state");
         acknowledge(audioUpdate, &success);
+        initiator.tieBreaker()->outgoingCallbacksFinished(transaction);
     }
 
     // Transport signaling keeps its existing priority over a queued direction

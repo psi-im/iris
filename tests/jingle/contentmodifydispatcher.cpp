@@ -52,20 +52,17 @@ static void dispatchModify(Client &receiver, const Jid &from, const QString &sid
     check(receiver.rootTask()->take(iq), "JTPush did not consume content-modify IQ");
 }
 
-static void completeCrossed(J::Session &initiator, J::Session &responder, const J::OutgoingUpdate &initiatorUpdate,
+static void completeCrossed(J::Session &initiator, J::Session &responder, quint64 initiatorTransaction,
+                            quint64 responderTransaction, const J::OutgoingUpdate &initiatorUpdate,
                             const J::OutgoingUpdate &responderUpdate, Task *success, Task *failure,
                             bool responderResultFirst)
 {
     if (responderResultFirst) {
-        responder.outgoingActionFinished(J::Action::ContentModify);
-        acknowledge(responderUpdate, failure);
-        initiator.outgoingActionFinished(J::Action::ContentModify);
-        acknowledge(initiatorUpdate, success);
+        finishContentModify(responder, responderTransaction, false, failure, { &responderUpdate });
+        finishContentModify(initiator, initiatorTransaction, true, success, { &initiatorUpdate });
     } else {
-        initiator.outgoingActionFinished(J::Action::ContentModify);
-        acknowledge(initiatorUpdate, success);
-        responder.outgoingActionFinished(J::Action::ContentModify);
-        acknowledge(responderUpdate, failure);
+        finishContentModify(initiator, initiatorTransaction, true, success, { &initiatorUpdate });
+        finishContentModify(responder, responderTransaction, false, failure, { &responderUpdate });
     }
 }
 
@@ -117,8 +114,8 @@ static void crossedThroughDispatcher(J::Origin initiatorTarget, J::Origin respon
           "responder dispatcher request was not evaluated");
     auto initiatorUpdate = initiatorApp->takeOutgoingUpdate();
     auto responderUpdate = responderApp->takeOutgoingUpdate();
-    initiator.outgoingActionStarted(J::Action::ContentModify);
-    responder.outgoingActionStarted(J::Action::ContentModify);
+    const auto initiatorTransaction = startContentModify(initiator, { &initiatorUpdate });
+    const auto responderTransaction = startContentModify(responder, { &responderUpdate });
 
     const auto initiatorWire = wireContent(initiatorUpdate);
     const auto responderWire = wireContent(responderUpdate);
@@ -147,13 +144,15 @@ static void crossedThroughDispatcher(J::Origin initiatorTarget, J::Origin respon
 
     Result success(initiatorClient.rootTask(), true);
     Result failure(initiatorClient.rootTask(), false);
-    completeCrossed(initiator, responder, initiatorUpdate, responderUpdate, &success, &failure,
-                    responderResultFirst);
+    completeCrossed(initiator, responder, initiatorTransaction, responderTransaction, initiatorUpdate,
+                    responderUpdate, &success, &failure, responderResultFirst);
 
     check(initiatorApp->senders() == initiatorTarget && responderApp->senders() == initiatorTarget,
           "dispatcher-level crossed content-modify did not converge to initiator state");
-    check(!initiator.shouldTieBreakIncoming(J::Action::ContentModify)
-              && !responder.shouldTieBreakIncoming(J::Action::ContentModify),
+    check(initiator.tieBreaker()->resolveIncoming(J::Action::ContentModify, payload(responderUpdate)).solution
+                  == J::TieBreaker::Solution::Continue
+              && responder.tieBreaker()->resolveIncoming(J::Action::ContentModify, payload(initiatorUpdate)).solution
+                  == J::TieBreaker::Solution::Continue,
           "dispatcher-level crossed content-modify left collision state active");
 
     if (verifyPacketGates) {
@@ -202,8 +201,8 @@ static void multiContentThroughDispatcher()
     auto ivu = iv->takeOutgoingUpdate();
     auto rau = ra->takeOutgoingUpdate();
     auto rvu = rv->takeOutgoingUpdate();
-    initiator.outgoingActionStarted(J::Action::ContentModify);
-    responder.outgoingActionStarted(J::Action::ContentModify);
+    const auto initiatorTransaction = startContentModify(initiator, { &iau, &ivu });
+    const auto responderTransaction = startContentModify(responder, { &rau, &rvu });
 
     dispatchModify(initiatorClient, responderJid, initiatorSid, QStringLiteral("multi-responder-duplicate"),
                    { wireContent(rau), wireContent(rvu) });
@@ -217,12 +216,8 @@ static void multiContentThroughDispatcher()
 
     Result success(initiatorClient.rootTask(), true);
     Result failure(initiatorClient.rootTask(), false);
-    responder.outgoingActionFinished(J::Action::ContentModify);
-    acknowledge(rau, &failure);
-    acknowledge(rvu, &failure);
-    initiator.outgoingActionFinished(J::Action::ContentModify);
-    acknowledge(iau, &success);
-    acknowledge(ivu, &success);
+    finishContentModify(responder, responderTransaction, false, &failure, { &rau, &rvu });
+    finishContentModify(initiator, initiatorTransaction, true, &success, { &iau, &ivu });
 
     check(ia->senders() == J::Origin::Initiator && ra->senders() == J::Origin::Initiator,
           "multi-content audio did not converge");
@@ -269,15 +264,16 @@ static void deletionWhileIqPending()
     auto rvu = rv->takeOutgoingUpdate();
     const QList<WireContent> initiatorWire { wireContent(iau), wireContent(ivu) };
     const QList<WireContent> responderWire { wireContent(rau), wireContent(rvu) };
-    initiator.outgoingActionStarted(J::Action::ContentModify);
-    responder.outgoingActionStarted(J::Action::ContentModify);
+    const auto initiatorTransaction = startContentModify(initiator, { &iau, &ivu });
+    const auto responderTransaction = startContentModify(responder, { &rau, &rvu });
 
     // Session::doStep stores callbacks behind QPointer<Application>. Clearing the
     // callback here models that skip after the Application disappears while the IQ
     // itself remains outstanding.
     std::get<1>(ivu) = {};
     delete iv;
-    check(initiator.shouldTieBreakIncoming(J::Action::ContentModify),
+    check(initiator.tieBreaker()->resolveIncoming(J::Action::ContentModify, payload(rau)).solution
+              == J::TieBreaker::Solution::Break,
           "content deletion incorrectly ended the Session-level IQ collision");
 
     dispatchModify(initiatorClient, responderJid, initiatorSid, QStringLiteral("deleted-sibling-duplicate"),
@@ -292,15 +288,13 @@ static void deletionWhileIqPending()
 
     Result success(initiatorClient.rootTask(), true);
     Result failure(initiatorClient.rootTask(), false);
-    responder.outgoingActionFinished(J::Action::ContentModify);
-    acknowledge(rau, &failure);
-    acknowledge(rvu, &failure);
-    initiator.outgoingActionFinished(J::Action::ContentModify);
-    acknowledge(iau, &success);
+    finishContentModify(responder, responderTransaction, false, &failure, { &rau, &rvu });
+    finishContentModify(initiator, initiatorTransaction, true, &success, { &iau });
 
     check(ia->senders() == J::Origin::Initiator && ra->senders() == J::Origin::Initiator,
           "surviving content did not converge after sibling deletion");
-    check(!initiator.shouldTieBreakIncoming(J::Action::ContentModify),
+    check(initiator.tieBreaker()->resolveIncoming(J::Action::ContentModify, payload(rau)).solution
+              == J::TieBreaker::Solution::Continue,
           "completed IQ kept collision active after sibling deletion");
 }
 
@@ -317,7 +311,7 @@ static void postIqActionIsNotTieBroken()
     check(content->requestSenders(J::Origin::Responder), "post-IQ local request rejected");
     content->evaluateOutgoingUpdate();
     auto update = content->takeOutgoingUpdate();
-    session.outgoingActionStarted(J::Action::ContentModify);
+    const auto transaction = startContentModify(session, { &update });
 
     bool dispatched = false;
     int  peerUpdates = 0;
@@ -334,8 +328,9 @@ static void postIqActionIsNotTieBroken()
     Result success(client.rootTask(), true);
     // This ordering is the production JT::finished ordering: the Jingle IQ stops
     // being collision-active before Application ACK callbacks are invoked.
-    session.outgoingActionFinished(J::Action::ContentModify);
+    session.tieBreaker()->outgoingFinished(transaction, std::nullopt);
     acknowledge(update, &success);
+    session.tieBreaker()->outgoingCallbacksFinished(transaction);
 
     check(dispatched, "post-IQ reentrant peer action was not dispatched");
     check(!session.lastError().has_value() && peerUpdates == 1,
