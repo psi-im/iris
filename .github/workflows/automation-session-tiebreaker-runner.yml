@@ -1,0 +1,55 @@
+name: Run session TieBreaker patch
+
+on:
+  push:
+    branches:
+      - automation/fix-jingle-parser
+    paths:
+      - .automation-trigger-session-tiebreaker-runner
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout helper branch
+        uses: actions/checkout@v4
+        with:
+          ref: automation/fix-jingle-parser
+          path: helper
+      - name: Checkout target branch
+        uses: actions/checkout@v4
+        with:
+          ref: jingle/async-media
+          fetch-depth: 0
+          path: target
+      - name: Extract and apply patcher
+        working-directory: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          workflow = Path('../helper/.github/workflows/automation-session-tiebreaker.yml').read_text()
+          body = workflow.split("python3 - <<'PY'\n", 1)[1].split('\n          PY', 1)[0]
+          normalized = []
+          for line in body.splitlines():
+              normalized.append(line[10:] if line.startswith('          ') else line)
+          Path('/tmp/session-tiebreaker-patch.py').write_text('\n'.join(normalized) + '\n')
+          PY
+          python3 /tmp/session-tiebreaker-patch.py
+      - name: Verify and push
+        working-directory: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git config user.name 'Sergei Ilinykh'
+          git config user.email 'rion4ik@gmail.com'
+          git add src/xmpp/xmpp-im/jingle.h src/xmpp/xmpp-im/jingle.cpp \
+                  src/xmpp/xmpp-im/jingle-session.h src/xmpp/xmpp-im/jingle-session.cpp \
+                  tests/jingle/CMakeLists.txt tests/jingle/tiebreaker.cpp
+          git commit -m 'Add session-scoped Jingle tie-break manager'
+          git push origin HEAD:jingle/async-media
