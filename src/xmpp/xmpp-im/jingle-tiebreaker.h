@@ -37,6 +37,8 @@ namespace XMPP { namespace Jingle {
 
         enum class RemoteResult { Applied, Rejected };
 
+        // retry() is recovery context, not an instruction to replay localData.
+        // Resolvers should reconcile the owner's current live intent instead.
         struct RetryContext {
   const QDomElement   &localData;
   const QDomElement   &remoteData;
