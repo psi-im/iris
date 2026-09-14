@@ -1,0 +1,45 @@
+name: Fix TieBreaker incomplete type build
+
+on:
+  push:
+    branches:
+      - automation/fix-jingle-parser
+    paths:
+      - .automation-trigger-fix-tiebreaker-incomplete
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout helper branch
+        uses: actions/checkout@v4
+        with:
+          ref: automation/fix-jingle-parser
+          path: helper
+      - name: Checkout target branch
+        uses: actions/checkout@v4
+        with:
+          ref: jingle/async-media
+          fetch-depth: 0
+          path: target
+      - name: Apply fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 helper/.automation-fix-tiebreaker-incomplete.py
+      - name: Verify and push
+        working-directory: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          f=src/xmpp/xmpp-im/jingle-application.h
+          test "$(tail -c 1 "$f" | od -An -t x1 | tr -d ' \n')" = 0a
+          git config user.name 'Sergei Ilinykh'
+          git config user.email 'rion4ik@gmail.com'
+          git add "$f"
+          git commit -m 'Store content-modify resolver through complete base type'
+          git push origin HEAD:jingle/async-media
