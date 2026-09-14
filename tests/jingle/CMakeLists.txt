@@ -16,6 +16,26 @@ target_link_libraries(jingle_signaling_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VE
     Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
 enable_testing()
 add_test(NAME jingle_signaling COMMAND jingle_signaling_test)
+add_executable(jingle_tiebreaker_test tiebreaker.cpp)
+target_link_libraries(jingle_tiebreaker_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
+    Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
+add_test(NAME jingle_tiebreaker COMMAND jingle_tiebreaker_test)
+add_executable(jingle_contentmodify_test contentmodify.cpp)
+target_link_libraries(jingle_contentmodify_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
+    Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
+add_test(NAME jingle_contentmodify COMMAND jingle_contentmodify_test)
+add_executable(jingle_contentmodifyrace_test contentmodifyrace.cpp)
+target_link_libraries(jingle_contentmodifyrace_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
+    Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
+add_test(NAME jingle_contentmodifyrace COMMAND jingle_contentmodifyrace_test)
+add_executable(jingle_contentmodifyiqboundary_test contentmodifyiqboundary.cpp)
+target_link_libraries(jingle_contentmodifyiqboundary_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
+    Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
+add_test(NAME jingle_contentmodify_iq_boundary COMMAND jingle_contentmodifyiqboundary_test)
+add_executable(jingle_contentmodifydispatcher_test contentmodifydispatcher.cpp)
+target_link_libraries(jingle_contentmodifydispatcher_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
+    Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
+add_test(NAME jingle_contentmodify_dispatcher COMMAND jingle_contentmodifydispatcher_test)
 add_executable(jingle_dtlssrtp_test dtlssrtp.cpp)
 # Dtls lives in irisnet but its fingerprint/XML helpers live in iris.
 target_link_libraries(jingle_dtlssrtp_test PRIVATE irisnet iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
@@ -29,9 +49,70 @@ target_include_directories(jingle_iceudp_test PRIVATE ../../src/xmpp/xmpp-im)
 target_link_libraries(jingle_iceudp_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
     Qt${QT_DEFAULT_MAJOR_VERSION}::Network Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
 add_test(NAME jingle_iceudp COMMAND jingle_iceudp_test)
+add_executable(jingle_icereplacestate_test icereplacestate.cpp)
+target_link_libraries(jingle_icereplacestate_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
+    Qt${QT_DEFAULT_MAJOR_VERSION}::Network Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
+add_test(NAME jingle_icereplacestate COMMAND jingle_icereplacestate_test)
+set_tests_properties(jingle_icereplacestate PROPERTIES TIMEOUT 15)
 add_executable(jingle_transportselection_test transportselection.cpp)
 target_link_libraries(jingle_transportselection_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core)
 add_test(NAME jingle_transportselection COMMAND jingle_transportselection_test)
+add_executable(jingle_transportreplace_test transportreplace.cpp)
+target_link_libraries(jingle_transportreplace_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
+    Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
+add_test(NAME jingle_transportreplace COMMAND jingle_transportreplace_test)
+add_executable(jingle_transportreplacematrix_test transportreplacematrix.cpp)
+target_link_libraries(jingle_transportreplacematrix_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
+    Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
+add_test(NAME jingle_transportreplace_matrix COMMAND jingle_transportreplacematrix_test)
+add_executable(jingle_transportacceptselfreentrancy_test transportacceptselfreentrancy.cpp)
+target_link_libraries(jingle_transportacceptselfreentrancy_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
+    Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
+add_test(NAME jingle_transportaccept_self_reentrancy COMMAND jingle_transportacceptselfreentrancy_test)
+add_executable(jingle_transportrejectreentrancy_test transportrejectreentrancy.cpp)
+target_link_libraries(jingle_transportrejectreentrancy_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
+    Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
+add_test(NAME jingle_transportreject_reentrancy COMMAND jingle_transportrejectreentrancy_test)
+add_executable(jingle_transportrejectatomicity_test transportrejectatomicity.cpp)
+target_link_libraries(jingle_transportrejectatomicity_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
+    Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
+add_test(NAME jingle_transportreject_atomicity COMMAND jingle_transportrejectatomicity_test)
+add_executable(jingle_transportacceptatomicity_test transportacceptatomicity.cpp)
+target_link_libraries(jingle_transportacceptatomicity_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
+    Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
+add_test(NAME jingle_transportaccept_atomicity COMMAND jingle_transportacceptatomicity_test)
+add_executable(jingle_transportacceptackreentrancy_test transportacceptackreentrancy.cpp)
+target_link_libraries(jingle_transportacceptackreentrancy_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
+    Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
+add_test(NAME jingle_transportaccept_ack_reentrancy COMMAND jingle_transportacceptackreentrancy_test)
+add_executable(jingle_transportreplacecorrectness_test transportreplacecorrectness.cpp)
+target_link_libraries(jingle_transportreplacecorrectness_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
+    Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
+add_test(NAME jingle_transportreplace_inflight_without_unacked
+    COMMAND jingle_transportreplacecorrectness_test inflight-without-unacked)
+add_test(NAME jingle_transportreplace_unacked_without_replace
+    COMMAND jingle_transportreplacecorrectness_test unacked-without-replace)
+add_test(NAME jingle_transportreplace_failed_iq
+    COMMAND jingle_transportreplacecorrectness_test failed-iq)
+add_test(NAME jingle_transportreplace_malformed_accept
+    COMMAND jingle_transportreplacecorrectness_test malformed-accept)
+add_test(NAME jingle_transportreplace_duplicate_content
+    COMMAND jingle_transportreplacecorrectness_test duplicate-content)
+add_test(NAME jingle_transportreplace_missing_transport
+    COMMAND jingle_transportreplacecorrectness_test missing-transport)
+add_executable(jingle_transportreplaceprotocol_test transportreplaceprotocol.cpp)
+target_link_libraries(jingle_transportreplaceprotocol_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
+    Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
+add_test(NAME jingle_transportreplace_transport_reject
+    COMMAND jingle_transportreplaceprotocol_test transport-reject)
+add_test(NAME jingle_transportreplace_failed_iq_fallback
+    COMMAND jingle_transportreplaceprotocol_test failed-iq-fallback)
+add_test(NAME jingle_transportreplace_malformed_accept_session
+    COMMAND jingle_transportreplaceprotocol_test malformed-accept)
+add_test(NAME jingle_transportreplace_duplicate_accept
+    COMMAND jingle_transportreplaceprotocol_test duplicate-accept)
+add_test(NAME jingle_transportreplace_duplicate_reject
+    COMMAND jingle_transportreplaceprotocol_test duplicate-reject)
 add_executable(jingle_groupnegotiation_test groupnegotiation.cpp)
 target_link_libraries(jingle_groupnegotiation_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core)
 add_test(NAME jingle_groupnegotiation COMMAND jingle_groupnegotiation_test)
@@ -46,14 +127,30 @@ add_executable(jingle_rtpnegotiation_test rtpnegotiation.cpp)
 target_link_libraries(jingle_rtpnegotiation_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
     Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
 add_test(NAME jingle_rtpnegotiation COMMAND jingle_rtpnegotiation_test)
+add_executable(jingle_rtppreparedanswer_test rtppreparedanswer.cpp)
+target_link_libraries(jingle_rtppreparedanswer_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core)
+add_test(NAME jingle_rtppreparedanswer COMMAND jingle_rtppreparedanswer_test)
 add_executable(jingle_rtprouter_test rtprouter.cpp)
 target_include_directories(jingle_rtprouter_test PRIVATE ../../src/xmpp/xmpp-im)
 target_link_libraries(jingle_rtprouter_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core)
 add_test(NAME jingle_rtprouter COMMAND jingle_rtprouter_test)
+add_executable(jingle_rtpmediaops_test rtpmediaops.cpp)
+target_link_libraries(jingle_rtpmediaops_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core)
+add_test(NAME jingle_rtpmediaops COMMAND jingle_rtpmediaops_test)
 add_executable(jingle_rtpapplication_test rtpapplication.cpp)
 target_link_libraries(jingle_rtpapplication_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
     Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
 add_test(NAME jingle_rtpapplication COMMAND jingle_rtpapplication_test)
+add_executable(jingle_rtpdirection_test rtpdirection.cpp)
+target_link_libraries(jingle_rtpdirection_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core)
+add_test(NAME jingle_rtpdirection COMMAND jingle_rtpdirection_test)
+add_executable(jingle_sessionacceptsubset_test sessionacceptsubset.cpp)
+target_link_libraries(jingle_sessionacceptsubset_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
+    Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
+add_test(NAME jingle_sessionacceptsubset COMMAND jingle_sessionacceptsubset_test)
+add_executable(jingle_rtpruntimeerror_test rtpruntimeerror.cpp)
+target_link_libraries(jingle_rtpruntimeerror_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core)
+add_test(NAME jingle_rtpruntimeerror COMMAND jingle_rtpruntimeerror_test)
 add_executable(jingle_srtp_test srtp.cpp)
 target_link_libraries(jingle_srtp_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core)
 if(IRIS_ENABLE_SRTP)

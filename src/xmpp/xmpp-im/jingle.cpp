@@ -34,6 +34,7 @@
 #include <QDateTime>
 #include <QDebug>
 #include <QDomElement>
+#include <QHash>
 #include <QMap>
 #include <QPointer>
 #include <QTimer>
@@ -386,17 +387,10 @@ namespace XMPP { namespace Jingle {
     class JTPush : public Task {
         Q_OBJECT
 
-        QList<QString> externalManagers;
-        QList<QString> externalSessions;
-
     public:
         JTPush(Task *parent) : Task(parent) { }
 
         ~JTPush() { }
-
-        inline void addExternalManager(const QString &ns) { externalManagers.append(ns); }
-        inline void forgetExternalSession(const QString &sid) { externalSessions.removeOne(sid); }
-        inline void registerExternalSession(const QString &sid) { externalSessions.append(sid); }
 
         bool take(const QDomElement &iq)
         {
@@ -415,25 +409,6 @@ namespace XMPP { namespace Jingle {
             if (!jingle.isValid()) {
                 respondError(iq, Stanza::Error::ErrorType::Cancel, Stanza::Error::ErrorCond::BadRequest);
                 return true;
-            }
-
-            if (externalManagers.size()) {
-                if (jingle.action() == Action::SessionInitiate) {
-                    auto cname = QString::fromLatin1("content");
-                    auto dname = QString::fromLatin1("description");
-                    for (auto n = jingleEl.firstChildElement(cname); !n.isNull(); n = n.nextSiblingElement(cname)) {
-                        auto del = n.firstChildElement(dname);
-                        if (!del.isNull() && externalManagers.contains(del.namespaceURI())) {
-                            externalSessions.append(jingle.sid());
-                            return false;
-                        }
-                    }
-                } else if (externalSessions.contains(jingle.sid())) {
-                    if (jingle.action() == Action::SessionTerminate) {
-                        externalSessions.removeOne(jingle.sid());
-                    }
-                    return false;
-                }
             }
 
             QString fromStr(iq.attribute(QStringLiteral("from")));
@@ -481,8 +456,23 @@ namespace XMPP { namespace Jingle {
                     }
                     return true;
                 }
-                if (!session->updateFromXml(jingle.action(), jingleEl)) {
-                    respondError(iq, *session->lastError());
+                const auto tieBreak = session->tieBreaker()->resolveIncoming(jingle.action(), jingleEl);
+                if (tieBreak.solution == TieBreaker::Solution::Break) {
+                    respondTieBreak(iq);
+                    return true;
+                }
+
+                QPointer<Session> sessionGuard(session);
+                const bool        applied = session->updateFromXml(jingle.action(), jingleEl);
+                if (sessionGuard) {
+                    sessionGuard->tieBreaker()->incomingFinished(
+                        tieBreak.id, applied ? TieBreaker::RemoteResult::Applied : TieBreaker::RemoteResult::Rejected);
+                }
+                if (!applied) {
+                    if (sessionGuard && sessionGuard->lastError())
+                        respondError(iq, *sessionGuard->lastError());
+                    else
+                        respondError(iq, Stanza::Error::ErrorType::Cancel, Stanza::Error::ErrorCond::BadRequest);
                     return true;
                 }
             }
@@ -498,7 +488,8 @@ namespace XMPP { namespace Jingle {
             auto          resp = createIQ(client()->doc(), "error", iq.attribute(QStringLiteral("from")),
                                           iq.attribute(QStringLiteral("id")));
             Stanza::Error error(errType, errCond, text);
-            auto          errEl = error.toXml(*client()->doc(), client()->stream().baseNS());
+            const auto baseNS = client()->hasStream() ? client()->stream().baseNS() : QStringLiteral("jabber:client");
+            auto       errEl  = error.toXml(*client()->doc(), baseNS);
             if (!jingleErr.isNull()) {
                 errEl.appendChild(jingleErr);
             }
@@ -517,7 +508,8 @@ namespace XMPP { namespace Jingle {
         {
             auto resp = createIQ(client()->doc(), "error", iq.attribute(QStringLiteral("from")),
                                  iq.attribute(QStringLiteral("id")));
-            resp.appendChild(error.toXml(*client()->doc(), client()->stream().baseNS()));
+            const auto baseNS = client()->hasStream() ? client()->stream().baseNS() : QStringLiteral("jabber:client");
+            resp.appendChild(error.toXml(*client()->doc(), baseNS));
             client()->send(resp);
         }
     };
@@ -537,6 +529,8 @@ namespace XMPP { namespace Jingle {
     void SessionManagerPad::onSend() { }
 
     QDomDocument *SessionManagerPad::doc() const { return session()->manager()->client()->doc(); }
+
+    TieBreaker *SessionManagerPad::tieBreaker() const { return session()->tieBreaker(); }
 
     //----------------------------------------------------------------------------
     // Manager
@@ -597,12 +591,6 @@ namespace XMPP { namespace Jingle {
 
     PublicationManager *Manager::publicationManager() const { return d->publicationManager.get(); }
     RTP::Manager       *Manager::rtpManager() const { return d->rtpManager.get(); }
-
-    void Manager::addExternalManager(const QString &ns) { d->pushTask->addExternalManager(ns); }
-
-    void Manager::registerExternalSession(const QString &sid) { d->pushTask->registerExternalSession(sid); }
-
-    void Manager::forgetExternalSession(const QString &sid) { d->pushTask->forgetExternalSession(sid); }
 
     void Manager::setRedirection(const Jid &to) { d->redirectionJid = to; }
 

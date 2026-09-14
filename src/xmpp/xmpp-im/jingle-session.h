@@ -23,8 +23,13 @@
 #include <iris/iris_export.h>
 
 #include <iris/xmpp-im/jingle-application.h>
+#include <iris/xmpp-im/jingle-tiebreaker.h>
 #include <iris/xmpp-im/jingle-transport.h>
 #include <iris/xmpp-im/xmpp_features.h>
+
+#include <algorithm>
+#include <functional>
+#include <memory>
 
 namespace XMPP { namespace Jingle {
 
@@ -63,6 +68,9 @@ namespace XMPP { namespace Jingle {
         bool isGroupingAllowed() const;
 
         std::optional<Stanza::Error> lastError() const;
+
+        TieBreaker       *tieBreaker();
+        const TieBreaker *tieBreaker() const;
 
         /**
          * @brief Create a local application for a new Jingle content.
@@ -125,15 +133,19 @@ namespace XMPP { namespace Jingle {
         void newContentReceived();
 
     private:
+        friend class Application;
         friend class Manager;
         friend class PublicationManager;
         friend class JTPush;
+
         QString                                   reserveSid();
         bool                                      incomingInitiate(const Jingle &jingle, const QDomElement &jingleEl);
         bool                                      updateFromXml(Action action, const QDomElement &jingleEl);
         static std::optional<QList<ContentGroup>> parseGroupings(const QDomElement &jingleEl);
         static bool validBundleAnswer(const QList<ContentGroup> &offer, const QList<ContentGroup> &answer);
         bool        validLocalGroupings() const;
+
+        TieBreaker tieBreaker_;
 
         class Private;
         std::unique_ptr<Private> d;

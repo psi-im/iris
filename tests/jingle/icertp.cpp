@@ -133,8 +133,6 @@ int main(int argc, char **argv)
         firstApp  = makeApp(firstClient, firstSession, firstMedia);
         secondApp = makeApp(secondClient, secondSession, secondMedia);
         check(firstApp->initializeOutgoing("audio"), "RTP application offer failed");
-        check(secondApp->setRemoteOffer(firstApp->makeLocalOffer()) == J::Application::Ok,
-              "RTP application offer rejected");
         check(firstApp->setTransport(first) && secondApp->setTransport(second), "RTP application rejected ICE");
     } else {
         check(first->enableRtpMux() && second->enableRtpMux(), "DTLS-SRTP backend required");
@@ -145,7 +143,7 @@ int main(int argc, char **argv)
     deadline.setSingleShot(true);
     QObject::connect(&deadline, &QTimer::timeout, &loop, &QEventLoop::quit);
     bool                offered = false, answered = false, started = false, sent = false;
-    bool                received = false, replied = false, failed = false;
+    bool                received = false, replied = false, failed = false, applicationOfferDelivered = false;
     J::OutgoingUpdateCB delayedAck;
     bool                rejectionChecked = false;
     QElapsedTimer       rejectionWindow;
@@ -176,6 +174,11 @@ int main(int argc, char **argv)
         return true;
     };
     QObject::connect(&tick, &QTimer::timeout, &loop, [&]() {
+        if (applicationMode && !applicationOfferDelivered && firstApp->localDescription()) {
+            check(secondApp->setRemoteOffer(firstApp->makeLocalOffer()) == J::Application::Ok,
+                  "RTP application offer rejected");
+            applicationOfferDelivered = true;
+        }
         offered = exchange(first.data(), second.data()) || offered;
         if (offered && second->state() == J::State::Pending) {
             if (applicationMode) {

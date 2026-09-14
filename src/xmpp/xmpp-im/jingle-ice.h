@@ -138,6 +138,7 @@ namespace Jingle { namespace ICE {
         void setBasePort(int port);
         void setExternalAddress(const QString &host);
         void setSelfAddress(const QHostAddress &addr);
+        void setAllowIpExposure(bool allow);
         void setStunBindService(const QString &host, int port);
         void setStunRelayUdpService(const QString &host, int port, const QString &user, const QString &pass);
         void setStunRelayTcpService(const QString &host, int port, const XMPP::AdvancedConnector::Proxy &proxy,

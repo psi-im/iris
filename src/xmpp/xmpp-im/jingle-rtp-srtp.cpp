@@ -135,6 +135,21 @@ QStringList        SrtpContext::supportedProfiles()
 #endif
     return result;
 }
+
+QStringList supportedSecureRtpProfiles()
+{
+    if (!Dtls::isSupported())
+        return {};
+    auto       result       = SrtpContext::supportedProfiles();
+    const auto dtlsProfiles = Dtls::supportedSRTPProfiles();
+    for (auto it = result.begin(); it != result.end();) {
+        if (!dtlsProfiles.contains(*it))
+            it = result.erase(it);
+        else
+            ++it;
+    }
+    return result;
+}
 bool SrtpContext::configure(const QString &name, const QCA::SecureArray &localKey, const QCA::SecureArray &localSalt,
                             const QCA::SecureArray &remoteKey, const QCA::SecureArray &remoteSalt)
 {

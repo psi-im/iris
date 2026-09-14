@@ -115,6 +115,7 @@ namespace XMPP { namespace Jingle {
 
         void setSessionFinished()
         {
+            q->tieBreaker()->clear();
             state = State::Finished;
             emit q->terminated();
             signalingContent.clear();
@@ -204,14 +205,20 @@ namespace XMPP { namespace Jingle {
             }
             auto jt = new JT(manager->client()->rootTask());
             jt->request(otherParty, xml);
-            QObject::connect(jt, &JT::finished, q, [jt, jingle, callback, this]() {
+            const auto tieBreakTransaction = q->tieBreaker()->outgoingStarted(action, xml);
+            QObject::connect(jt, &JT::finished, q, [jt, callback, tieBreakTransaction, this]() {
                 waitingAck = false;
-                if (callback) {
+                const auto error = jt->success() ? std::optional<Stanza::Error>()
+                                                 : std::optional<Stanza::Error>(jt->error());
+                QPointer<Session> session(q);
+                q->tieBreaker()->outgoingFinished(tieBreakTransaction, error);
+                if (callback)
                     callback(jt);
-                }
-                if (!jt->success()) {
+                if (!session)
+                    return;
+                if (!jt->success())
                     lastError = jt->error();
-                }
+                q->tieBreaker()->outgoingCallbacksFinished(tieBreakTransaction);
                 planStep();
             });
             waitingAck = true;
@@ -369,19 +376,29 @@ namespace XMPP { namespace Jingle {
              *         b) don't send content-accept and accept everything with session-accept
              *      We prefer option (b) in our implementation.
              */
-            typedef std::tuple<QPointer<Application>, OutgoingUpdateCB> AckHndl;
+            typedef std::tuple<QPointer<Application>, OutgoingUpdateCB, bool> AckHndl;
+            QSet<Application *>                                               rejectedInitialContent;
             if (role == Origin::Responder) {
+                int    acceptedInitialContent = 0;
+                Reason rejectionReason;
                 for (const auto &c : std::as_const(initialIncomingUnacceptedContent)) {
                     auto out = c->evaluateOutgoingUpdate();
-                    if (out.action == Action::ContentReject) {
-                        lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,
-                                                        XMPP::Stanza::Error::ErrorCond::BadRequest);
-                        setSessionFinished();
-                        return true;
+                    if (out.action == Action::ContentAccept) {
+                        ++acceptedInitialContent;
+                        continue;
                     }
-                    if (out.action != Action::ContentAccept) {
-                        return false; // keep waiting.
+                    if (out.action == Action::ContentReject || out.action == Action::ContentRemove) {
+                        rejectedInitialContent.insert(c);
+                        if (!rejectionReason.isValid() && out.reason.isValid())
+                            rejectionReason = out.reason;
+                        continue;
                     }
+                    return false; // keep waiting.
+                }
+                if (!acceptedInitialContent) {
+                    q->terminate(rejectionReason.isValid() ? rejectionReason.condition() : Reason::Decline,
+                                 rejectionReason.text());
+                    return true;
                 }
             } else {
                 for (const auto &c : std::as_const(contentList)) {
@@ -422,12 +439,16 @@ namespace XMPP { namespace Jingle {
             for (const auto &app : std::as_const(contentList)) {
                 QList<QDomElement> xml;
                 OutgoingUpdateCB   callback;
-                std::tie(xml, callback) = app->takeOutgoingUpdate();
-                contents += xml;
-                // p->setState(State::Unacked);
-                if (callback) {
-                    acceptApps.append(AckHndl { app, callback });
-                }
+                std::tie(xml, callback)    = app->takeOutgoingUpdate();
+                const bool rejectedInitial = role == Origin::Responder && rejectedInitialContent.contains(app);
+                if (!rejectedInitial)
+                    contents += xml;
+                if (callback)
+                    acceptApps.append(AckHndl { app, callback, !rejectedInitial });
+            }
+            if (contents.isEmpty()) {
+                q->terminate(Reason::Decline, QStringLiteral("No initial content was accepted"));
+                return true;
             }
 
             state = State::Unacked;
@@ -440,13 +461,13 @@ namespace XMPP { namespace Jingle {
                 }
                 state = finalState;
                 for (const auto &h : acceptApps) {
-                    auto app      = std::get<0>(h);
-                    auto callback = std::get<1>(h);
+                    auto app         = std::get<0>(h);
+                    auto callback    = std::get<1>(h);
+                    auto shouldStart = std::get<2>(h);
                     if (app) {
                         callback(jt);
-                        if (role == Origin::Responder) {
+                        if (role == Origin::Responder && shouldStart)
                             app->start();
-                        }
                     }
                 }
                 if (finalState == State::Active) {
@@ -477,7 +498,7 @@ namespace XMPP { namespace Jingle {
             auto    tel = contentEl.firstChildElement(QLatin1String("transport"));
             QString transportNS;
             if (tel.isNull() || (transportNS = tel.namespaceURI()).isEmpty()) {
-                TransportResult { false, Reason::NoReason, QSharedPointer<Transport>() };
+                return TransportResult { false, Reason::NoReason, QSharedPointer<Transport>() };
             }
             auto trPad = q->transportPadFactory(transportNS);
             if (!trPad) {
@@ -825,26 +846,62 @@ namespace XMPP { namespace Jingle {
             return true;
         }
 
-        void startAcceptedContents(const QList<Application *> &apps, bool notifyActivated = false)
+        struct GuardedContent {
+            QPointer<Application> application;
+            ContentKey            key;
+        };
+
+        QList<GuardedContent> snapshotContents(const QList<Application *> &apps) const
         {
-            QList<QPointer<Application>> guardedApps;
+            QList<GuardedContent> guarded;
+            guarded.reserve(apps.size());
             for (auto app : apps) {
-                guardedApps.append(app);
+                if (app)
+                    guarded.append(GuardedContent { QPointer<Application>(app),
+                                                    ContentKey { app->contentName(), app->creator() } });
             }
+            return guarded;
+        }
+
+        void startAcceptedContents(QList<GuardedContent> guardedApps, bool notifyActivated = false)
+        {
+            if (guardedApps.isEmpty())
+                return;
             // JTPush must send the acceptance IQ result before start() can send
             // transport traffic (in particular IBB <open/>, XEP-0261 section 2.1).
-            QTimer::singleShot(0, q, [this, session = QPointer<Session>(q), guardedApps, notifyActivated]() {
-                for (const auto &app : guardedApps) {
-                    if (!session || state != State::Active)
-                        return;
-                    if (app && app->state() == State::Accepted
-                        && contentList.value(ContentKey { app->contentName(), app->creator() }) == app.data()) {
+            QTimer::singleShot(
+                0, q, [this, session = QPointer<Session>(q), guardedApps = std::move(guardedApps), notifyActivated]() {
+                    for (const auto &entry : guardedApps) {
+                        if (!session || state != State::Active)
+                            return;
+                        const auto app = entry.application;
+                        if (!app || contentList.value(entry.key) != app.data() || app->state() != State::Accepted)
+                            continue;
+
                         app->start();
+
+                        // A callback may remove this content without cancelling
+                        // the Session. Other accepted contents must still start.
+                        if (!session || state != State::Active)
+                            return;
                     }
-                }
-                if (session && state == State::Active && notifyActivated)
-                    emit q->activated();
-            });
+                    if (contentList.isEmpty()) {
+                        q->terminate(Reason::Success);
+                        return;
+                    }
+                    if (notifyActivated) {
+                        // Recheck the whole snapshot: a later start callback may
+                        // have removed an earlier application. Never activate on
+                        // behalf of a replacement object with the same content key.
+                        for (const auto &entry : guardedApps) {
+                            const auto app = entry.application;
+                            if (app && contentList.value(entry.key) == app.data() && app->state() < State::Finishing) {
+                                emit q->activated();
+                                return;
+                            }
+                        }
+                    }
+                });
         }
 
         bool handleIncomingSessionAccept(const QDomElement &jingleEl)
@@ -864,10 +921,118 @@ namespace XMPP { namespace Jingle {
                 return false;
             }
 
+            // Snapshot every parser result before the first external callback.
+            // Raw Application pointers returned by the parser are not stable:
+            // stopping one omitted transport may synchronously delete a sibling,
+            // an accepted content, or the Session itself.
+            auto                guardedAccepted = snapshotContents(apps);
+            QSet<Application *> accepted;
+            for (const auto &entry : std::as_const(guardedAccepted)) {
+                if (entry.application)
+                    accepted.insert(entry.application.data());
+            }
+
+            QList<GuardedContent> omitted;
+            for (auto it = contentList.cbegin(); it != contentList.cend(); ++it) {
+                auto app = it.value();
+                if (app->creator() == role && app->flags().testFlag(Application::InitialApplication)
+                    && app->state() == State::Pending && !accepted.contains(app)) {
+                    omitted.append(GuardedContent { QPointer<Application>(app), it.key() });
+                }
+            }
+
+            if (!omitted.isEmpty() && guardedAccepted.isEmpty()) {
+                lastError
+                    = Stanza::Error(Stanza::Error::ErrorType::Cancel, Stanza::Error::ErrorCond::UnexpectedRequest);
+                ErrorUtil::fill(jingleEl.ownerDocument(), *lastError, ErrorUtil::OutOfOrder);
+                return false;
+            }
+
+            QPointer<Session> session(q);
+            const State       negotiationState = state;
+            const Reason omittedReason(Reason::Decline, QStringLiteral("Initial content was not accepted by peer"));
+
+            for (const auto &entry : std::as_const(omitted)) {
+                if (!session)
+                    return true;
+                if (state != negotiationState)
+                    return true; // a reentrant cancellation/termination wins
+
+                auto application = entry.application;
+                if (!application || contentList.value(entry.key) != application.data())
+                    continue; // a previous callback already disposed of this sibling
+
+                // Detach before invoking any external code. From this point the
+                // current application is no longer owned by contentList, so this
+                // scope must delete it even if the Session disappears.
+                signalingContent.remove(application.data());
+                initialIncomingUnacceptedContent.removeAll(application.data());
+                contentList.remove(entry.key);
+
+                const auto transport = application->transport();
+                if (transport) {
+                    transport->disconnect(application.data());
+                    transport->stop();
+                }
+
+                if (!session) {
+                    if (application)
+                        delete application.data();
+                    return true;
+                }
+                if (state != negotiationState) {
+                    if (application)
+                        delete application.data();
+                    return true;
+                }
+                if (!application)
+                    continue;
+
+                application->incomingRemove(omittedReason);
+
+                if (!session) {
+                    if (application)
+                        delete application.data();
+                    return true;
+                }
+                if (state != negotiationState) {
+                    if (application)
+                        delete application.data();
+                    return true;
+                }
+                if (application)
+                    delete application.data();
+
+                // Application destruction may itself synchronously dispose of
+                // the Session or change its state through connected callbacks.
+                if (!session)
+                    return true;
+                if (state != negotiationState)
+                    return true;
+            }
+
+            if (!session)
+                return true;
+            if (state != negotiationState)
+                return true;
+
+            // Every accepted application must still be the same object under
+            // the snapshotted key before committing Active. If an omitted-content
+            // callback invalidated one, acknowledge the peer's stanza but locally
+            // terminate instead of resurrecting a broken negotiation.
+            for (const auto &entry : std::as_const(guardedAccepted)) {
+                const auto application = entry.application;
+                if (!application || contentList.value(entry.key) != application.data()
+                    || application->state() != State::Accepted) {
+                    q->terminate(Reason::Decline, QStringLiteral("Accepted content disappeared during session-accept"));
+                    return true;
+                }
+            }
+
             remoteGroups = *peerGroups;
             // Session acceptance completes signaling, not transport connectivity.
             state = State::Active;
-            startAcceptedContents(apps, true);
+            startAcceptedContents(std::move(guardedAccepted), true);
             planStep();
 
             return true;
@@ -885,36 +1050,64 @@ namespace XMPP { namespace Jingle {
                 return false;
             }
 
-            if (apps.size() && state == State::Active) {
-                startAcceptedContents(apps);
+            auto guardedApps = snapshotContents(apps);
+            if (!guardedApps.isEmpty() && state == State::Active) {
+                startAcceptedContents(std::move(guardedApps));
             }
             planStep();
 
             return true;
         }
 
-        bool handleIncomingTransportReplace(const QDomElement &jingleEl)
+// transport-replace is deliberately handled in two phases. The first pass
+// parses and validates every content and snapshots (Application, ContentKey,
+// current Transport). Selector capability checks are reentrant boundaries: a
+// callback may remove a content or install a newer transport. The second pass
+// therefore mutates only entries whose object/key/transport identity still
+// matches the validation snapshot. This preserves the historical partial-batch
+// behavior without applying a candidate to superseded local state.
+bool handleIncomingTransportReplace(const QDomElement &jingleEl)
         {
             qDebug("handle incoming transport replace");
-            QVector<std::tuple<Application *, QSharedPointer<Transport>, QDomElement>> passed;
-            QList<QDomElement>                                                         toReject;
-            QString contentTag(QStringLiteral("content"));
-            bool    doTieBreak = false;
+            struct ValidatedTransportReplace {
+                QPointer<Application>     application;
+                ContentKey                key;
+                QWeakPointer<Transport>   current;
+                QSharedPointer<Transport> incoming;
+                QDomElement               content;
+            };
+            QVector<ValidatedTransportReplace> passed;
+            QList<QDomElement>                  toReject;
+            QSet<ContentKey>                    seen;
+            QString                                                                     contentTag(QStringLiteral("content"));
+            bool                                                                        doTieBreak = false;
             for (QDomElement ce = jingleEl.firstChildElement(contentTag); !ce.isNull();
                  ce             = ce.nextSiblingElement(contentTag)) {
-
-                ContentBase               cb(ce);
-                bool                      transportParsed;
-                Reason::Condition         errReason;
-                QSharedPointer<Transport> transport;
-                std::tie(transportParsed, errReason, transport) = parseIncomingTransport(ce);
-
-                if (!cb.isValid() || !transportParsed) {
+                ContentBase cb(ce);
+                if (!cb.isValid()) {
                     lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,
                                                     XMPP::Stanza::Error::ErrorCond::BadRequest);
                     return false;
                 }
-                Application *app = contentList.value(ContentKey { cb.name, cb.creator });
+                const ContentKey key { cb.name, cb.creator };
+                if (seen.contains(key)) {
+                    lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,
+                                                    XMPP::Stanza::Error::ErrorCond::BadRequest);
+                    return false;
+                }
+                seen.insert(key);
+
+                bool                      transportParsed;
+                Reason::Condition         errReason;
+                QSharedPointer<Transport> transport;
+                std::tie(transportParsed, errReason, transport) = parseIncomingTransport(ce);
+                if (!transportParsed) {
+                    lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,
+                                                    XMPP::Stanza::Error::ErrorCond::BadRequest);
+                    return false;
+                }
+
+                Application *app = contentList.value(key);
                 if (!app || (app->creator() == role && app->state() <= State::Unacked)) {
                     qDebug("not existing app or inaporpriate app state");
                     lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,
@@ -928,10 +1121,10 @@ namespace XMPP { namespace Jingle {
                     continue;
                 }
 
-                auto old = app->transport();
-                Q_ASSERT(old != nullptr);
-                // if it's my transport and it's sent but unacknowledged but has to be accepted
-                if (old->isLocal() && old->state() == State::Unacked && role == Origin::Initiator) {
+                // XEP-0166 tie-break is about simultaneous Jingle actions, not
+                // the transport implementation's internal state. NeedAck is the
+                // state entered only after serializing our transport-replace.
+                if (role == Origin::Initiator && app->transportReplaceAwaitingAck()) {
                     doTieBreak = true;
                     continue;
                 }
@@ -948,29 +1141,51 @@ namespace XMPP { namespace Jingle {
                     continue;
                 }
 
-                passed.append(std::make_tuple(app, transport, ce));
+                passed.append(ValidatedTransportReplace { QPointer<Application>(app), key,
+                                                           app->transport().toWeakRef(), transport, ce });
             }
 
-            for (auto &v : passed) {
-                Application              *app;
-                QSharedPointer<Transport> transport;
-                QDomElement               ce;
-                std::tie(app, transport, ce) = v;
+            if (seen.isEmpty()) {
+                lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,
+                                                XMPP::Stanza::Error::ErrorCond::BadRequest);
+                return false;
+            }
+
+            // Preserve the original batch optimization: when one content wins
+            // the initiator tie-break, the whole incoming action is rejected,
+            // but sibling remote transports are still useful as hints for
+            // selecting compatible local transports before we retry.
+            for (const auto &entry : std::as_const(passed)) {
+                auto app                = entry.application;
+                auto validatedTransport = entry.current.lock();
+                const bool currentEntry = app && contentList.value(entry.key) == app.data() && validatedTransport
+                    && app->transport() == validatedTransport;
+                if (!currentEntry) {
+                    // A callback during validation of a sibling may have removed
+                    // this content or selected a newer transport. Never apply a
+                    // candidate validated against superseded local state.
+                    if (!doTieBreak && app && contentList.value(entry.key) == app.data())
+                        toReject.append(entry.content);
+                    continue;
+                }
+
                 if (doTieBreak) {
-                    if (app->transport()->creator() == role && app->transport()->state() < State::Unacked)
-                        continue; // it will send transport soon
-                    app->selectNextTransport(transport);
-                } else if (!app->setTransport(transport)) {
+                    if (validatedTransport->creator() == role && validatedTransport->state() < State::Unacked)
+                        continue; // a prepared local transport will be sent shortly
+                    app->selectNextTransport(entry.incoming);
+                } else if (!app->setTransport(entry.incoming)) {
                     // app should generate transport accept eventually. content-accept will
                     // work too if the content wasn't accepted yet
-                    toReject.append(ce);
+                    toReject.append(entry.content);
                 }
             }
 
             if (doTieBreak) {
                 lastError = ErrorUtil::makeTieBreak(*manager->client()->doc());
                 return false;
-            } else if (toReject.size()) {
+            }
+
+            if (toReject.size()) {
                 QList<QDomElement> rejectImported;
                 std::transform(toReject.begin(), toReject.end(), std::back_inserter(rejectImported),
                                [this](const QDomElement &e) {
@@ -983,10 +1198,22 @@ namespace XMPP { namespace Jingle {
             return true;
         }
 
-        bool handleIncomingTransportAccept(const QDomElement &jingleEl)
+// transport-accept is an acknowledgement of a transport-replace signaling
+// transaction, not merely a transport state update. Validate the whole batch
+// against PendingTransportReplace::InProgress before the first Transport::update().
+// Transport::update() is reentrant, so the apply pass uses guarded identity
+// snapshots and skips entries invalidated by an earlier sibling callback.
+bool handleIncomingTransportAccept(const QDomElement &jingleEl)
         {
-            QString                                    contentTag(QStringLiteral("content"));
-            QVector<QPair<Application *, QDomElement>> updates;
+            struct ValidatedTransportAccept {
+                QPointer<Application>   application;
+                ContentKey              key;
+                QWeakPointer<Transport> current;
+                QDomElement             transport;
+            };
+            QString                           contentTag(QStringLiteral("content"));
+            QVector<ValidatedTransportAccept> updates;
+            QSet<ContentKey>                  seen;
             for (QDomElement ce = jingleEl.firstChildElement(contentTag); !ce.isNull();
                  ce             = ce.nextSiblingElement(contentTag)) {
                 ContentBase cb(ce);
@@ -997,26 +1224,135 @@ namespace XMPP { namespace Jingle {
                                                     XMPP::Stanza::Error::ErrorCond::BadRequest);
                     return false;
                 }
+                const ContentKey key { cb.name, cb.creator };
+                if (seen.contains(key)) {
+                    lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,
+                                                    XMPP::Stanza::Error::ErrorCond::BadRequest);
+                    return false;
+                }
+                seen.insert(key);
 
-                Application *app = contentList.value(ContentKey { cb.name, cb.creator });
+                Application *app = contentList.value(key);
                 if (!app || !app->transport() || app->transport()->creator() != role
                     || app->transport()->state() != State::Pending || transportNS != app->transport()->pad()->ns()) {
                     // ignore out of order
                     qInfo("ignore out of order transport-accept");
                     continue;
                 }
-                updates.append(qMakePair(app, transportEl));
+                if (!app->transportReplaceInProgress()) {
+                    lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,
+                                                    XMPP::Stanza::Error::ErrorCond::BadRequest);
+                    return false;
+                }
+                updates.append(ValidatedTransportAccept { QPointer<Application>(app), key,
+                                                          app->transport().toWeakRef(), transportEl });
             }
 
-            for (auto &u : updates) {
-                u.first->incomingTransportAccept(u.second);
-                // if update fails transport should trigger replace procedure
+            if (seen.isEmpty()) {
+                lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,
+                                                XMPP::Stanza::Error::ErrorCond::BadRequest);
+                return false;
             }
 
+            QPointer<Session> session(q);
+            for (const auto &entry : std::as_const(updates)) {
+                if (!session)
+                    return true;
+                auto app              = entry.application;
+                auto currentTransport = entry.current.lock();
+                if (!app || contentList.value(entry.key) != app.data() || !currentTransport
+                    || app->transport() != currentTransport)
+                    continue; // superseded or removed by a previous reentrant callback
+
+                if (!app->incomingTransportAccept(entry.transport)) {
+                    if (!session)
+                        return true;
+                    lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,
+                                                    XMPP::Stanza::Error::ErrorCond::BadRequest);
+                    return false;
+                }
+            }
+
+            if (!session)
+                return true;
             planStep();
             return true;
         }
 
+// A peer transport-reject is valid only for a local replacement already in
+// PendingTransportReplace::InProgress. Validate the complete batch before
+// selecting any fallback. selectNextTransport() and selector callbacks may be
+// reentrant, so each second-pass entry is tied to the Application/key/transport
+// snapshot that was validated in the first pass.
+bool handleIncomingTransportReject(const QDomElement &jingleEl)
+        {
+            struct ValidatedTransportReject {
+                QPointer<Application>   application;
+                ContentKey              key;
+                QWeakPointer<Transport> current;
+            };
+            QVector<ValidatedTransportReject> updates;
+            QSet<ContentKey>                  seen;
+            for (auto ce = jingleEl.firstChildElement(QStringLiteral("content")); !ce.isNull();
+                 ce      = ce.nextSiblingElement(QStringLiteral("content"))) {
+                ContentBase cb(ce);
+                auto        transportEl = ce.firstChildElement(QStringLiteral("transport"));
+                if (!cb.isValid() || transportEl.isNull() || transportEl.namespaceURI().isEmpty()) {
+                    lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,
+                                                    XMPP::Stanza::Error::ErrorCond::BadRequest);
+                    return false;
+                }
+                const ContentKey key { cb.name, cb.creator };
+                if (seen.contains(key)) {
+                    lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,
+                                                    XMPP::Stanza::Error::ErrorCond::BadRequest);
+                    return false;
+                }
+                seen.insert(key);
+
+                auto app = contentList.value(key);
+                if (!app || !app->transport() || !app->transport()->isLocal()
+                    || !app->transportReplaceInProgress()
+                    || transportEl.namespaceURI() != app->transport()->pad()->ns()) {
+                    lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,
+                                                    XMPP::Stanza::Error::ErrorCond::UnexpectedRequest);
+                    ErrorUtil::fill(jingleEl.ownerDocument(), *lastError, ErrorUtil::OutOfOrder);
+                    return false;
+                }
+                updates.append(ValidatedTransportReject { QPointer<Application>(app), key,
+                                                          app->transport().toWeakRef() });
+            }
+
+            if (updates.isEmpty()) {
+                lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,
+                                                XMPP::Stanza::Error::ErrorCond::BadRequest);
+                return false;
+            }
+
+            QPointer<Session> session(q);
+            for (const auto &entry : std::as_const(updates)) {
+                if (!session)
+                    return true;
+                auto app              = entry.application;
+                auto currentTransport = entry.current.lock();
+                if (!app || contentList.value(entry.key) != app.data() || !currentTransport
+                    || app->transport() != currentTransport)
+                    continue; // superseded or removed by a previous reentrant callback
+
+                if (!app->incomingTransportReject()) {
+                    if (!session)
+                        return true;
+                    lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,
+                                                    XMPP::Stanza::Error::ErrorCond::UnexpectedRequest);
+                    ErrorUtil::fill(jingleEl.ownerDocument(), *lastError, ErrorUtil::OutOfOrder);
+                    return false;
+                }
+            }
+            if (!session)
+                return true;
+            planStep();
+            return true;
+        }
         bool handleIncomingContentModify(const QDomElement &jingleEl)
         {
             QList<QPair<QPointer<Application>, Origin>> updates;
@@ -1241,6 +1577,9 @@ namespace XMPP { namespace Jingle {
     bool Session::isGroupingAllowed() const { return d->groupingAllowed; }
 
     std::optional<XMPP::Stanza::Error> Session::lastError() const { return d->lastError; }
+
+    TieBreaker *Session::tieBreaker() { return &tieBreaker_; }
+    const TieBreaker *Session::tieBreaker() const { return &tieBreaker_; }
 
     Application *Session::newContent(const QString &ns, Origin senders)
     {
@@ -1597,7 +1936,7 @@ namespace XMPP { namespace Jingle {
         case Action::TransportInfo:
             return d->handleIncomingTransportInfo(jingleEl);
         case Action::TransportReject:
-            break;
+            return d->handleIncomingTransportReject(jingleEl);
         case Action::TransportReplace:
             return d->handleIncomingTransportReplace(jingleEl);
         case Action::NoAction:

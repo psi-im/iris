@@ -44,6 +44,7 @@ namespace Jingle {
 
     class Manager;
     class Session;
+    class TieBreaker;
     namespace RTP {
         class Manager;
     }
@@ -332,6 +333,7 @@ namespace Jingle {
         virtual QDomElement takeOutgoingSessionInfoUpdate();
         virtual QString     ns() const      = 0;
         virtual Session    *session() const = 0;
+        TieBreaker         *tieBreaker() const;
 
         virtual void onLocalAccepted(); // changing to prepare state
         virtual void onSend();          // local stuff is prepared we are going to send it to remote
@@ -353,15 +355,11 @@ namespace Jingle {
 
         XMPP::Client *client() const;
 
-        // if we have another jingle manager we can add its contents' namespaces here.
-        void addExternalManager(const QString &ns);
-        // on outgoing session destroy an external manager should call this function.
-        void registerExternalSession(const QString &sid);
-        void forgetExternalSession(const QString &sid);
-
         void       setRedirection(const Jid &to);
         const Jid &redirectionJid() const;
 
+        // Application implementations may live outside Iris, but all signaling
+        // remains owned and dispatched by this single Jingle manager.
         void                   registerApplication(ApplicationManager *app);
         void                   unregisterApp(const QString &ns);
         bool                   isRegisteredApplication(const QString &ns);

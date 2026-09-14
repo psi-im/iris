@@ -119,6 +119,7 @@ set(XMPP_IM_HEADERS
     xmpp-im/jingle-nstransportslist.h
     xmpp-im/jingle-application.h
     xmpp-im/jingle-session.h
+    xmpp-im/jingle-tiebreaker.h
     xmpp-im/jingle-ft.h
     xmpp-im/jingle-rtp-description.h
     xmpp-im/jingle-rtp-negotiation.h
@@ -194,6 +195,7 @@ target_sources(iris PRIVATE
     xmpp-im/stundisco.cpp
 
     xmpp-im/jingle.cpp
+    xmpp-im/jingle-tiebreaker.cpp
     xmpp-im/jingle-connection.cpp
     xmpp-im/jingle-session.cpp
     xmpp-im/jingle-application.cpp
@@ -203,6 +205,7 @@ target_sources(iris PRIVATE
     xmpp-im/jingle-rtp-description.cpp
     xmpp-im/jingle-rtp-negotiation.cpp
     xmpp-im/jingle-rtp.cpp
+    xmpp-im/jingle-rtp-media.cpp
     xmpp-im/jingle-rtp-info.cpp
     xmpp-im/jingle-rtp-srtp.cpp
     xmpp-im/jingle-rtp-router_p.cpp

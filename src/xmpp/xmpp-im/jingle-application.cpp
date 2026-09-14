@@ -27,12 +27,156 @@
 
 namespace XMPP { namespace Jingle {
 
+    static bool isValidSenders(Origin senders)
+    {
+        return senders == Origin::None || senders == Origin::Both || senders == Origin::Initiator
+            || senders == Origin::Responder;
+    }
+
+    static QString sendersAttribute(Origin senders)
+    {
+        switch (senders) {
+        case Origin::None:
+            return QStringLiteral("none");
+        case Origin::Both:
+            return QStringLiteral("both");
+        case Origin::Initiator:
+            return QStringLiteral("initiator");
+        case Origin::Responder:
+            return QStringLiteral("responder");
+        }
+        return {};
+    }
+
+    class Application::ContentModifyTieBreakResolver : public TieBreaker::Resolver {
+    public:
+        explicit ContentModifyTieBreakResolver(Application *application) : application_(application),
+            key_(application->_contentName, application->_creator)
+        {
+        }
+
+        TieBreaker::Solution resolve(const QDomElement &localData, const QDomElement &remoteData) override
+        {
+            if (!contains(localData) || !contains(remoteData))
+                return TieBreaker::Solution::Continue;
+
+            const auto application = application_.data();
+            if (!application || !application->_pad || !application->_pad->session())
+                return TieBreaker::Solution::Continue;
+
+            switch (application->_pad->session()->role()) {
+            case Origin::Initiator:
+                return TieBreaker::Solution::Break;
+            case Origin::Responder:
+                return TieBreaker::Solution::Postpone;
+            default:
+                return TieBreaker::Solution::Continue;
+            }
+        }
+
+        void retry(const TieBreaker::RetryContext &context) override
+        {
+            Q_UNUSED(context);
+            auto application = application_.data();
+            if (!application || application->_state >= State::Finishing || application->_sendersUpdateInFlight
+                || !application->_requestedSenders)
+                return;
+
+            if (*application->_requestedSenders == application->_senders) {
+                application->_requestedSenders.reset();
+                return;
+            }
+            emit application->updated();
+        }
+
+    private:
+        bool contains(const QDomElement &jingle) const
+        {
+            for (auto element = jingle.firstChildElement(); !element.isNull(); element = element.nextSiblingElement()) {
+                const auto name = element.localName().isEmpty() ? element.tagName() : element.localName();
+                if (name != QLatin1String("content"))
+                    continue;
+                const ContentBase content(element);
+                if (content.isValid() && ContentKey { content.name, content.creator } == key_)
+                    return true;
+            }
+            return false;
+        }
+
+        QPointer<Application> application_;
+        ContentKey            key_;
+    };
+
+    Application::~Application() = default;
+
+    void Application::ensureContentModifyTieBreakResolver()
+    {
+        if (_contentModifyTieBreakRegistration || !_pad || !_pad->session())
+            return;
+        _contentModifyTieBreakResolver = std::make_unique<ContentModifyTieBreakResolver>(this);
+        _contentModifyTieBreakRegistration
+            = _pad->tieBreaker()->registerResolver(Action::ContentModify, _contentModifyTieBreakResolver.get());
+    }
+
     void Application::incomingContentModify(Origin senders)
     {
-        if (!supportsContentModify() || _senders == senders)
+        if (!supportsContentModify() || !isValidSenders(senders) || _senders == senders)
             return;
         _senders = senders;
+
+        QPointer<Application> guard(this);
         emit sendersChanged(senders);
+        if (!guard)
+            return;
+        emit sendersChangedByPeer(senders);
+        if (!guard)
+            return;
+
+        if (_requestedSenders && !_sendersUpdateInFlight) {
+            if (*_requestedSenders == _senders)
+                _requestedSenders.reset();
+            else
+                emit updated();
+        }
+    }
+
+    bool Application::requestSenders(Origin senders)
+    {
+        if (!supportsContentModify() || !isValidSenders(senders) || _state >= State::Finishing)
+            return false;
+
+        if (!_sendersStateConnection) {
+            _sendersStateConnection = connect(this, &Application::stateChanged, this, [this](State state) {
+                if (state == State::Active && _requestedSenders && !_sendersUpdateInFlight)
+                    emit updated();
+            });
+        }
+
+        // Before the initial content stanza is consumed by takeOutgoingUpdate(),
+        // changing direction only changes the local proposal/answer. No
+        // content-modify is needed yet.
+        if (_state <= State::ApprovedToSend && !_sendersUpdateInFlight) {
+            _requestedSenders.reset();
+            if (_senders != senders) {
+                _senders = senders;
+                emit sendersChanged(senders);
+            }
+            return true;
+        }
+
+        // If another direction change is already in flight, asking for the
+        // currently negotiated value is still meaningful: it supersedes the
+        // in-flight request once its IQ result arrives.
+        if (!_sendersUpdateInFlight && _senders == senders) {
+            _requestedSenders.reset();
+            return true;
+        }
+        if (_requestedSenders && *_requestedSenders == senders)
+            return true;
+
+        _requestedSenders = senders;
+        emit updated();
+        return true;
     }
 
     class ConnectionWaiter : public QObject {
@@ -199,9 +343,16 @@ namespace XMPP { namespace Jingle {
             }
             break;
         case State::Active:
-            if (_transport->hasUpdates())
+            // Preserve the action priority defined by Action: flush transport
+            // updates before changing media direction.
+            if (_transport->hasUpdates()) {
                 _update = { Action::TransportInfo, Reason() };
-
+            } else if (_requestedSenders && !_sendersUpdateInFlight) {
+                if (*_requestedSenders == _senders)
+                    _requestedSenders.reset();
+                else
+                    _update = { Action::ContentModify, Reason() };
+            }
             break;
         default:
             break;
@@ -254,39 +405,109 @@ namespace XMPP { namespace Jingle {
                                        if (task->success())
                                            setState(State::Connecting);
                                    } };
+        case Action::ContentModify: {
+            Q_ASSERT(_state == State::Active);
+            Q_ASSERT(_requestedSenders);
+            Q_ASSERT(!_sendersUpdateInFlight);
+            const auto requested = *_requestedSenders;
+            ensureContentModifyTieBreakResolver();
+
+            // XEP-0166 makes senders mandatory for content-modify. ContentBase
+            // normally omits the default value "both", so force the attribute
+            // for every direction here.
+            contentEl.setAttribute(QLatin1String("senders"), sendersAttribute(requested));
+            _sendersUpdateInFlight = requested;
+            return OutgoingUpdate { updates,
+                                    [this, requested](Task *task) {
+                                        const bool success   = task && task->success();
+                                        const bool postponed = _contentModifyTieBreakRegistration.isPostponed();
+                                        _sendersUpdateInFlight.reset();
+
+                                        if (success && _senders != requested) {
+                                            _senders = requested;
+                                            QPointer<Application> guard(this);
+                                            emit sendersChanged(requested);
+                                            if (!guard)
+                                                return;
+                                        }
+
+                                        // A generic failure drops an unchanged request as before. A
+                                        // postponed crossed action keeps its local intent until TieBreaker
+                                        // calls retry() after this owner callback has fully completed.
+                                        if (!success && !postponed && _requestedSenders
+                                            && *_requestedSenders == requested)
+                                            _requestedSenders.reset();
+                                        if (_requestedSenders && *_requestedSenders == _senders)
+                                            _requestedSenders.reset();
+                                        if (_requestedSenders && !postponed)
+                                            emit updated();
+                                    } };
+        }
         case Action::TransportInfo:
             Q_ASSERT(_transport->hasUpdates());
             std::tie(transportEl, transportCB) = wrapOutgoingTransportUpdate();
             contentEl.appendChild(transportEl);
             return OutgoingUpdate { updates, transportCB };
-        case Action::TransportReplace:
+        // transport-replace IQ lifetime belongs to PendingTransportReplace, not
+        // Transport::State. Capture the concrete transport as transaction identity:
+        // its callback is a reentrant boundary and may install a newer replacement.
+        case Action::TransportReplace: {
             Q_ASSERT(_transport->hasUpdates());
+            const auto replacement = _transport.toWeakRef();
             std::tie(transportEl, transportCB) = wrapOutgoingTransportUpdate();
             contentEl.appendChild(transportEl);
-            if (_pendingTransportReplace == PendingTransportReplace::Planned) {
+            if (_pendingTransportReplace == PendingTransportReplace::Planned)
                 _pendingTransportReplace = PendingTransportReplace::NeedAck;
-            }
             if (_update.reason.isValid())
                 updates << _update.reason.toXml(doc);
-            return OutgoingUpdate { updates, [this, transportCB](Task *task) {
-                                       transportCB(task);
-                                       if (task->success())
-                                           _pendingTransportReplace = PendingTransportReplace::InProgress;
-                                       // else transport will report failure from its callback => select next tran.
-                                   } };
-        case Action::TransportAccept:
+            return OutgoingUpdate { updates,
+                                    [this, guard = QPointer<Application>(this), replacement, transportCB](Task *task) {
+                                        transportCB(task);
+                                        if (!guard)
+                                            return;
+                                        auto expected = replacement.lock();
+                                        if (!expected || _transport != expected
+                                            || _pendingTransportReplace != PendingTransportReplace::NeedAck)
+                                            return;
+
+                                        if (task && task->success()) {
+                                            _pendingTransportReplace = PendingTransportReplace::InProgress;
+                                            return;
+                                        }
+
+                                        // The peer did not acknowledge this replacement. Do not leave
+                                        // the application blocked in NeedAck; move to the next local
+                                        // candidate (or content-remove if none remain).
+                                        _pendingTransportReplace = PendingTransportReplace::Planned;
+                                        selectNextTransport();
+                                    } };
+        }
+        // This ACK completes a peer-initiated replacement. The transport callback may
+        // reenter and select another transport, so completion is tied to the transport
+        // instance that produced this stanza, not whatever _transport points to later.
+        case Action::TransportAccept: {
             Q_ASSERT(_transport->hasUpdates());
+            const auto accepted = _transport.toWeakRef();
             std::tie(transportEl, transportCB) = wrapOutgoingTransportUpdate();
             contentEl.appendChild(transportEl);
-            return OutgoingUpdate { updates, [this, transportCB](Task *task) {
-                                       transportCB(task);
-                                       if (task->success()) {
-                                           _pendingTransportReplace = PendingTransportReplace::None;
-                                           if (_state == State::Connecting || _state == State::Active)
-                                               _transport->start();
-                                       }
-                                       // else transport will report failure from its callback => select next tran.
-                                   } };
+            return OutgoingUpdate { updates,
+                                    [this, guard = QPointer<Application>(this), accepted, transportCB](Task *task) {
+                                        transportCB(task);
+                                        if (!guard)
+                                            return;
+                                        auto expected = accepted.lock();
+                                        if (!expected || _transport != expected
+                                            || _pendingTransportReplace != PendingTransportReplace::InProgress)
+                                            return;
+
+                                        if (task && task->success()) {
+                                            _pendingTransportReplace = PendingTransportReplace::None;
+                                            if (_state == State::Connecting || _state == State::Active)
+                                                expected->start();
+                                        }
+                                        // Else the transport callback owns failure/fallback handling.
+                                    } };
+        }
         default:
             break;
         }
@@ -363,14 +584,49 @@ namespace XMPP { namespace Jingle {
         return !_transport || _transportSelector->compare(t, _transport) > 0;
     }
 
-    void Application::incomingTransportAccept(const QDomElement &el)
+    bool Application::transportReplaceAwaitingAck() const
     {
-        if (_pendingTransportReplace != PendingTransportReplace::InProgress) {
-            return; // ignore out of order
-        }
+        return _pendingTransportReplace == PendingTransportReplace::NeedAck;
+    }
+
+    bool Application::transportReplaceInProgress() const
+    {
+        return _pendingTransportReplace == PendingTransportReplace::InProgress;
+    }
+
+    bool Application::incomingTransportAccept(const QDomElement &el)
+    {
+        if (_pendingTransportReplace != PendingTransportReplace::InProgress || !_transport)
+            return false;
+
+        const auto expected = _transport;
+        QPointer<Application> guard(this);
+        if (!expected->update(el))
+            return false;
+        if (!guard)
+            return true;
+
+        // update() is transport-specific and may synchronously select a newer
+        // replacement. The peer accepted expected, so never let that old
+        // acknowledgement complete or start the newer local transaction.
+        if (_transport != expected || _pendingTransportReplace != PendingTransportReplace::InProgress)
+            return true;
+
         _pendingTransportReplace = PendingTransportReplace::None;
-        if (_transport->update(el) && _state >= State::Connecting)
-            _transport->start();
+        if (_state >= State::Connecting)
+            expected->start();
+        return true;
+    }
+    bool Application::incomingTransportReject()
+    {
+        if (_pendingTransportReplace != PendingTransportReplace::InProgress || !_transport || !_transport->isLocal())
+            return false;
+
+        // The peer rejected the current proposal. Any selected successor is a
+        // fresh proposal and must be signalled with another transport-replace.
+        _pendingTransportReplace = PendingTransportReplace::Planned;
+        selectNextTransport();
+        return true;
     }
 
     bool Application::isTransportReplaceEnabled() const { return true; }
@@ -391,10 +647,8 @@ namespace XMPP { namespace Jingle {
             if (transport->isLocal()) {
                 auto ts = _transport->state() == State::Finished ? _transport->prevState() : _transport->state();
                 if (_transport->isRemote() || ts > State::Unacked) {
-                    // if remote knows of the current transport
                     _pendingTransportReplace = PendingTransportReplace::Planned;
                 } else if (_transport->isLocal() && ts == State::Unacked) {
-                    // if remote may know but we don't know yet about it
                     _pendingTransportReplace = PendingTransportReplace::NeedAck;
                 }
             } else {

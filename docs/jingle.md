@@ -12,13 +12,14 @@ The implementation is intentionally split into two planes:
   `Connection` objects used by the application to move bytes or datagrams.
 
 For the native Iris stack, the relevant entry point is `XMPP::Client::jingleManager()`.
-`XMPP::Client` currently creates the Jingle manager, registers the built-in file-transfer
-application, and registers S5B, IBB and ICE transport managers.
+`XMPP::Client` creates the Jingle manager and registers the file-transfer application and S5B,
+IBB and ICE transports. The Jingle manager also owns the native RTP application manager,
+accessible through `rtpManager()`, and the separate publication manager. RTP requires a
+client-installed media provider and explicitly enabled transport namespaces.
 
-> **Scope:** Psi also has an external RTP Jingle implementation. It registers the RTP description
-> namespace with `Manager::addExternalManager()`, which tells the Iris Jingle task not to consume
-> those sessions. The architecture below describes sessions handled by the native Iris Jingle
-> stack.
+All sessions described here use the native Iris dispatcher; there is no external-manager
+bypass. RTP uses an authenticated packet interface rather than the file-transfer `Connection`
+interface. See [native RTP architecture](jingle-rtp-design.md) for that data path.
 
 ## From XEP-0166 concepts to Iris objects
 
@@ -167,15 +168,15 @@ flowchart LR
 
 ## Built-in native Jingle pieces
 
-At client construction time Iris registers the file-transfer application and three transport
-managers:
+Iris supplies file-transfer and RTP applications and three transport managers:
 
 | Implementation | Namespace | Relevant manager features |
 | --- | --- | --- |
 | File transfer | `urn:xmpp:jingle:apps:file-transfer:5` | Requires a reliable, ordered, data-oriented transport. |
+| RTP | `urn:xmpp:jingle:apps:rtp:1` | Client-installed `MediaProvider`; packet-capable endpoints require authenticated RTP/RTCP mux. |
 | S5B | `urn:xmpp:jingle:transports:s5b:1` | `Reliable`, `Ordered`, `Fast`, `DataOriented`. |
 | IBB | `urn:xmpp:jingle:transports:ibb:1` | `AlwaysConnect`, `Reliable`, `Ordered`, `DataOriented`. |
-| ICE | `urn:xmpp:jingle:transports:ice:0` | Supports a broader feature set including reliable/unreliable and message/live-oriented modes; see `jingle-ice.cpp`. |
+| ICE | `urn:xmpp:jingle:transports:ice:0`, `urn:xmpp:jingle:transports:ice-udp:1` | One manager with namespace-specific wire profiles; mode/build-dependent transport features. |
 
 `Manager::availableTransports()` filters managers by required features. The application still owns
 the final policy through `TransportSelector`; Jingle core deliberately does not hard-code a single
@@ -220,6 +221,89 @@ Content lookup uses `(content name, creator)` as `ContentKey`, matching the Jing
 
 A second API detail is easy to miss: **`Session::newContent()` does not insert the returned
 application into the session**. Configure it first, then call `Session::addContent()`.
+
+## Existing-session tie-break coordination
+
+Every incoming Jingle IQ for an already known session passes through the session-owned
+`Jingle::TieBreaker` before `Session::updateFromXml()` handles the action. The coordinator is
+intentionally generic with respect to application and transport semantics: it only correlates the
+currently outstanding local Jingle IQ with incoming actions and dispatches registered resolvers.
+
+A session-bound owner may register any number of resolvers for an action:
+
+```cpp
+auto registration = pad->tieBreaker()->registerResolver(Action::ContentModify, resolver);
+```
+
+`SessionManagerPad::tieBreaker()` is a convenience for application and transport pads; an
+`Application`, `Transport`, selector or another session-owned object may also register directly via
+`Session::tieBreaker()`. Registrations are move-only RAII handles, so destroying the owner can
+unregister it without a separate lifetime protocol.
+
+A resolver receives the serialized local and remote `<jingle/>` elements and returns one of three
+solutions:
+
+| Solution | Meaning |
+| --- | --- |
+| `Continue` | Tie-break does not intervene. The incoming action follows normal Session parsing and may still succeed or fail for unrelated protocol reasons. |
+| `Break` | Reject the whole incoming IQ with XEP-0166 `conflict` + `tie-break`. Semantic policy, including whether the local role is allowed to win, belongs to the resolver. |
+| `Postpone` | Continue processing the incoming IQ, but remember this resolver until the correlated local IQ finishes. If that local IQ succeeds, the peer accepted our proposal and no tie-break retry is necessary. If it fails, the resolver may reconcile its still-current local intent afterwards. |
+
+All resolvers registered for the matching `Action` are called. This is deliberate: a resolver may
+have owner-local side effects such as updating transport-selection hints. The aggregate wire
+result has deterministic precedence `Break > Postpone > Continue`; a `Break` prevents postponed
+retry state from being armed for that incoming IQ.
+
+`Postpone` is bound to an explicit outgoing transaction id, not to an `Application` callback or a
+transport state. Completion ordering is significant:
+
+```mermaid
+sequenceDiagram
+    participant Peer
+    participant Push as JTPush
+    participant TB as Session::TieBreaker
+    participant Owner as Resolver owner
+
+    Owner->>TB: outgoingStarted(action, local XML)
+    Owner->>Peer: IQ set
+    Peer->>Push: simultaneous IQ set, same action
+    Push->>TB: resolveIncoming(action, remote XML)
+    TB->>Owner: Resolver::resolve(local, remote)
+    Owner-->>TB: Postpone
+    Push->>Owner: normal Session processing
+    Push->>TB: incomingFinished(Applied/Rejected)
+
+    Peer-->>Owner: IQ result/error for local request
+    Owner->>TB: outgoingFinished(transaction, error?)
+    Note over TB: local transaction stops being collision-active here
+    Owner->>Owner: normal IQ ACK/error callback
+    Owner->>TB: outgoingCallbacksFinished(transaction)
+    alt local IQ succeeded
+        Note over TB: discard postponed recovery
+    else local IQ failed and remote outcome is known
+        TB->>Owner: retry(RetryContext)
+    end
+```
+
+Clearing collision-active state before owner callbacks prevents a reentrant incoming IQ from being
+mistaken for the action that has already completed. Delaying `retry()` until after those callbacks
+lets the resolver inspect the owner's updated live state. `RetryContext` supplies the original
+local XML, the competing remote XML, the local stanza error and whether normal processing of the
+remote action was applied or rejected. It is context, not a command to replay the old stanza:
+`retry()` should reconcile current owner intent and may send a different update or do nothing.
+
+`content-modify` is the first consumer. Each participating `Application` registers a resolver for
+its own `(creator,name)` content. An initiator-side collision returns `Break`; a responder-side
+collision returns `Postpone`, applies the initiator action normally, and only reconciles its local
+direction intent if its already outstanding IQ later fails. Unrelated contents using the same
+Jingle action return `Continue`.
+
+`transport-replace` deliberately remains on its specialized handler for now. Its crossed-action
+path has established semantics beyond accept/reject: losing peer transport proposals can be used
+as advisory sibling hints for `TransportSelector::getAlikeTransport()` / local reselection, and
+multi-content replacement currently permits partial success for supported siblings. A later
+migration must preserve those behaviours while moving only transaction arbitration into
+`TieBreaker`; transport semantics must not be moved into the coordinator.
 
 ## Signaling scheduler
 
@@ -359,13 +443,24 @@ overtaking the acknowledgement ([XEP-0261, section 2.1](https://xmpp.org/extensi
 Incoming `content-accept` in an active session uses the same deferred start, without emitting
 another `activated()`. Queued starts check session state, content membership and application state.
 
+Initial acceptance may select a nonempty subset of pending contents. Omitted contents are
+detached and cleaned up using guarded object snapshots; cancellation or session destruction
+during cleanup prevents committing Active. Ordinary content-accept does not perform this
+initial-subset cleanup.
+
+The queued batch skips removed, destroyed or no-longer-Accepted applications and continues
+with the remaining accepted contents. Every callback boundary checks Session lifetime and
+Active state. Initial activation requires a surviving nonterminal content from the original
+snapshot; a replacement object with the same key does not qualify. An empty Session terminates
+without activation. The same helper serves later acceptance without re-emitting activated().
+
 The deferred-start ordering assumes the normal single-threaded, non-reentrant IQ dispatch:
 application parsing callbacks must not spin a nested event loop.
 
 ## Incoming session lifecycle
 
 Incoming Jingle IQs are consumed by the internal `JTPush` task. Before creating a native session it
-checks the external-manager bypass, allowed-party policy, redirection, duplicate SID and tie-break
+checks allowed-party policy, redirection, duplicate SID and tie-break
 conditions.
 
 A responder `Session` is deliberately **not** registered merely because a syntactically valid
@@ -530,30 +625,164 @@ session->terminate(Jingle::Reason::Condition::Decline);
 
 ## Transport failure and replacement
 
-Transport fallback is application-owned. `Application::setTransport()` wires:
+Transport fallback is application-owned. `Application::setTransport()` wires transport
+updates into the normal Jingle scheduler and `Transport::failed` into
+`Application::selectNextTransport()`. The selector owns policy: Jingle core does not hard-code
+an ICE/S5B/IBB fallback order.
 
-- `Transport::updated` to `Application::updated`;
-- `Transport::failed` to `Application::selectNextTransport()`.
+The implementation has **two distinct state machines** which must not be conflated:
 
-The selector tracks unused alternatives. If the failed/old transport may already be known to the
-peer, the application enters its transport-replace sub-state and emits a
-`transport-replace`/`transport-accept`/`transport-reject` sequence as required. If no usable
-transport remains, the application moves toward `content-remove` with `failed-transport`.
+- `Transport::State` describes the concrete transport implementation's lifecycle;
+- `Application::PendingTransportReplace` describes the XEP-0166 signaling transaction around
+  replacing the current transport.
+
+In particular, `Transport::State::Unacked` is **not** the lifetime of a `transport-replace` IQ.
+IBB happens to use `Unacked` while serializing some updates, while the built-in ICE transports
+can serialize their Jingle update and remain `ApprovedToSend`. Code deciding whether a
+`transport-replace` IQ is outstanding must use the application signaling state instead.
+
+| `PendingTransportReplace` | Meaning |
+| --- | --- |
+| `None` | No transport-replace transaction is active. |
+| `Planned` | A new local transport was selected, but its `transport-replace` has not been sent yet. |
+| `NeedAck` | Our `transport-replace` was serialized and the IQ result/error is still pending. |
+| `InProgress` | The replacement proposal is the current signaling attempt known to both sides; final `transport-accept` / `transport-reject` completion is pending. An incoming peer replacement enters this state while its IQ is being processed. |
+
+```mermaid
+stateDiagram-v2
+    [*] --> None
+    None --> Planned: local failure / select local successor
+    Planned --> NeedAck: serialize transport-replace
+    NeedAck --> InProgress: IQ result
+    NeedAck --> Planned: IQ error / select retry
+    None --> InProgress: accept peer transport-replace
+    InProgress --> None: transport-accept completes
+    InProgress --> Planned: transport-reject + local fallback
+    Planned --> None: replacement abandoned / content removed
+    InProgress --> None: peer-initiated accept IQ acknowledged
+```
+
+If no compatible fallback remains, `selectNextTransport()` moves the application toward
+`content-remove` with `failed-transport` rather than leaving a half-open replacement state.
+
+### Locally initiated replacement
+
+A local transport failure selects a successor and marks the signaling transaction `Planned`.
+When the scheduler serializes `transport-replace`, the state becomes `NeedAck`. The IQ result
+advances it to `InProgress`; a peer `transport-accept` then updates/starts the same transport
+instance and clears the signaling state. `transport-reject` selects another local candidate,
+returning to `Planned`.
+
+```mermaid
+sequenceDiagram
+    participant T as old Transport
+    participant A as Application
+    participant Sel as TransportSelector
+    participant S as Session scheduler
+    participant Peer as Remote peer
+    participant New as replacement Transport
+
+    T-->>A: failed()
+    A->>Sel: selectNextTransport()
+    Sel-->>A: New
+    A->>A: PendingTransportReplace = Planned
+    New-->>A: updated()
+    A-->>S: updated()
+    S->>A: takeOutgoingUpdate(TransportReplace)
+    A->>A: Planned -> NeedAck
+    S->>Peer: IQ set transport-replace
+    Peer-->>S: IQ result
+    S->>A: replacement ACK callback
+    A->>A: NeedAck -> InProgress
+    Peer->>S: IQ set transport-accept
+    S->>A: incomingTransportAccept()
+    A->>New: update(accept payload) / start()
+    A->>A: InProgress -> None
+    S-->>Peer: IQ result
+```
+
+The IQ completion callback is tied to the **specific transport instance** that produced the
+stanza. A stale ACK must not complete or start a newer replacement selected reentrantly while
+the old transport callback is running.
+
+### Peer-initiated replacement
+
+For a valid incoming `transport-replace`, Iris installs the remote proposal and enters
+`InProgress`. Once that transport has an outgoing acceptance update, the scheduler sends
+`transport-accept`. The IQ result completes only the snapshotted transport transaction and
+starts that same transport; it must not act on a newer transport selected by a callback.
+
+### Crossed transport-replace and tie-break
+
+XEP-0166 resolves simultaneous same-action requests in an existing session in favor of the
+session initiator. Iris therefore treats an incoming `transport-replace` as a collision when
+the local endpoint is the initiator and its matching application is in `NeedAck`. The losing
+incoming action is rejected with stanza `<conflict/>` plus Jingle `<tie-break/>`.
+
+There is an intentional historical optimization in the batch path: although the losing
+incoming action is rejected as a whole, already validated sibling remote transport proposals
+are still useful as **hints** to `TransportSelector::getAlikeTransport()`. Iris may preselect a
+compatible local sibling transport before retrying its own action. The losing remote transport
+is not installed, and a prepared local sibling that is about to be signaled is kept intact.
+Removing this behavior would add avoidable signaling round-trips and regress the original
+transport-replace design.
 
 ```mermaid
 flowchart TD
-    Fail["Transport failed"] --> More{"selector has another transport?"}
-    More -->|no| Remove["Application -> Finishing<br/>content-remove / failed-transport"]
-    More -->|yes| Select["selectNextTransport()"]
-    Select --> Known{"old transport may be known by peer?"}
-    Known -->|no| Prepare["prepare new transport"]
-    Known -->|yes| Replace["transport-replace negotiation"]
-    Replace --> Prepare
-    Prepare --> Conn["new Connection"]
+    Incoming["incoming transport-replace batch"] --> Validate["parse + validate every content"]
+    Validate --> Collision{"local initiator has NeedAck?"}
+    Collision -->|no| Apply["apply still-current validated replacements"]
+    Apply --> RejectUnsupported["queue transport-reject for unsupported siblings"]
+    Collision -->|yes| Hints["use valid sibling proposals as selector hints"]
+    Hints --> Tie["reject whole incoming action: conflict + tie-break"]
 ```
 
-This fallback mechanism is one reason a custom application should depend on
-`TransportSelector`, not directly instantiate a concrete ICE/S5B/IBB class.
+### Batch atomicity and reentrancy
+
+Transport callbacks and selector hooks are treated as reentrant boundaries. In particular,
+`TransportSelector::canReplace()`, `isTransportReplaceEnabled()`, `setTransport()`,
+`selectNextTransport()`, `Transport::update()` and transport IQ callbacks can synchronously
+emit signals or invoke application code. Such code may remove an application, destroy the
+session, or select a newer transport for the same content.
+
+For that reason the incoming replace/accept/reject handlers use a validate-then-apply pattern:
+
+1. identify content by stable `(creator, name)` `ContentKey`;
+2. guard the `Application` through `QPointer`, because it is a QObject that the session may delete during a reentrant callback;
+3. snapshot the current transport through `QWeakPointer`, because transports are shared-pointer
+   owned and are not QObject children of the application;
+4. validate the complete signaling state required for the action before the first mutating
+   callback where protocol atomicity requires it;
+5. before each second-pass mutation, verify that the same application is still registered under
+   the same key and still owns the transport against which the candidate was validated.
+
+A stale snapshot is never allowed to overwrite newer local intent. For `transport-replace`, an
+unsupported sibling can still be returned in a queued `transport-reject`; this **partial batch
+success is intentional historical behavior**. By contrast, malformed duplicate identities and
+out-of-order accept/reject signaling are rejected before earlier siblings are committed.
+
+This also explains the ownership model. `Application::_transport` is a `QSharedPointer`; the
+base `Transport` constructor does not set the application as QObject parent. Mixing QObject
+parent ownership with `QSharedPointer` here would make destruction ambiguous. Use
+`QPointer<Application>` for application/session QObject lifetime and weak/shared transport
+pointers for transport lifetime and transaction identity.
+
+### Regression coverage
+
+The Jingle regression suite contains explicit cases for:
+
+- real ICE serialization not using `Transport::State::Unacked` as Jingle IQ state;
+- crossed initiator/responder replacement and sibling tie-break optimization;
+- duplicate and malformed `transport-replace`, `transport-accept` and `transport-reject`;
+- selector rejection and intentional mixed-batch partial success;
+- stale sibling mutation during replace/accept/reject callbacks;
+- whole-batch accept/reject signaling-state validation before side effects;
+- self-reentrancy where an old transport callback selects a newer local replacement;
+- stale outgoing transport IQ acknowledgements not completing a newer transport transaction.
+
+These tests are deliberately about signaling invariants rather than one concrete transport
+implementation. Keep them when refactoring transport replacement into more generic Jingle
+transaction/tie-break machinery.
 
 ## Extending the stack
 
@@ -609,11 +838,10 @@ network operations. In Qt code, `QPointer` is usually the appropriate guard.
 ## Implementation limits and regression checks
 
 The object model above is not a claim of complete XEP-0166 support. In particular,
-`Session::updateFromXml()` currently falls through to `feature-not-implemented` for
-`security-info` and `transport-reject`.
-The existence of corresponding enum values or outgoing serialization does not imply an
-implemented incoming handler. Transport fallback diagrams describe the intended flow through
-the implemented paths, not successful recovery from every possible peer response.
+`Session::updateFromXml()` still falls through to `feature-not-implemented` for `security-info`.
+Transport replacement, including incoming `transport-reject`, has dedicated handlers and
+regression coverage, but that does not imply successful recovery from every transport-specific
+failure or every peer implementation.
 
 `content-reject` removes a pending locally added content, stops its transport and notifies the
 application through `incomingRemove()`. Rejection of an initial or already accepted content is
@@ -627,7 +855,18 @@ changing negotiation state or replacing its transport. This notification is sign
 permission to activate media capture: the media adapter must independently enforce local consent.
 Callbacks must not run nested event loops. No `content-accept` is generated in response.
 An omitted `senders` means `both`; explicit `none` disables both sending directions.
-There is no dedicated outgoing direction-change API yet.
+`Application::requestSenders()` requests an outgoing direction change. Before the initial
+content stanza is consumed it updates the proposal; afterwards it retains the latest intent
+until Active and sends content-modify with an explicit senders attribute. The negotiated
+value changes on successful IQ acknowledgement. A newer request can supersede an in-flight
+target; a failed unchanged target is discarded rather than retried indefinitely.
+`sendersChanged` reports local and remote changes; `sendersChangedByPeer` distinguishes
+incoming modifications. Neither signal grants capture consent.
+
+Current limitations: overlapping peer/local content-modify actions do not implement the
+existing-session tie-break rule, and there is no explicit failed-request completion signal
+for a client that retains its own policy target. See the current development-plan audit gate
+before relying on convergence under crossed requests or retry after IQ failure.
 
 `description-info` validates content identities and description namespaces before dispatching to
 `Application::incomingDescriptionInfo()`. This hook processes advisory parameters without
@@ -641,9 +880,9 @@ pending-content rejection, session destruction with
 remaining contents, and DTLS fingerprint comparison. Run with:
 
 ```sh
-cmake -S tests/jingle -B build/jingle-tests -DUSE_QT6=ON -DIRIS_SYSTEM_QCA=3
+cmake -S tests/jingle -B build/jingle-tests -DUSE_QT6=ON -DIRIS_SYSTEM_QCA=3 -DIRIS_ENABLE_SRTP=ON
 cmake --build build/jingle-tests -j2
-ctest --test-dir build/jingle-tests --output-on-failure
+ctest --test-dir build/jingle-tests --output-on-failure -j1
 ```
 
 The DTLS-SRTP integration test requires a QCA3 provider supporting
@@ -663,10 +902,11 @@ success/failure and callbacks outliving their transport. A non-null IQ task is n
 success: acknowledgement handlers inspect `Task::success()`.
 `jingle_rtpmedia` uses the local ICE path with native RTP Applications and mock media endpoints,
 checking authenticated attachment, direction/payload filtering and teardown. The media API is
-documented in [RTP extension design](jingle-rtp-design.md#media-integration); no psimedia adapter
+documented in [native RTP architecture](jingle-rtp-design.md#media-integration); no psimedia adapter
 or external-client call is exercised by this test.
 
-For the proposed RTP/security extension boundaries, see [RTP and DTLS design](jingle-rtp-design.md).
+For the implemented RTP/security interfaces, asynchronous operations and the boundary between
+standalone group/router models and production transports, see [native RTP architecture](jingle-rtp-design.md).
 
 This document covers ordinary session signaling and data transport. It does **not** validate
 the separate PubSub authority/reconciliation machinery in `PublicationManager` (`jingle-pub.*`).
@@ -700,6 +940,11 @@ The main implementation files are:
 - `jingle-connection.h`, `jingle-connection.cpp` — application data connection abstraction;
 - `jingle-nstransportslist.*` — namespace-list transport selector;
 - `jingle-ft.*` — XEP-0234 file-transfer application and pad;
+- `jingle-rtp.*`, `jingle-rtp-media.cpp` — native RTP application, media interfaces and asynchronous operation scheduler;
+- `jingle-rtp-description.*`, `jingle-rtp-negotiation.*`, `jingle-rtp-info.*` — RTP XML, negotiation and notifications;
+- `jingle-rtp-srtp.*` — authenticated packet interface and SRTP association binding;
+- `jingle-rtp-router_p.*`, `jingle-group-negotiation_p.h`, `jingle-ice-group_p.h` — standalone routing and group models, not live BUNDLE;
+- `jingle-ice-udp.*` — standard ICE-UDP wire codec;
 - `jingle-s5b.*`, `jingle-ibb.*`, `jingle-ice.*` — built-in transport implementations;
 - `jingle-pub.*` — Jingle session publication support, adjacent to the ordinary XEP-0166 session
   lifecycle documented here.
