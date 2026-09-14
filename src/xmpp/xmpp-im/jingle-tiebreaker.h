@@ -96,6 +96,9 @@ namespace XMPP { namespace Jingle {
         void    outgoingFinished(quint64 transaction, const std::optional<Stanza::Error> &error);
         void    outgoingCallbacksFinished(quint64 transaction);
 
+        // Every resolver registered for the matching Action is evaluated. The
+        // aggregate wire decision is Break > Postpone > Continue; Break does not
+        // short-circuit owner callbacks because they may maintain local hints.
         Resolution resolveIncoming(Action action, const QDomElement &remoteData);
         void       incomingFinished(quint64 resolution, RemoteResult result);
 
