@@ -35,7 +35,7 @@ static R::Description description(const QString &media)
 class Endpoint : public R::MediaEndpoint {
 public:
     explicit Endpoint(QString media) : media(std::move(media)) { }
-    R::Description localOffer() const override { return description(media); }
+    R::Description                localOffer() const override { return description(media); }
     std::optional<R::Description> makeAnswer(const R::Description &offer) const override { return offer; }
     bool acceptsAnswer(const R::Description &, const R::Description &) const override { return true; }
     bool configure(const R::Description &local, const R::Description &remote) override
@@ -43,7 +43,7 @@ public:
         ++configured;
         return local.media == media && remote.media == media;
     }
-    void stop() override { }
+    void    stop() override { }
     QString media;
     int     configured = 0;
 };
@@ -55,13 +55,10 @@ public:
         return std::make_unique<Endpoint>(media);
     }
 
-    void expireDeadline(R::MediaOperation::Id id = 0)
-    {
-        mediaOperationDeadlineExpired(id ? id : deadlineId);
-    }
+    void expireDeadline(R::MediaOperation::Id id = 0) { mediaOperationDeadlineExpired(id ? id : deadlineId); }
 
-    int localStarts = 0, answerStarts = 0, applyStarts = 0, cancels = 0, timeouts = 0;
-    R::MediaOperation::Id lastId = 0;
+    int                   localStarts = 0, answerStarts = 0, applyStarts = 0, cancels = 0, timeouts = 0;
+    R::MediaOperation::Id lastId     = 0;
     R::MediaOperation::Id deadlineId = 0;
     int                   deadlineMs = 0;
     PrepareCompletion     prepareCompletion;
@@ -137,7 +134,7 @@ int main(int argc, char **argv)
     Endpoint         audio(QStringLiteral("audio"));
     AsyncSession     session;
 
-    int localCallbacks = 0, answerCallbacks = 0, applyCallbacks = 0;
+    int  localCallbacks = 0, answerCallbacks = 0, applyCallbacks = 0;
     auto local = session.prepareLocalOffer(
         &audio, [&](R::MediaOperation::Id id, std::optional<R::Description> result, R::MediaError error) {
             check(id != 0 && result && !error && result->media == QLatin1String("audio"),
@@ -147,9 +144,9 @@ int main(int argc, char **argv)
     auto answer = session.prepareAnswer(
         &audio, description(QStringLiteral("audio")),
         [&](R::MediaOperation::Id, std::optional<R::Description>, R::MediaError) { ++answerCallbacks; });
-    auto pendingApply = session.applyNegotiation(
-        &audio, description(QStringLiteral("audio")), description(QStringLiteral("audio")),
-        [&](R::MediaOperation::Id, R::MediaError) { ++applyCallbacks; });
+    auto pendingApply
+        = session.applyNegotiation(&audio, description(QStringLiteral("audio")), description(QStringLiteral("audio")),
+                                   [&](R::MediaOperation::Id, R::MediaError) { ++applyCallbacks; });
     check(local && answer && pendingApply && local->id() && answer->id() && pendingApply->id()
               && local->id() != answer->id() && answer->id() != pendingApply->id(),
           "media operation ids are not unique and non-zero");
@@ -158,7 +155,7 @@ int main(int argc, char **argv)
     pump();
     check(session.localStarts == 1 && session.answerStarts == 0 && session.applyStarts == 0,
           "media session did not serialize initial operations");
-    auto firstCompletion = session.prepareCompletion;
+    auto firstCompletion      = session.prepareCompletion;
     session.prepareCompletion = {};
     firstCompletion(description(QStringLiteral("audio")), {});
     firstCompletion(description(QStringLiteral("audio")), {}); // duplicate backend completion must be ignored
@@ -183,17 +180,17 @@ int main(int argc, char **argv)
     check(answerCallbacks == 0 && session.applyStarts == 0, "cancelled/stale media callback was delivered");
 
     R::MediaOperation::Id applyId = 0;
-    auto apply = session.applyNegotiation(
-        &audio, description(QStringLiteral("audio")), description(QStringLiteral("audio")),
-        [&](R::MediaOperation::Id id, R::MediaError error) {
-            check(applyId && id == applyId && !error, "apply completion corrupted");
-            ++applyCallbacks;
-        });
+    auto                  apply
+        = session.applyNegotiation(&audio, description(QStringLiteral("audio")), description(QStringLiteral("audio")),
+                                   [&](R::MediaOperation::Id id, R::MediaError error) {
+                                       check(applyId && id == applyId && !error, "apply completion corrupted");
+                                       ++applyCallbacks;
+                                   });
     check(bool(apply), "apply operation handle missing");
     applyId = apply->id();
     pump();
     check(session.applyStarts == 1 && bool(session.applyCompletion), "apply operation did not start");
-    auto applyDone = session.applyCompletion;
+    auto applyDone          = session.applyCompletion;
     session.applyCompletion = {};
     applyDone({});
     applyDone({});
@@ -203,15 +200,14 @@ int main(int argc, char **argv)
 
     // A malformed backend completion is an explicit failure, never an empty
     // successful answer.
-    int invalidCallbacks = 0;
-    auto invalid = session.prepareLocalOffer(
+    int  invalidCallbacks = 0;
+    auto invalid          = session.prepareLocalOffer(
         &audio, [&](R::MediaOperation::Id, std::optional<R::Description> result, R::MediaError error) {
-            check(!result && error.code == R::MediaError::Code::Backend,
-                  "empty successful preparation was accepted");
+            check(!result && error.code == R::MediaError::Code::Backend, "empty successful preparation was accepted");
             ++invalidCallbacks;
         });
     pump();
-    auto invalidDone = session.prepareCompletion;
+    auto invalidDone          = session.prepareCompletion;
     session.prepareCompletion = {};
     invalidDone({}, {});
     pump();
@@ -237,7 +233,7 @@ int main(int argc, char **argv)
 
     // Deadlines use a controlled clock seam. A silent backend receives a distinct
     // timeout hook, while the live caller receives exactly one queued Timeout.
-    AsyncSession timed;
+    AsyncSession            timed;
     R::MediaOperationPolicy timedPolicy;
     timedPolicy.prepareDeadlineMs    = 41;
     timedPolicy.applyDeadlineMs      = 23;
@@ -245,7 +241,7 @@ int main(int argc, char **argv)
     check(timed.setOperationPolicy(timedPolicy), "idle media operation policy was rejected");
     int           timedCallbacks = 0;
     R::MediaError timedError;
-    auto timedOffer = timed.prepareLocalOffer(
+    auto          timedOffer = timed.prepareLocalOffer(
         &audio, [&](R::MediaOperation::Id, std::optional<R::Description> result, R::MediaError error) {
             check(!result, "timed-out preparation returned a result");
             timedError = std::move(error);
@@ -268,11 +264,10 @@ int main(int argc, char **argv)
     // Caller cancellation wins even if a stale deadline event arrives afterwards.
     AsyncSession cancelBeforeTimeout;
     check(cancelBeforeTimeout.setOperationPolicy(timedPolicy), "cancel timeout policy rejected");
-    int cancelledTimeoutCallbacks = 0;
-    auto cancelledTimeout = cancelBeforeTimeout.prepareLocalOffer(
-        &audio, [&](R::MediaOperation::Id, std::optional<R::Description>, R::MediaError) {
-            ++cancelledTimeoutCallbacks;
-        });
+    int  cancelledTimeoutCallbacks = 0;
+    auto cancelledTimeout          = cancelBeforeTimeout.prepareLocalOffer(
+        &audio,
+        [&](R::MediaOperation::Id, std::optional<R::Description>, R::MediaError) { ++cancelledTimeoutCallbacks; });
     pump();
     const auto cancelledId = cancelledTimeout->id();
     cancelledTimeout->cancel();
@@ -286,14 +281,14 @@ int main(int argc, char **argv)
     // later backend completion is stale. Both cases deliver exactly one result.
     AsyncSession completionWins;
     check(completionWins.setOperationPolicy(timedPolicy), "completion boundary policy rejected");
-    int completionWinsCallbacks = 0;
-    auto completionWinsOffer = completionWins.prepareLocalOffer(
+    int  completionWinsCallbacks = 0;
+    auto completionWinsOffer     = completionWins.prepareLocalOffer(
         &audio, [&](R::MediaOperation::Id, std::optional<R::Description> result, R::MediaError error) {
             check(result && !error, "completion did not win deadline boundary");
             ++completionWinsCallbacks;
         });
     pump();
-    auto completionAtBoundary = completionWins.prepareCompletion;
+    auto completionAtBoundary        = completionWins.prepareCompletion;
     completionWins.prepareCompletion = {};
     completionAtBoundary(description(QStringLiteral("audio")), {});
     completionWins.expireDeadline(completionWinsOffer->id());
@@ -305,7 +300,7 @@ int main(int argc, char **argv)
     check(timeoutWins.setOperationPolicy(timedPolicy), "timeout boundary policy rejected");
     int           timeoutWinsCallbacks = 0;
     R::MediaError timeoutWinsError;
-    auto timeoutWinsOffer = timeoutWins.prepareLocalOffer(
+    auto          timeoutWinsOffer = timeoutWins.prepareLocalOffer(
         &audio, [&](R::MediaOperation::Id, std::optional<R::Description> result, R::MediaError error) {
             check(!result, "timeout boundary returned a preparation result");
             timeoutWinsError = std::move(error);
@@ -325,12 +320,12 @@ int main(int argc, char **argv)
     check(applyTimeout.setOperationPolicy(timedPolicy), "apply timeout policy rejected");
     int           applyTimeoutCallbacks = 0;
     R::MediaError applyTimeoutError;
-    auto timedApply = applyTimeout.applyNegotiation(
-        &audio, description(QStringLiteral("audio")), description(QStringLiteral("audio")),
-        [&](R::MediaOperation::Id, R::MediaError error) {
-            applyTimeoutError = std::move(error);
-            ++applyTimeoutCallbacks;
-        });
+    auto          timedApply = applyTimeout.applyNegotiation(&audio, description(QStringLiteral("audio")),
+                                                             description(QStringLiteral("audio")),
+                                                             [&](R::MediaOperation::Id, R::MediaError error) {
+                                                        applyTimeoutError = std::move(error);
+                                                        ++applyTimeoutCallbacks;
+                                                    });
     pump();
     check(timedApply && applyTimeout.deadlineId == timedApply->id() && applyTimeout.deadlineMs == 23,
           "apply deadline was not armed from policy");
@@ -341,9 +336,9 @@ int main(int argc, char **argv)
 
     // Pending work is explicitly bounded. Rejection returns no operation handle,
     // and policy cannot be mutated while any operation is queued or active.
-    AsyncSession bounded;
+    AsyncSession            bounded;
     R::MediaOperationPolicy boundedPolicy = timedPolicy;
-    boundedPolicy.maxPendingOperations = 1;
+    boundedPolicy.maxPendingOperations    = 1;
     check(bounded.setOperationPolicy(boundedPolicy), "bounded queue policy rejected");
     auto boundedFirst = bounded.prepareLocalOffer(
         &audio, [](R::MediaOperation::Id, std::optional<R::Description>, R::MediaError) { });
@@ -369,9 +364,8 @@ int main(int argc, char **argv)
     LegacySession legacy;
     Endpoint      legacyAudio(QStringLiteral("audio"));
     int           fallbackPrepared = 0;
-    auto fallbackOffer = legacy.prepareLocalOffer(
-        &legacyAudio,
-        [&](R::MediaOperation::Id, std::optional<R::Description> result, R::MediaError error) {
+    auto          fallbackOffer    = legacy.prepareLocalOffer(
+        &legacyAudio, [&](R::MediaOperation::Id, std::optional<R::Description> result, R::MediaError error) {
             check(result && !error, "legacy localOffer fallback failed");
             ++fallbackPrepared;
         });
@@ -379,13 +373,13 @@ int main(int argc, char **argv)
     pump();
     check(fallbackPrepared == 1, "legacy preparation fallback did not complete");
 
-    int fallbackApplied = 0;
-    auto fallbackApply = legacy.applyNegotiation(
-        &legacyAudio, description(QStringLiteral("audio")), description(QStringLiteral("audio")),
-        [&](R::MediaOperation::Id, R::MediaError error) {
-            check(!error, "legacy configure fallback failed");
-            ++fallbackApplied;
-        });
+    int  fallbackApplied = 0;
+    auto fallbackApply   = legacy.applyNegotiation(&legacyAudio, description(QStringLiteral("audio")),
+                                                   description(QStringLiteral("audio")),
+                                                   [&](R::MediaOperation::Id, R::MediaError error) {
+                                                     check(!error, "legacy configure fallback failed");
+                                                     ++fallbackApplied;
+                                                 });
     check(fallbackApplied == 0 && legacyAudio.configured == 0, "legacy apply ran inline");
     pump();
     check(fallbackApplied == 1 && legacyAudio.configured == 1, "legacy configure fallback did not complete");

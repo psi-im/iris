@@ -249,8 +249,8 @@ solutions:
 | `Break` | Reject the whole incoming IQ with XEP-0166 `conflict` + `tie-break`. Semantic policy, including whether the local role is allowed to win, belongs to the resolver. |
 | `Postpone` | Continue processing the incoming IQ, but remember this resolver until the correlated local IQ finishes. If that local IQ succeeds, the peer accepted our proposal and no tie-break retry is necessary. If it fails, the resolver may reconcile its still-current local intent afterwards. |
 
-All resolvers registered for the matching `Action` are called. This is deliberate: a resolver may
-have owner-local side effects such as updating transport-selection hints. The aggregate wire
+All still-live resolvers registered for the matching `Action` are called while the cancellation
+epoch remains valid. Advisory hints must not mutate committed state. The aggregate wire
 result has deterministic precedence `Break > Postpone > Continue`; a `Break` prevents postponed
 retry state from being armed for that incoming IQ.
 
@@ -271,6 +271,7 @@ sequenceDiagram
     TB->>Owner: Resolver::resolve(local, remote)
     Owner-->>TB: Postpone
     Push->>Owner: normal Session processing
+    Push-->>Peer: IQ result/error
     Push->>TB: incomingFinished(Applied/Rejected)
 
     Peer-->>Owner: IQ result/error for local request
@@ -291,6 +292,13 @@ lets the resolver inspect the owner's updated live state. `RetryContext` supplie
 local XML, the competing remote XML, the local stanza error and whether normal processing of the
 remote action was applied or rejected. It is context, not a command to replay the old stanza:
 `retry()` should reconcile current owner intent and may send a different update or do nothing.
+
+clear()/destruction invalidates dispatch snapshots, including a currently running retry loop.
+Internal state is pinned across callbacks, but pinning does not authorize continuing cancelled
+work. XML snapshots do not alias the caller's mutable node handles. Duplicate terminal notices
+cannot replace an earlier outcome. The coordinator retains at most 64 remote resolutions;
+arbitration snapshots have node/depth/text limits and overload produces `wait/resource-constraint`
+through `Resolution::error`, not `conflict/tie-break`.
 
 `content-modify` is the first consumer. Each participating `Application` registers a resolver for
 its own `(creator,name)` content. An initiator-side collision returns `Break`; a responder-side
@@ -856,17 +864,68 @@ permission to activate media capture: the media adapter must independently enfor
 Callbacks must not run nested event loops. No `content-accept` is generated in response.
 An omitted `senders` means `both`; explicit `none` disables both sending directions.
 `Application::requestSenders()` requests an outgoing direction change. Before the initial
-content stanza is consumed it updates the proposal; afterwards it retains the latest intent
+content stanza is consumed it updates the proposal; afterwards it retains a queued target
 until Active and sends content-modify with an explicit senders attribute. The negotiated
 value changes on successful IQ acknowledgement. A newer request can supersede an in-flight
 target; a failed unchanged target is discarded rather than retried indefinitely.
 `sendersChanged` reports local and remote changes; `sendersChangedByPeer` distinguishes
 incoming modifications. Neither signal grants capture consent.
 
-Current limitations: overlapping peer/local content-modify actions do not implement the
-existing-session tie-break rule, and there is no explicit failed-request completion signal
-for a client that retains its own policy target. See the current development-plan audit gate
-before relying on convergence under crossed requests or retry after IQ failure.
+Overlapping peer/local content-modify actions use the session-owned TieBreaker described
+above. A failed postponed attempt preserves the queued target for resolver recovery;
+the resolver currently wakes the scheduler, it does not merge directional policy itself.
+`requestSendersTracked()` returns a scheduling revision. `sendersAttemptFinished()` reports
+the concrete attempt ID/revision/target and Accepted, Rejected, TimedOut or Cancelled outcome
+after internal cleanup. These are per-IQ notifications, including generic failure, not durable
+intent completion. No-op requests have no IQ event. Application destruction is a separate
+lifetime notification. `cancelQueuedSenders(revision)` cannot unsend an in-flight stanza.
+
+### RTP local direction policy
+
+`RTP::Pad::directionController()` owns opt-in local-send policy across the pad's contents.
+The application supplies explicit consent through `setLocalSending(content, enabled)` and
+temporary restrictions through move-only-lifetime `suspendLocalSending()` constraint handles.
+All live constraints restrict sending; dropping one cannot override another or revoked consent.
+Unmanaged contents retain the existing direct requestSenders behavior. A managed content uses
+one policy writer; do not mix controller policy with direct exact-direction requests.
+
+The controller owns only the local sending bit and preserves the peer bit from live negotiated
+state. Its queued reconciliation uses the existing Application/Session scheduler. On tie-break
+failure it discards its old disposable target and recomputes; generic failure stops retries.
+A finite proposal budget also bounds repeated successful proposals countermanded by a peer.
+Policy snapshots report Pending/Satisfied/Blocked/Failed/Finished; `policyChanged()` is a
+coalesced queued live-state notification, not a one-shot operation handle. Snapshots also expose
+typed failure, optional signaling error and diagnostic constraint reasons.
+
+`requestLocalSending({{content, sending}, ...}, deadlineMs)` validates the entire batch before
+installing revisions, and returns a caller-owned `DirectionOperation`. The default deadline is
+15 seconds; at most 64 items per batch and 32 pending operations per Pad are accepted.
+`progressChanged()` exposes per-item snapshots; `finished()` reports one queued terminal
+Succeeded/Failed/Cancelled/Superseded result. Even no-op or invalid requests complete through
+that queued interface. A blocked sending desire is not satisfied by an effective receive-only ACK.
+Success means the direction predicate was observed, not that media connectivity was established.
+Cancellation, timeout, supersession and observer destruction do not roll back durable policy
+or unsend IQs. Removing/recreating a content name never transfers an old operation to the new
+object. Session termination/destruction retires policies even when their Pad is retained.
+
+```mermaid
+flowchart LR
+    Caller["Caller: user consent"] --> Controller["RTP Pad DirectionController"]
+    Gates["Scoped device / permission restrictions"] --> Controller
+    Peer["Live negotiated peer bit"] --> Controller
+    Controller -->|"immediate local gate"| Packets["Application RTP packet gate"]
+    Controller -->|"queued target + revision"| App["Application"]
+    Controller -->|"policy revision / current result"| Op["Caller-owned DirectionOperation"]
+    App --> Scheduler["Session: existing IQ scheduler"]
+    App -->|"attempt result / negotiated change"| Controller
+```
+
+The packet gate does not stop hardware capture: callers must independently keep psimedia's
+capture controls consistent with consent and device availability. Psi's audio path uses
+`AvCallAudioDirection` to bind explicit call/accept intent, scope the device constraint and
+observe completion. Its capture decision includes the controller gate; peer updates cannot
+grant local consent. Camera/hold policies are not migrated by the audio adapter.
+See [the direction-policy design](jingle-direction-policy.md) for lifecycle and integration details.
 
 `description-info` validates content identities and description namespaces before dispatching to
 `Application::incomingDescriptionInfo()`. This hook processes advisory parameters without

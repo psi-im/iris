@@ -27,25 +27,24 @@ static std::optional<Description> parse(const QString &body, bool advisory = fal
 int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
-    const auto       description = parse(
-        "<rtcp-fb xmlns='urn:xmpp:jingle:apps:rtp:rtcp-fb:0' type='nack' subtype='pli'>"
-        "<parameter name='scope'/></rtcp-fb>"
-        "<rtcp-fb-trr-int xmlns='urn:xmpp:jingle:apps:rtp:rtcp-fb:0' value='0'/>"
-        "<payload-type id='111' name='opus' clockrate='48000' channels='2'>"
-        "<parameter name='minptime' value='10'/><parameter name='useinbandfec' value='1'/>"
-        "<rtcp-fb xmlns='urn:xmpp:jingle:apps:rtp:rtcp-fb:0' type='transport-cc'/>"
-        "<rtcp-fb-trr-int xmlns='urn:xmpp:jingle:apps:rtp:rtcp-fb:0' value='100'/>"
-        "</payload-type><payload-type id='0'/><rtcp-mux/>"
-        "<ssrc-group xmlns='urn:xmpp:jingle:apps:rtp:ssma:0' semantics='FID'>"
-        "<source ssrc='100'/><source ssrc='101'/></ssrc-group>"
-        "<source xmlns='urn:xmpp:jingle:apps:rtp:ssma:0' ssrc='100'>"
-        "<parameter name='cname' value='voice'/><parameter name='msid'/></source>"
-        "<source xmlns='urn:xmpp:jingle:apps:rtp:ssma:0' ssrc='101'/>"
-        "<rtp-hdrext xmlns='urn:xmpp:jingle:apps:rtp:rtp-hdrext:0' id='1' "
-        "uri='urn:ietf:params:rtp-hdrext:sdes:mid' senders='initiator'>"
-        "<parameter name='mode'/></rtp-hdrext>"
-        "<extmap-allow-mixed xmlns='urn:xmpp:jingle:apps:rtp:rtp-hdrext:0'/>"
-        "<future xmlns='urn:example:rtp:future' value='kept'/>");
+    const auto description = parse("<rtcp-fb xmlns='urn:xmpp:jingle:apps:rtp:rtcp-fb:0' type='nack' subtype='pli'>"
+                                   "<parameter name='scope'/></rtcp-fb>"
+                                   "<rtcp-fb-trr-int xmlns='urn:xmpp:jingle:apps:rtp:rtcp-fb:0' value='0'/>"
+                                   "<payload-type id='111' name='opus' clockrate='48000' channels='2'>"
+                                   "<parameter name='minptime' value='10'/><parameter name='useinbandfec' value='1'/>"
+                                   "<rtcp-fb xmlns='urn:xmpp:jingle:apps:rtp:rtcp-fb:0' type='transport-cc'/>"
+                                   "<rtcp-fb-trr-int xmlns='urn:xmpp:jingle:apps:rtp:rtcp-fb:0' value='100'/>"
+                                   "</payload-type><payload-type id='0'/><rtcp-mux/>"
+                                   "<ssrc-group xmlns='urn:xmpp:jingle:apps:rtp:ssma:0' semantics='FID'>"
+                                   "<source ssrc='100'/><source ssrc='101'/></ssrc-group>"
+                                   "<source xmlns='urn:xmpp:jingle:apps:rtp:ssma:0' ssrc='100'>"
+                                   "<parameter name='cname' value='voice'/><parameter name='msid'/></source>"
+                                   "<source xmlns='urn:xmpp:jingle:apps:rtp:ssma:0' ssrc='101'/>"
+                                   "<rtp-hdrext xmlns='urn:xmpp:jingle:apps:rtp:rtp-hdrext:0' id='1' "
+                                   "uri='urn:ietf:params:rtp-hdrext:sdes:mid' senders='initiator'>"
+                                   "<parameter name='mode'/></rtp-hdrext>"
+                                   "<extmap-allow-mixed xmlns='urn:xmpp:jingle:apps:rtp:rtp-hdrext:0'/>"
+                                   "<future xmlns='urn:example:rtp:future' value='kept'/>");
     check(description && description->payloads.size() == 2, "valid description rejected");
     check(description->payloads.first().id == 111 && description->payloads.last().id == 0, "codec preference lost");
     check(description->payloads.first().clockrate == 48000 && description->payloads.first().channels == 2,
@@ -81,7 +80,8 @@ int main(int argc, char **argv)
     check(roundtrip && roundtrip->rtcpMux && roundtrip->feedback.size() == 1
               && roundtrip->payloads.first().feedback.size() == 1 && roundtrip->headerExtensions.size() == 1
               && roundtrip->sources.size() == 2 && roundtrip->sourceGroups.size() == 1
-              && roundtrip->extensions.size() == 1 && roundtrip->extensions.first().namespaceURI() == "urn:example:rtp:future",
+              && roundtrip->extensions.size() == 1
+              && roundtrip->extensions.first().namespaceURI() == "urn:example:rtp:future",
           "typed or opaque extensions lost on roundtrip");
 
     const auto boundaryIds = parse(
@@ -102,8 +102,7 @@ int main(int argc, char **argv)
 
     const QString fbNs = QStringLiteral("urn:xmpp:jingle:apps:rtp:rtcp-fb:0");
     check(!parse("<payload-type id='0'/><rtcp-fb xmlns='" + fbNs + "'/>")
-              && !parse("<payload-type id='0'/><rtcp-fb xmlns='" + fbNs
-                        + "' type='nack'><bad/></rtcp-fb>")
+              && !parse("<payload-type id='0'/><rtcp-fb xmlns='" + fbNs + "' type='nack'><bad/></rtcp-fb>")
               && !parse("<payload-type id='0'/><rtcp-fb-trr-int xmlns='" + fbNs + "'/>")
               && !parse("<payload-type id='0'/><rtcp-fb-trr-int xmlns='" + fbNs + "' value='-1'/>")
               && !parse("<payload-type id='0'/><rtcp-fb-trr-int xmlns='" + fbNs
@@ -113,17 +112,16 @@ int main(int argc, char **argv)
           "malformed RTCP feedback accepted");
 
     const QString hdrNs = QStringLiteral("urn:xmpp:jingle:apps:rtp:rtp-hdrext:0");
-    for (const auto &id : { QStringLiteral("0"), QStringLiteral("257"), QStringLiteral("4095"),
-                            QStringLiteral("4352") }) {
-        check(!parse("<payload-type id='0'/><rtp-hdrext xmlns='" + hdrNs + "' id='" + id
-                     + "' uri='urn:test'/>") ,
+    for (const auto &id :
+         { QStringLiteral("0"), QStringLiteral("257"), QStringLiteral("4095"), QStringLiteral("4352") }) {
+        check(!parse("<payload-type id='0'/><rtp-hdrext xmlns='" + hdrNs + "' id='" + id + "' uri='urn:test'/>"),
               "invalid RTP header-extension id accepted");
     }
     check(!parse("<payload-type id='0'/><rtp-hdrext xmlns='" + hdrNs + "' id='1'/>")
               && !parse("<payload-type id='0'/><rtp-hdrext xmlns='" + hdrNs
                         + "' id='1' uri='urn:test' senders='invalid'/>")
-              && !parse("<payload-type id='0'/><extmap-allow-mixed xmlns='" + hdrNs
-                        + "'/><extmap-allow-mixed xmlns='" + hdrNs + "'/>")
+              && !parse("<payload-type id='0'/><extmap-allow-mixed xmlns='" + hdrNs + "'/><extmap-allow-mixed xmlns='"
+                        + hdrNs + "'/>")
               && !parse("<payload-type id='0'/><rtp-hdrext xmlns='" + hdrNs
                         + "' id='1' uri='urn:test'><parameter/></rtp-hdrext>"),
           "malformed RTP header extension accepted");
@@ -131,10 +129,9 @@ int main(int argc, char **argv)
     const QString ssmaNs = QStringLiteral("urn:xmpp:jingle:apps:rtp:ssma:0");
     check(!parse("<payload-type id='0'/><source xmlns='" + ssmaNs + "'/>")
               && !parse("<payload-type id='0'/><source xmlns='" + ssmaNs + "' ssrc='4294967296'/>")
-              && !parse("<payload-type id='0'/><source xmlns='" + ssmaNs
-                        + "' ssrc='1'/><source xmlns='" + ssmaNs + "' ssrc='1'/>")
-              && !parse("<payload-type id='0'/><source xmlns='" + ssmaNs
-                        + "' ssrc='1'><parameter value='x'/></source>")
+              && !parse("<payload-type id='0'/><source xmlns='" + ssmaNs + "' ssrc='1'/><source xmlns='" + ssmaNs
+                        + "' ssrc='1'/>")
+              && !parse("<payload-type id='0'/><source xmlns='" + ssmaNs + "' ssrc='1'><parameter value='x'/></source>")
               && !parse("<payload-type id='0'/><ssrc-group xmlns='" + ssmaNs + "'><source ssrc='1'/></ssrc-group>")
               && !parse("<payload-type id='0'/><ssrc-group xmlns='" + ssmaNs
                         + "' semantics='FID'><source ssrc='1'/><source ssrc='1'/></ssrc-group>"),

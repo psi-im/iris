@@ -12,7 +12,7 @@ class ReentrantRejectSelector : public TestSelector {
 public:
     QSharedPointer<J::Transport> getNextTransport() override
     {
-        auto result = TestSelector::getNextTransport();
+        auto result   = TestSelector::getNextTransport();
         auto callback = std::move(onGetNext);
         if (callback)
             callback();
@@ -28,18 +28,18 @@ static void testRejectSkipsReentrantStaleSibling(Client &client)
                        J::Origin::Initiator);
 
     auto audioOld = makeTransport(session, J::Origin::Initiator, J::State::Pending, QStringLiteral("audio-old"));
-    auto audioFallback = makeTransport(session, J::Origin::Initiator, J::State::Created,
-                                       QStringLiteral("audio-fallback"));
+    auto audioFallback
+        = makeTransport(session, J::Origin::Initiator, J::State::Created, QStringLiteral("audio-fallback"));
     auto audioSelector = std::make_unique<ReentrantRejectSelector>();
     audioSelector->backupTransport(audioFallback);
     auto audioSelectorRaw = audioSelector.get();
-    auto audio = addApplication(session, QStringLiteral("audio"), J::Origin::Initiator, audioOld,
-                                std::move(audioSelector));
+    auto audio
+        = addApplication(session, QStringLiteral("audio"), J::Origin::Initiator, audioOld, std::move(audioSelector));
     audio->markReplaceInProgress();
 
     auto videoOld = makeTransport(session, J::Origin::Initiator, J::State::Pending, QStringLiteral("video-old"));
-    auto video = addApplication(session, QStringLiteral("video"), J::Origin::Initiator, videoOld,
-                                std::make_unique<TestSelector>());
+    auto video    = addApplication(session, QStringLiteral("video"), J::Origin::Initiator, videoOld,
+                                   std::make_unique<TestSelector>());
     video->markReplaceInProgress();
     auto videoNew = makeTransport(session, J::Origin::Initiator, J::State::Created, QStringLiteral("video-new"));
 
@@ -49,28 +49,27 @@ static void testRejectSkipsReentrantStaleSibling(Client &client)
     };
 
     QDomDocument doc;
-    const bool ok = session.updateFromXml(
+    const bool   ok = session.updateFromXml(
         J::Action::TransportReject,
         makeReplace(doc,
-                    { { QStringLiteral("audio"), J::Origin::Initiator, TestTransportManager::namespaceUri(),
-                        QStringLiteral("audio-rejected") },
-                      { QStringLiteral("video"), J::Origin::Initiator, TestTransportManager::namespaceUri(),
-                        QStringLiteral("video-stale-reject") } }));
+                      { { QStringLiteral("audio"), J::Origin::Initiator, TestTransportManager::namespaceUri(),
+                          QStringLiteral("audio-rejected") },
+                        { QStringLiteral("video"), J::Origin::Initiator, TestTransportManager::namespaceUri(),
+                          QStringLiteral("video-stale-reject") } }));
 
     check(ok, "reentrant stale sibling made transport-reject reject the whole batch");
     check(audio->transport().data() == audioFallback.data() && audio->replacePlanned(),
           "valid first transport-reject member did not select its fallback");
-    check(video->transport().data() == videoNew.data(),
-          "stale transport-reject changed the newer sibling transport");
+    check(video->transport().data() == videoNew.data(), "stale transport-reject changed the newer sibling transport");
     check(video->replacePlanned(), "stale transport-reject completed the newer sibling transaction");
 }
 
 int main(int argc, char **argv)
 {
-    QCoreApplication application(argc, argv);
-    QCA::Initializer qca;
+    QCoreApplication     application(argc, argv);
+    QCA::Initializer     qca;
     TestTransportManager transportManager;
-    Client client;
+    Client               client;
     client.jingleManager()->registerTransport(&transportManager);
 
     testRejectSkipsReentrantStaleSibling(client);

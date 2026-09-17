@@ -78,7 +78,7 @@ namespace Jingle {
         // association lifetime as if another content had joined it.
         class ConnectionMembership {
         public:
-            ConnectionMembership() = default;
+            ConnectionMembership()                                        = default;
             ConnectionMembership(const ConnectionMembership &)            = delete;
             ConnectionMembership &operator=(const ConnectionMembership &) = delete;
             ConnectionMembership(ConnectionMembership &&other) :
@@ -98,11 +98,11 @@ namespace Jingle {
             }
             ~ConnectionMembership() { reset(); }
 
-            explicit operator bool() const { return state_ && state_->connection; }
-            IceConnection *connection() const { return state_ ? state_->connection.data() : nullptr; }
-            quint64 associationId() const { return state_ ? state_->id : 0; }
-            const ContentKey &content() const { return content_; }
-            qsizetype membershipCount() const { return state_ ? state_->members.size() : 0; }
+            explicit             operator bool() const { return state_ && state_->connection; }
+            IceConnection       *connection() const { return state_ ? state_->connection.data() : nullptr; }
+            quint64              associationId() const { return state_ ? state_->id : 0; }
+            const ContentKey    &content() const { return content_; }
+            qsizetype            membershipCount() const { return state_ ? state_->members.size() : 0; }
             ConnectionGeneration generation() const
             {
                 return state_ && state_->connection ? state_->connection->generation : ConnectionGeneration {};

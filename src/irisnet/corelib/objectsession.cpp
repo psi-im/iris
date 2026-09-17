@@ -27,23 +27,23 @@
 
 namespace XMPP {
 namespace {
-const char *argumentName(const ObjectSessionArgument &arg)
-{
+    const char *argumentName(const ObjectSessionArgument &arg)
+    {
 #if QT_VERSION < QT_VERSION_CHECK(6, 5, 0)
-    return arg.name();
+        return arg.name();
 #else
-    return arg.name;
+        return arg.name;
 #endif
-}
+    }
 
-const void *argumentData(const ObjectSessionArgument &arg)
-{
+    const void *argumentData(const ObjectSessionArgument &arg)
+    {
 #if QT_VERSION < QT_VERSION_CHECK(6, 5, 0)
-    return arg.data();
+        return arg.data();
 #else
-    return arg.data;
+        return arg.data;
 #endif
-}
+    }
 } // namespace
 
 class ObjectSessionWatcherPrivate {
@@ -83,16 +83,12 @@ public:
             args.clear();
         }
 
-        bool setArgs(ObjectSessionArgument val0 = ObjectSessionArgument(),
-                     ObjectSessionArgument val1 = ObjectSessionArgument(),
-                     ObjectSessionArgument val2 = ObjectSessionArgument(),
-                     ObjectSessionArgument val3 = ObjectSessionArgument(),
-                     ObjectSessionArgument val4 = ObjectSessionArgument(),
-                     ObjectSessionArgument val5 = ObjectSessionArgument(),
-                     ObjectSessionArgument val6 = ObjectSessionArgument(),
-                     ObjectSessionArgument val7 = ObjectSessionArgument(),
-                     ObjectSessionArgument val8 = ObjectSessionArgument(),
-                     ObjectSessionArgument val9 = ObjectSessionArgument())
+        bool setArgs(
+            ObjectSessionArgument val0 = ObjectSessionArgument(), ObjectSessionArgument val1 = ObjectSessionArgument(),
+            ObjectSessionArgument val2 = ObjectSessionArgument(), ObjectSessionArgument val3 = ObjectSessionArgument(),
+            ObjectSessionArgument val4 = ObjectSessionArgument(), ObjectSessionArgument val5 = ObjectSessionArgument(),
+            ObjectSessionArgument val6 = ObjectSessionArgument(), ObjectSessionArgument val7 = ObjectSessionArgument(),
+            ObjectSessionArgument val8 = ObjectSessionArgument(), ObjectSessionArgument val9 = ObjectSessionArgument())
         {
             const char *arg_name[] = { argumentName(val0), argumentName(val1), argumentName(val2), argumentName(val3),
                                        argumentName(val4), argumentName(val5), argumentName(val6), argumentName(val7),

@@ -165,7 +165,7 @@ namespace {
             }
             if (matched < 0)
                 return false;
-            used[matched] = true;
+            used[matched]        = true;
             const auto offeredId = offer.headerExtensions.at(matched).id;
             if (isExtendedHeaderId(offeredId))
                 selectedExtendedIds.insert(offeredId);
@@ -190,8 +190,8 @@ namespace {
 
     bool compatible(const Description &offer, const Description &answer)
     {
-        if (offer.media != answer.media || (answer.rtcpMux && !offer.rtcpMux)
-            || !feedbackCompatible(offer, answer) || !headerExtensionsCompatible(offer, answer))
+        if (offer.media != answer.media || (answer.rtcpMux && !offer.rtcpMux) || !feedbackCompatible(offer, answer)
+            || !headerExtensionsCompatible(offer, answer))
             return false;
         for (const auto &selected : answer.payloads) {
             const PayloadType *offered = nullptr;

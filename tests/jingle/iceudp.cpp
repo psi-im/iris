@@ -1,11 +1,11 @@
+#include "jingle-ice-udp.h"
 #include <QCoreApplication>
 #include <QDebug>
-#include "jingle-ice-udp.h"
 
-using XMPP::Jingle::ICE::NS_ICE_UDP;
-using XMPP::Jingle::ICE::UdpTransportCodec;
 using XMPP::Jingle::ICE::iceUdpToInternal;
 using XMPP::Jingle::ICE::internalToIceUdp;
+using XMPP::Jingle::ICE::NS_ICE_UDP;
+using XMPP::Jingle::ICE::UdpTransportCodec;
 
 static void check(bool value, const char *message)
 {
@@ -22,21 +22,20 @@ static QDomElement xml(const QString &body)
 
 static std::optional<XMPP::Jingle::ICE::UdpTransportDescription> parse(const QString &body)
 {
-    return UdpTransportCodec::fromXml(
-        xml("<transport xmlns='urn:xmpp:jingle:transports:ice-udp:1' pwd='secret' ufrag='frag'>" + body
-            + "</transport>"));
+    return UdpTransportCodec::fromXml(xml(
+        "<transport xmlns='urn:xmpp:jingle:transports:ice-udp:1' pwd='secret' ufrag='frag'>" + body + "</transport>"));
 }
 
 int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
 
-    const auto description = parse(
-        "<candidate component='1' foundation='1' generation='0' id='host1' ip='192.0.2.1' network='0' "
-        "port='5000' priority='2130706431' protocol='udp' type='host'/>"
-        "<candidate component='1' foundation='2' generation='0' id='relay1' ip='192.0.2.2' port='5001' "
-        "priority='1677734911' protocol='udp' rel-addr='192.0.2.1' rel-port='5000' type='relay'/>"
-        "<fingerprint xmlns='urn:xmpp:jingle:apps:dtls:0' hash='sha-256' setup='actpass'>AA:BB</fingerprint>");
+    const auto description
+        = parse("<candidate component='1' foundation='1' generation='0' id='host1' ip='192.0.2.1' network='0' "
+                "port='5000' priority='2130706431' protocol='udp' type='host'/>"
+                "<candidate component='1' foundation='2' generation='0' id='relay1' ip='192.0.2.2' port='5001' "
+                "priority='1677734911' protocol='udp' rel-addr='192.0.2.1' rel-port='5000' type='relay'/>"
+                "<fingerprint xmlns='urn:xmpp:jingle:apps:dtls:0' hash='sha-256' setup='actpass'>AA:BB</fingerprint>");
     check(description && description->candidates.size() == 2, "valid ICE-UDP description rejected");
     check(description->candidates.first().network == 0 && description->candidates.last().network == -1,
           "optional network attribute changed");
@@ -79,10 +78,11 @@ int main(int argc, char **argv)
           "valid remote-candidate rejected");
 
     check(parse("").has_value(), "empty ICE-UDP transport rejected");
-    check(!UdpTransportCodec::fromXml(xml(
-              "<transport xmlns='urn:xmpp:jingle:transports:ice-udp:1'><candidate component='1' foundation='1' "
-              "generation='0' id='x' ip='192.0.2.1' port='5000' priority='1' protocol='udp' type='host'/></transport>")),
-          "candidate without credentials accepted");
+    check(
+        !UdpTransportCodec::fromXml(xml(
+            "<transport xmlns='urn:xmpp:jingle:transports:ice-udp:1'><candidate component='1' foundation='1' "
+            "generation='0' id='x' ip='192.0.2.1' port='5000' priority='1' protocol='udp' type='host'/></transport>")),
+        "candidate without credentials accepted");
     check(!parse("<candidate component='0' foundation='1' generation='0' id='x' ip='192.0.2.1' port='5000' "
                  "priority='1' protocol='udp' type='host'/>")
               && !parse("<candidate component='1' foundation='1' generation='256' id='x' ip='192.0.2.1' port='5000' "
@@ -98,17 +98,17 @@ int main(int argc, char **argv)
               && !parse("<candidate component='1' foundation='1' generation='0' id='x' ip='192.0.2.1' port='5000' "
                         "priority='1' protocol='udp' type='bogus'/>")
               && !parse("<candidate component='1' foundation='1' generation='0' id='x' ip='192.0.2.1' network='256' "
-                        "port='5000' priority='1' protocol='udp' type='host'/>") ,
+                        "port='5000' priority='1' protocol='udp' type='host'/>"),
           "invalid ICE-UDP candidate accepted");
 
     check(!parse("<candidate component='1' foundation='1' generation='0' id='same' ip='192.0.2.1' port='5000' "
                  "priority='2' protocol='udp' type='host'/>"
                  "<candidate component='1' foundation='2' generation='0' id='same' ip='192.0.2.2' port='5001' "
-                 "priority='1' protocol='udp' type='host'/>") ,
+                 "priority='1' protocol='udp' type='host'/>"),
           "duplicate candidate id accepted");
     check(!parse("<candidate component='1' foundation='1' generation='0' id='x' ip='192.0.2.1' port='5000' "
                  "priority='1' protocol='udp' type='host'/>"
-                 "<remote-candidate component='1' ip='192.0.2.2' port='5001'/>") ,
+                 "<remote-candidate component='1' ip='192.0.2.2' port='5001'/>"),
           "candidate and remote-candidate mixture accepted");
     check(!parse("<gathering-complete/>"), "XEP-0371 gathering-complete leaked into XEP-0176");
     check(!UdpTransportCodec::fromXml(xml("<transport xmlns='urn:xmpp:jingle:transports:ice:0'/>")).has_value(),

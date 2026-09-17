@@ -189,24 +189,24 @@ int main(int argc, char **argv)
     feedbackOffer.feedbackTrrInt = 100;
     feedbackOffer.payloads.first().feedback.append(feedback("transport-cc"));
     feedbackOffer.payloads.first().feedbackTrrInt = 50;
-    auto feedbackAnswer = feedbackOffer;
+    auto feedbackAnswer                           = feedbackOffer;
     feedbackAnswer.feedback.clear();
     feedbackAnswer.payloads.first().feedback.clear();
     check(answerResult(feedbackOffer, feedbackAnswer) == Result::Ok, "feedback subset rejected");
 
-    auto modifiedFeedback = feedbackOffer;
+    auto modifiedFeedback                     = feedbackOffer;
     modifiedFeedback.feedback.first().subtype = QStringLiteral("sli");
     check(answerResult(feedbackOffer, modifiedFeedback) == Result::IncompatibleAnswer,
           "modified description feedback accepted");
-    modifiedFeedback = feedbackOffer;
+    modifiedFeedback                                           = feedbackOffer;
     modifiedFeedback.feedback.first().parameters.first().value = QStringLiteral("slow");
     check(answerResult(feedbackOffer, modifiedFeedback) == Result::IncompatibleAnswer,
           "modified feedback parameter accepted");
-    modifiedFeedback = feedbackOffer;
+    modifiedFeedback                = feedbackOffer;
     modifiedFeedback.feedbackTrrInt = 101;
     check(answerResult(feedbackOffer, modifiedFeedback) == Result::IncompatibleAnswer,
           "modified description trr-int accepted");
-    modifiedFeedback = feedbackOffer;
+    modifiedFeedback                                 = feedbackOffer;
     modifiedFeedback.payloads.first().feedbackTrrInt = 51;
     check(answerResult(feedbackOffer, modifiedFeedback) == Result::IncompatibleAnswer,
           "modified payload trr-int accepted");
@@ -217,12 +217,11 @@ int main(int argc, char **argv)
 
     auto avpfOffer = makeOffer();
     avpfOffer.feedback.append(feedback("nack", "pli"));
-    auto avpfOnly = makeOffer();
+    auto avpfOnly           = makeOffer();
     avpfOnly.feedbackTrrInt = 0;
     check(answerResult(avpfOffer, avpfOnly) == Result::Ok, "XEP-0293 AVPF trr-int=0 fallback rejected");
-    check(answerResult(makeOffer(), avpfOnly) == Result::IncompatibleAnswer,
-          "unsolicited AVPF trr-int=0 accepted");
-    auto offeredTrr = avpfOffer;
+    check(answerResult(makeOffer(), avpfOnly) == Result::IncompatibleAnswer, "unsolicited AVPF trr-int=0 accepted");
+    auto offeredTrr           = avpfOffer;
     offeredTrr.feedbackTrrInt = 100;
     check(answerResult(offeredTrr, avpfOnly) == Result::IncompatibleAnswer,
           "offered trr-int was replaced by synthetic zero");
@@ -233,58 +232,58 @@ int main(int argc, char **argv)
     auto mid         = headerExtension(1, "urn:ietf:params:rtp-hdrext:sdes:mid");
     mid.parameters.append({ QStringLiteral("mode"), QStringLiteral("compact") });
     headerOffer.headerExtensions.append(mid);
-    headerOffer.extmapAllowMixed = true;
-    auto headerAnswer = headerOffer;
+    headerOffer.extmapAllowMixed                  = true;
+    auto headerAnswer                             = headerOffer;
     headerAnswer.headerExtensions.first().senders = Origin::Initiator;
-    headerAnswer.extmapAllowMixed                  = false;
+    headerAnswer.extmapAllowMixed                 = false;
     check(answerResult(headerOffer, headerAnswer) == Result::Ok, "header-extension sender downgrade rejected");
 
-    auto badHeader = headerAnswer;
+    auto badHeader                        = headerAnswer;
     badHeader.headerExtensions.first().id = 2;
     check(answerResult(headerOffer, badHeader) == Result::IncompatibleAnswer,
           "ordinary header-extension id remap accepted");
-    badHeader = headerAnswer;
+    badHeader                              = headerAnswer;
     badHeader.headerExtensions.first().uri = QStringLiteral("urn:example:unoffered");
     check(answerResult(headerOffer, badHeader) == Result::IncompatibleAnswer,
           "unoffered header-extension URI accepted");
-    badHeader = headerAnswer;
+    badHeader                                                   = headerAnswer;
     badHeader.headerExtensions.first().parameters.first().value = QStringLiteral("changed");
     check(answerResult(headerOffer, badHeader) == Result::IncompatibleAnswer,
           "modified header-extension parameter accepted");
-    badHeader = headerAnswer;
+    badHeader                                  = headerAnswer;
     badHeader.headerExtensions.first().senders = Origin::None;
     check(answerResult(headerOffer, badHeader) == Result::IncompatibleAnswer,
           "unsupported both-to-none sender downgrade accepted");
-    auto noMixedOffer = headerOffer;
+    auto noMixedOffer             = headerOffer;
     noMixedOffer.extmapAllowMixed = false;
-    auto addedMixed = headerAnswer;
-    addedMixed.extmapAllowMixed = true;
+    auto addedMixed               = headerAnswer;
+    addedMixed.extmapAllowMixed   = true;
     check(answerResult(noMixedOffer, addedMixed) == Result::IncompatibleAnswer,
           "unoffered extmap-allow-mixed accepted");
 
     auto directionalOffer = makeOffer();
     directionalOffer.headerExtensions.append(
         headerExtension(3, "urn:ietf:params:rtp-hdrext:ssrc-audio-level", Origin::Initiator));
-    auto directionalAnswer = directionalOffer;
+    auto directionalAnswer                             = directionalOffer;
     directionalAnswer.headerExtensions.first().senders = Origin::Responder;
     check(answerResult(directionalOffer, directionalAnswer) == Result::IncompatibleAnswer,
           "one-way header-extension direction was reversed");
 
     auto extendedOffer = makeOffer();
-    extendedOffer.headerExtensions = { headerExtension(4096, "urn:example:gps-string"),
-                                       headerExtension(4096, "urn:example:gps-binary") };
-    auto extendedAnswer = makeOffer();
+    extendedOffer.headerExtensions
+        = { headerExtension(4096, "urn:example:gps-string"), headerExtension(4096, "urn:example:gps-binary") };
+    auto extendedAnswer             = makeOffer();
     extendedAnswer.headerExtensions = { headerExtension(2, "urn:example:gps-string", Origin::Responder) };
     check(answerResult(extendedOffer, extendedAnswer) == Result::Ok, "extended header alternative remap rejected");
     auto tooManyAlternatives = extendedAnswer;
     tooManyAlternatives.headerExtensions.append(headerExtension(3, "urn:example:gps-binary"));
     check(answerResult(extendedOffer, tooManyAlternatives) == Result::IncompatibleAnswer,
           "multiple alternatives from one extended id accepted");
-    auto echoedExtended = makeOffer();
+    auto echoedExtended             = makeOffer();
     echoedExtended.headerExtensions = { headerExtension(4096, "urn:example:gps-binary") };
     check(answerResult(extendedOffer, echoedExtended) == Result::Ok, "extended capability echo rejected");
 
-    auto duplicateUsableIds = makeOffer();
+    auto duplicateUsableIds             = makeOffer();
     duplicateUsableIds.headerExtensions = { headerExtension(1, "urn:example:a"), headerExtension(1, "urn:example:b") };
     Negotiation invalidHeaderOffer;
     check(invalidHeaderOffer.setLocalOffer(duplicateUsableIds) == Result::InvalidDescription,
@@ -297,7 +296,7 @@ int main(int argc, char **argv)
     // are free to describe different local sources in the answer.
     auto sourceOffer = makeOffer();
     sourceOffer.sources.append(Source { 111, {} });
-    auto sourceAnswer = sourceOffer;
+    auto sourceAnswer    = sourceOffer;
     sourceAnswer.sources = { Source { 222, {} } };
     check(answerResult(sourceOffer, sourceAnswer) == Result::Ok, "independent peer SSRC source rejected");
 

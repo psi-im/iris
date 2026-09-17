@@ -456,25 +456,38 @@ namespace XMPP { namespace Jingle {
                     }
                     return true;
                 }
-                const auto tieBreak = session->tieBreaker()->resolveIncoming(jingle.action(), jingleEl);
+                QPointer<Session> sessionGuard(session);
+                const auto        tieBreak = session->tieBreaker()->resolveIncoming(jingle.action(), jingleEl);
+                if (!sessionGuard) {
+                    respondError(iq, Stanza::Error::ErrorType::Cancel, Stanza::Error::ErrorCond::ItemNotFound);
+                    return true;
+                }
+                if (tieBreak.error) {
+                    respondError(iq, *tieBreak.error);
+                    return true;
+                }
                 if (tieBreak.solution == TieBreaker::Solution::Break) {
                     respondTieBreak(iq);
                     return true;
                 }
 
-                QPointer<Session> sessionGuard(session);
-                const bool        applied = session->updateFromXml(jingle.action(), jingleEl);
-                if (sessionGuard) {
-                    sessionGuard->tieBreaker()->incomingFinished(
-                        tieBreak.id, applied ? TieBreaker::RemoteResult::Applied : TieBreaker::RemoteResult::Rejected);
-                }
+                const bool applied = session->updateFromXml(jingle.action(), jingleEl);
                 if (!applied) {
                     if (sessionGuard && sessionGuard->lastError())
                         respondError(iq, *sessionGuard->lastError());
                     else
                         respondError(iq, Stanza::Error::ErrorType::Cancel, Stanza::Error::ErrorCond::BadRequest);
-                    return true;
+                } else {
+                    auto resp = createIQ(client()->doc(), "result", fromStr, iq.attribute(QStringLiteral("id")));
+                    client()->send(resp);
                 }
+                // Recovery may start networking or destroy the Session. Publish
+                // the incoming outcome only after its IQ reply has been sent.
+                if (sessionGuard) {
+                    sessionGuard->tieBreaker()->incomingFinished(
+                        tieBreak.id, applied ? TieBreaker::RemoteResult::Applied : TieBreaker::RemoteResult::Rejected);
+                }
+                return true;
             }
 
             auto resp = createIQ(client()->doc(), "result", fromStr, iq.attribute(QStringLiteral("id")));
@@ -506,8 +519,8 @@ namespace XMPP { namespace Jingle {
 
         void respondError(const QDomElement &iq, const Stanza::Error &error)
         {
-            auto resp = createIQ(client()->doc(), "error", iq.attribute(QStringLiteral("from")),
-                                 iq.attribute(QStringLiteral("id")));
+            auto       resp   = createIQ(client()->doc(), "error", iq.attribute(QStringLiteral("from")),
+                                         iq.attribute(QStringLiteral("id")));
             const auto baseNS = client()->hasStream() ? client()->stream().baseNS() : QStringLiteral("jabber:client");
             resp.appendChild(error.toXml(*client()->doc(), baseNS));
             client()->send(resp);

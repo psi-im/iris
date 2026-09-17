@@ -42,18 +42,20 @@ public:
     void reset();
 
     bool isDeferred(QObject *obj, const char *method);
-    void defer(QObject *obj, const char *method, ObjectSessionArgument val0 = ObjectSessionArgument(),
+    void
+         defer(QObject *obj, const char *method, ObjectSessionArgument val0 = ObjectSessionArgument(),
                ObjectSessionArgument val1 = ObjectSessionArgument(), ObjectSessionArgument val2 = ObjectSessionArgument(),
                ObjectSessionArgument val3 = ObjectSessionArgument(), ObjectSessionArgument val4 = ObjectSessionArgument(),
                ObjectSessionArgument val5 = ObjectSessionArgument(), ObjectSessionArgument val6 = ObjectSessionArgument(),
                ObjectSessionArgument val7 = ObjectSessionArgument(), ObjectSessionArgument val8 = ObjectSessionArgument(),
                ObjectSessionArgument val9 = ObjectSessionArgument());
-    void deferExclusive(QObject *obj, const char *method, ObjectSessionArgument val0 = ObjectSessionArgument(),
-                        ObjectSessionArgument val1 = ObjectSessionArgument(), ObjectSessionArgument val2 = ObjectSessionArgument(),
-                        ObjectSessionArgument val3 = ObjectSessionArgument(), ObjectSessionArgument val4 = ObjectSessionArgument(),
-                        ObjectSessionArgument val5 = ObjectSessionArgument(), ObjectSessionArgument val6 = ObjectSessionArgument(),
-                        ObjectSessionArgument val7 = ObjectSessionArgument(), ObjectSessionArgument val8 = ObjectSessionArgument(),
-                        ObjectSessionArgument val9 = ObjectSessionArgument());
+    void deferExclusive(
+        QObject *obj, const char *method, ObjectSessionArgument val0 = ObjectSessionArgument(),
+        ObjectSessionArgument val1 = ObjectSessionArgument(), ObjectSessionArgument val2 = ObjectSessionArgument(),
+        ObjectSessionArgument val3 = ObjectSessionArgument(), ObjectSessionArgument val4 = ObjectSessionArgument(),
+        ObjectSessionArgument val5 = ObjectSessionArgument(), ObjectSessionArgument val6 = ObjectSessionArgument(),
+        ObjectSessionArgument val7 = ObjectSessionArgument(), ObjectSessionArgument val8 = ObjectSessionArgument(),
+        ObjectSessionArgument val9 = ObjectSessionArgument());
 
     void pause();
     void resume();

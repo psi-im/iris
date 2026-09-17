@@ -1,6 +1,6 @@
 # Native Jingle calls: план продолжения для нового чата с Sol
 
-Актуализировано 2026-09-13 по последнему аудиту. Это самостоятельное задание для продолжения существующей реализации, а не предложение спроектировать стек заново. Начать с проверки веток/коммитов через GitHub connector и CI evidence новых исправлений. Старые исправленные замечания не реализовывать повторно.
+Актуализировано 2026-09-17 по последнему аудиту. Это самостоятельное задание для продолжения существующей реализации, а не предложение спроектировать стек заново. Начать с проверки веток/коммитов через GitHub connector и CI evidence новых исправлений. Старые исправленные замечания не реализовывать повторно.
 
 ## 1. Контекст, репозитории и границы достоверности
 
@@ -22,7 +22,7 @@ Checkout и установка dependencies внутри CI job допустим
 | Репозиторий | Ветка | Проверенный диапазон |
 | --- | --- | --- |
 | psi-im/psi | ai/jingle-native-calls | 9421bd0e3df1008d2b3cb1783d945061035d6333 → c8821dbeb30096e5aca1462cb2e660ad3705a5ad |
-| psi-im/iris | jingle/async-media | ba784334f2ef480a3090f0e161341c5cdcbc252d → be3833e32afa56424965c390a564f628da64a9e1 |
+| psi-im/iris | jingle/async-media | Архитектурная сверка fb7678d088834830e58b8bd733018a8ef83f72d2; прежний аудит ba784334 → be3833e |
 | psi-im/psimedia | jingle/rtcp-session | ab15f6829be56921920188f2381feebdd9d9d0ca → b4139cbddde3d9439568f4d59cf0af390dd7432f |
 
 IRIS/PSI/MEDIA ниже означают корни GitHub репозиториев. Проверить remote heads перед
@@ -30,12 +30,24 @@ IRIS/PSI/MEDIA ниже означают корни GitHub репозитори�
 Iris subset/acceptance P0.1 уже опубликован: не просить пользователя публиковать его заново.
 QCA3 и libSRTP сохраняются, оснований менять crypto backend этот аудит не даёт.
 
-Старые P0 исправления не реализовывать повторно. Новые проблемы и verification gaps —
-в разделе 2. Source review не означает доказанную эксплуатацию каждой потенциальной гонки.
-Локально у аудитора недоступен gstreamer-app-1.0 development package: новые psimedia
-runtime regressions не запускались. Результаты Iris и точный объём проверки записаны в
-jingle-calls-interop.md. Новые GitHub CI runs в этом аудите не проверялись.
-Реальные peer-to-peer звонки по-прежнему не подтверждены.
+На 2026-09-17 поверх fb7678d локально реализованы T0 и Iris-части T1/T2/T3: полный suite 50/50
+прошёл (Qt 6.10.2, system QCA3, SRTP/SCTP enabled, последовательный CTest).
+Включены directionpolicy, directionoperation и sessioncallbacklifetime; реальные peer-to-peer
+звонки не выполнялись. Targeted ASan/UBSan/LSan для directionoperation также прошёл:
+инструментированы operation/controller/Application/TieBreaker, но не остальные units Iris/Qt.
+Изменения пока в worktree, не объявлять их опубликованными или проверенными GitHub CI.
+Psi audio adapter также реализован локально поверх c8821dbe: собран target avcall и прошли
+4/4 AvCall CTest entries (policy, audiodirection, backend_lifecycle, capability_refresh).
+Targeted ASan/UBSan/LSan для production adapter и его теста прошёл; Iris/Qt в этом конкретном
+прогоне не инструментированы. Backend tests используют fake provider, это не GStreamer live gate.
+Перед публикацией Psi изменений сначала нужен Iris commit с новым API и соответствующий
+submodule pin; текущий committed Iris HEAD ещё не содержит worktree T0–T3. Не публиковать
+Psi отдельно с несуществующим в pinned Iris API и не утверждать, что remote CI уже это проверил.
+Дополнительно исправлена обнаруженная LeakSanitizer утечка ExternalServiceDiscovery:
+это теперь QObject child своего Client. Проверка уничтожения включена в sessioncallbacklifetime.
+Это не новый полный аудит трёх репозиториев. GStreamer development package пользователь уже установил;
+отсутствие dependency больше не текущий блокер, но новых psimedia runtime results здесь нет.
+Live calls не подтверждены. Предыдущие Psi/psimedia findings сохраняют прежнюю область проверки.
 
 ### PR stack и CI
 
@@ -123,66 +135,157 @@ PRtpPacket::Type имеет underlying int, Rtp=0, Rtcp=1. Сохранены la
 - Late live input attach/detach/reattach и production sender regression добавлены (b4139cb).
   Это не закрытие всей privacy/hotplug/receive/A/V матрицы.
 
-### A1 [P1] Crossed content-modify не сходится к одному negotiated state
+### A1 — arbitration реализована; сначала T0 hardening, не новый framework
 
-Статус реализации 2026-09-14: arbitration вынесен в session-owned `Jingle::TieBreaker` с
-динамической регистрацией resolver-ов по `Jingle::Action`. Контракт resolver-а:
-`Continue`, `Break`, `Postpone`; все resolver-ы совпавшего action вызываются, итоговый приоритет
-`Break > Postpone > Continue`. `Postpone` привязан к конкретному outgoing IQ transaction и вызывает
-`retry()` только если этот локальный IQ завершился ошибкой; успешный IQ означает, что peer принял
-локальное предложение и recovery не нужен. `retry()` запускается после owner ACK/error callbacks
-и получает local/remote XML, local stanza error и outcome обработки remote action.
+Session-owned Jingle::TieBreaker в jingle-tiebreaker.{h,cpp} заменяет protocol-agnostic template.
+Application resolver для content-modify проверяет ContentKey и роль. Dispatcher/IQ-boundary
+tests уже существуют; больше не утверждать, что dispatcher не умеет tie-break.
+Transport-replace намеренно остаётся specialized handler.
 
-`content-modify` мигрирован первым consumer-ом на Application-level resolver по `(creator,name)`:
-initiator возвращает `Break`, responder — `Postpone`; повторная отправка использует актуальный
-Application intent, а не старый stanza snapshot. Dispatcher остаётся общей pre-parse точкой.
-`transport-replace` пока намеренно НЕ мигрирован: при переносе необходимо сохранить исторические
-sibling transport hints (`getAlikeTransport()`/`selectNextTransport(remoteHint)`), partial batch
-semantics и reentrancy guards. CI этого нового refactor-а считать закрывающим gate только после
-отдельного успешного run на актуальном head.
+Сохранить Continue/Break/Postpone и whole-IQ aggregate Break > Postpone > Continue.
+Postpone означает recovery opportunity после error, не откладывание incoming IQ и не replay.
+Success не вызывает tie-break retry, но не доказывает удовлетворение более нового intent.
+Текущий resolver retry лишь будит _requestedSenders; он не сливает желания в Both.
 
-IRIS/src/xmpp/xmpp-im/jingle-application.cpp, incomingContentModify и outgoing ACK;
-jingle-session.cpp, handleIncomingContentModify.
+**T0: реализовано локально — cancellation/reentrancy и arbitration bounds.**
+Добавлены pinned SharedState, cancellation epoch, stable snapshots, idempotent terminal outcomes,
+Session guards и IQ reply-before-recovery. clear/delete из resolve/retry и удаление Session
+через реальный JTPush покрыты regression. Лимиты: 64 resolutions, 4096 XML nodes/attributes,
+64 уровня, 256 Ki UTF-16 characters; превышение — отдельный wait/resource-constraint.
+Один active outgoing IQ остаётся контрактом Session scheduler (debug assertion).
+Также добавлен sessioncallbacklifetime: настоящий Session scheduler отправляет stanza в
+записывающий ClientStream без сети, настоящий JT обрабатывает IQ completion. Проверяется
+удаление Session из Application completion и из resolver retry. Standalone TieBreaker вместе
+с новым regression прошёл ASan/UBSan. Дополнительно directionpolicy прошёл ASan/UBSan/LSan
+с инструментированными DirectionController, Application и TieBreaker, включая удаление Pad
+из callback. Остальная статическая Iris/Qt не инструментирована: это не полный sanitizer CI.
+Дальнейшие adjacent проверки, не повторная реализация T0:
 
-При двух in-flight противоположных requests обе стороны применяют peer update, затем
-каждая успешным ACK восстанавливает собственное requested значение. Результат — разные
-senders без оставшегося update. Session dispatcher не проверяет конфликт content-modify.
-Новые тесты проверяют supersession, но не два peers с одновременным действием.
+- Полный sanitizer CI для Session/Application/controller и поддерживаемых Qt конфигураций.
+- Wire-order regression с завершением local IQ прямо во время incoming handling: recovery
+  обязан следовать за actual incoming reply, не только за boolean Applied.
+- Generic completion каждого surviving участника multi-content batch, в том числе resolver
+  Continue; корреляция с upcoming operation handles, не только Postpone.
+- Для transport migration сохранить bounded hints и не делать transport install внутри resolve.
 
-Решение: применить existing-session tie-break XEP-0166 §7.2.16 — initiator выигрывает.
-Разрешать конфликт до peer notification/изменения media policy, вернуть conflict/tie-break
-для проигрывающего действия. На responder проигравший ACK не должен перезаписать принятое
-решение initiator. Разделить проигравшую transaction и действительно более новый local intent,
-не стирать последний запрос и не устраивать бесконечный обмен contrary requests.
+Подробности и тестовая матрица: [Direction policy design decision](jingle-direction-policy.md).
 
-Добавить two-Session dispatcher-level regression, не только вызовы Application напрямую:
-оба роли, один и несколько contents, IQ success/error order, crossed identical/different
-directions, terminal/removal во время ACK. Проверить одинаковый итоговый state и packet gates.
-Ссылка: https://xmpp.org/extensions/xep-0166.html#def-action-tie
+### A2 — durable policy, finite operation и IQ attempt должны иметь разных владельцев
 
-В аудите временный Application-level reproducer с реальными ACK callbacks подтвердил
-divergence. Dispatcher-level отсутствие tie-break сверено по коду; two-peer runtime ещё
-не проверен. Перенести сценарий в постоянный integration test, не считать временный файл CI gate.
+Psi audioPolicyTarget не имеет generic failure completion. Решать по шагам:
 
-### A2 [P2] Psi policy target остаётся pending после IQ error
+1. **T1:** explicit attempt completion с request identity/revision, success/error/timeout/cancel.
+   Iris-часть реализована: requestSendersTracked, SendersAttemptResult, sendersAttemptFinished,
+   cancelQueuedSenders и sendersAttemptPending. requestSenders сохранён. Первая настоящая ACK
+   обновляет negotiated facts; duplicate/stale callback после завершения уже ничего не делает.
+   Тест contentmodifycompletion покрывает error/timeout/newer revision/reentrancy/cancel/delete.
+   Ещё требуется production Psi integration test; Iris green не закрывает зависание Psi policy.
+2. **T2:** RTP Pad-owned DirectionController, один policy writer от Psi плюс scoped constraint
+   tokens. Psi владеет device/permission/UI фактами, Iris не выбирает микрофоны. Application
+   queued target остаётся disposable attempt snapshot, не авторитетным user desire.
+   Минимальная Iris реализация уже в jingle-rtp-directions.{h,cpp}, getter на RTP::Pad,
+   немедленный RTP send gate в Application::allowsRtp. Policy status — живое состояние,
+   не finite operation. Three-proposal budget ограничивает автоматическую борьбу политик;
+   generic failure требует нового явного policy/constraint event, не busy retry.
+   directionpolicy проверяет обе роли, constraints/consent, superseded ACK, crossed actions
+   с обоими моментами reconcile относительно error, limit успешной борьбы с peer, recreation
+   content и удаление Pad/controller из scheduling callback. Не создавать второй controller.
+3. **T3:** finite DirectionOperation: per-content progress, Blocked(reason), deadline и one-shot
+   queued completion Succeeded/Failed/Cancelled/Superseded. Iris-часть реализована в
+   jingle-rtp-direction-operation.cpp, API в jingle-rtp-directions.h. Factory:
+   directionController()->requestLocalSending({{content, sending}, ...}, deadlineMs).
+   Не 1:1 с IQ; отмена/деструктор/таймаут наблюдателя не откатывают policy. Весь batch
+   валидируется до mutations; максимум 64 items и 32 pending handles, deadline по умолчанию
+   15 секунд. Policy/item содержат причины блокировки и typed failure + optional Stanza::Error.
+   directionoperation покрывает no-op/invalid batch, progress, supersede/late ACK, cancel,
+   blocked/recovery/deadline, generic error, capacity, recreation, session destruction при
+   удержанном Pad и синхронное удаление handle из callbacks. В Psi audio path подключён
+   через AvCallAudioDirection; старые pending state и прямой requestSenders удалены.
+4. **T4:** transport-replace resolver у Application/selector, переживающего замену Transport;
+   Pad scope только для group-level invariants.
+5. **T5:** отдельный staged transport payload API для malformed-batch atomicity.
 
-PSI/src/avcall/avcall.cpp: syncAudioDirection/applicationSendersChanged;
-avcallpolicy.h: shouldRequestSenders. IRIS/Application ACK callback.
+Обязательные design решения подробно изложены в
+[jingle-direction-policy.md](jingle-direction-policy.md); T0–T3 реализованы в Iris,
+а T4/T5 и дальнейшие integration gates остаются следующими шагами:
 
-Iris сбрасывает _requestedSenders после error неизменённого запроса, но не уведомляет Psi
-о завершении. audioPolicyTarget очищается только при совпадающем sendersChanged.
-Сценарий: receive-only → mic available → Both request → IQ error; повторная синхронизация
-с тем же desired Both подавляется, хотя Iris уже ничего не отправляет/не ждёт.
+- SetLocalSending и SetExactSenders различаются. Responder → Both после peer Initiator
+  корректно только для желания «отправлять самому», не для exact Responder target.
+- Consent/constraints закрывают local gate немедленно, не ждут ACK. Снятие device constraint
+  не возвращает отозванное разрешение. Не подменять durable user desire hardware-событием.
+- Не вводить global last-writer-wins или priority enum User/Recovery. Recovery — trigger
+  существующей policy. Для начала single writer + restrictive tokens достаточно.
+- Завершённый operation не хранит вечное желание и не воскресает. Cancellation не unsend IQ;
+  уничтожение observer handle не должно менять capture policy. Superseded завершает старое
+  наблюдение без silent rollback других contents; content identity включает incarnation.
+- Succeeded = выполнен predicate текущей revision, а не пришёл ACK. Невозможное желание
+  видно как Blocked/Failed; bounded retry, deadline и отсутствие ping-pong обязательны.
+- TieBreaker не знает logical operation groups: resolution group только связывает transaction,
+  remote outcome и независимо отзываемые registrations.
 
-Нужен explicit completion/failure contract с identity/revision запроса либо единый владелец
-pending intent. Нельзя сбрасывать более новый target при завершении старого. Определить
-bounded retry / новый user-device event / явную ошибку; не ретраить бесконечно на каждом
-capabilitiesChanged. Не выдавать requestSenders()==true за подтверждение peer.
-Тест должен связывать реальный Iris ACK callback с production policy/controller и проверять
-success, failure, timeout, supersession и повторный event. Pure boolean matrix недостаточна.
+#### Решения и открытые вопросы следующего этапа (не блокируют текущую разработку)
 
-Временный reproducer на реальном Iris callback + Psi AvCallPolicy подтвердил suppression
-после failure. Штатный policy.cpp отдельно проходит: комбинация уровней в нём не покрыта.
+- Текущий budget controller — три scheduled proposals на поколение policy/constraints.
+  Это консервативная защита от ping-pong, не требование XEP. При появлении реальной потребности
+  вынести в validated policy settings; не снимать ограничение ради успешного теста.
+- Satisfied относится к текущему предикату directions; это не подтверждение media connectivity.
+  До Connecting локальная proposal не считается согласованным успешным operation.
+- T3 выполнен: не создавать ещё один Intent/Operation framework. Handle — только finite
+  observer принятых policy revisions. Supersession не откатывает unaffected siblings,
+  finished вызывается один раз после установки всех snapshots. Ошибка item имеет приоритет
+  над supersession, а остальные Pending/Blocked items при прекращении batch observation
+  становятся Cancelled/ObservationEnded. Эти исходы не меняют durable policy.
+- Controller Policy и operation item уже сохраняют typed failure и optional signaling error;
+  constraint reason — диагностическая строка, не числовой приоритет policy writers.
+- Psi audio path мигрирован: audioPolicyTarget/audioDesiredWithCapture удалены, как и старые
+  shouldRequestSenders/reconcilePolicyTarget helpers. Один controller writer и device token
+  находятся в AvCallAudioDirection; не возвращать параллельный signaling policy path.
+  Начальную local-send preference брать из явного call/user intent; negotiated peer update
+  не должен становиться новым локальным consent. Для receive-only initial offer не включать
+  микрофон автоматически лишь потому, что captureAudioConsent разрешает его использование.
+- Передача local policy в Iris не отменяет синхронное выключение capture в psimedia. Packet
+  gate защищает отправку, но не индикатор микрофона и фактический сбор данных устройством.
+
+#### Production Psi integration: реализовано локально, remaining gates
+
+1. `src/avcall/avcall.cpp` использует `AvCallAudioDirection` из `avcallaudiodirection.{h,cpp}`
+   как adapter к существующему `RTP::Pad::directionController()`.
+   Не путать роль пользователя и wire mask: исходящий audio call явно желает local send;
+   принимаемый receive-only offer не создаёт такого желания автоматически. Решение принимать
+   при исходном call/accept action, а не при `sendersChangedByPeer`.
+2. Для принятого content уже передаётся начальное желание через requestLocalSending и хранится
+   finite handle. Для hotplug используется RAII constraint token с reason;
+   потеря устройства не заменяет durable желание на false. Возврат снимает лишь свой token.
+   Повторный capabilitiesChanged без изменения фактов не должен создавать revision/retry.
+3. `syncActiveTransmit` учитывает consent, реальное устройство, negotiated local bit
+   и controller gate. Локальный changed callback вызывает capture controls сразу, без ACK.
+   Не ограничиваться RTP packet dropping при живом capture pipeline.
+4. Adapter подписан на policyChanged и finished, хранит последний handle для чтения outcome.
+   Generic failure/timeout не должны оставлять pending target или порождать авто retry loop.
+   Наблюдатель может истечь при отсутствии устройства; его timeout не отзывает разрешение.
+   Новое явное действие или изменение constraint может запустить следующее наблюдение.
+5. Обход через прямой requestSenders для managed audio удалён. Peer notification обновляет
+   negotiated facts, но не выдаёт consent и не перезаписывает пользовательское желание.
+   Не расширять молча эту миграцию на camera/hold без определения их caller policy.
+6. `src/avcall/unittest/audiodirection.cpp` использует именно production adapter плюс реальные
+   Iris Application/Pad/DirectionController. Он покрывает error/timeout, receive-only,
+   loss/return с pending IQ, consent revoke, explicit retry после failure, recreated content
+   и reentrant adapter destruction. Fake Transport/Task дают signaling boundary без сети.
+   Это не полноценный тест AvCall UI или реального capture pipeline. Ubuntu CI regex включает
+   новый avcallaudiodirection_test; запуск CI и live capture пока не подтверждены.
+
+Осталось для A2 acceptance: cross-repo real-psimedia gate на точных heads и проверка реального
+звонка/микрофона. Отдельно нужна UI-подача failed/blocked operation (сейчас adapter сохраняет
+outcome, но не показывает новый диалог). Не завершать весь звонок из-за observation timeout:
+это не Session negotiation deadline. Camera/hold/permission UX не добавлять без отдельного
+определения их user policy. Следующий Iris implementation этап — T4 transport-replace resolver,
+после него отдельный T5 staged payload API; соответствующие safety gates ниже сохраняются.
+
+Transport migration сохраняет validated sibling hints getAlikeTransport/selectNextTransport,
+partial supported/unsupported outcomes и существующие reentrancy/identity regressions.
+Historical efficiency не оправдывает side effects от malformed sibling. T5 требует настоящего
+prepare/validate → staged update → identity/generation check → commit, не повторного вызова
+старого mutating update после формальной bool-проверки.
 
 ### A3 [P1 privacy, оставшийся старый gap] Live/file switch оставляет прежний capture source
 
@@ -514,7 +617,7 @@ flowchart TD
    конкретный run или действие пользователя, не объявлять отсутствие Qt локально блокером проекта.
 
 Локальные результаты аудитора Iris — полезная отдельная запись, но не замена CI для
-текущей cross-repo комбинации. Новые psimedia tests не запущены из-за отсутствующего development dependency; CI результаты предстоит подтвердить.
+текущей cross-repo комбинации. Новых psimedia runtime results в этом архитектурном review нет; CI результаты предстоит подтвердить.
 
 ### Production и ручная проверка
 
@@ -567,7 +670,13 @@ Performance измерять отдельно: media encoding CPU, SRTP packet p
 
 ## 8. Как выполнять и сдавать работу
 
-Начать с remote heads и CI evidence через connector. Подтвердить текущие CI gates; закрыть A1–A4 и verification gaps, не повторять опубликованные subset fixes. Затем P1a isolated runtime → P1b production worker → P1c native peer checks. P2 live BUNDLE, P3 JMI, P4 feedback/control, P5 recovery и P6 release выполняются по зависимостям наблюдённого peer. Не возвращаться к созданию уже существующих interfaces с нуля.
+Начать с remote heads и CI evidence через connector. Проверить, опубликован ли локальный
+checkpoint T0/T1/T2/T3 и Psi audio adapter, и не реализовывать их повторно. Следующий Iris
+этап — T4, а для A2 требуются оставшиеся cross-repo/live gates; параллельные policy owners не оставлять.
+A3/A4 в psimedia остаются отдельными задачами. T4/T5 вести отдельными ограниченными шагами,
+не повторять опубликованные subset fixes. Затем P1a isolated runtime → P1b production worker →
+P1c native peer checks. P2 live BUNDLE, P3 JMI, P4 feedback/control, P5 recovery и P6 release
+выполняются по зависимостям наблюдённого peer. Не создавать существующие interfaces заново.
 
 Каждый завершённый подпункт сопровождать:
 

@@ -29,22 +29,23 @@ int main(int argc, char **argv)
     QCoreApplication app(argc, argv);
 
     const QList<GroupNegotiation::Member> members { member("audio"), member("video"), member("screen") };
-    const QList<ContentGroup> offer { { QStringLiteral("BUNDLE"), { QStringLiteral("audio"), QStringLiteral("video") } } };
-    const QList<ContentGroup> answer { { QStringLiteral("BUNDLE"), { QStringLiteral("video"), QStringLiteral("audio") } } };
+    const QList<ContentGroup>             offer { { QStringLiteral("BUNDLE"),
+                                                    { QStringLiteral("audio"), QStringLiteral("video") } } };
+    const QList<ContentGroup>             answer { { QStringLiteral("BUNDLE"),
+                                                     { QStringLiteral("video"), QStringLiteral("audio") } } };
 
     auto plan = GroupNegotiation::initialPlan(members, offer, answer);
     check(plan && plan->readyToCommit(), "valid group plan was not committable");
 
     ConnectionRegistry registry;
-    auto transaction = ConnectionGroupTransaction::commit(*plan, registry);
+    auto               transaction = ConnectionGroupTransaction::commit(*plan, registry);
     check(transaction && transaction->size() == 3, "valid group plan did not commit all memberships");
 
     auto shared = transaction->connectionFor(members.at(0).content);
     auto video  = transaction->connectionFor(members.at(1).content);
     auto screen = transaction->connectionFor(members.at(2).content);
     check(shared && shared == video && shared != screen, "committed membership topology did not match the plan");
-    check(transaction->associationIdFor(members.at(0).content)
-              == transaction->associationIdFor(members.at(1).content)
+    check(transaction->associationIdFor(members.at(0).content) == transaction->associationIdFor(members.at(1).content)
               && transaction->associationIdFor(members.at(0).content)
                   != transaction->associationIdFor(members.at(2).content),
           "live association ids did not match planned grouping");

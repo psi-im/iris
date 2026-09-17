@@ -14,7 +14,7 @@ public:
 
     bool update(const QDomElement &el) override
     {
-        const bool ok = TestTransport::update(el);
+        const bool ok       = TestTransport::update(el);
         auto       callback = std::move(onUpdate);
         if (callback)
             callback();
@@ -32,40 +32,38 @@ static void testAcceptedTransportCannotCompleteNewerReplacement(Client &client)
     auto pad = session.transportPadFactory(TestTransportManager::namespaceUri());
     check(bool(pad), "test transport pad missing for self-reentrant transport-accept");
 
-    auto oldTransport = QSharedPointer<SelfReentrantUpdateTransport>::create(
-        pad, J::Origin::Initiator, QStringLiteral("old-local"));
+    auto oldTransport
+        = QSharedPointer<SelfReentrantUpdateTransport>::create(pad, J::Origin::Initiator, QStringLiteral("old-local"));
     oldTransport->forceState(J::State::Pending);
     auto app = addApplication(session, QStringLiteral("audio"), J::Origin::Initiator, oldTransport,
                               std::make_unique<TestSelector>());
     app->markReplaceInProgress();
 
-    auto newTransport = makeTransport(session, J::Origin::Initiator, J::State::Created,
-                                      QStringLiteral("new-local"));
+    auto newTransport = makeTransport(session, J::Origin::Initiator, J::State::Created, QStringLiteral("new-local"));
     oldTransport->onUpdate = [app, newTransport]() {
         check(app->setTransport(newTransport), "self-reentrant replacement selection failed");
     };
 
     QDomDocument doc;
-    const bool ok = session.updateFromXml(
+    const bool   ok = session.updateFromXml(
         J::Action::TransportAccept,
-        makeReplace(doc, { { QStringLiteral("audio"), J::Origin::Initiator,
-                             TestTransportManager::namespaceUri(), QStringLiteral("accepted-old") } }));
+        makeReplace(doc,
+                      { { QStringLiteral("audio"), J::Origin::Initiator, TestTransportManager::namespaceUri(),
+                          QStringLiteral("accepted-old") } }));
 
     check(ok, "valid transport-accept became an error after a newer local replacement was selected");
     check(app->transport().data() == newTransport.data(),
           "transport-accept restored or replaced the newer local transport");
-    check(app->replacePlanned(),
-          "transport-accept for the old transport completed the newer replacement transaction");
-    check(newTransport->starts() == 0,
-          "transport-accept for the old transport started the newer local transport");
+    check(app->replacePlanned(), "transport-accept for the old transport completed the newer replacement transaction");
+    check(newTransport->starts() == 0, "transport-accept for the old transport started the newer local transport");
 }
 
 int main(int argc, char **argv)
 {
-    QCoreApplication application(argc, argv);
-    QCA::Initializer qca;
+    QCoreApplication     application(argc, argv);
+    QCA::Initializer     qca;
     TestTransportManager transportManager;
-    Client client;
+    Client               client;
     client.jingleManager()->registerTransport(&transportManager);
 
     testAcceptedTransportCannotCompleteNewerReplacement(client);

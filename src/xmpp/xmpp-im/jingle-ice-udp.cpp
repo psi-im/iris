@@ -10,182 +10,182 @@ const QString NS_ICE_UDP = QStringLiteral("urn:xmpp:jingle:transports:ice-udp:1"
 
 namespace {
 
-QString elementName(const QDomElement &element)
-{
-    return element.localName().isEmpty() ? element.tagName() : element.localName();
-}
-
-bool fail(QString *error, const QString &message)
-{
-    if (error)
-        *error = message;
-    return false;
-}
-
-bool parseInteger(const QDomElement &element, const QString &name, qlonglong minimum, qlonglong maximum, int *result,
-                  QString *error, bool optional = false)
-{
-    if (!element.hasAttribute(name)) {
-        if (optional) {
-            *result = -1;
-            return true;
-        }
-        return fail(error, QStringLiteral("Missing %1 attribute").arg(name));
+    QString elementName(const QDomElement &element)
+    {
+        return element.localName().isEmpty() ? element.tagName() : element.localName();
     }
 
-    bool            ok    = false;
-    const qlonglong value = element.attribute(name).toLongLong(&ok);
-    if (!ok || value < minimum || value > maximum)
-        return fail(error, QStringLiteral("Invalid %1 attribute").arg(name));
-
-    *result = int(value);
-    return true;
-}
-
-bool parseAddress(const QDomElement &element, const QString &name, QHostAddress *result, QString *error,
-                  bool optional = false)
-{
-    if (!element.hasAttribute(name)) {
-        if (optional) {
-            *result = QHostAddress();
-            return true;
-        }
-        return fail(error, QStringLiteral("Missing %1 attribute").arg(name));
-    }
-
-    *result = QHostAddress(element.attribute(name));
-    if (result->isNull())
-        return fail(error, QStringLiteral("Invalid %1 attribute").arg(name));
-    return true;
-}
-
-bool validateCandidate(const UdpCandidate &candidate, QString *error)
-{
-    if (candidate.component < 1 || candidate.component > 255)
-        return fail(error, QStringLiteral("Invalid component attribute"));
-    if (candidate.foundation.isEmpty())
-        return fail(error, QStringLiteral("Missing foundation attribute"));
-    if (candidate.generation < 0 || candidate.generation > 255)
-        return fail(error, QStringLiteral("Invalid generation attribute"));
-    if (candidate.id.isEmpty())
-        return fail(error, QStringLiteral("Missing id attribute"));
-    if (candidate.ip.isNull())
-        return fail(error, QStringLiteral("Invalid ip attribute"));
-    if (candidate.network < -1 || candidate.network > 255)
-        return fail(error, QStringLiteral("Invalid network attribute"));
-    if (candidate.port < 1 || candidate.port > 65535)
-        return fail(error, QStringLiteral("Invalid port attribute"));
-    if (candidate.priority < 1)
-        return fail(error, QStringLiteral("Invalid priority attribute"));
-    if (candidate.protocol != QStringLiteral("udp"))
-        return fail(error, QStringLiteral("Unsupported ICE-UDP protocol"));
-    if (candidate.relPort < -1 || candidate.relPort == 0 || candidate.relPort > 65535)
-        return fail(error, QStringLiteral("Invalid rel-port attribute"));
-
-    static const QSet<QString> candidateTypes { QStringLiteral("host"), QStringLiteral("prflx"),
-                                                QStringLiteral("relay"), QStringLiteral("srflx") };
-    if (!candidateTypes.contains(candidate.type))
-        return fail(error, QStringLiteral("Unsupported ICE-UDP candidate type"));
-
-    return true;
-}
-
-bool validateRemoteCandidate(const UdpRemoteCandidate &candidate, QString *error)
-{
-    if (candidate.component < 1 || candidate.component > 255)
-        return fail(error, QStringLiteral("Invalid remote-candidate component"));
-    if (candidate.ip.isNull())
-        return fail(error, QStringLiteral("Invalid remote-candidate ip"));
-    if (candidate.port < 1 || candidate.port > 65535)
-        return fail(error, QStringLiteral("Invalid remote-candidate port"));
-    return true;
-}
-
-bool parseCandidate(const QDomElement &element, UdpCandidate *candidate, QString *error)
-{
-    if (!element.firstChildElement().isNull() || !element.text().trimmed().isEmpty())
-        return fail(error, QStringLiteral("ICE-UDP candidate must be empty"));
-
-    if (!parseInteger(element, QStringLiteral("component"), 1, 255, &candidate->component, error)
-        || !parseInteger(element, QStringLiteral("generation"), 0, 255, &candidate->generation, error)
-        || !parseAddress(element, QStringLiteral("ip"), &candidate->ip, error)
-        || !parseInteger(element, QStringLiteral("port"), 1, 65535, &candidate->port, error)
-        || !parseInteger(element, QStringLiteral("priority"), 1, std::numeric_limits<int>::max(),
-                         &candidate->priority, error)
-        || !parseInteger(element, QStringLiteral("network"), 0, 255, &candidate->network, error, true)
-        || !parseAddress(element, QStringLiteral("rel-addr"), &candidate->relAddr, error, true)
-        || !parseInteger(element, QStringLiteral("rel-port"), 1, 65535, &candidate->relPort, error, true)) {
+    bool fail(QString *error, const QString &message)
+    {
+        if (error)
+            *error = message;
         return false;
     }
 
-    candidate->foundation = element.attribute(QStringLiteral("foundation"));
-    candidate->id         = element.attribute(QStringLiteral("id"));
-    candidate->protocol   = element.attribute(QStringLiteral("protocol"));
-    candidate->type       = element.attribute(QStringLiteral("type"));
-    return validateCandidate(*candidate, error);
-}
+    bool parseInteger(const QDomElement &element, const QString &name, qlonglong minimum, qlonglong maximum,
+                      int *result, QString *error, bool optional = false)
+    {
+        if (!element.hasAttribute(name)) {
+            if (optional) {
+                *result = -1;
+                return true;
+            }
+            return fail(error, QStringLiteral("Missing %1 attribute").arg(name));
+        }
 
-bool parseRemoteCandidate(const QDomElement &element, UdpRemoteCandidate *candidate, QString *error)
-{
-    if (!element.firstChildElement().isNull() || !element.text().trimmed().isEmpty())
-        return fail(error, QStringLiteral("ICE-UDP remote-candidate must be empty"));
+        bool            ok    = false;
+        const qlonglong value = element.attribute(name).toLongLong(&ok);
+        if (!ok || value < minimum || value > maximum)
+            return fail(error, QStringLiteral("Invalid %1 attribute").arg(name));
 
-    if (!parseInteger(element, QStringLiteral("component"), 1, 255, &candidate->component, error)
-        || !parseAddress(element, QStringLiteral("ip"), &candidate->ip, error)
-        || !parseInteger(element, QStringLiteral("port"), 1, 65535, &candidate->port, error)) {
-        return false;
+        *result = int(value);
+        return true;
     }
-    return validateRemoteCandidate(*candidate, error);
-}
 
-QDomElement candidateToXml(QDomDocument &doc, const UdpCandidate &candidate)
-{
-    auto element = doc.createElementNS(NS_ICE_UDP, QStringLiteral("candidate"));
-    element.setAttribute(QStringLiteral("component"), candidate.component);
-    element.setAttribute(QStringLiteral("foundation"), candidate.foundation);
-    element.setAttribute(QStringLiteral("generation"), candidate.generation);
-    element.setAttribute(QStringLiteral("id"), candidate.id);
-    element.setAttribute(QStringLiteral("ip"), candidate.ip.toString());
-    if (candidate.network >= 0)
-        element.setAttribute(QStringLiteral("network"), candidate.network);
-    element.setAttribute(QStringLiteral("port"), candidate.port);
-    element.setAttribute(QStringLiteral("priority"), candidate.priority);
-    element.setAttribute(QStringLiteral("protocol"), candidate.protocol);
-    if (!candidate.relAddr.isNull())
-        element.setAttribute(QStringLiteral("rel-addr"), candidate.relAddr.toString());
-    if (candidate.relPort >= 0)
-        element.setAttribute(QStringLiteral("rel-port"), candidate.relPort);
-    element.setAttribute(QStringLiteral("type"), candidate.type);
-    return element;
-}
+    bool parseAddress(const QDomElement &element, const QString &name, QHostAddress *result, QString *error,
+                      bool optional = false)
+    {
+        if (!element.hasAttribute(name)) {
+            if (optional) {
+                *result = QHostAddress();
+                return true;
+            }
+            return fail(error, QStringLiteral("Missing %1 attribute").arg(name));
+        }
 
-QDomElement remoteCandidateToXml(QDomDocument &doc, const UdpRemoteCandidate &candidate)
-{
-    auto element = doc.createElementNS(NS_ICE_UDP, QStringLiteral("remote-candidate"));
-    element.setAttribute(QStringLiteral("component"), candidate.component);
-    element.setAttribute(QStringLiteral("ip"), candidate.ip.toString());
-    element.setAttribute(QStringLiteral("port"), candidate.port);
-    return element;
-}
-
-QDomElement internalCandidateToUdp(QDomDocument &doc, const QDomElement &candidate, QString *error)
-{
-    auto converted = doc.createElementNS(NS_ICE_UDP, QStringLiteral("candidate"));
-    static const QStringList attributes { QStringLiteral("component"), QStringLiteral("foundation"),
-                                          QStringLiteral("generation"), QStringLiteral("id"),
-                                          QStringLiteral("ip"), QStringLiteral("network"),
-                                          QStringLiteral("port"), QStringLiteral("priority"),
-                                          QStringLiteral("protocol"), QStringLiteral("rel-addr"),
-                                          QStringLiteral("rel-port"), QStringLiteral("type") };
-    for (const auto &attribute : attributes) {
-        if (candidate.hasAttribute(attribute))
-            converted.setAttribute(attribute, candidate.attribute(attribute));
+        *result = QHostAddress(element.attribute(name));
+        if (result->isNull())
+            return fail(error, QStringLiteral("Invalid %1 attribute").arg(name));
+        return true;
     }
-    UdpCandidate parsed;
-    if (!parseCandidate(converted, &parsed, error))
-        return {};
-    return converted;
-}
+
+    bool validateCandidate(const UdpCandidate &candidate, QString *error)
+    {
+        if (candidate.component < 1 || candidate.component > 255)
+            return fail(error, QStringLiteral("Invalid component attribute"));
+        if (candidate.foundation.isEmpty())
+            return fail(error, QStringLiteral("Missing foundation attribute"));
+        if (candidate.generation < 0 || candidate.generation > 255)
+            return fail(error, QStringLiteral("Invalid generation attribute"));
+        if (candidate.id.isEmpty())
+            return fail(error, QStringLiteral("Missing id attribute"));
+        if (candidate.ip.isNull())
+            return fail(error, QStringLiteral("Invalid ip attribute"));
+        if (candidate.network < -1 || candidate.network > 255)
+            return fail(error, QStringLiteral("Invalid network attribute"));
+        if (candidate.port < 1 || candidate.port > 65535)
+            return fail(error, QStringLiteral("Invalid port attribute"));
+        if (candidate.priority < 1)
+            return fail(error, QStringLiteral("Invalid priority attribute"));
+        if (candidate.protocol != QStringLiteral("udp"))
+            return fail(error, QStringLiteral("Unsupported ICE-UDP protocol"));
+        if (candidate.relPort < -1 || candidate.relPort == 0 || candidate.relPort > 65535)
+            return fail(error, QStringLiteral("Invalid rel-port attribute"));
+
+        static const QSet<QString> candidateTypes { QStringLiteral("host"), QStringLiteral("prflx"),
+                                                    QStringLiteral("relay"), QStringLiteral("srflx") };
+        if (!candidateTypes.contains(candidate.type))
+            return fail(error, QStringLiteral("Unsupported ICE-UDP candidate type"));
+
+        return true;
+    }
+
+    bool validateRemoteCandidate(const UdpRemoteCandidate &candidate, QString *error)
+    {
+        if (candidate.component < 1 || candidate.component > 255)
+            return fail(error, QStringLiteral("Invalid remote-candidate component"));
+        if (candidate.ip.isNull())
+            return fail(error, QStringLiteral("Invalid remote-candidate ip"));
+        if (candidate.port < 1 || candidate.port > 65535)
+            return fail(error, QStringLiteral("Invalid remote-candidate port"));
+        return true;
+    }
+
+    bool parseCandidate(const QDomElement &element, UdpCandidate *candidate, QString *error)
+    {
+        if (!element.firstChildElement().isNull() || !element.text().trimmed().isEmpty())
+            return fail(error, QStringLiteral("ICE-UDP candidate must be empty"));
+
+        if (!parseInteger(element, QStringLiteral("component"), 1, 255, &candidate->component, error)
+            || !parseInteger(element, QStringLiteral("generation"), 0, 255, &candidate->generation, error)
+            || !parseAddress(element, QStringLiteral("ip"), &candidate->ip, error)
+            || !parseInteger(element, QStringLiteral("port"), 1, 65535, &candidate->port, error)
+            || !parseInteger(element, QStringLiteral("priority"), 1, std::numeric_limits<int>::max(),
+                             &candidate->priority, error)
+            || !parseInteger(element, QStringLiteral("network"), 0, 255, &candidate->network, error, true)
+            || !parseAddress(element, QStringLiteral("rel-addr"), &candidate->relAddr, error, true)
+            || !parseInteger(element, QStringLiteral("rel-port"), 1, 65535, &candidate->relPort, error, true)) {
+            return false;
+        }
+
+        candidate->foundation = element.attribute(QStringLiteral("foundation"));
+        candidate->id         = element.attribute(QStringLiteral("id"));
+        candidate->protocol   = element.attribute(QStringLiteral("protocol"));
+        candidate->type       = element.attribute(QStringLiteral("type"));
+        return validateCandidate(*candidate, error);
+    }
+
+    bool parseRemoteCandidate(const QDomElement &element, UdpRemoteCandidate *candidate, QString *error)
+    {
+        if (!element.firstChildElement().isNull() || !element.text().trimmed().isEmpty())
+            return fail(error, QStringLiteral("ICE-UDP remote-candidate must be empty"));
+
+        if (!parseInteger(element, QStringLiteral("component"), 1, 255, &candidate->component, error)
+            || !parseAddress(element, QStringLiteral("ip"), &candidate->ip, error)
+            || !parseInteger(element, QStringLiteral("port"), 1, 65535, &candidate->port, error)) {
+            return false;
+        }
+        return validateRemoteCandidate(*candidate, error);
+    }
+
+    QDomElement candidateToXml(QDomDocument &doc, const UdpCandidate &candidate)
+    {
+        auto element = doc.createElementNS(NS_ICE_UDP, QStringLiteral("candidate"));
+        element.setAttribute(QStringLiteral("component"), candidate.component);
+        element.setAttribute(QStringLiteral("foundation"), candidate.foundation);
+        element.setAttribute(QStringLiteral("generation"), candidate.generation);
+        element.setAttribute(QStringLiteral("id"), candidate.id);
+        element.setAttribute(QStringLiteral("ip"), candidate.ip.toString());
+        if (candidate.network >= 0)
+            element.setAttribute(QStringLiteral("network"), candidate.network);
+        element.setAttribute(QStringLiteral("port"), candidate.port);
+        element.setAttribute(QStringLiteral("priority"), candidate.priority);
+        element.setAttribute(QStringLiteral("protocol"), candidate.protocol);
+        if (!candidate.relAddr.isNull())
+            element.setAttribute(QStringLiteral("rel-addr"), candidate.relAddr.toString());
+        if (candidate.relPort >= 0)
+            element.setAttribute(QStringLiteral("rel-port"), candidate.relPort);
+        element.setAttribute(QStringLiteral("type"), candidate.type);
+        return element;
+    }
+
+    QDomElement remoteCandidateToXml(QDomDocument &doc, const UdpRemoteCandidate &candidate)
+    {
+        auto element = doc.createElementNS(NS_ICE_UDP, QStringLiteral("remote-candidate"));
+        element.setAttribute(QStringLiteral("component"), candidate.component);
+        element.setAttribute(QStringLiteral("ip"), candidate.ip.toString());
+        element.setAttribute(QStringLiteral("port"), candidate.port);
+        return element;
+    }
+
+    QDomElement internalCandidateToUdp(QDomDocument &doc, const QDomElement &candidate, QString *error)
+    {
+        auto                     converted = doc.createElementNS(NS_ICE_UDP, QStringLiteral("candidate"));
+        static const QStringList attributes { QStringLiteral("component"),  QStringLiteral("foundation"),
+                                              QStringLiteral("generation"), QStringLiteral("id"),
+                                              QStringLiteral("ip"),         QStringLiteral("network"),
+                                              QStringLiteral("port"),       QStringLiteral("priority"),
+                                              QStringLiteral("protocol"),   QStringLiteral("rel-addr"),
+                                              QStringLiteral("rel-port"),   QStringLiteral("type") };
+        for (const auto &attribute : attributes) {
+            if (candidate.hasAttribute(attribute))
+                converted.setAttribute(attribute, candidate.attribute(attribute));
+        }
+        UdpCandidate parsed;
+        if (!parseCandidate(converted, &parsed, error))
+            return {};
+        return converted;
+    }
 
 } // namespace
 

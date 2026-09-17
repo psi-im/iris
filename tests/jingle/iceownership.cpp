@@ -55,12 +55,12 @@ int main(int argc, char **argv)
     independent.reset();
     check(!other, "independent connection leaked");
 
-    ConnectionRegistry registry;
-    ConnectionRegistry separateRegistry;
+    ConnectionRegistry       registry;
+    ConnectionRegistry       separateRegistry;
     const Jingle::ContentKey audioKey { QStringLiteral("audio"), Jingle::Origin::Initiator };
     const Jingle::ContentKey videoKey { QStringLiteral("video"), Jingle::Origin::Initiator };
     const Jingle::ContentKey screenKey { QStringLiteral("screen"), Jingle::Origin::Initiator };
-    auto audioMembership = registry.create(audioKey);
+    auto                     audioMembership = registry.create(audioKey);
     check(audioMembership && audioMembership.associationId() != 0 && audioMembership.content() == audioKey,
           "registry did not create the first membership");
     const auto associationId = audioMembership.associationId();
@@ -70,7 +70,7 @@ int main(int argc, char **argv)
     QPointer<IceConnection> associationGuard(audioMembership.connection());
     audioMembership.connection()->generation.iceGeneration = 7;
     audioMembership.connection()->generation.dtlsEpoch     = 11;
-    const auto beforeAttach = audioMembership.generation();
+    const auto beforeAttach                                = audioMembership.generation();
 
     auto videoMembership = registry.attach(associationId, videoKey);
     check(videoMembership && videoMembership.connection() == audioMembership.connection()

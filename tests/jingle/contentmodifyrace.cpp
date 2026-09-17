@@ -37,7 +37,7 @@ public:
     J::Session            *session() const override { return session_; }
     QString                ns() const override { return QStringLiteral("urn:iris:test:application"); }
     J::ApplicationManager *manager() const override { return nullptr; }
-    QString generateContentName(J::Origin) override { return QStringLiteral("audio"); }
+    QString                generateContentName(J::Origin) override { return QStringLiteral("audio"); }
 
 private:
     J::Session *session_;
@@ -47,18 +47,18 @@ class TestTransport : public J::Transport {
 public:
     TestTransport() : Transport({}, J::Origin::Initiator) { setState(J::State::Active); }
 
-    void prepare() override { }
-    void start() override { }
-    bool update(const QDomElement &) override { return true; }
-    bool hasUpdates() const override { return hasUpdates_; }
+    void                           prepare() override { }
+    void                           start() override { }
+    bool                           update(const QDomElement &) override { return true; }
+    bool                           hasUpdates() const override { return hasUpdates_; }
     J::OutgoingTransportInfoUpdate takeOutgoingUpdate(bool) override
     {
         hasUpdates_ = false;
         return {};
     }
-    bool isValid() const override { return true; }
-    J::TransportFeatures features() const override { return {}; }
-    J::Connection::Ptr addChannel(J::TransportFeatures, const QString &, int) override { return {}; }
+    bool                      isValid() const override { return true; }
+    J::TransportFeatures      features() const override { return {}; }
+    J::Connection::Ptr        addChannel(J::TransportFeatures, const QString &, int) override { return {}; }
     QList<J::Connection::Ptr> channels() const override { return {}; }
 
     bool hasUpdates_ = false;
@@ -68,7 +68,7 @@ class TestApplication : public J::Application {
 public:
     explicit TestApplication(J::Session *session, J::Origin senders = J::Origin::Both,
                              const QString &contentName = QStringLiteral("audio"),
-                             J::Origin creator = J::Origin::Initiator)
+                             J::Origin      creator     = J::Origin::Initiator)
     {
         _pad.reset(new TestPad(session));
         _contentName = contentName;
@@ -105,16 +105,16 @@ public:
     }
 
     const std::optional<Stanza::Error> &lastError() const override { return error_; }
-    J::Reason lastReason() const override { return {}; }
-    SetDescError setRemoteOffer(const QDomElement &) override { return Unparsed; }
-    SetDescError setRemoteAnswer(const QDomElement &) override { return Unparsed; }
-    QDomElement makeLocalOffer() override { return {}; }
-    QDomElement makeLocalAnswer() override { return {}; }
-    bool supportsContentModify() const override { return true; }
-    void prepare() override { }
-    void start() override { }
-    void remove(J::Reason::Condition, const QString &) override { }
-    void incomingRemove(const J::Reason &) override { }
+    J::Reason                           lastReason() const override { return {}; }
+    SetDescError                        setRemoteOffer(const QDomElement &) override { return Unparsed; }
+    SetDescError                        setRemoteAnswer(const QDomElement &) override { return Unparsed; }
+    QDomElement                         makeLocalOffer() override { return {}; }
+    QDomElement                         makeLocalAnswer() override { return {}; }
+    bool                                supportsContentModify() const override { return true; }
+    void                                prepare() override { }
+    void                                start() override { }
+    void                                remove(J::Reason::Condition, const QString &) override { }
+    void                                incomingRemove(const J::Reason &) override { }
 
 protected:
     void prepareTransport() override { }
@@ -165,8 +165,7 @@ static void acknowledge(const J::OutgoingUpdate &update, Task *result)
     callback(result);
 }
 
-static quint64 startContentModify(J::Session &session,
-                                  std::initializer_list<const J::OutgoingUpdate *> updates)
+static quint64 startContentModify(J::Session &session, std::initializer_list<const J::OutgoingUpdate *> updates)
 {
     return session.tieBreaker()->outgoingStarted(J::Action::ContentModify, payload(updates));
 }
@@ -208,8 +207,8 @@ static void crossedContentModify(Client &client, Task *success, Task *failure, J
           "initiator crossed request was not evaluated");
     check(responderApp->evaluateOutgoingUpdate().action == J::Action::ContentModify,
           "responder crossed request was not evaluated");
-    auto initiatorUpdate = initiatorApp->takeOutgoingUpdate();
-    auto responderUpdate = responderApp->takeOutgoingUpdate();
+    auto       initiatorUpdate      = initiatorApp->takeOutgoingUpdate();
+    auto       responderUpdate      = responderApp->takeOutgoingUpdate();
     const auto initiatorTransaction = startContentModify(initiator, { &initiatorUpdate });
     const auto responderTransaction = startContentModify(responder, { &responderUpdate });
 
@@ -272,8 +271,7 @@ int main(int argc, char **argv)
         check(pending.evaluateOutgoingUpdate().action == J::Action::NoAction,
               "pending direction leaked content-modify before Active");
         pending.setState(J::State::Connecting);
-        check(pending.evaluateOutgoingUpdate().action == J::Action::NoAction,
-              "Connecting emitted content-modify");
+        check(pending.evaluateOutgoingUpdate().action == J::Action::NoAction, "Connecting emitted content-modify");
         pending.setState(J::State::Active);
         check(updates == 2 && pending.evaluateOutgoingUpdate().action == J::Action::ContentModify,
               "queued direction was not woken on Active transition");
@@ -314,8 +312,8 @@ int main(int argc, char **argv)
     {
         J::Session initiator(client.jingleManager(), Jid(QStringLiteral("multi@example.test/device")),
                              J::Origin::Initiator);
-        auto audio = new TestApplication(&initiator, J::Origin::Both, QStringLiteral("audio"));
-        auto video = new TestApplication(&initiator, J::Origin::Both, QStringLiteral("video"));
+        auto       audio = new TestApplication(&initiator, J::Origin::Both, QStringLiteral("audio"));
+        auto       video = new TestApplication(&initiator, J::Origin::Both, QStringLiteral("video"));
         initiator.addContent(audio);
         initiator.addContent(video);
         audio->activate();
@@ -324,8 +322,8 @@ int main(int argc, char **argv)
               "multi-content direction request rejected");
         audio->evaluateOutgoingUpdate();
         video->evaluateOutgoingUpdate();
-        auto audioUpdate = audio->takeOutgoingUpdate();
-        auto videoUpdate = video->takeOutgoingUpdate();
+        auto       audioUpdate = audio->takeOutgoingUpdate();
+        auto       videoUpdate = video->takeOutgoingUpdate();
         const auto transaction = startContentModify(initiator, { &audioUpdate, &videoUpdate });
         check(initiator.tieBreaker()->resolveIncoming(J::Action::ContentModify, payload(audioUpdate)).solution
                   == J::TieBreaker::Solution::Break,

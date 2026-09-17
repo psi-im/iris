@@ -139,7 +139,7 @@ namespace {
         auto senders = parseSenders(element);
         if (!senders)
             return {};
-        result.senders = *senders;
+        result.senders  = *senders;
         auto parameters = parseExtensionParameters(element, NS_RTP_HDREXT);
         if (!parameters)
             return {};
@@ -164,7 +164,7 @@ namespace {
         if (!ssrc)
             return {};
         Source result;
-        result.ssrc = *ssrc;
+        result.ssrc     = *ssrc;
         auto parameters = parseExtensionParameters(element, NS_SSMA);
         if (!parameters)
             return {};
@@ -301,8 +301,7 @@ std::optional<Description> Description::fromXml(const QDomElement &element, bool
             if (!extension)
                 return {};
             result.headerExtensions.append(std::move(*extension));
-        } else if (child.namespaceURI() == NS_RTP_HDREXT
-                   && child.localName() == QLatin1String("extmap-allow-mixed")) {
+        } else if (child.namespaceURI() == NS_RTP_HDREXT && child.localName() == QLatin1String("extmap-allow-mixed")) {
             if (result.extmapAllowMixed || !child.firstChildElement().isNull())
                 return {};
             result.extmapAllowMixed = true;

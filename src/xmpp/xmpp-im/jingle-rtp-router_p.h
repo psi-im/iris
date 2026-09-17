@@ -26,7 +26,7 @@ public:
     struct Route {
         ContentKey    content;
         QByteArray    mid;
-        quint16       midExtensionId = 0; // 0 when MID was not negotiated for this content.
+        quint16       midExtensionId = 0;   // 0 when MID was not negotiated for this content.
         QSet<quint8>  incomingPayloadTypes; // Allowed PTs; only globally unique PTs are fallback routes.
         QSet<quint32> incomingSsrcs;
         QSet<quint32> localSsrcs; // Peer RTCP can refer to our local media source.
@@ -84,9 +84,9 @@ private:
     static quint32 read32(const QByteArray &data, int offset);
     static void    noteSsrc(const QHash<quint32, int> &mapping, quint32 ssrc, QSet<int> &routes);
 
-    std::optional<ParsedRtp> parseRtp(const QByteArray &packet) const;
-    bool                     collectRtcpRoutes(const QByteArray &packet, QSet<int> &routes) const;
-    bool                     payloadAllowed(int routeIndex, quint8 payloadType) const;
+    std::optional<ParsedRtp>    parseRtp(const QByteArray &packet) const;
+    bool                        collectRtcpRoutes(const QByteArray &packet, QSet<int> &routes) const;
+    bool                        payloadAllowed(int routeIndex, quint8 payloadType) const;
     std::optional<RoutedPacket> routed(int routeIndex, const QByteArray &packet, SrtpContext::Packet kind);
     std::optional<RoutedPacket> routedSharedRtcp(const QSet<int> &routeIndexes, const QByteArray &packet);
     void                        advanceRevision();

@@ -69,8 +69,8 @@ static void completeCrossed(J::Session &initiator, J::Session &responder, quint6
 static void checkInitiatorPacketGates(Client &client, J::Session &session, J::Origin senders, bool sending,
                                       bool receiving)
 {
-    auto pad = QSharedPointer<R::Pad>::create(client.jingleManager()->rtpManager(), &session,
-                                              std::shared_ptr<R::MediaProvider>(), QStringList());
+    auto           pad = QSharedPointer<R::Pad>::create(client.jingleManager()->rtpManager(), &session,
+                                                        std::shared_ptr<R::MediaProvider>(), QStringList());
     R::Application gate(pad, QStringLiteral("gate"), J::Origin::Responder, senders);
     check(gate.allowsRtp(true) == sending, "negotiated senders did not reach the RTP sending gate");
     check(gate.allowsRtp(false) == receiving, "negotiated senders did not reach the RTP receiving gate");
@@ -79,8 +79,8 @@ static void checkInitiatorPacketGates(Client &client, J::Session &session, J::Or
 static void crossedThroughDispatcher(J::Origin initiatorTarget, J::Origin responderTarget, bool responderIqFirst,
                                      bool responderResultFirst, bool verifyPacketGates)
 {
-    Client initiatorClient;
-    Client responderClient;
+    Client    initiatorClient;
+    Client    responderClient;
     const Jid initiatorJid(QStringLiteral("initiator@example.test/device"));
     const Jid responderJid(QStringLiteral("responder@example.test/device"));
 
@@ -112,20 +112,20 @@ static void crossedThroughDispatcher(J::Origin initiatorTarget, J::Origin respon
           "initiator dispatcher request was not evaluated");
     check(responderApp->evaluateOutgoingUpdate().action == J::Action::ContentModify,
           "responder dispatcher request was not evaluated");
-    auto initiatorUpdate = initiatorApp->takeOutgoingUpdate();
-    auto responderUpdate = responderApp->takeOutgoingUpdate();
+    auto       initiatorUpdate      = initiatorApp->takeOutgoingUpdate();
+    auto       responderUpdate      = responderApp->takeOutgoingUpdate();
     const auto initiatorTransaction = startContentModify(initiator, { &initiatorUpdate });
     const auto responderTransaction = startContentModify(responder, { &responderUpdate });
 
-    const auto initiatorWire = wireContent(initiatorUpdate);
-    const auto responderWire = wireContent(responderUpdate);
-    auto dispatchResponderDuplicate = [&]() {
+    const auto initiatorWire              = wireContent(initiatorUpdate);
+    const auto responderWire              = wireContent(responderUpdate);
+    auto       dispatchResponderDuplicate = [&]() {
         dispatchModify(initiatorClient, responderJid, initiatorSid, QStringLiteral("responder-duplicate"),
-                       { responderWire });
+                             { responderWire });
         check(!initiator.lastError().has_value(),
-              "initiator parsed the losing duplicate instead of taking the JTPush tie-break path");
+                    "initiator parsed the losing duplicate instead of taking the JTPush tie-break path");
         check(initiatorApp->senders() == J::Origin::Both && initiatorPeerUpdates == 0,
-              "losing responder content-modify mutated initiator state");
+                    "losing responder content-modify mutated initiator state");
     };
     auto dispatchInitiatorWinner = [&]() {
         dispatchModify(responderClient, initiatorJid, responderSid, QStringLiteral("initiator-winner"),
@@ -144,8 +144,8 @@ static void crossedThroughDispatcher(J::Origin initiatorTarget, J::Origin respon
 
     Result success(initiatorClient.rootTask(), true);
     Result failure(initiatorClient.rootTask(), false);
-    completeCrossed(initiator, responder, initiatorTransaction, responderTransaction, initiatorUpdate,
-                    responderUpdate, &success, &failure, responderResultFirst);
+    completeCrossed(initiator, responder, initiatorTransaction, responderTransaction, initiatorUpdate, responderUpdate,
+                    &success, &failure, responderResultFirst);
 
     check(initiatorApp->senders() == initiatorTarget && responderApp->senders() == initiatorTarget,
           "dispatcher-level crossed content-modify did not converge to initiator state");
@@ -164,8 +164,8 @@ static void crossedThroughDispatcher(J::Origin initiatorTarget, J::Origin respon
 
 static void multiContentThroughDispatcher()
 {
-    Client initiatorClient;
-    Client responderClient;
+    Client    initiatorClient;
+    Client    responderClient;
     const Jid initiatorJid(QStringLiteral("multi-initiator@example.test/device"));
     const Jid responderJid(QStringLiteral("multi-responder@example.test/device"));
 
@@ -197,10 +197,10 @@ static void multiContentThroughDispatcher()
               && rv->evaluateOutgoingUpdate().action == J::Action::ContentModify,
           "multi-content request was not evaluated as content-modify");
 
-    auto iau = ia->takeOutgoingUpdate();
-    auto ivu = iv->takeOutgoingUpdate();
-    auto rau = ra->takeOutgoingUpdate();
-    auto rvu = rv->takeOutgoingUpdate();
+    auto       iau                  = ia->takeOutgoingUpdate();
+    auto       ivu                  = iv->takeOutgoingUpdate();
+    auto       rau                  = ra->takeOutgoingUpdate();
+    auto       rvu                  = rv->takeOutgoingUpdate();
     const auto initiatorTransaction = startContentModify(initiator, { &iau, &ivu });
     const auto responderTransaction = startContentModify(responder, { &rau, &rvu });
 
@@ -221,14 +221,13 @@ static void multiContentThroughDispatcher()
 
     check(ia->senders() == J::Origin::Initiator && ra->senders() == J::Origin::Initiator,
           "multi-content audio did not converge");
-    check(iv->senders() == J::Origin::None && rv->senders() == J::Origin::None,
-          "multi-content video did not converge");
+    check(iv->senders() == J::Origin::None && rv->senders() == J::Origin::None, "multi-content video did not converge");
 }
 
 static void deletionWhileIqPending()
 {
-    Client initiatorClient;
-    Client responderClient;
+    Client    initiatorClient;
+    Client    responderClient;
     const Jid initiatorJid(QStringLiteral("delete-initiator@example.test/device"));
     const Jid responderJid(QStringLiteral("delete-responder@example.test/device"));
 
@@ -258,14 +257,14 @@ static void deletionWhileIqPending()
     iv->evaluateOutgoingUpdate();
     ra->evaluateOutgoingUpdate();
     rv->evaluateOutgoingUpdate();
-    auto iau = ia->takeOutgoingUpdate();
-    auto ivu = iv->takeOutgoingUpdate();
-    auto rau = ra->takeOutgoingUpdate();
-    auto rvu = rv->takeOutgoingUpdate();
+    auto                     iau = ia->takeOutgoingUpdate();
+    auto                     ivu = iv->takeOutgoingUpdate();
+    auto                     rau = ra->takeOutgoingUpdate();
+    auto                     rvu = rv->takeOutgoingUpdate();
     const QList<WireContent> initiatorWire { wireContent(iau), wireContent(ivu) };
     const QList<WireContent> responderWire { wireContent(rau), wireContent(rvu) };
-    const auto initiatorTransaction = startContentModify(initiator, { &iau, &ivu });
-    const auto responderTransaction = startContentModify(responder, { &rau, &rvu });
+    const auto               initiatorTransaction = startContentModify(initiator, { &iau, &ivu });
+    const auto               responderTransaction = startContentModify(responder, { &rau, &rvu });
 
     // Session::doStep stores callbacks behind QPointer<Application>. Clearing the
     // callback here models that skip after the Application disappears while the IQ
@@ -300,8 +299,8 @@ static void deletionWhileIqPending()
 
 static void postIqActionIsNotTieBroken()
 {
-    Client client;
-    const Jid peer(QStringLiteral("later-peer@example.test/device"));
+    Client     client;
+    const Jid  peer(QStringLiteral("later-peer@example.test/device"));
     J::Session session(client.jingleManager(), peer, J::Origin::Initiator);
     const auto sid = client.jingleManager()->registerSession(&session);
 
@@ -310,13 +309,12 @@ static void postIqActionIsNotTieBroken()
     content->activate();
     check(content->requestSenders(J::Origin::Responder), "post-IQ local request rejected");
     content->evaluateOutgoingUpdate();
-    auto update = content->takeOutgoingUpdate();
+    auto       update      = content->takeOutgoingUpdate();
     const auto transaction = startContentModify(session, { &update });
 
-    bool dispatched = false;
+    bool dispatched  = false;
     int  peerUpdates = 0;
-    QObject::connect(content, &J::Application::sendersChangedByPeer, content,
-                     [&](J::Origin) { ++peerUpdates; });
+    QObject::connect(content, &J::Application::sendersChangedByPeer, content, [&](J::Origin) { ++peerUpdates; });
     QObject::connect(content, &J::Application::sendersChanged, content, [&](J::Origin senders) {
         if (senders != J::Origin::Responder || dispatched)
             return;
@@ -339,6 +337,29 @@ static void postIqActionIsNotTieBroken()
           "post-IQ peer content-modify did not replace the completed local direction");
 }
 
+static void deletingSessionFromResolver()
+{
+    Client     client;
+    const Jid  peer(QStringLiteral("deletion@example.test/device"));
+    auto       session = std::make_unique<J::Session>(client.jingleManager(), peer, J::Origin::Initiator);
+    const auto sid     = client.jingleManager()->registerSession(session.get());
+    class Deleter : public J::TieBreaker::Resolver {
+    public:
+        std::function<void()>   destroy;
+        J::TieBreaker::Solution resolve(const QDomElement &, const QDomElement &) override
+        {
+            destroy();
+            return J::TieBreaker::Solution::Continue;
+        }
+    } resolver;
+    resolver.destroy  = [&] { session.reset(); };
+    auto registration = session->tieBreaker()->registerResolver(J::Action::ContentModify, &resolver);
+    session->tieBreaker()->outgoingStarted(J::Action::ContentModify, client.doc()->createElement("jingle"));
+    dispatchModify(client, peer, sid, QStringLiteral("delete-from-resolve"),
+                   { { QStringLiteral("initiator"), QStringLiteral("audio"), QStringLiteral("none") } });
+    check(!session, "resolver did not delete the Session");
+}
+
 int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
@@ -348,16 +369,17 @@ int main(int argc, char **argv)
     // IQ-result orderings must all converge to the initiator's action.
     for (const bool responderIqFirst : { false, true }) {
         for (const bool responderResultFirst : { false, true }) {
-            crossedThroughDispatcher(J::Origin::Initiator, J::Origin::Responder, responderIqFirst,
-                                     responderResultFirst, !responderIqFirst && !responderResultFirst);
-            crossedThroughDispatcher(J::Origin::Responder, J::Origin::Responder, responderIqFirst,
-                                     responderResultFirst, false);
+            crossedThroughDispatcher(J::Origin::Initiator, J::Origin::Responder, responderIqFirst, responderResultFirst,
+                                     !responderIqFirst && !responderResultFirst);
+            crossedThroughDispatcher(J::Origin::Responder, J::Origin::Responder, responderIqFirst, responderResultFirst,
+                                     false);
         }
     }
 
     multiContentThroughDispatcher();
     deletionWhileIqPending();
     postIqActionIsNotTieBroken();
+    deletingSessionFromResolver();
 
     qInfo("Dispatcher-level crossed content-modify regressions passed");
     return 0;

@@ -24,6 +24,7 @@
 
 #include <QPointer>
 #include <QTimer>
+#include <utility>
 
 namespace XMPP { namespace Jingle {
 
@@ -50,8 +51,8 @@ namespace XMPP { namespace Jingle {
 
     class Application::ContentModifyTieBreakResolver : public TieBreaker::Resolver {
     public:
-        explicit ContentModifyTieBreakResolver(Application *application) : application_(application),
-            key_(application->_contentName, application->_creator)
+        explicit ContentModifyTieBreakResolver(Application *application) :
+            application_(application), key_(application->_contentName, application->_creator)
         {
         }
 
@@ -125,7 +126,7 @@ namespace XMPP { namespace Jingle {
         _senders = senders;
 
         QPointer<Application> guard(this);
-        emit sendersChanged(senders);
+        emit                  sendersChanged(senders);
         if (!guard)
             return;
         emit sendersChangedByPeer(senders);
@@ -140,13 +141,26 @@ namespace XMPP { namespace Jingle {
         }
     }
 
-    bool Application::requestSenders(Origin senders)
+    bool Application::requestSenders(Origin senders) { return requestSendersTracked(senders) != 0; }
+
+    quint64 Application::requestSendersTracked(Origin senders)
     {
         if (!supportsContentModify() || !isValidSenders(senders) || _state >= State::Finishing)
-            return false;
+            return 0;
+
+        const auto revision = ++_sendersRequestRevision;
 
         if (!_sendersStateConnection) {
+            qRegisterMetaType<SendersAttemptResult>();
             _sendersStateConnection = connect(this, &Application::stateChanged, this, [this](State state) {
+                if (state >= State::Finishing) {
+                    _requestedSenders.reset();
+                    _sendersUpdateInFlight.reset();
+                    const auto attempt = std::exchange(_sendersAttempt, std::nullopt);
+                    if (attempt)
+                        emit sendersAttemptFinished(*attempt); // default outcome: Cancelled
+                    return;
+                }
                 if (state == State::Active && _requestedSenders && !_sendersUpdateInFlight)
                     emit updated();
             });
@@ -161,7 +175,7 @@ namespace XMPP { namespace Jingle {
                 _senders = senders;
                 emit sendersChanged(senders);
             }
-            return true;
+            return revision;
         }
 
         // If another direction change is already in flight, asking for the
@@ -169,13 +183,21 @@ namespace XMPP { namespace Jingle {
         // in-flight request once its IQ result arrives.
         if (!_sendersUpdateInFlight && _senders == senders) {
             _requestedSenders.reset();
-            return true;
+            return revision;
         }
         if (_requestedSenders && *_requestedSenders == senders)
-            return true;
+            return revision;
 
         _requestedSenders = senders;
         emit updated();
+        return revision;
+    }
+
+    bool Application::cancelQueuedSenders(quint64 revision)
+    {
+        if (!revision || revision != _sendersRequestRevision)
+            return false;
+        _requestedSenders.reset();
         return true;
     }
 
@@ -417,28 +439,51 @@ namespace XMPP { namespace Jingle {
             // for every direction here.
             contentEl.setAttribute(QLatin1String("senders"), sendersAttribute(requested));
             _sendersUpdateInFlight = requested;
+            const auto attemptId   = ++_nextSendersAttempt;
+            const auto revision    = _sendersRequestRevision;
+            _sendersAttempt        = SendersAttemptResult { attemptId, revision, requested };
             return OutgoingUpdate { updates,
-                                    [this, requested](Task *task) {
+                                    [this, guard = QPointer<Application>(this), requested, attemptId,
+                                     revision](Task *task) {
+                                        if (!guard || !_sendersAttempt || _sendersAttempt->id != attemptId)
+                                            return; // deletion, cancellation or duplicate/stale completion
                                         const bool success   = task && task->success();
                                         const bool postponed = _contentModifyTieBreakRegistration.isPostponed();
-                                        _sendersUpdateInFlight.reset();
-
-                                        if (success && _senders != requested) {
-                                            _senders = requested;
-                                            QPointer<Application> guard(this);
-                                            emit sendersChanged(requested);
-                                            if (!guard)
-                                                return;
+                                        auto       result    = *_sendersAttempt;
+                                        result.outcome       = success ? SendersAttemptResult::Outcome::Accepted
+                                                                       : SendersAttemptResult::Outcome::Rejected;
+                                        if (!success)
+                                            result.error = task ? task->error() : Stanza::Error();
+                                        if (task && !success && task->statusCode() == Task::ErrTimeout) {
+                                            result.outcome = SendersAttemptResult::Outcome::TimedOut;
+                                            result.error   = Stanza::Error(Stanza::Error::ErrorType::Wait,
+                                                                           Stanza::Error::ErrorCond::RemoteServerTimeout);
+                                        } else if (!task || (!success && task->statusCode() == Task::ErrDisc)) {
+                                            result.outcome = SendersAttemptResult::Outcome::Cancelled;
                                         }
+                                        _sendersAttempt.reset();
+                                        _sendersUpdateInFlight.reset();
+                                        const bool changed = success && _senders != requested;
+                                        if (success)
+                                            _senders = requested;
 
                                         // A generic failure drops an unchanged request as before. A
                                         // postponed crossed action keeps its local intent until TieBreaker
                                         // calls retry() after this owner callback has fully completed.
-                                        if (!success && !postponed && _requestedSenders
-                                            && *_requestedSenders == requested)
+                                        if (!success && !postponed && _sendersRequestRevision == revision)
                                             _requestedSenders.reset();
                                         if (_requestedSenders && *_requestedSenders == _senders)
                                             _requestedSenders.reset();
+
+                                        // Publish only after cleanup: callbacks may enqueue a newer
+                                        // revision, finish the content or delete it synchronously.
+                                        if (changed)
+                                            emit sendersChanged(requested);
+                                        if (!guard)
+                                            return;
+                                        emit sendersAttemptFinished(result);
+                                        if (!guard || _state >= State::Finishing)
+                                            return;
                                         if (_requestedSenders && !postponed)
                                             emit updated();
                                     } };
@@ -453,7 +498,7 @@ namespace XMPP { namespace Jingle {
         // its callback is a reentrant boundary and may install a newer replacement.
         case Action::TransportReplace: {
             Q_ASSERT(_transport->hasUpdates());
-            const auto replacement = _transport.toWeakRef();
+            const auto replacement             = _transport.toWeakRef();
             std::tie(transportEl, transportCB) = wrapOutgoingTransportUpdate();
             contentEl.appendChild(transportEl);
             if (_pendingTransportReplace == PendingTransportReplace::Planned)
@@ -487,7 +532,7 @@ namespace XMPP { namespace Jingle {
         // instance that produced this stanza, not whatever _transport points to later.
         case Action::TransportAccept: {
             Q_ASSERT(_transport->hasUpdates());
-            const auto accepted = _transport.toWeakRef();
+            const auto accepted                = _transport.toWeakRef();
             std::tie(transportEl, transportCB) = wrapOutgoingTransportUpdate();
             contentEl.appendChild(transportEl);
             return OutgoingUpdate { updates,
@@ -599,7 +644,7 @@ namespace XMPP { namespace Jingle {
         if (_pendingTransportReplace != PendingTransportReplace::InProgress || !_transport)
             return false;
 
-        const auto expected = _transport;
+        const auto            expected = _transport;
         QPointer<Application> guard(this);
         if (!expected->update(el))
             return false;

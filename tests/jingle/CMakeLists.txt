@@ -32,6 +32,23 @@ add_executable(jingle_contentmodifyiqboundary_test contentmodifyiqboundary.cpp)
 target_link_libraries(jingle_contentmodifyiqboundary_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
     Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
 add_test(NAME jingle_contentmodify_iq_boundary COMMAND jingle_contentmodifyiqboundary_test)
+add_executable(jingle_contentmodifycompletion_test contentmodifycompletion.cpp)
+target_link_libraries(jingle_contentmodifycompletion_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
+    Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
+add_test(NAME jingle_contentmodify_completion COMMAND jingle_contentmodifycompletion_test)
+add_executable(jingle_directionpolicy_test directionpolicy.cpp)
+target_link_libraries(jingle_directionpolicy_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
+    Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
+add_test(NAME jingle_directionpolicy COMMAND jingle_directionpolicy_test)
+add_executable(jingle_directionoperation_test directionoperation.cpp)
+target_link_libraries(jingle_directionoperation_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
+    Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
+add_test(NAME jingle_directionoperation COMMAND jingle_directionoperation_test)
+set_tests_properties(jingle_directionoperation PROPERTIES TIMEOUT 10)
+add_executable(jingle_sessioncallbacklifetime_test sessioncallbacklifetime.cpp)
+target_link_libraries(jingle_sessioncallbacklifetime_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
+    Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
+add_test(NAME jingle_sessioncallback_lifetime COMMAND jingle_sessioncallbacklifetime_test)
 add_executable(jingle_contentmodifydispatcher_test contentmodifydispatcher.cpp)
 target_link_libraries(jingle_contentmodifydispatcher_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
     Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)

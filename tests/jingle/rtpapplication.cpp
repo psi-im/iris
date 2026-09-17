@@ -278,7 +278,7 @@ int main(int argc, char **argv)
         check(!audio->makeLocalAnswer().isNull(), "local RTP answer empty");
         audio->takeOutgoingUpdate();
         audio->setState(State::Connecting); // emulate successful session-accept IQ result
-        counters->configOk = false;
+        counters->configOk         = false;
         const int configuredBefore = counters->configured;
         audio->start();
         check(counters->configured == configuredBefore && transport->starts == 0,
@@ -331,7 +331,7 @@ int main(int argc, char **argv)
         pump();
         check(audio->state() >= State::Finishing && unprotected->starts == 0 && packetCounters->configured == 0,
               "packet backend accepted an unprotected transport");
-        auto other = manager->createOutgoing(&session, "audio");
+        auto other          = manager->createOutgoing(&session, "audio");
         auto otherTransport = QSharedPointer<TestTransport>::create(&session, Origin::Initiator);
         check(other && other->setTransport(otherTransport), "mux-refusal fixture rejected transport");
         other->prepare();

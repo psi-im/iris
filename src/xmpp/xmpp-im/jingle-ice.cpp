@@ -22,8 +22,8 @@
 #endif
 
 #include "jingle-ice-connection_p.h"
-#include "jingle-ice.h"
 #include "jingle-ice-udp.h"
+#include "jingle-ice.h"
 
 #include "dtls.h"
 #include "ice176.h"
@@ -334,7 +334,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
     public:
         XMPP::Jingle::Manager *jingleManager = nullptr;
 
-        int          basePort        = -1;
+        int          basePort = -1;
         QString      extHost;
         QHostAddress selfAddr;
         bool         allowIpExposure = true;

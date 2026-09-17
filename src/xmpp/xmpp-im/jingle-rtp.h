@@ -3,6 +3,7 @@
 #define JINGLE_RTP_H
 
 #include "jingle-application.h"
+#include "jingle-rtp-directions.h"
 #include "jingle-rtp-info.h"
 #include "jingle-rtp-negotiation.h"
 #include "jingle-rtp-srtp.h"
@@ -40,8 +41,8 @@ public:
 
 struct IRIS_EXPORT MediaError {
     enum class Code { None, Unsupported, InvalidDescription, Backend, Timeout };
-    Code    code = Code::None;
-    QString text;
+    Code     code = Code::None;
+    QString  text;
     explicit operator bool() const { return code != Code::None; }
 };
 
@@ -50,10 +51,7 @@ struct IRIS_EXPORT MediaOperationPolicy {
     int applyDeadlineMs      = 10000;
     int maxPendingOperations = 8;
 
-    bool isValid() const
-    {
-        return prepareDeadlineMs > 0 && applyDeadlineMs > 0 && maxPendingOperations > 0;
-    }
+    bool isValid() const { return prepareDeadlineMs > 0 && applyDeadlineMs > 0 && maxPendingOperations > 0; }
 };
 
 class MediaSession;
@@ -165,14 +163,15 @@ class IRIS_EXPORT Pad : public ApplicationManagerPad {
 public:
     Pad(Manager *, Session *, std::shared_ptr<MediaProvider>, QStringList transports);
     ~Pad() override;
-    QString             ns() const override;
-    Session            *session() const override;
-    ApplicationManager *manager() const override;
-    QString             generateContentName(Origin) override;
-    QStringList         sessionInfoNamespaces() const override { return { SessionInfo::ns() }; }
-    bool                incomingSessionInfo(const QDomElement &) override;
-    MediaSession       *mediaSession() const;
-    const QStringList  &transportNamespaces() const { return transports_; }
+    QString              ns() const override;
+    Session             *session() const override;
+    ApplicationManager  *manager() const override;
+    QString              generateContentName(Origin) override;
+    QStringList          sessionInfoNamespaces() const override { return { SessionInfo::ns() }; }
+    bool                 incomingSessionInfo(const QDomElement &) override;
+    MediaSession        *mediaSession() const;
+    DirectionController *directionController() const { return directions_; }
+    const QStringList   &transportNamespaces() const { return transports_; }
 signals:
     // Peer status only: never changes local consent or negotiated senders.
     void informationReceived(const XMPP::Jingle::RTP::SessionInfo &);
@@ -186,7 +185,8 @@ private:
     std::shared_ptr<MediaProvider> provider_;
     std::unique_ptr<MediaSession>  media_;
     QStringList                    transports_;
-    quint64                        nextName_ = 0;
+    quint64                        nextName_   = 0;
+    DirectionController           *directions_ = nullptr; // QObject child
 };
 
 class IRIS_EXPORT Application : public XMPP::Jingle::Application {
@@ -210,7 +210,7 @@ public:
     void                                start() override;
     void                       remove(Reason::Condition = Reason::Success, const QString & = QString()) override;
     void                       incomingRemove(const Reason &) override;
-    const QString              &media() const { return media_; }
+    const QString             &media() const { return media_; }
     std::optional<Description> localDescription() const { return negotiation_.localDescription(); }
     std::optional<Description> remoteDescription() const { return negotiation_.remoteDescription(); }
 
@@ -218,16 +218,16 @@ protected:
     void prepareTransport() override;
 
 private:
-    void                           stopMedia();
-    void                           prepared(MediaOperation::Id, std::optional<Description>, MediaError);
-    void                           applied(MediaOperation::Id, MediaError);
-    void                           failPreparation(Reason::Condition, const QString &);
-    void                           activateMedia();
-    bool                           sendPacket(QByteArray, SrtpContext::Packet, quint64 epoch);
-    bool                           allowsRtp(bool sending) const;
-    Negotiation                    negotiation_;
-    std::optional<Negotiation>     beforeAnswer_;
-    std::optional<Description>     pendingRemoteOffer_;
+    void                            stopMedia();
+    void                            prepared(MediaOperation::Id, std::optional<Description>, MediaError);
+    void                            applied(MediaOperation::Id, MediaError);
+    void                            failPreparation(Reason::Condition, const QString &);
+    void                            activateMedia();
+    bool                            sendPacket(QByteArray, SrtpContext::Packet, quint64 epoch);
+    bool                            allowsRtp(bool sending) const;
+    Negotiation                     negotiation_;
+    std::optional<Negotiation>      beforeAnswer_;
+    std::optional<Description>      pendingRemoteOffer_;
     std::unique_ptr<MediaEndpoint>  endpoint_;
     std::unique_ptr<MediaOperation> prepareOperation_;
     std::unique_ptr<MediaOperation> applyOperation_;
@@ -261,7 +261,7 @@ public:
     {
         if (!provider_)
             return {};
-        const auto media = provider_->mediaTypes();
+        const auto  media = provider_->mediaTypes();
         QStringList features;
         if (media.contains(QStringLiteral("audio")) || media.contains(QStringLiteral("video")))
             features << Description::ns();

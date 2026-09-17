@@ -208,10 +208,12 @@ namespace XMPP { namespace Jingle {
             const auto tieBreakTransaction = q->tieBreaker()->outgoingStarted(action, xml);
             QObject::connect(jt, &JT::finished, q, [jt, callback, tieBreakTransaction, this]() {
                 waitingAck = false;
-                const auto error = jt->success() ? std::optional<Stanza::Error>()
-                                                 : std::optional<Stanza::Error>(jt->error());
+                const auto error
+                    = jt->success() ? std::optional<Stanza::Error>() : std::optional<Stanza::Error>(jt->error());
                 QPointer<Session> session(q);
                 q->tieBreaker()->outgoingFinished(tieBreakTransaction, error);
+                if (!session)
+                    return;
                 if (callback)
                     callback(jt);
                 if (!session)
@@ -219,6 +221,8 @@ namespace XMPP { namespace Jingle {
                 if (!jt->success())
                     lastError = jt->error();
                 q->tieBreaker()->outgoingCallbacksFinished(tieBreakTransaction);
+                if (!session)
+                    return;
                 planStep();
             });
             waitingAck = true;
@@ -353,11 +357,14 @@ namespace XMPP { namespace Jingle {
                     }
                 }
                 sendJingle(upd.action, updateXml, [this, acceptApps](JT *jt) {
+                    QPointer<Session> session(q);
                     for (const auto &h : acceptApps) {
                         auto app      = std::get<0>(h);
                         auto callback = std::get<1>(h);
                         if (app) {
                             callback(jt);
+                            if (!session)
+                                return;
                         }
                     }
                     planStep();
@@ -1059,14 +1066,14 @@ namespace XMPP { namespace Jingle {
             return true;
         }
 
-// transport-replace is deliberately handled in two phases. The first pass
-// parses and validates every content and snapshots (Application, ContentKey,
-// current Transport). Selector capability checks are reentrant boundaries: a
-// callback may remove a content or install a newer transport. The second pass
-// therefore mutates only entries whose object/key/transport identity still
-// matches the validation snapshot. This preserves the historical partial-batch
-// behavior without applying a candidate to superseded local state.
-bool handleIncomingTransportReplace(const QDomElement &jingleEl)
+        // transport-replace is deliberately handled in two phases. The first pass
+        // parses and validates every content and snapshots (Application, ContentKey,
+        // current Transport). Selector capability checks are reentrant boundaries: a
+        // callback may remove a content or install a newer transport. The second pass
+        // therefore mutates only entries whose object/key/transport identity still
+        // matches the validation snapshot. This preserves the historical partial-batch
+        // behavior without applying a candidate to superseded local state.
+        bool handleIncomingTransportReplace(const QDomElement &jingleEl)
         {
             qDebug("handle incoming transport replace");
             struct ValidatedTransportReplace {
@@ -1077,10 +1084,10 @@ bool handleIncomingTransportReplace(const QDomElement &jingleEl)
                 QDomElement               content;
             };
             QVector<ValidatedTransportReplace> passed;
-            QList<QDomElement>                  toReject;
-            QSet<ContentKey>                    seen;
-            QString                                                                     contentTag(QStringLiteral("content"));
-            bool                                                                        doTieBreak = false;
+            QList<QDomElement>                 toReject;
+            QSet<ContentKey>                   seen;
+            QString                            contentTag(QStringLiteral("content"));
+            bool                               doTieBreak = false;
             for (QDomElement ce = jingleEl.firstChildElement(contentTag); !ce.isNull();
                  ce             = ce.nextSiblingElement(contentTag)) {
                 ContentBase cb(ce);
@@ -1141,8 +1148,8 @@ bool handleIncomingTransportReplace(const QDomElement &jingleEl)
                     continue;
                 }
 
-                passed.append(ValidatedTransportReplace { QPointer<Application>(app), key,
-                                                           app->transport().toWeakRef(), transport, ce });
+                passed.append(ValidatedTransportReplace { QPointer<Application>(app), key, app->transport().toWeakRef(),
+                                                          transport, ce });
             }
 
             if (seen.isEmpty()) {
@@ -1156,9 +1163,9 @@ bool handleIncomingTransportReplace(const QDomElement &jingleEl)
             // but sibling remote transports are still useful as hints for
             // selecting compatible local transports before we retry.
             for (const auto &entry : std::as_const(passed)) {
-                auto app                = entry.application;
-                auto validatedTransport = entry.current.lock();
-                const bool currentEntry = app && contentList.value(entry.key) == app.data() && validatedTransport
+                auto       app                = entry.application;
+                auto       validatedTransport = entry.current.lock();
+                const bool currentEntry       = app && contentList.value(entry.key) == app.data() && validatedTransport
                     && app->transport() == validatedTransport;
                 if (!currentEntry) {
                     // A callback during validation of a sibling may have removed
@@ -1198,12 +1205,12 @@ bool handleIncomingTransportReplace(const QDomElement &jingleEl)
             return true;
         }
 
-// transport-accept is an acknowledgement of a transport-replace signaling
-// transaction, not merely a transport state update. Validate the whole batch
-// against PendingTransportReplace::InProgress before the first Transport::update().
-// Transport::update() is reentrant, so the apply pass uses guarded identity
-// snapshots and skips entries invalidated by an earlier sibling callback.
-bool handleIncomingTransportAccept(const QDomElement &jingleEl)
+        // transport-accept is an acknowledgement of a transport-replace signaling
+        // transaction, not merely a transport state update. Validate the whole batch
+        // against PendingTransportReplace::InProgress before the first Transport::update().
+        // Transport::update() is reentrant, so the apply pass uses guarded identity
+        // snapshots and skips entries invalidated by an earlier sibling callback.
+        bool handleIncomingTransportAccept(const QDomElement &jingleEl)
         {
             struct ValidatedTransportAccept {
                 QPointer<Application>   application;
@@ -1244,8 +1251,8 @@ bool handleIncomingTransportAccept(const QDomElement &jingleEl)
                                                     XMPP::Stanza::Error::ErrorCond::BadRequest);
                     return false;
                 }
-                updates.append(ValidatedTransportAccept { QPointer<Application>(app), key,
-                                                          app->transport().toWeakRef(), transportEl });
+                updates.append(ValidatedTransportAccept { QPointer<Application>(app), key, app->transport().toWeakRef(),
+                                                          transportEl });
             }
 
             if (seen.isEmpty()) {
@@ -1279,12 +1286,12 @@ bool handleIncomingTransportAccept(const QDomElement &jingleEl)
             return true;
         }
 
-// A peer transport-reject is valid only for a local replacement already in
-// PendingTransportReplace::InProgress. Validate the complete batch before
-// selecting any fallback. selectNextTransport() and selector callbacks may be
-// reentrant, so each second-pass entry is tied to the Application/key/transport
-// snapshot that was validated in the first pass.
-bool handleIncomingTransportReject(const QDomElement &jingleEl)
+        // A peer transport-reject is valid only for a local replacement already in
+        // PendingTransportReplace::InProgress. Validate the complete batch before
+        // selecting any fallback. selectNextTransport() and selector callbacks may be
+        // reentrant, so each second-pass entry is tied to the Application/key/transport
+        // snapshot that was validated in the first pass.
+        bool handleIncomingTransportReject(const QDomElement &jingleEl)
         {
             struct ValidatedTransportReject {
                 QPointer<Application>   application;
@@ -1311,16 +1318,15 @@ bool handleIncomingTransportReject(const QDomElement &jingleEl)
                 seen.insert(key);
 
                 auto app = contentList.value(key);
-                if (!app || !app->transport() || !app->transport()->isLocal()
-                    || !app->transportReplaceInProgress()
+                if (!app || !app->transport() || !app->transport()->isLocal() || !app->transportReplaceInProgress()
                     || transportEl.namespaceURI() != app->transport()->pad()->ns()) {
                     lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,
                                                     XMPP::Stanza::Error::ErrorCond::UnexpectedRequest);
                     ErrorUtil::fill(jingleEl.ownerDocument(), *lastError, ErrorUtil::OutOfOrder);
                     return false;
                 }
-                updates.append(ValidatedTransportReject { QPointer<Application>(app), key,
-                                                          app->transport().toWeakRef() });
+                updates.append(
+                    ValidatedTransportReject { QPointer<Application>(app), key, app->transport().toWeakRef() });
             }
 
             if (updates.isEmpty()) {
@@ -1578,7 +1584,7 @@ bool handleIncomingTransportReject(const QDomElement &jingleEl)
 
     std::optional<XMPP::Stanza::Error> Session::lastError() const { return d->lastError; }
 
-    TieBreaker *Session::tieBreaker() { return &tieBreaker_; }
+    TieBreaker       *Session::tieBreaker() { return &tieBreaker_; }
     const TieBreaker *Session::tieBreaker() const { return &tieBreaker_; }
 
     Application *Session::newContent(const QString &ns, Origin senders)

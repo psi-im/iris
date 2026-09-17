@@ -22,14 +22,13 @@ static void check(bool ok, const char *message)
 static void exerciseProfile(Client &client, const QString &transportNs)
 {
     J::Session session(client.jingleManager(), Jid(QStringLiteral("peer@example.test/device")), J::Origin::Initiator);
-    auto base = session.newOutgoingTransport(transportNs);
-    auto ice  = qSharedPointerDynamicCast<J::ICE::Transport>(base);
+    auto       base = session.newOutgoingTransport(transportNs);
+    auto       ice  = qSharedPointerDynamicCast<J::ICE::Transport>(base);
     check(bool(ice), "selected ICE namespace did not create an ICE transport");
     check(ice->state() == J::State::Created, "new ICE transport did not start in Created state");
 
     ice->prepare();
-    check(ice->state() == J::State::ApprovedToSend,
-          "preparing a local ICE transport did not enter ApprovedToSend");
+    check(ice->state() == J::State::ApprovedToSend, "preparing a local ICE transport did not enter ApprovedToSend");
 
     QElapsedTimer deadline;
     deadline.start();
@@ -58,8 +57,8 @@ int main(int argc, char **argv)
 {
     QCoreApplication application(argc, argv);
     QCA::Initializer qca;
-    TcpPortReserver reserver;
-    Client client;
+    TcpPortReserver  reserver;
+    Client           client;
     client.setTcpPortReserver(&reserver);
     client.jingleICEManager()->setSelfAddress(QHostAddress::LocalHost);
 

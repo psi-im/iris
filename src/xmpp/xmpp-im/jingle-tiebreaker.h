@@ -30,9 +30,9 @@ namespace XMPP { namespace Jingle {
 
     public:
         enum class Solution {
-  Continue, ///< Tie-break does not intervene; process the incoming IQ normally.
-  Break,    ///< Reject the whole incoming IQ with conflict/tie-break.
-  Postpone  ///< Process normally, but preserve local intent if our IQ later fails.
+            Continue, ///< Tie-break does not intervene; process the incoming IQ normally.
+            Break,    ///< Reject the whole incoming IQ with conflict/tie-break.
+            Postpone  ///< Process normally, but preserve local intent if our IQ later fails.
         };
 
         enum class RemoteResult { Applied, Rejected };
@@ -40,49 +40,52 @@ namespace XMPP { namespace Jingle {
         // retry() is recovery context, not an instruction to replay localData.
         // Resolvers should reconcile the owner's current live intent instead.
         struct RetryContext {
-  const QDomElement   &localData;
-  const QDomElement   &remoteData;
-  const Stanza::Error &localError;
-  RemoteResult         remoteResult;
+            const QDomElement   &localData;
+            const QDomElement   &remoteData;
+            const Stanza::Error &localError;
+            RemoteResult         remoteResult;
         };
 
         class Resolver {
         public:
-  virtual ~Resolver() = default;
-  virtual Solution resolve(const QDomElement &localData, const QDomElement &remoteData)
-  {
-      Q_UNUSED(localData);
-      Q_UNUSED(remoteData);
-      return Solution::Continue;
-  }
-  virtual void retry(const RetryContext &context) { Q_UNUSED(context); }
+            virtual ~Resolver() = default;
+            virtual Solution resolve(const QDomElement &localData, const QDomElement &remoteData)
+            {
+                Q_UNUSED(localData);
+                Q_UNUSED(remoteData);
+                return Solution::Continue;
+            }
+            virtual void retry(const RetryContext &context) { Q_UNUSED(context); }
         };
 
         class Registration {
-  friend class TieBreaker;
+            friend class TieBreaker;
 
         public:
-  Registration() = default;
-  ~Registration();
-  Registration(Registration &&other) noexcept;
-  Registration &operator=(Registration &&other) noexcept;
-  Registration(const Registration &)            = delete;
-  Registration &operator=(const Registration &) = delete;
+            Registration() = default;
+            ~Registration();
+            Registration(Registration &&other) noexcept;
+            Registration &operator=(Registration &&other) noexcept;
+            Registration(const Registration &)            = delete;
+            Registration &operator=(const Registration &) = delete;
 
-  explicit operator bool() const { return id_ != 0; }
-  bool isPostponed() const;
+            explicit operator bool() const { return id_ != 0; }
+            bool     isPostponed() const;
 
         private:
-  Registration(std::weak_ptr<SharedState> state, quint64 id);
-  void reset();
+            Registration(std::weak_ptr<SharedState> state, quint64 id);
+            void reset();
 
-  std::weak_ptr<SharedState> state_;
-  quint64                    id_ = 0;
+            std::weak_ptr<SharedState> state_;
+            quint64                    id_ = 0;
         };
 
         struct Resolution {
-  Solution solution = Solution::Continue;
-  quint64  id       = 0;
+            Solution solution = Solution::Continue;
+            quint64  id       = 0;
+            // Resource exhaustion is not a protocol tie-break. The dispatcher
+            // must send this error before attempting ordinary action handling.
+            std::optional<Stanza::Error> error;
         };
 
         TieBreaker();
@@ -102,7 +105,9 @@ namespace XMPP { namespace Jingle {
         // aggregate wire decision is Break > Postpone > Continue; Break does not
         // short-circuit owner callbacks because they may maintain local hints.
         Resolution resolveIncoming(Action action, const QDomElement &remoteData);
-        void       incomingFinished(quint64 resolution, RemoteResult result);
+        // Call only after the incoming IQ reply has been dispatched. May retry
+        // synchronously and destroy the coordinator/Session via resolver code.
+        void incomingFinished(quint64 resolution, RemoteResult result);
 
         // Cancel transient arbitration state. Registrations stay valid until
         // their RAII handles are destroyed with their owning session objects.

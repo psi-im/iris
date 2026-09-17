@@ -18,7 +18,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
             ConnectionMembership membership;
         };
 
-        ConnectionGroupTransaction() = default;
+        ConnectionGroupTransaction()                                              = default;
         ConnectionGroupTransaction(const ConnectionGroupTransaction &)            = delete;
         ConnectionGroupTransaction &operator=(const ConnectionGroupTransaction &) = delete;
         ConnectionGroupTransaction(ConnectionGroupTransaction &&)                 = default;
@@ -38,12 +38,11 @@ namespace XMPP { namespace Jingle { namespace ICE {
                 if (!ownerMembership)
                     return std::nullopt;
                 const auto liveAssociationId = ownerMembership.associationId();
-                result.entries_.push_back(
-                    Entry { association.id, association.owner, std::move(ownerMembership) });
+                result.entries_.push_back(Entry { association.id, association.owner, std::move(ownerMembership) });
 
                 for (qsizetype index = 1; index < association.members.size(); ++index) {
-                    const auto &content = association.members.at(index);
-                    auto membership = registry.attach(liveAssociationId, content);
+                    const auto &content    = association.members.at(index);
+                    auto        membership = registry.attach(liveAssociationId, content);
                     if (!membership)
                         return std::nullopt;
                     result.entries_.push_back(Entry { association.id, content, std::move(membership) });

@@ -6,15 +6,9 @@
 
 namespace XMPP::Jingle::RTP {
 namespace {
-    MediaError backendError(const QString &text)
-    {
-        return { MediaError::Code::Backend, text };
-    }
+    MediaError backendError(const QString &text) { return { MediaError::Code::Backend, text }; }
 
-    MediaError unsupportedError(const QString &text)
-    {
-        return { MediaError::Code::Unsupported, text };
-    }
+    MediaError unsupportedError(const QString &text) { return { MediaError::Code::Unsupported, text }; }
 
     MediaError timeoutError()
     {
@@ -33,7 +27,7 @@ public:
 MediaOperation::MediaOperation(Id id, MediaSession *session) : d(std::make_unique<Private>(id, session)) { }
 MediaOperation::~MediaOperation() { cancel(); }
 MediaOperation::Id MediaOperation::id() const { return d ? d->id : 0; }
-void MediaOperation::cancel()
+void               MediaOperation::cancel()
 {
     if (!d || d->cancelled)
         return;
@@ -47,15 +41,15 @@ class MediaSession::Private {
 public:
     enum class Kind { PrepareLocalOffer, PrepareAnswer, ApplyNegotiation };
     struct State {
-        MediaOperation::Id          id = 0;
-        Kind                        kind;
-        MediaEndpoint              *endpoint = nullptr;
-        std::optional<Description>  local;
-        std::optional<Description>  remote;
-        PrepareCallback             prepareCallback;
-        ApplyCallback               applyCallback;
-        bool                        completionQueued = false;
-        bool                        timedOut = false;
+        MediaOperation::Id         id = 0;
+        Kind                       kind;
+        MediaEndpoint             *endpoint = nullptr;
+        std::optional<Description> local;
+        std::optional<Description> remote;
+        PrepareCallback            prepareCallback;
+        ApplyCallback              applyCallback;
+        bool                       completionQueued = false;
+        bool                       timedOut         = false;
     };
 
     MediaOperation::Id allocateId()
@@ -215,27 +209,27 @@ void MediaSession::startNext()
 
     QPointer<MediaSession> guard(this);
     const auto             id = state->id;
-    const int deadline = state->kind == Private::Kind::ApplyNegotiation ? d->policy.applyDeadlineMs
-                                                                         : d->policy.prepareDeadlineMs;
+    const int              deadline
+        = state->kind == Private::Kind::ApplyNegotiation ? d->policy.applyDeadlineMs : d->policy.prepareDeadlineMs;
     armMediaOperationDeadline(id, deadline);
     if (!guard || !d->active || d->active->id != id)
         return;
 
     switch (state->kind) {
     case Private::Kind::PrepareLocalOffer:
-        beginPrepareLocalOffer(id, state->endpoint,
-                               [guard, id](std::optional<Description> result, MediaError error) mutable {
-                                   if (!guard)
-                                       return;
-                                   Q_ASSERT(QThread::currentThread() == guard->thread());
-                                   if (!guard->claimCompletion(id))
-                                       return;
-                                   QTimer::singleShot(0, guard, [guard, id, result = std::move(result),
-                                                                 error = std::move(error)]() mutable {
+        beginPrepareLocalOffer(
+            id, state->endpoint, [guard, id](std::optional<Description> result, MediaError error) mutable {
+                if (!guard)
+                    return;
+                Q_ASSERT(QThread::currentThread() == guard->thread());
+                if (!guard->claimCompletion(id))
+                    return;
+                QTimer::singleShot(0, guard,
+                                   [guard, id, result = std::move(result), error = std::move(error)]() mutable {
                                        if (guard)
                                            guard->finishPrepared(id, std::move(result), std::move(error));
                                    });
-                               });
+            });
         break;
     case Private::Kind::PrepareAnswer:
         beginPrepareAnswer(id, state->endpoint, *state->remote,
@@ -245,11 +239,12 @@ void MediaSession::startNext()
                                Q_ASSERT(QThread::currentThread() == guard->thread());
                                if (!guard->claimCompletion(id))
                                    return;
-                               QTimer::singleShot(0, guard, [guard, id, result = std::move(result),
-                                                             error = std::move(error)]() mutable {
-                                   if (guard)
-                                       guard->finishPrepared(id, std::move(result), std::move(error));
-                               });
+                               QTimer::singleShot(
+                                   0, guard,
+                                   [guard, id, result = std::move(result), error = std::move(error)]() mutable {
+                                       if (guard)
+                                           guard->finishPrepared(id, std::move(result), std::move(error));
+                                   });
                            });
         break;
     case Private::Kind::ApplyNegotiation:
@@ -322,7 +317,7 @@ void MediaSession::finishTimedOut(MediaOperation::Id id)
     if (!d->active || d->active->id != id || !d->active->timedOut || d->active->completionQueued)
         return;
 
-    const auto kind = d->active->kind;
+    const auto kind            = d->active->kind;
     auto       prepareCallback = std::move(d->active->prepareCallback);
     auto       applyCallback   = std::move(d->active->applyCallback);
     d->active.reset();

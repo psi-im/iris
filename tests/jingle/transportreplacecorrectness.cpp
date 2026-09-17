@@ -55,10 +55,10 @@ public:
     {
     }
 
-    void forceState(J::State state) { setState(state); }
-    void setHasUpdates(bool value) { hasUpdates_ = value; }
-    void setMarkUnackedOnTake(bool value) { markUnackedOnTake_ = value; }
-    int  starts() const { return starts_; }
+    void           forceState(J::State state) { setState(state); }
+    void           setHasUpdates(bool value) { hasUpdates_ = value; }
+    void           setMarkUnackedOnTake(bool value) { markUnackedOnTake_ = value; }
+    int            starts() const { return starts_; }
     const QString &id() const { return id_; }
 
     void prepare() override
@@ -109,9 +109,9 @@ public:
                 } };
     }
 
-    bool isValid() const override { return true; }
-    J::TransportFeatures features() const override { return J::TransportFeature::Reliable; }
-    J::Connection::Ptr addChannel(J::TransportFeatures, const QString &, int) override { return {}; }
+    bool                      isValid() const override { return true; }
+    J::TransportFeatures      features() const override { return J::TransportFeature::Reliable; }
+    J::Connection::Ptr        addChannel(J::TransportFeatures, const QString &, int) override { return {}; }
     QList<J::Connection::Ptr> channels() const override { return {}; }
 
 private:
@@ -125,22 +125,22 @@ class TestTransportManager : public J::TransportManager {
 public:
     static QString namespaceUri() { return QStringLiteral("urn:iris:test:transport-replace-correctness"); }
 
-    J::TransportFeatures features() const override { return J::TransportFeature::Reliable; }
-    void setJingleManager(J::Manager *manager) override { manager_ = manager; }
+    J::TransportFeatures         features() const override { return J::TransportFeature::Reliable; }
+    void                         setJingleManager(J::Manager *manager) override { manager_ = manager; }
     QSharedPointer<J::Transport> newTransport(const J::TransportManagerPad::Ptr &pad, J::Origin creator) override
     {
         return QSharedPointer<TestTransport>::create(pad, creator);
     }
     J::TransportManagerPad *pad(J::Session *session) override { return new TestTransportPad(session, this); }
-    void closeAll(const QString & = QString()) override { }
-    QStringList ns() const override { return { namespaceUri() }; }
-    QStringList discoFeatures() const override { return { namespaceUri() }; }
+    void                    closeAll(const QString & = QString()) override { }
+    QStringList             ns() const override { return { namespaceUri() }; }
+    QStringList             discoFeatures() const override { return { namespaceUri() }; }
 
 private:
     J::Manager *manager_ = nullptr;
 };
 
-QString TestTransportPad::ns() const { return TestTransportManager::namespaceUri(); }
+QString              TestTransportPad::ns() const { return TestTransportManager::namespaceUri(); }
 J::TransportManager *TestTransportPad::manager() const { return manager_; }
 
 class TestAppPad : public J::ApplicationManagerPad {
@@ -149,7 +149,7 @@ public:
     J::Session            *session() const override { return session_; }
     QString                ns() const override { return QStringLiteral("urn:iris:test:application"); }
     J::ApplicationManager *manager() const override { return nullptr; }
-    QString generateContentName(J::Origin) override { return QStringLiteral("test"); }
+    QString                generateContentName(J::Origin) override { return QStringLiteral("test"); }
 
 private:
     J::Session *session_;
@@ -159,7 +159,7 @@ class TestSelector : public J::TransportSelector {
 public:
     QSharedPointer<J::Transport> getNextTransport() override { return {}; }
     QSharedPointer<J::Transport> getAlikeTransport(QSharedPointer<J::Transport>) override { return {}; }
-    bool replace(QSharedPointer<J::Transport>, QSharedPointer<J::Transport>) override
+    bool                         replace(QSharedPointer<J::Transport>, QSharedPointer<J::Transport>) override
     {
         ++replaceCalls;
         return true;
@@ -189,7 +189,7 @@ public:
     }
 
     TestSelector *installTransport(const QSharedPointer<TestTransport> &transport,
-                                   std::unique_ptr<TestSelector> selector)
+                                   std::unique_ptr<TestSelector>        selector)
     {
         auto raw           = selector.get();
         _transport         = transport;
@@ -210,15 +210,15 @@ public:
         emit stateChanged(state);
     }
     const std::optional<Stanza::Error> &lastError() const override { return error_; }
-    J::Reason lastReason() const override { return {}; }
-    SetDescError setRemoteOffer(const QDomElement &) override { return Unparsed; }
-    SetDescError setRemoteAnswer(const QDomElement &) override { return Unparsed; }
-    QDomElement makeLocalOffer() override { return {}; }
-    QDomElement makeLocalAnswer() override { return {}; }
-    void prepare() override { }
-    void start() override { }
-    void remove(J::Reason::Condition, const QString &) override { }
-    void incomingRemove(const J::Reason &) override { }
+    J::Reason                           lastReason() const override { return {}; }
+    SetDescError                        setRemoteOffer(const QDomElement &) override { return Unparsed; }
+    SetDescError                        setRemoteAnswer(const QDomElement &) override { return Unparsed; }
+    QDomElement                         makeLocalOffer() override { return {}; }
+    QDomElement                         makeLocalAnswer() override { return {}; }
+    void                                prepare() override { }
+    void                                start() override { }
+    void                                remove(J::Reason::Condition, const QString &) override { }
+    void                                incomingRemove(const J::Reason &) override { }
 
 protected:
     void prepareTransport() override { }
@@ -287,8 +287,8 @@ static bool isTieBreak(const J::Session &session)
 static void testInFlightReplaceWinsWithoutTransportUnacked(Client &client)
 {
     J::Session session(client.jingleManager(), Jid(QStringLiteral("peer@example.test/device")), J::Origin::Initiator);
-    auto local = makeTransport(session, J::Origin::Initiator, J::State::ApprovedToSend,
-                               QStringLiteral("local-replacement"));
+    auto       local
+        = makeTransport(session, J::Origin::Initiator, J::State::ApprovedToSend, QStringLiteral("local-replacement"));
     local->setHasUpdates(true);
     auto app = addApplication(session, local, std::make_unique<TestSelector>());
     app->markReplacePlanned();
@@ -301,8 +301,8 @@ static void testInFlightReplaceWinsWithoutTransportUnacked(Client &client)
           "ICE-like test transport unexpectedly encoded IQ lifetime in transport state");
 
     QDomDocument doc;
-    const bool ok = session.updateFromXml(J::Action::TransportReplace,
-                                          makeReplace(doc, { QStringLiteral("remote-replacement") }));
+    const bool   ok = session.updateFromXml(J::Action::TransportReplace,
+                                            makeReplace(doc, { QStringLiteral("remote-replacement") }));
     check(!ok && isTieBreak(session),
           "initiator accepted a crossed transport-replace because Transport::State was not Unacked");
     check(app->transport().data() == local.data(), "crossed transport-replace replaced the initiator winner");
@@ -312,11 +312,11 @@ static void testUnackedTransportWithoutReplaceDoesNotTieBreak(Client &client)
 {
     J::Session session(client.jingleManager(), Jid(QStringLiteral("peer@example.test/device")), J::Origin::Initiator);
     auto local = makeTransport(session, J::Origin::Initiator, J::State::Unacked, QStringLiteral("unrelated-unacked"));
-    auto app = addApplication(session, local, std::make_unique<TestSelector>());
+    auto app   = addApplication(session, local, std::make_unique<TestSelector>());
 
     QDomDocument doc;
-    const bool ok = session.updateFromXml(J::Action::TransportReplace,
-                                          makeReplace(doc, { QStringLiteral("remote-replacement") }));
+    const bool   ok = session.updateFromXml(J::Action::TransportReplace,
+                                            makeReplace(doc, { QStringLiteral("remote-replacement") }));
     check(ok && !isTieBreak(session),
           "Transport::State::Unacked was mistaken for an in-flight transport-replace transaction");
     check(app->transport().data() != local.data(), "valid peer transport-replace was not installed");
@@ -325,8 +325,8 @@ static void testUnackedTransportWithoutReplaceDoesNotTieBreak(Client &client)
 static void testFailedOutgoingReplaceLeavesNeedAck(Client &client)
 {
     J::Session session(client.jingleManager(), Jid(QStringLiteral("peer@example.test/device")), J::Origin::Initiator);
-    auto local = makeTransport(session, J::Origin::Initiator, J::State::ApprovedToSend,
-                               QStringLiteral("local-replacement"));
+    auto       local
+        = makeTransport(session, J::Origin::Initiator, J::State::ApprovedToSend, QStringLiteral("local-replacement"));
     local->setHasUpdates(true);
     auto app = addApplication(session, local, std::make_unique<TestSelector>());
     app->markReplacePlanned();
@@ -347,11 +347,11 @@ static void testMalformedTransportAcceptDoesNotFinishReplace(Client &client)
 {
     J::Session session(client.jingleManager(), Jid(QStringLiteral("peer@example.test/device")), J::Origin::Initiator);
     auto local = makeTransport(session, J::Origin::Initiator, J::State::Pending, QStringLiteral("local-replacement"));
-    auto app = addApplication(session, local, std::make_unique<TestSelector>());
+    auto app   = addApplication(session, local, std::make_unique<TestSelector>());
     app->markReplaceInProgress();
 
     QDomDocument doc;
-    auto transport = doc.createElementNS(TestTransportManager::namespaceUri(), QStringLiteral("transport"));
+    auto         transport = doc.createElementNS(TestTransportManager::namespaceUri(), QStringLiteral("transport"));
     transport.setAttribute(QStringLiteral("id"), QStringLiteral("malformed-accept"));
     transport.setAttribute(QStringLiteral("parse"), QStringLiteral("fail"));
     app->incomingTransportAccept(transport);
@@ -363,15 +363,14 @@ static void testMalformedTransportAcceptDoesNotFinishReplace(Client &client)
 static void testDuplicateContentReplaceIsAtomic(Client &client)
 {
     J::Session session(client.jingleManager(), Jid(QStringLiteral("peer@example.test/device")), J::Origin::Initiator);
-    auto local = makeTransport(session, J::Origin::Initiator, J::State::Pending, QStringLiteral("current"));
-    auto selector = std::make_unique<TestSelector>();
+    auto       local    = makeTransport(session, J::Origin::Initiator, J::State::Pending, QStringLiteral("current"));
+    auto       selector = std::make_unique<TestSelector>();
     TestSelector *selectorRaw = nullptr;
-    auto app = addApplication(session, local, std::move(selector), &selectorRaw, J::State::Active);
+    auto          app         = addApplication(session, local, std::move(selector), &selectorRaw, J::State::Active);
 
     QDomDocument doc;
-    const bool ok = session.updateFromXml(
-        J::Action::TransportReplace,
-        makeReplace(doc, { QStringLiteral("first"), QStringLiteral("second") }));
+    const bool   ok = session.updateFromXml(J::Action::TransportReplace,
+                                            makeReplace(doc, { QStringLiteral("first"), QStringLiteral("second") }));
 
     check(!ok, "duplicate (creator,name) transport-replace entries were accepted");
     check(app->transport().data() == local.data(), "duplicate transport-replace partially mutated current transport");
@@ -381,13 +380,13 @@ static void testDuplicateContentReplaceIsAtomic(Client &client)
 static void testMissingTransportReplaceIsMalformed(Client &client)
 {
     J::Session session(client.jingleManager(), Jid(QStringLiteral("peer@example.test/device")), J::Origin::Initiator);
-    auto local = makeTransport(session, J::Origin::Initiator, J::State::Pending, QStringLiteral("current"));
-    auto selector = std::make_unique<TestSelector>();
+    auto       local    = makeTransport(session, J::Origin::Initiator, J::State::Pending, QStringLiteral("current"));
+    auto       selector = std::make_unique<TestSelector>();
     TestSelector *selectorRaw = nullptr;
-    auto app = addApplication(session, local, std::move(selector), &selectorRaw, J::State::Active);
+    auto          app         = addApplication(session, local, std::move(selector), &selectorRaw, J::State::Active);
 
     QDomDocument doc;
-    const bool ok = session.updateFromXml(J::Action::TransportReplace, makeReplaceWithoutTransport(doc));
+    const bool   ok = session.updateFromXml(J::Action::TransportReplace, makeReplaceWithoutTransport(doc));
 
     check(!ok, "transport-replace without a transport element was accepted as an unsupported transport");
     check(app->transport().data() == local.data(), "malformed transport-replace changed current transport");
@@ -397,10 +396,10 @@ static void testMissingTransportReplaceIsMalformed(Client &client)
 
 int main(int argc, char **argv)
 {
-    QCoreApplication application(argc, argv);
-    QCA::Initializer qca;
+    QCoreApplication     application(argc, argv);
+    QCA::Initializer     qca;
     TestTransportManager transportManager;
-    Client client;
+    Client               client;
     client.jingleManager()->registerTransport(&transportManager);
 
     const auto args = application.arguments();

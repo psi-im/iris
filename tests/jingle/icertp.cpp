@@ -116,8 +116,8 @@ int main(int argc, char **argv)
         check(bool(ice), "selected ICE namespace did not create an ICE transport");
         return ice;
     };
-    auto first  = makeTransport(firstClient, firstSession, J::Origin::Initiator);
-    auto second = makeTransport(secondClient, secondSession, J::Origin::Initiator);
+    auto first     = makeTransport(firstClient, firstSession, J::Origin::Initiator);
+    auto second    = makeTransport(secondClient, secondSession, J::Origin::Initiator);
     auto firstPad  = first->pad().staticCast<J::ICE::Pad>();
     auto secondPad = second->pad().staticCast<J::ICE::Pad>();
 
@@ -162,7 +162,7 @@ int main(int argc, char **argv)
         check(!xml.isNull() && xml.namespaceURI() == transportNs, "wrong ICE wire namespace");
         if (iceUdpMode)
             check(xml.firstChildElement(QStringLiteral("gathering-complete")).isNull(),
-                  "gathering-complete leaked into XEP-0176");
+                        "gathering-complete leaked into XEP-0176");
         check(to->update(xml), "ICE signaling update rejected");
         if (ack) {
             const bool reject = from == second.data() && !rejectionChecked && !delayedAck;

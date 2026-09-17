@@ -22,9 +22,9 @@
 
 #include <iris/iris_export.h>
 
-#include <iris/xmpp-im/jingle-transport.h>
-#include <iris/xmpp-im/jingle-tiebreaker.h>
 #include <QMetaObject>
+#include <iris/xmpp-im/jingle-tiebreaker.h>
+#include <iris/xmpp-im/jingle-transport.h>
 #include <optional>
 
 class QTimer;
@@ -133,6 +133,23 @@ namespace XMPP { namespace Jingle {
          * changes only after the peer acknowledges that request.
          */
         bool requestSenders(Origin senders);
+
+        // Low-level scheduling revision, not a durable policy/operation handle.
+        // Returns zero on rejection. A no-op/proposal-only request has no IQ
+        // attempt; consumers observe senders() as well as attempt completions.
+        quint64 requestSendersTracked(Origin senders);
+        // Discard only this queued revision, never an already sent IQ.
+        bool cancelQueuedSenders(quint64 revision);
+        bool sendersAttemptPending() const { return _sendersUpdateInFlight.has_value(); }
+
+        struct SendersAttemptResult {
+            enum class Outcome { Accepted, Rejected, TimedOut, Cancelled };
+            quint64                      id       = 0; // unique within this Application incarnation
+            quint64                      revision = 0;
+            Origin                       target   = Origin::None;
+            Outcome                      outcome  = Outcome::Cancelled;
+            std::optional<Stanza::Error> error; // includes the IQ timeout error
+        };
 
         /**
          * @brief evaluateOutgoingUpdate computes and prepares next update which will be taken with takeOutgoingUpdate
@@ -260,6 +277,10 @@ namespace XMPP { namespace Jingle {
         // Emitted only when the negotiated direction changes due to a peer content-modify.
         // Local proposals and acknowledgements of our own content-modify do not emit it.
         void sendersChangedByPeer(Origin);
+        // One terminal result per consumed content-modify attempt, after internal
+        // state cleanup. May be synchronous. QObject::destroyed is the terminal
+        // lifetime notification if the Application is deleted before completion.
+        void sendersAttemptFinished(const XMPP::Jingle::Application::SendersAttemptResult &result);
 
     protected:
         State            _state = State::Created;
@@ -291,10 +312,13 @@ namespace XMPP { namespace Jingle {
         Origin  _creator;
         Origin  _senders;
 
-        // Latest local direction intent and the value currently awaiting IQ ack.
-        std::optional<Origin>   _requestedSenders;
-        std::optional<Origin>   _sendersUpdateInFlight;
-        QMetaObject::Connection _sendersStateConnection;
+        // Disposable queued target and concrete IQ target, not durable UI policy.
+        std::optional<Origin>               _requestedSenders;
+        std::optional<Origin>               _sendersUpdateInFlight;
+        QMetaObject::Connection             _sendersStateConnection;
+        quint64                             _sendersRequestRevision = 0;
+        quint64                             _nextSendersAttempt     = 0;
+        std::optional<SendersAttemptResult> _sendersAttempt;
 
         // Current transport uses shared ownership, independently of QObject parentage.
         // Session handlers pair QPointer<Application> with weak/shared transport snapshots
@@ -323,8 +347,8 @@ namespace XMPP { namespace Jingle {
 
         // Registration is declared after the resolver so it is destroyed
         // first and never leaves TieBreaker with a dangling callback.
-        std::unique_ptr<TieBreaker::Resolver>           _contentModifyTieBreakResolver;
-        TieBreaker::Registration                       _contentModifyTieBreakRegistration;
+        std::unique_ptr<TieBreaker::Resolver> _contentModifyTieBreakResolver;
+        TieBreaker::Registration              _contentModifyTieBreakRegistration;
     };
 
     inline bool operator<(const Application::Update &a, const Application::Update &b)
@@ -352,5 +376,7 @@ namespace XMPP { namespace Jingle {
     };
 
 }}
+
+Q_DECLARE_METATYPE(XMPP::Jingle::Application::SendersAttemptResult)
 
 #endif

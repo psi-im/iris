@@ -13,7 +13,7 @@ namespace XMPP::Jingle::ICE {
 extern const QString NS_ICE_UDP;
 
 struct UdpCandidate {
-    int          component  = -1;
+    int          component = -1;
     QString      foundation;
     int          generation = -1;
     QString      id;

@@ -1,7 +1,8 @@
 # Native RTP, asynchronous media and DTLS-SRTP
 
-This document describes Iris at commit `be3833e` and the adjacent Psi `c8821dbe` /
-psimedia `b4139cbd` integration. It is implementation documentation,
+This document describes the RTP integration reviewed at Iris `be3833e`, Psi `c8821dbe` /
+psimedia `b4139cbd`, with the direction-arbitration update reviewed at Iris `fb7678d`.
+It is implementation documentation,
 not a development roadmap. [Jingle architecture](jingle.md) describes the generic signaling
 and file-transfer lifecycle. Media capture, codecs, playback, device policy and RTP generation
 remain outside Iris.
@@ -274,9 +275,13 @@ Description-info is advisory, not an arbitrary replacement offer.
 
 Outgoing direction changes use Application::requestSenders(); latest queued intent and
 the in-flight IQ value are separate. Successful local ACKs emit sendersChanged, while peer
-modifications additionally emit sendersChangedByPeer. The current dispatcher lacks conflict
-resolution for crossed content-modify actions. Clients must also distinguish a failed request
-from a still-pending target; no dedicated completion notification currently provides that.
+modifications additionally emit sendersChangedByPeer. The dispatcher uses a session-owned
+TieBreaker with Application-level content-modify resolvers. Postponed failed transactions
+wake reconciliation after owner callbacks; successful transactions do not trigger tie-break
+retry. Clients must still distinguish a failed request from a pending policy target; no
+dedicated generic completion notification currently provides that. The proposed controller,
+operation and constraint model is in [the design decision](jingle-direction-policy.md), not
+yet implemented in the RTP Pad.
 
 ## Psi and psimedia production boundary
 

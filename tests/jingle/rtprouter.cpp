@@ -62,7 +62,7 @@ static QByteArray rtp(quint32 ssrc, const QByteArray &mid = {}, quint8 extension
 static QByteArray paddedRtp(quint32 ssrc, int paddingLength)
 {
     auto packet = rtp(ssrc);
-    packet[0] = char(quint8(packet[0]) | 0x20);
+    packet[0]   = char(quint8(packet[0]) | 0x20);
     if (paddingLength > 0) {
         packet.append(QByteArray(paddingLength, '\0'));
         packet[packet.size() - 1] = char(paddingLength);
@@ -129,8 +129,8 @@ static BundleRouter::Route route(const char *name, const char *mid, quint16 midI
                                  quint8 payloadType)
 {
     BundleRouter::Route result;
-    result.content = ContentKey { QString::fromLatin1(name), Origin::Initiator };
-    result.mid = QByteArray(mid);
+    result.content        = ContentKey { QString::fromLatin1(name), Origin::Initiator };
+    result.mid            = QByteArray(mid);
     result.midExtensionId = midId;
     result.incomingPayloadTypes.insert(payloadType);
     result.incomingSsrcs.insert(incoming);
@@ -204,14 +204,14 @@ int main(int argc, char **argv)
               && router.lastError() == BundleRouter::Error::MalformedPacket,
           "truncated RTP extension accepted");
     auto truncatedCsrc = rtp(AudioRemote);
-    truncatedCsrc[0] = char(quint8(truncatedCsrc[0]) | 0x01);
+    truncatedCsrc[0]   = char(quint8(truncatedCsrc[0]) | 0x01);
     check(!router.routeIncoming(truncatedCsrc, SrtpContext::Packet::Rtp)
               && router.lastError() == BundleRouter::Error::MalformedPacket,
           "truncated RTP CSRC list accepted");
     check(!router.routeIncoming(paddedRtp(AudioRemote, 0), SrtpContext::Packet::Rtp)
               && router.lastError() == BundleRouter::Error::MalformedPacket,
           "RTP padding flag without padding accepted");
-    auto excessivePadding = paddedRtp(AudioRemote, 2);
+    auto excessivePadding                         = paddedRtp(AudioRemote, 2);
     excessivePadding[excessivePadding.size() - 1] = char(3);
     check(!router.routeIncoming(excessivePadding, SrtpContext::Packet::Rtp)
               && router.lastError() == BundleRouter::Error::MalformedPacket,
@@ -220,15 +220,15 @@ int main(int argc, char **argv)
     check(validPadding && validPadding->content == audio.content, "valid RTP padding was rejected");
 
     BundleRouter twoByteRouter;
-    auto twoByteAudio = audio;
+    auto         twoByteAudio   = audio;
     twoByteAudio.midExtensionId = 16;
     check(twoByteRouter.configure({ twoByteAudio }), "two-byte MID mapping rejected");
     auto twoBytePacket = twoByteRouter.routeIncoming(rtp(0x66666666, "audio", 16, true), SrtpContext::Packet::Rtp);
     check(twoBytePacket && twoBytePacket->content == audio.content, "two-byte RTP MID was not routed");
 
     const auto beforeInvalidRevision = router.revision();
-    auto duplicateMid = video;
-    duplicateMid.mid = audio.mid;
+    auto       duplicateMid          = video;
+    duplicateMid.mid                 = audio.mid;
     check(!router.configure({ audio, duplicateMid }) && router.lastError() == BundleRouter::Error::InvalidRoutes
               && router.revision() == beforeInvalidRevision,
           "duplicate MID partially replaced the route table");
@@ -243,10 +243,10 @@ int main(int argc, char **argv)
     duplicateLocalSsrc.localSsrcs.clear();
     duplicateLocalSsrc.localSsrcs.insert(AudioLocal);
     check(!router.configure({ audio, duplicateLocalSsrc }), "one local SSRC was assigned to two contents");
-    auto differentMidId = video;
+    auto differentMidId           = video;
     differentMidId.midExtensionId = 2;
     check(!router.configure({ audio, differentMidId }), "different BUNDLE MID extension ids accepted");
-    auto appbitsMid = audio;
+    auto appbitsMid           = audio;
     appbitsMid.midExtensionId = 256;
     check(!router.configure({ appbitsMid }), "RFC 8285 appbits value used as a MID element id");
 
@@ -259,8 +259,7 @@ int main(int argc, char **argv)
     BundleRouter directional;
     check(directional.configure({ audio, directionalVideo }), "cross-direction SSRC collision was rejected");
     auto collidingRtp = directional.routeIncoming(rtp(AudioLocal, {}, 1, false, VideoPt), SrtpContext::Packet::Rtp);
-    check(collidingRtp && collidingRtp->content == video.content,
-          "incoming RTP used the local RTCP SSRC namespace");
+    check(collidingRtp && collidingRtp->content == video.content, "incoming RTP used the local RTCP SSRC namespace");
     auto senderDirected = directional.routeIncoming(feedback(206, AudioLocal, 0), SrtpContext::Packet::Rtcp);
     check(senderDirected && senderDirected->content == video.content,
           "RTCP sender SSRC used the local media-source namespace");
@@ -292,15 +291,16 @@ int main(int argc, char **argv)
     auto audioSdes = rtcpRouter.routeIncoming(sdes(AudioRemote), SrtpContext::Packet::Rtcp);
     check(audioSdes && audioSdes->content == audio.content, "RTCP SDES chunk was not routed");
 
-    const auto crossContent = senderReport(AudioRemote) + senderReport(VideoRemote);
-    auto sharedCompound = rtcpRouter.routeIncoming(crossContent, SrtpContext::Packet::Rtcp);
+    const auto crossContent   = senderReport(AudioRemote) + senderReport(VideoRemote);
+    auto       sharedCompound = rtcpRouter.routeIncoming(crossContent, SrtpContext::Packet::Rtcp);
     check(sharedCompound && sharedCompound->delivery == BundleRouter::Delivery::SharedRtcp
               && sharedCompound->data == crossContent && sharedCompound->relatedContents.size() == 2
               && containsContent(sharedCompound->relatedContents, audio.content)
-              && containsContent(sharedCompound->relatedContents, video.content) && rtcpRouter.isCurrent(*sharedCompound),
+              && containsContent(sharedCompound->relatedContents, video.content)
+              && rtcpRouter.isCurrent(*sharedCompound),
           "cross-content compound RTCP was not preserved for shared ingress");
-    auto sharedReports = rtcpRouter.routeIncoming(receiverReport(0x89898989, AudioLocal, VideoLocal),
-                                                   SrtpContext::Packet::Rtcp);
+    auto sharedReports
+        = rtcpRouter.routeIncoming(receiverReport(0x89898989, AudioLocal, VideoLocal), SrtpContext::Packet::Rtcp);
     check(sharedReports && sharedReports->delivery == BundleRouter::Delivery::SharedRtcp
               && sharedReports->relatedContents.size() == 2,
           "one RR containing reports for two contents was rejected or split");
@@ -344,8 +344,8 @@ int main(int argc, char **argv)
 
     // Removing one member retains the live source registration of the survivor
     // and drops the removed member's source without changing the old queued packet.
-    auto queuedShared = dynamic.routeIncoming(receiverReport(0x77770000, AudioLocal, VideoLocal),
-                                               SrtpContext::Packet::Rtcp);
+    auto queuedShared
+        = dynamic.routeIncoming(receiverReport(0x77770000, AudioLocal, VideoLocal), SrtpContext::Packet::Rtcp);
     check(queuedShared && queuedShared->delivery == BundleRouter::Delivery::SharedRtcp,
           "shared RTCP teardown regression setup failed");
     check(dynamic.configure({ dynamicAudio }), "surviving member reconfiguration failed");
@@ -362,7 +362,7 @@ int main(int argc, char **argv)
     // runtime ownership. Otherwise removing the static declaration on a later
     // reconfigure silently loses RTCP routing for the live sender.
     BundleRouter staticThenRuntime;
-    auto staticAudio = audio;
+    auto         staticAudio = audio;
     staticAudio.incomingSsrcs.clear();
     check(staticThenRuntime.configure({ staticAudio }), "static/runtime SSRC route rejected");
     check(staticThenRuntime.registerOutgoingSsrc(staticAudio.content, AudioLocal),
@@ -371,8 +371,8 @@ int main(int argc, char **argv)
           "statically declared SSRC was not tracked as a runtime registration");
     staticAudio.localSsrcs.clear();
     check(staticThenRuntime.configure({ staticAudio }), "removing static SSRC declaration failed");
-    auto afterStaticRemoval = staticThenRuntime.routeIncoming(receiverReport(0x77770001, AudioLocal),
-                                                               SrtpContext::Packet::Rtcp);
+    auto afterStaticRemoval
+        = staticThenRuntime.routeIncoming(receiverReport(0x77770001, AudioLocal), SrtpContext::Packet::Rtcp);
     check(afterStaticRemoval && afterStaticRemoval->content == staticAudio.content,
           "runtime SSRC route disappeared with its static declaration");
     check(staticThenRuntime.unregisterOutgoingSsrc(staticAudio.content, AudioLocal),
@@ -382,7 +382,7 @@ int main(int argc, char **argv)
           "runtime unregister retained a removed static SSRC route");
 
     BundleRouter limitedOutgoing;
-    auto noStaticLocal = audio;
+    auto         noStaticLocal = audio;
     noStaticLocal.localSsrcs.clear();
     check(limitedOutgoing.configure({ noStaticLocal }), "outgoing SSRC limit route rejected");
     for (int i = 0; i < BundleRouter::MaxRegisteredOutgoingSsrcs; ++i) {
@@ -400,7 +400,7 @@ int main(int argc, char **argv)
     // A source first seen statically still consumes a runtime registration slot
     // once the producer registers it.
     BundleRouter limitedStaticRuntime;
-    auto limitedStatic = audio;
+    auto         limitedStatic = audio;
     limitedStatic.incomingSsrcs.clear();
     check(limitedStaticRuntime.configure({ limitedStatic }), "static runtime limit route rejected");
     check(limitedStaticRuntime.registerOutgoingSsrc(limitedStatic.content, AudioLocal),
@@ -416,7 +416,7 @@ int main(int argc, char **argv)
     // Receive-only is valid without any local source registration. Unique PT can
     // still establish the authenticated incoming SSRC association.
     BundleRouter receiveOnly;
-    auto receiveOnlyAudio = dynamicAudio;
+    auto         receiveOnlyAudio = dynamicAudio;
     check(receiveOnly.configure({ receiveOnlyAudio }), "receive-only route rejected");
     auto receivedByPt = receiveOnly.routeIncoming(rtp(0x70707070), SrtpContext::Packet::Rtp);
     check(receivedByPt && receivedByPt->content == receiveOnlyAudio.content,
@@ -428,7 +428,7 @@ int main(int argc, char **argv)
     check(bounded.configure({ audio }), "bounded learning route rejected");
     quint32 last = 0;
     for (int i = 0; i < BundleRouter::MaxLearnedSsrcs + 1; ++i) {
-        last = 0x10000000u + quint32(i);
+        last        = 0x10000000u + quint32(i);
         auto routed = bounded.routeIncoming(rtp(last, "audio"), SrtpContext::Packet::Rtp);
         check(routed && routed->content == audio.content, "MID routing failed while learning SSRCs");
     }

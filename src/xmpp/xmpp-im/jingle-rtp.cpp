@@ -8,6 +8,7 @@ namespace XMPP::Jingle::RTP {
 Pad::Pad(Manager *manager, Session *session, std::shared_ptr<MediaProvider> provider, QStringList transports) :
     manager_(manager), session_(session), provider_(std::move(provider)), transports_(std::move(transports))
 {
+    directions_ = new DirectionController(this);
     if (provider_)
         media_ = provider_->createSession();
     if (media_)
@@ -226,7 +227,8 @@ void Application::prepare()
             });
     } else {
         prepareOperation_ = media->prepareLocalOffer(
-            endpoint_.get(), [guard](MediaOperation::Id id, std::optional<Description> result, MediaError error) mutable {
+            endpoint_.get(),
+            [guard](MediaOperation::Id id, std::optional<Description> result, MediaError error) mutable {
                 if (guard)
                     guard->prepared(id, std::move(result), std::move(error));
             });
@@ -350,11 +352,11 @@ void Application::start()
         return;
     }
     QPointer<Application> guard(this);
-    applyOperation_ = media->applyNegotiation(
-        endpoint_.get(), *local, *remote, [guard](MediaOperation::Id id, MediaError error) mutable {
-            if (guard)
-                guard->applied(id, std::move(error));
-        });
+    applyOperation_ = media->applyNegotiation(endpoint_.get(), *local, *remote,
+                                              [guard](MediaOperation::Id id, MediaError error) mutable {
+                                                  if (guard)
+                                                      guard->applied(id, std::move(error));
+                                              });
     if (!applyOperation_)
         remove(Reason::FailedApplication, QStringLiteral("Media configuration could not be started"));
 }
@@ -391,6 +393,8 @@ void Application::applied(MediaOperation::Id id, MediaError error)
 }
 bool Application::allowsRtp(bool sending) const
 {
+    if (sending && !_pad.staticCast<Pad>()->directionController()->allowsLocalSending(this))
+        return false;
     const auto localRole = _pad->session()->role();
     const auto role = sending ? localRole : (localRole == Origin::Initiator ? Origin::Responder : Origin::Initiator);
     return _senders == Origin::Both || _senders == role;

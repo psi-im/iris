@@ -34,10 +34,7 @@ namespace XMPP { namespace Jingle {
         typedef QSharedPointer<TransportManagerPad> Ptr;
 
         virtual TransportManager *manager() const = 0;
-        QString                   requestedNamespace() const
-        {
-            return property("_iris_jingle_transport_namespace").toString();
-        }
+        QString requestedNamespace() const { return property("_iris_jingle_transport_namespace").toString(); }
     };
 
     class Transport : public QObject {

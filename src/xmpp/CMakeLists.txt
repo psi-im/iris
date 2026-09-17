@@ -124,6 +124,7 @@ set(XMPP_IM_HEADERS
     xmpp-im/jingle-rtp-description.h
     xmpp-im/jingle-rtp-negotiation.h
     xmpp-im/jingle-rtp.h
+    xmpp-im/jingle-rtp-directions.h
     xmpp-im/jingle-rtp-info.h
     xmpp-im/jingle-rtp-srtp.h
     xmpp-im/jingle-ice.h
@@ -205,6 +206,8 @@ target_sources(iris PRIVATE
     xmpp-im/jingle-rtp-description.cpp
     xmpp-im/jingle-rtp-negotiation.cpp
     xmpp-im/jingle-rtp.cpp
+    xmpp-im/jingle-rtp-directions.cpp
+    xmpp-im/jingle-rtp-direction-operation.cpp
     xmpp-im/jingle-rtp-media.cpp
     xmpp-im/jingle-rtp-info.cpp
     xmpp-im/jingle-rtp-srtp.cpp

@@ -29,7 +29,7 @@ namespace XMPP { namespace Jingle {
         };
 
         struct Association {
-            int                                id = -1;
+            int                                id      = -1;
             bool                               bundled = false;
             ContentKey                         owner;
             QList<ContentKey>                  members;
@@ -40,14 +40,14 @@ namespace XMPP { namespace Jingle {
         enum class ActionKind { CreateAssociation, AttachMember };
 
         struct Action {
-            ActionKind kind = ActionKind::CreateAssociation;
+            ActionKind kind          = ActionKind::CreateAssociation;
             int        associationId = -1;
             ContentKey content;
         };
 
         const QList<Association> &associations() const { return associations_; }
         const QList<Action>      &actions() const { return actions_; }
-        int associationFor(const ContentKey &content) const { return memberAssociations_.value(content, -1); }
+        int  associationFor(const ContentKey &content) const { return memberAssociations_.value(content, -1); }
         bool readyToCommit() const
         {
             for (const auto &association : associations_) {
@@ -157,22 +157,22 @@ namespace XMPP { namespace Jingle {
                 if (group.semantics != QLatin1String("BUNDLE") || group.contents.isEmpty())
                     continue;
                 QSet<QString> groupNames;
-                const int offeredGroup = offeredGroupByName.value(group.contents.first(), -1);
+                const int     offeredGroup = offeredGroupByName.value(group.contents.first(), -1);
                 if (offeredGroup < 0 || answeredGroups.contains(offeredGroup))
                     return fail(Error::InvalidAnswer);
 
                 GroupPlan::Association association;
-                association.id      = plan.associations_.size();
-                association.bundled = true;
-                bool hasParameters  = false;
+                association.id         = plan.associations_.size();
+                association.bundled    = true;
+                bool hasParameters     = false;
                 bool missingParameters = false;
 
                 for (const auto &name : group.contents) {
                     if (name.isEmpty() || groupNames.contains(name) || answeredNames.contains(name)
                         || offeredGroupByName.value(name, -1) != offeredGroup)
                         return fail(Error::InvalidAnswer);
-                    Error resolutionError = Error::None;
-                    const int memberIndex = resolve(name, &resolutionError);
+                    Error     resolutionError = Error::None;
+                    const int memberIndex     = resolve(name, &resolutionError);
                     if (memberIndex < 0)
                         return fail(resolutionError);
                     const auto &member = members.at(memberIndex);
@@ -207,7 +207,7 @@ namespace XMPP { namespace Jingle {
             for (int memberIndex = 0; memberIndex < members.size(); ++memberIndex) {
                 if (assignedMembers.contains(memberIndex))
                     continue;
-                const auto &member = members.at(memberIndex);
+                const auto            &member = members.at(memberIndex);
                 GroupPlan::Association association;
                 association.id                  = plan.associations_.size();
                 association.owner               = member.content;

@@ -292,7 +292,7 @@ int main(int argc, char **argv)
             disposable->addContent(a);
             disposable->addContent(b);
             QPointer<TestApplication> bGuard(b);
-            auto destroy = [=](Origin) {
+            auto                      destroy = [=](Origin) {
                 if (destroySession)
                     delete disposable;
                 else

@@ -43,15 +43,15 @@ bool BundleRouter::configure(const QList<Route> &routes)
         return false;
     }
 
-    QMap<ContentKey, int>        contentRoutes;
-    QHash<QByteArray, int>       midRoutes;
-    QHash<quint8, int>           payloadTypeRoutes;
-    QSet<quint8>                 ambiguousPayloadTypes;
-    QHash<quint32, int>          incomingSsrcRoutes;
-    QHash<quint32, int>          localSsrcRoutes;
-    QHash<quint32, ContentKey>   registeredOutgoingSsrcs;
-    QSet<QByteArray>             mids;
-    quint16                      midExtensionId = 0;
+    QMap<ContentKey, int>      contentRoutes;
+    QHash<QByteArray, int>     midRoutes;
+    QHash<quint8, int>         payloadTypeRoutes;
+    QSet<quint8>               ambiguousPayloadTypes;
+    QHash<quint32, int>        incomingSsrcRoutes;
+    QHash<quint32, int>        localSsrcRoutes;
+    QHash<quint32, ContentKey> registeredOutgoingSsrcs;
+    QSet<QByteArray>           mids;
+    quint16                    midExtensionId = 0;
 
     auto addSsrc = [](QHash<quint32, int> &mapping, quint32 ssrc, int routeIndex) {
         auto it = mapping.constFind(ssrc);
@@ -138,13 +138,13 @@ bool BundleRouter::configure(const QList<Route> &routes)
         registeredOutgoingSsrcs.insert(it.key(), it.value());
     }
 
-    routes_                   = routes;
-    contentRoutes_            = std::move(contentRoutes);
-    midRoutes_                = std::move(midRoutes);
-    payloadTypeRoutes_        = std::move(payloadTypeRoutes);
-    incomingSsrcRoutes_       = std::move(incomingSsrcRoutes);
-    localSsrcRoutes_          = std::move(localSsrcRoutes);
-    registeredOutgoingSsrcs_  = std::move(registeredOutgoingSsrcs);
+    routes_                  = routes;
+    contentRoutes_           = std::move(contentRoutes);
+    midRoutes_               = std::move(midRoutes);
+    payloadTypeRoutes_       = std::move(payloadTypeRoutes);
+    incomingSsrcRoutes_      = std::move(incomingSsrcRoutes);
+    localSsrcRoutes_         = std::move(localSsrcRoutes);
+    registeredOutgoingSsrcs_ = std::move(registeredOutgoingSsrcs);
     learnedSsrcs_.clear();
     midExtensionId_ = midExtensionId;
     advanceRevision();
@@ -253,7 +253,7 @@ std::optional<BundleRouter::ParsedRtp> BundleRouter::parseRtp(const QByteArray &
         if (packet.size() - offset < 4)
             return {};
 
-        const quint16 profile     = read16(packet, offset);
+        const quint16 profile        = read16(packet, offset);
         const int     extensionBytes = int(read16(packet, offset + 2)) * 4;
         if (extensionBytes > packet.size() - offset - 4)
             return {};
@@ -438,16 +438,16 @@ std::optional<BundleRouter::RoutedPacket> BundleRouter::routed(int routeIndex, c
     }
     RoutedPacket result;
     result.delivery = Delivery::Content;
-    result.content = routes_.at(routeIndex).content;
+    result.content  = routes_.at(routeIndex).content;
     result.relatedContents.append(result.content);
-    result.data = packet;
-    result.kind = kind;
+    result.data     = packet;
+    result.kind     = kind;
     result.revision = revision_;
-    lastError_ = Error::None;
+    lastError_      = Error::None;
     return result;
 }
 
-std::optional<BundleRouter::RoutedPacket> BundleRouter::routedSharedRtcp(const QSet<int> &routeIndexes,
+std::optional<BundleRouter::RoutedPacket> BundleRouter::routedSharedRtcp(const QSet<int>  &routeIndexes,
                                                                          const QByteArray &packet)
 {
     QList<int> ordered = routeIndexes.values();
@@ -459,8 +459,8 @@ std::optional<BundleRouter::RoutedPacket> BundleRouter::routedSharedRtcp(const Q
 
     RoutedPacket result;
     result.delivery = Delivery::SharedRtcp;
-    result.data = packet;
-    result.kind = SrtpContext::Packet::Rtcp;
+    result.data     = packet;
+    result.kind     = SrtpContext::Packet::Rtcp;
     result.revision = revision_;
     for (int routeIndex : ordered) {
         if (routeIndex < 0 || routeIndex >= routes_.size()) {
@@ -473,7 +473,7 @@ std::optional<BundleRouter::RoutedPacket> BundleRouter::routedSharedRtcp(const Q
     return result;
 }
 
-std::optional<BundleRouter::RoutedPacket> BundleRouter::routeIncoming(const QByteArray &packet,
+std::optional<BundleRouter::RoutedPacket> BundleRouter::routeIncoming(const QByteArray   &packet,
                                                                       SrtpContext::Packet kind)
 {
     if (kind == SrtpContext::Packet::Rtp) {
@@ -498,8 +498,7 @@ std::optional<BundleRouter::RoutedPacket> BundleRouter::routeIncoming(const QByt
                 lastError_ = Error::DisallowedPayloadType;
                 return {};
             }
-            if (ssrcRoute == incomingSsrcRoutes_.cend() && parsed->ssrc
-                && learnedSsrcs_.size() < MaxLearnedSsrcs) {
+            if (ssrcRoute == incomingSsrcRoutes_.cend() && parsed->ssrc && learnedSsrcs_.size() < MaxLearnedSsrcs) {
                 incomingSsrcRoutes_.insert(parsed->ssrc, midRoute.value());
                 learnedSsrcs_.insert(parsed->ssrc);
             }

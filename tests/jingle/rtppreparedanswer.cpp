@@ -23,7 +23,7 @@ static R::Description description()
     opus.channels  = 2;
     result.payloads.append(opus);
     QDomDocument doc;
-    auto extension = doc.createElementNS(QStringLiteral("urn:iris:test"), QStringLiteral("test"));
+    auto         extension = doc.createElementNS(QStringLiteral("urn:iris:test"), QStringLiteral("test"));
     extension.setAttribute(QStringLiteral("value"), QStringLiteral("original"));
     result.extensions.append(extension);
     return result;
@@ -37,8 +37,7 @@ int main(int argc, char **argv)
     auto answer = description();
     answer.ssrc = 42;
     R::Negotiation prepared;
-    check(prepared.setRemoteOffer(offer, answer) == R::Negotiation::Result::Ok,
-          "prepared answer was not committed");
+    check(prepared.setRemoteOffer(offer, answer) == R::Negotiation::Result::Ok, "prepared answer was not committed");
     offer.extensions.first().setAttribute(QStringLiteral("value"), QStringLiteral("changed"));
     answer.payloads.first().name = QStringLiteral("changed");
     check(prepared.remoteDescription()->extensions.first().attribute(QStringLiteral("value"))
@@ -49,7 +48,7 @@ int main(int argc, char **argv)
     check(prepared.setRemoteOffer(description(), description()) == R::Negotiation::Result::WrongState,
           "prepared answer replaced an accepted negotiation");
 
-    auto invented = description();
+    auto invented                = description();
     invented.payloads.first().id = 112;
     R::Negotiation incompatible;
     check(incompatible.setRemoteOffer(description(), invented) == R::Negotiation::Result::IncompatibleAnswer,

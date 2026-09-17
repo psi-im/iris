@@ -35,7 +35,7 @@ public:
     J::Session            *session() const override { return session_; }
     QString                ns() const override { return QStringLiteral("urn:iris:test:application"); }
     J::ApplicationManager *manager() const override { return nullptr; }
-    QString generateContentName(J::Origin) override { return QStringLiteral("test"); }
+    QString                generateContentName(J::Origin) override { return QStringLiteral("test"); }
 
 private:
     J::Session *session_;
@@ -45,15 +45,15 @@ class TestTransport : public J::Transport {
 public:
     TestTransport() : Transport({}, J::Origin::Initiator) { setState(J::State::Active); }
 
-    void prepare() override { }
-    void start() override { }
-    bool update(const QDomElement &) override { return true; }
-    bool hasUpdates() const override { return false; }
+    void                           prepare() override { }
+    void                           start() override { }
+    bool                           update(const QDomElement &) override { return true; }
+    bool                           hasUpdates() const override { return false; }
     J::OutgoingTransportInfoUpdate takeOutgoingUpdate(bool) override { return {}; }
-    bool isValid() const override { return true; }
-    J::TransportFeatures features() const override { return {}; }
-    J::Connection::Ptr addChannel(J::TransportFeatures, const QString &, int) override { return {}; }
-    QList<J::Connection::Ptr> channels() const override { return {}; }
+    bool                           isValid() const override { return true; }
+    J::TransportFeatures           features() const override { return {}; }
+    J::Connection::Ptr             addChannel(J::TransportFeatures, const QString &, int) override { return {}; }
+    QList<J::Connection::Ptr>      channels() const override { return {}; }
 };
 
 class TestApplication : public J::Application {
@@ -72,18 +72,18 @@ public:
         _state = J::State::Active;
     }
 
-    void setState(J::State state) override { _state = state; }
+    void                                setState(J::State state) override { _state = state; }
     const std::optional<Stanza::Error> &lastError() const override { return error_; }
-    J::Reason lastReason() const override { return {}; }
-    SetDescError setRemoteOffer(const QDomElement &) override { return Unparsed; }
-    SetDescError setRemoteAnswer(const QDomElement &) override { return Unparsed; }
-    QDomElement makeLocalOffer() override { return {}; }
-    QDomElement makeLocalAnswer() override { return {}; }
-    bool supportsContentModify() const override { return supportsModify_; }
-    void prepare() override { }
-    void start() override { }
-    void remove(J::Reason::Condition, const QString &) override { }
-    void incomingRemove(const J::Reason &) override { }
+    J::Reason                           lastReason() const override { return {}; }
+    SetDescError                        setRemoteOffer(const QDomElement &) override { return Unparsed; }
+    SetDescError                        setRemoteAnswer(const QDomElement &) override { return Unparsed; }
+    QDomElement                         makeLocalOffer() override { return {}; }
+    QDomElement                         makeLocalAnswer() override { return {}; }
+    bool                                supportsContentModify() const override { return supportsModify_; }
+    void                                prepare() override { }
+    void                                start() override { }
+    void                                remove(J::Reason::Condition, const QString &) override { }
+    void                                incomingRemove(const J::Reason &) override { }
 
     bool supportsModify_ = true;
 
@@ -110,10 +110,9 @@ int main(int argc, char **argv)
 
     {
         TestApplication initial(&session);
-        int directionNotifications     = 0;
-        int peerDirectionNotifications = 0;
-        QObject::connect(&initial, &J::Application::sendersChanged, &app,
-                         [&](J::Origin) { ++directionNotifications; });
+        int             directionNotifications     = 0;
+        int             peerDirectionNotifications = 0;
+        QObject::connect(&initial, &J::Application::sendersChanged, &app, [&](J::Origin) { ++directionNotifications; });
         QObject::connect(&initial, &J::Application::sendersChangedByPeer, &app,
                          [&](J::Origin) { ++peerDirectionNotifications; });
         check(initial.requestSenders(J::Origin::Responder), "initial direction request rejected");
@@ -131,8 +130,7 @@ int main(int argc, char **argv)
         active.activate();
         int directionNotifications     = 0;
         int peerDirectionNotifications = 0;
-        QObject::connect(&active, &J::Application::sendersChanged, &app,
-                         [&](J::Origin) { ++directionNotifications; });
+        QObject::connect(&active, &J::Application::sendersChanged, &app, [&](J::Origin) { ++directionNotifications; });
         QObject::connect(&active, &J::Application::sendersChangedByPeer, &app,
                          [&](J::Origin) { ++peerDirectionNotifications; });
 
@@ -175,8 +173,7 @@ int main(int argc, char **argv)
         active.activate();
         int directionNotifications     = 0;
         int peerDirectionNotifications = 0;
-        QObject::connect(&active, &J::Application::sendersChanged, &app,
-                         [&](J::Origin) { ++directionNotifications; });
+        QObject::connect(&active, &J::Application::sendersChanged, &app, [&](J::Origin) { ++directionNotifications; });
         QObject::connect(&active, &J::Application::sendersChangedByPeer, &app,
                          [&](J::Origin) { ++peerDirectionNotifications; });
 
@@ -216,8 +213,7 @@ int main(int argc, char **argv)
         std::get<1>(second)(&success);
         check(active.senders() == J::Origin::Both, "newer direction was not committed after ACK");
         check(peerDirectionNotifications == 0, "newer outgoing ACK was reported as peer-originated");
-        check(active.evaluateOutgoingUpdate().action == J::Action::NoAction,
-              "superseded direction remained queued");
+        check(active.evaluateOutgoingUpdate().action == J::Action::NoAction, "superseded direction remained queued");
     }
 
     {

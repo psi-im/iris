@@ -13,9 +13,8 @@ int main(int argc, char **argv)
     Client           client;
     Result           success(client.rootTask(), true);
 
-    J::Session session(client.jingleManager(), Jid(QStringLiteral("peer@example.test/device")),
-                       J::Origin::Initiator);
-    auto content = new TestApplication(&session, J::Origin::Both, QStringLiteral("audio"), J::Origin::Initiator);
+    J::Session session(client.jingleManager(), Jid(QStringLiteral("peer@example.test/device")), J::Origin::Initiator);
+    auto       content = new TestApplication(&session, J::Origin::Both, QStringLiteral("audio"), J::Origin::Initiator);
     session.addContent(content);
     content->activate();
 
@@ -27,7 +26,7 @@ int main(int argc, char **argv)
     const auto transaction   = startContentModify(session, { &update });
 
     bool ackNotificationEntered = false;
-    bool staleTieBreak           = false;
+    bool staleTieBreak          = false;
     QObject::connect(content, &J::Application::sendersChanged, &app, [&](J::Origin senders) {
         if (senders != J::Origin::Responder)
             return;
