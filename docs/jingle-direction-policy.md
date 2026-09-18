@@ -247,11 +247,10 @@ flowchart TD
     S -->|all success/error outcomes| C
 ```
 
-## Transport replacement migration
+## Transport replacement coordination
 
-Keep the existing specialized handler until the hardened coordinator and direction API are
-stable. Register transport-replace resolution at Application/transport-selector ownership:
-that owner outlives individual candidate Transports and knows replacement generation.
+Transport-replace arbitration uses an Application-owned resolver registered when serializing
+a local replacement. That owner outlives individual candidate Transports and knows replacement generation.
 A short-lived Transport should not be the sole owner of fallback recovery; Pad-level resolvers
 are appropriate only for actual shared-group invariants, not generic per-content replacement.
 
@@ -259,6 +258,11 @@ Preserve separate IQ ACK and transport-accept/reject lifetimes, transaction/gene
 validated sibling hints and valid mixed supported/unsupported batch policy. Hints from rejected
 IQs remain advisory, never install a remote transport. Resolution aggregation cannot encode
 per-content commit outcomes; keep those in the transport handler/attempt result.
+Session validates replacement batches before arbitration. Validated sibling hints are consumed
+only after the IQ error, rechecking owner/transport/generation; selection itself is guarded
+across reentrant selector callbacks. The responder uses Continue, not Postpone: a remote winner
+invalidates the old local completion, otherwise ordinary failed-IQ fallback is the single owner.
+There is no durable transport intent to replay. See [jingle.md](jingle.md#crossed-transport-replace-and-tie-break).
 Do not infer correctness from historical speed: malformed sibling mutation requires staged
 parse/validate then commit. A boolean validate() followed by the same mutating update() is not
 transactionality. Prefer typed prepared updates, bound to the transport identity/generation,
@@ -274,8 +278,9 @@ payload application. This API deserves a separate bounded step, not another gene
 3. Add minimal Pad direction controller: one policy writer, local-bit operations, scoped gates,
    finite batch operation handles. Migrate Psi and remove duplicate pending state.
 4. Prove two-peer convergence and no privacy reopening under crossed actions + newer policy.
-5. Migrate transport-replace incrementally, keeping its existing regression suite and hints.
-6. Stage transport-specific payload mutation as a separate atomicity task.
+5. Transport-replace arbitration and post-reply hints are implemented; keep dispatcher,
+   completion-boundary and selector lifetime regressions alongside the existing transport suite.
+6. Next: stage transport-specific payload mutation as a separate atomicity task.
 
 Tests required in addition to existing dispatcher/transport regressions:
 

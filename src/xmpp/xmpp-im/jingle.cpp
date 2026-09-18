@@ -457,7 +457,11 @@ namespace XMPP { namespace Jingle {
                     return true;
                 }
                 QPointer<Session> sessionGuard(session);
-                const auto        tieBreak = session->tieBreaker()->resolveIncoming(jingle.action(), jingleEl);
+                // Replacement batches must be validated before arbitration and
+                // retain validated sibling hints until after the IQ reply.
+                const auto tieBreak = jingle.action() == Action::TransportReplace
+                    ? TieBreaker::Resolution()
+                    : session->tieBreaker()->resolveIncoming(jingle.action(), jingleEl);
                 if (!sessionGuard) {
                     respondError(iq, Stanza::Error::ErrorType::Cancel, Stanza::Error::ErrorCond::ItemNotFound);
                     return true;
@@ -471,7 +475,8 @@ namespace XMPP { namespace Jingle {
                     return true;
                 }
 
-                const bool applied = session->updateFromXml(jingle.action(), jingleEl);
+                std::function<void()> afterReply;
+                const bool            applied = session->updateFromXml(jingle.action(), jingleEl, &afterReply);
                 if (!applied) {
                     if (sessionGuard && sessionGuard->lastError())
                         respondError(iq, *sessionGuard->lastError());
@@ -483,6 +488,8 @@ namespace XMPP { namespace Jingle {
                 }
                 // Recovery may start networking or destroy the Session. Publish
                 // the incoming outcome only after its IQ reply has been sent.
+                if (afterReply)
+                    afterReply();
                 if (sessionGuard) {
                     sessionGuard->tieBreaker()->incomingFinished(
                         tieBreak.id, applied ? TieBreaker::RemoteResult::Applied : TieBreaker::RemoteResult::Rejected);

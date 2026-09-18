@@ -296,6 +296,10 @@ static void testInFlightReplaceWinsWithoutTransportUnacked(Client &client)
     check(app->evaluateOutgoingUpdate().action == J::Action::TransportReplace,
           "planned replacement did not evaluate to transport-replace");
     auto outgoing = app->takeOutgoingUpdate();
+    auto xml      = client.doc()->createElementNS(J::NS, QStringLiteral("jingle"));
+    for (const auto &element : std::get<0>(outgoing))
+        xml.appendChild(element);
+    session.tieBreaker()->outgoingStarted(J::Action::TransportReplace, xml);
     check(bool(std::get<1>(outgoing)) && app->replaceNeedAck(), "outgoing transport-replace is not in flight");
     check(local->state() == J::State::ApprovedToSend,
           "ICE-like test transport unexpectedly encoded IQ lifetime in transport state");
@@ -422,4 +426,5 @@ int main(int argc, char **argv)
         qFatal("unknown transport-replace correctness case: %s", qPrintable(test));
 
     qInfo() << "Transport-replace correctness case passed:" << test;
+    return 0;
 }

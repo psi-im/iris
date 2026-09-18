@@ -208,7 +208,19 @@ public:
     }
     void setReplaceEnabled(bool enabled) { replaceEnabled_ = enabled; }
     void markReplacePlanned() { _pendingTransportReplace = PendingTransportReplace::Planned; }
-    void markReplaceAwaitingAck() { _pendingTransportReplace = PendingTransportReplace::NeedAck; }
+    void markReplaceAwaitingAck()
+    {
+        // Handler tests still need a real coordinator transaction. NeedAck alone
+        // is not collision lifetime (in particular inside batch ACK callbacks).
+        _pendingTransportReplace = PendingTransportReplace::Planned;
+        _update                  = { J::Action::TransportReplace, {} };
+        static_cast<TestTransport *>(_transport.data())->setHasUpdates(true);
+        const auto update = takeOutgoingUpdate();
+        auto       xml    = _pad->doc()->createElementNS(J::NS, QStringLiteral("jingle"));
+        for (const auto &element : std::get<0>(update))
+            xml.appendChild(element);
+        _pad->tieBreaker()->outgoingStarted(J::Action::TransportReplace, xml);
+    }
     void markReplaceInProgress() { _pendingTransportReplace = PendingTransportReplace::InProgress; }
     bool replacePlanned() const { return _pendingTransportReplace == PendingTransportReplace::Planned; }
     bool replaceNeedAck() const { return _pendingTransportReplace == PendingTransportReplace::NeedAck; }

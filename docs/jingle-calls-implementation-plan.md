@@ -1,6 +1,6 @@
 # Native Jingle calls: план продолжения для нового чата с Sol
 
-Актуализировано 2026-09-17 по последнему аудиту. Это самостоятельное задание для продолжения существующей реализации, а не предложение спроектировать стек заново. Начать с проверки веток/коммитов через GitHub connector и CI evidence новых исправлений. Старые исправленные замечания не реализовывать повторно.
+Актуализировано 2026-09-18. Это самостоятельное задание для продолжения существующей реализации, а не предложение спроектировать стек заново. Начать с проверки веток/коммитов через GitHub connector и CI evidence новых исправлений. Старые исправленные замечания не реализовывать повторно.
 
 ## 1. Контекст, репозитории и границы достоверности
 
@@ -35,14 +35,16 @@ QCA3 и libSRTP сохраняются, оснований менять crypto b
 Включены directionpolicy, directionoperation и sessioncallbacklifetime; реальные peer-to-peer
 звонки не выполнялись. Targeted ASan/UBSan/LSan для directionoperation также прошёл:
 инструментированы operation/controller/Application/TieBreaker, но не остальные units Iris/Qt.
-Изменения пока в worktree, не объявлять их опубликованными или проверенными GitHub CI.
+Эти Iris изменения вошли в локальный commit b5a1985, указанный ниже; не объявлять их
+опубликованными или проверенными GitHub CI без проверки remote head и конкретного run.
 Psi audio adapter также реализован локально поверх c8821dbe: собран target avcall и прошли
 4/4 AvCall CTest entries (policy, audiodirection, backend_lifecycle, capability_refresh).
 Targeted ASan/UBSan/LSan для production adapter и его теста прошёл; Iris/Qt в этом конкретном
 прогоне не инструментированы. Backend tests используют fake provider, это не GStreamer live gate.
-Перед публикацией Psi изменений сначала нужен Iris commit с новым API и соответствующий
-submodule pin; текущий committed Iris HEAD ещё не содержит worktree T0–T3. Не публиковать
-Psi отдельно с несуществующим в pinned Iris API и не утверждать, что remote CI уже это проверил.
+T0–T3 и форматирование теперь находятся в локальном Iris commit
+`b5a1985d788169e55a18da90a3aa5169162fbf38`. Перед публикацией Psi изменений нужен соответствующий
+submodule pin; не публиковать Psi с несуществующим в pinned Iris API. Наличие local commit
+не доказывает push/remote CI. T4 transport arbitration/completion изменения ниже остаются в worktree.
 Дополнительно исправлена обнаруженная LeakSanitizer утечка ExternalServiceDiscovery:
 это теперь QObject child своего Client. Проверка уничтожения включена в sessioncallbacklifetime.
 Это не новый полный аудит трёх репозиториев. GStreamer development package пользователь уже установил;
@@ -201,13 +203,13 @@ Psi audioPolicyTarget не имеет generic failure completion. Решать �
    blocked/recovery/deadline, generic error, capacity, recreation, session destruction при
    удержанном Pad и синхронное удаление handle из callbacks. В Psi audio path подключён
    через AvCallAudioDirection; старые pending state и прямой requestSenders удалены.
-4. **T4:** transport-replace resolver у Application/selector, переживающего замену Transport;
-   Pad scope только для group-level invariants.
+4. **T4 (реализовано):** transport-replace resolver у Application, переживающего замену Transport;
+   централизованный IQ lifetime, validated sibling hints после reply, guarded fallback.
 5. **T5:** отдельный staged transport payload API для malformed-batch atomicity.
 
 Обязательные design решения подробно изложены в
-[jingle-direction-policy.md](jingle-direction-policy.md); T0–T3 реализованы в Iris,
-а T4/T5 и дальнейшие integration gates остаются следующими шагами:
+[jingle-direction-policy.md](jingle-direction-policy.md); T0–T4 реализованы в Iris,
+а T5 и дальнейшие integration gates остаются следующими шагами:
 
 - SetLocalSending и SetExactSenders различаются. Responder → Both после peer Initiator
   корректно только для желания «отправлять самому», не для exact Responder target.
@@ -278,14 +280,171 @@ Psi audioPolicyTarget не имеет generic failure completion. Решать �
 звонка/микрофона. Отдельно нужна UI-подача failed/blocked operation (сейчас adapter сохраняет
 outcome, но не показывает новый диалог). Не завершать весь звонок из-за observation timeout:
 это не Session negotiation deadline. Camera/hold/permission UX не добавлять без отдельного
-определения их user policy. Следующий Iris implementation этап — T4 transport-replace resolver,
-после него отдельный T5 staged payload API; соответствующие safety gates ниже сохраняются.
+определения их user policy. T4 transport-replace resolver реализован; следующий Iris этап —
+T5 staged payload API и bounded adjacent audit, описанные ниже.
 
-Transport migration сохраняет validated sibling hints getAlikeTransport/selectNextTransport,
-partial supported/unsupported outcomes и существующие reentrancy/identity regressions.
-Historical efficiency не оправдывает side effects от malformed sibling. T5 требует настоящего
-prepare/validate → staged update → identity/generation check → commit, не повторного вызова
-старого mutating update после формальной bool-проверки.
+#### T4: transport TieBreaker — реализованный checkpoint (2026-09-18)
+
+Transport arbitration перенесена в существующий session-scoped TieBreaker. Не начинать
+этот перенос заново. Изменения находятся в локальном worktree поверх
+`b5a1985d788169e55a18da90a3aa5169162fbf38`; наличие кода здесь не доказывает push/CI.
+
+Перед продолжением через GitHub connector проверить наличие:
+`Application::TransportReplaceTieBreakResolver`, `Resolution::localData`,
+`Session::updateFromXml(..., afterReply)`, `transportreplacedispatcher.cpp` и
+`transportreplaceackboundary.cpp`. Если их ещё нет на remote, попросить пользователя
+опубликовать checkpoint, не создавать конкурирующую реализацию. Psi audio adapter также
+остаётся отдельным локальным изменением: проверить его публикацию и submodule pin.
+
+**Граница T4:** централизованная arbitration, сохранение sibling hints, guards и regression
+coverage. Это не staged API всех transport payloads (T5), не готовый live BUNDLE и не доказанная
+совместимость звонков. Архитектура описана в [jingle.md](jingle.md), policy/operations —
+в [jingle-direction-policy.md](jingle-direction-policy.md).
+
+##### Ownership и API, которые следует сохранить
+
+| Файлы в IRIS | Реализованная ответственность |
+| --- | --- |
+| `src/xmpp/xmpp-im/jingle-tiebreaker.{h,cpp}` | Реальный outgoing IQ lifetime, RAII resolver registrations, aggregate Break > Postpone > Continue, deferred recovery. Никаких Transport/RTP/selector semantics. |
+| `src/xmpp/xmpp-im/jingle-application.{h,cpp}` | Application-owned replacement resolver, completion generation, guards внутри setTransport/selectNextTransport, единственный failed-IQ fallback. |
+| `src/xmpp/xmpp-im/jingle-session.{h,cpp}` | Per-incoming-IQ validated replacement entries, ContentKey/owner/transport/generation snapshots, partial outcomes и post-reply hints. |
+| `src/xmpp/xmpp-im/jingle.cpp` | JTPush направляет replacement в validation/arbitration handler; отправляет один reply; затем выполняет guarded afterReply. Другие actions сохраняют прежний dispatcher path. |
+| `tests/jingle/transportreplacedispatcher.cpp` | Реальный Session/JT/JTPush для batch ACK, wire replies/hints; responder cases используют JTPush + явное завершение coordinator/owner callback. |
+| `tests/jingle/transportreplaceackboundary.cpp` | Per-content completion identity, duplicate/stale callbacks, same-object reselection, failure successor после IBB-like Unacked. |
+| `tests/jingle/transportreplace.cpp`, `transportreplacematrix.cpp`, `transportreplacecorrectness.cpp` | Сохранённые handler/partial outcome tests; collision fixtures теперь создают outgoingStarted, не просто выставляют NeedAck. |
+
+Application resolver регистрируется при serialization local replacement и живёт дольше
+конкретного Transport. Initiator возвращает Break при пересечении своего ContentKey в
+local/remote snapshots. Responder возвращает **Continue, не Postpone**:
+принятый remote transport инвалидирует completion проигравшего local proposal; если remote
+transport не установлен, normal failed-IQ fallback остаётся единственным recovery owner.
+Не добавлять второй retry/helper лишь ради симметрии с content-modify.
+Postpone по-прежнему доступен consumers с независимым durable intent, например направлениям RTP.
+
+Content-scoped overlap — политика Iris. Не выдавать её за дословное требование XEP-0166
+и не менять на action-wide collision без отдельного interop анализа.
+`PendingTransportReplace` нужен для workflow, но не является источником истины IQ lifetime.
+После JT completion второй Application в batch ещё может иметь NeedAck, пока callback первого
+реентрантно принимает новое действие; новый IQ уже не simultaneous.
+
+```text
+JT finished
+  → outgoingFinished(tx): закрыть collision lifetime
+  → completion callbacks всех owners
+  → outgoingCallbacksFinished(tx): разрешить deferred recovery других consumers
+
+incoming transport-replace
+  → validate all ContentKeys / structure; snapshot identities
+  → parse detached incoming transports; reject malformed batch before arbitration
+  → resolveIncoming(action, XML)
+      Break: не устанавливать ни один remote transport
+      Continue: apply supported entries; queue transport-reject for unsupported
+  → IQ result/error
+  → guarded afterReply: validated sibling hints; incomingFinished bookkeeping
+```
+
+Break имеет id=0 и detached `localData` snapshot winning outgoing IQ. Snapshot позволяет
+отличить colliding contents от advisory siblings, не сохраняет live transaction и не является
+командой повторить XML. `incomingFinished()` обслуживает Postpone correlation, а не общий
+outcome hook; поэтому transport hints находятся в Session closure, а не в retry().
+
+Prepared entries принадлежат одному incoming request, не mutable Session lastIncoming slot.
+Лимит — 64 contents на batch. У coordinator отдельно ограничены pending resolutions и XML
+snapshots; эти лимиты нельзя считать универсальным ограничителем любых будущих очередей.
+До arbitration проверяются duplicate/unknown keys, отсутствие transport и malformed payload.
+Валидный unsupported transport не равен malformed: обычный путь сохраняет partial acceptance.
+При Break совместимые **sibling** proposals остаются hints для локального selector, не скрытым
+remote acceptance. Prepared local sibling до Unacked не заменяется ради hint.
+
+После reply повторно проверяются Session/Application lifetime, content incarnation, transport
+identity и generation, включая same-pointer reselection. Проверки повторяются после каждого
+selector callback; внутри selectNextTransport/setTransport также есть guards, поскольку
+getAlikeTransport/replace/backupTransport/stop могут удалить owner или изменить текущую попытку.
+Не перемещать selection/network effects обратно внутрь Resolver::resolve().
+
+##### Recovery / acceptance contract
+
+| Ситуация | Обязательный результат |
+| --- | --- |
+| Local IQ success | Completion один раз; никакого tie-break retry. |
+| Local error без установленного remote winner | Один fallback для актуальной generation; при исчерпании selector content завершается. |
+| Local completion после установки remote winner | Старый callback не вызывает transport code и не восстанавливает проигравшее предложение. |
+| Generic invalid/unsupported remote proposal | Обычная validation/reject semantics; local error всё ещё обрабатывает единственный completion owner. |
+| Owner удалён / Session завершена / transport generation изменена | Старые completion/hints не меняют новое состояние. |
+| Callback переустанавливает тот же Transport | Pointer equality недостаточно; проверять generation. |
+
+Воспроизведены и исправлены: stale tie-break второго content внутри первого ACK callback
+реального batch; обращение к удалённому Application после selector getAlikeTransport().
+Регрессии также покрывают success/error, duplicate completion, malformed/duplicate batches,
+hints строго после reply, disjoint contents, удаление owner/Session из reply/hint callbacks,
+reselection внутри selector, responder accepted/malformed/unsupported proposals и fallback.
+Это headless fixtures с fake transports, не реальная двухсторонняя сеть.
+
+Verification checkpoint (2026-09-18): финальная локальная сборка с максимум -j2 и
+последовательный полный Jingle CTest прошли **52/52**, Qt 6.10.2 / system QCA3,
+SRTP/SCTP включены, 15.42 s. Это результат текущего worktree, не GitHub CI.
+Финальный targeted **ASan/UBSan/LSan прошёл**: instrumented dispatcher regression,
+jingle-application.cpp, jingle-session.cpp, jingle-tiebreaker.cpp и jingle.cpp;
+остальные Iris units, Qt и QCA слинкованы без instrumentation. Это не sanitizer-прогон
+всех transport providers. Проверка git diff --check также чистая.
+Для Sol обязательны собственные CI runs на точном опубликованном SHA.
+Не удалять contentmodify_dispatcher, directionpolicy/operation, sessioncallbacklifetime,
+tiebreaker и полный transport suite из regression gate.
+
+#### Следующий Iris этап для Sol: T5 и bounded adjacent audit
+
+**Порядок:** сверить опубликованный T4 → targeted/full CI → adjacent completion audit →
+staged transport payload work. Никаких новых managers, generic template frameworks или
+параллельных policy owners. Работать в существующей ветке/PR, не создавать PR на каждый test.
+
+1. **Adjacent audit (потенциальный P0, ещё не отдельный подтверждённый дефект):**
+   `Application::takeOutgoingUpdate(TransportAccept)` вызывает transport callback до части
+   identity checks. Отдельными reproducer проверить duplicate completion, старый transport,
+   same-object new generation, Application termination/deletion и nested accept/reject.
+   Использовать/расширить `transportacceptackreentrancy.cpp`. Если дефект воспроизведён —
+   привязать completion к конкретной попытке, retirement до внешнего кода, guards после него.
+   Не переносить механически replace counter на все actions без определения их lifecycle.
+
+2. **Inventory transport update effects:** в `jingle-transport.h` и реализациях
+   `jingle-ice.cpp`, `jingle-ibb.cpp`, `jingle-s5b.cpp` перечислить, что делает update:
+   parse, изменение credentials/candidates/security state, emission, scheduling/networking.
+   `parseIncomingTransport` сейчас создаёт отдельный Transport, но вызов update не становится
+   pure от слова prepare. Проверить отмену/Session deletion внутри factory/update callbacks;
+   локального QPointer после возврата недостаточно, если helper сам продолжил работу до возврата.
+   Не заявлять, что T4 даёт rollback произвольных provider side effects.
+
+3. **Первый T5 reproducer:** incoming transport-accept или transport-info с двумя валидными
+   ContentKeys: первый payload корректен и меняет действующий Transport, второй malformed.
+   Проверить, что сейчас ошибка второго не должна оставлять первое изменение применённым.
+   Oracle — actual credentials/candidates/state и отсутствие start/network signals, не только
+   bool return. Unknown/unsupported sibling и malformed payload имеют разные исходы.
+
+4. **Минимальный staged API:** предполагаемые имена `Transport::PreparedUpdate` /
+   `prepareUpdate` — предложение, не существующий контракт. Сначала распарсить/валидировать
+   все нужные payloads в owned typed values без изменения live transport. Prepared value
+   связан с transport identity/generation и не хранит висячие QDomElement references.
+   Затем проверить identities и commit. Не вызывать старый mutating update дважды,
+   не делать bool validate() с теми же side effects, не имитировать rollback произвольных
+   callbacks. Выбрать один transport consumer и regression, затем переносить остальные.
+
+5. **Session integration:** `handleIncomingTransportAccept/Info` готовят весь required batch,
+   затем применяют его. Reentrant commit может удалить sibling или изменить generation:
+   определить stale outcome, не продолжать по raw pointers. Если нужен более сильный
+   observer-atomic контракт, отделить state commit от notifications; не обещать его до реализации.
+   Существующее partial acceptance валидных unsupported replacements сохранить отдельно.
+
+6. **Failure и lifetime cases:** invalid first/last sibling, duplicate/unknown content,
+   stale transport того же pointer, peer reject/error, teardown между stage/commit,
+   timer/network side effects, provider unavailable. Prepared objects освобождаются на всех
+   error/cancel paths. Никаких nested event loops и бесконечных retry.
+   Public API compatibility defaults должны fail-closed; нельзя молча fallback на mutating
+   update до окончания общей validation.
+
+7. **Gate:** reproducer → fix → targeted tests → полный Jingle suite → targeted sanitizer.
+   Sol выполняет это через GitHub CI, не через несуществующий локальный Qt.
+   Указать реальные instrumented units; старый зелёный PR или compile-only gate недостаточен.
+   После T5 обновить `docs/jingle.md` только по фактически достигнутой atomicity.
+   Cross-repo capture/privacy и live Conversations gates остаются отдельными задачами ниже.
 
 ### A3 [P1 privacy, оставшийся старый gap] Live/file switch оставляет прежний capture source
 
@@ -671,9 +830,9 @@ Performance измерять отдельно: media encoding CPU, SRTP packet p
 ## 8. Как выполнять и сдавать работу
 
 Начать с remote heads и CI evidence через connector. Проверить, опубликован ли локальный
-checkpoint T0/T1/T2/T3 и Psi audio adapter, и не реализовывать их повторно. Следующий Iris
-этап — T4, а для A2 требуются оставшиеся cross-repo/live gates; параллельные policy owners не оставлять.
-A3/A4 в psimedia остаются отдельными задачами. T4/T5 вести отдельными ограниченными шагами,
+checkpoint T0–T4 и Psi audio adapter, и не реализовывать их повторно. Следующий Iris
+этап — T5 с bounded adjacent audit, а для A2 требуются cross-repo/live gates; параллельные policy owners не оставлять.
+A3/A4 в psimedia остаются отдельными задачами. T5 вести отдельными ограниченными шагами,
 не повторять опубликованные subset fixes. Затем P1a isolated runtime → P1b production worker →
 P1c native peer checks. P2 live BUNDLE, P3 JMI, P4 feedback/control, P5 recovery и P6 release
 выполняются по зависимостям наблюдённого peer. Не создавать существующие interfaces заново.

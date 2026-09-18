@@ -108,7 +108,47 @@ namespace XMPP { namespace Jingle {
         ContentKey            key_;
     };
 
+    class Application::TransportReplaceTieBreakResolver : public TieBreaker::Resolver {
+    public:
+        explicit TransportReplaceTieBreakResolver(Application *application) : application_(application) { }
+
+        TieBreaker::Solution resolve(const QDomElement &localData, const QDomElement &remoteData) override
+        {
+            auto app = application_.data();
+            if (!app || app->_state >= State::Finishing || app->_pad->session()->role() != Origin::Initiator)
+                return TieBreaker::Solution::Continue;
+            const ContentKey key { app->_contentName, app->_creator };
+            auto             contains = [&key](const QDomElement &data) {
+                for (auto el = data.firstChildElement(QStringLiteral("content")); !el.isNull();
+                     el      = el.nextSiblingElement(QStringLiteral("content"))) {
+                    const ContentBase content(el);
+                    if (content.isValid() && ContentKey { content.name, content.creator } == key)
+                        return true;
+                }
+                return false;
+            };
+            // The coordinator supplies only a genuinely in-flight IQ snapshot.
+            // Responder yields through normal processing: replacing the transport
+            // invalidates the old completion, while a rejected remote proposal
+            // leaves ordinary failed-IQ fallback as the sole recovery owner.
+            return contains(localData) && contains(remoteData) ? TieBreaker::Solution::Break
+                                                               : TieBreaker::Solution::Continue;
+        }
+
+    private:
+        QPointer<Application> application_;
+    };
+
     Application::~Application() = default;
+
+    void Application::ensureTransportReplaceTieBreakResolver()
+    {
+        if (_transportReplaceTieBreakRegistration || !_pad || !_pad->session())
+            return;
+        _transportReplaceTieBreakResolver = std::make_unique<TransportReplaceTieBreakResolver>(this);
+        _transportReplaceTieBreakRegistration
+            = _pad->tieBreaker()->registerResolver(Action::TransportReplace, _transportReplaceTieBreakResolver.get());
+    }
 
     void Application::ensureContentModifyTieBreakResolver()
     {
@@ -497,35 +537,45 @@ namespace XMPP { namespace Jingle {
         // Transport::State. Capture the concrete transport as transaction identity:
         // its callback is a reentrant boundary and may install a newer replacement.
         case Action::TransportReplace: {
+            ensureTransportReplaceTieBreakResolver();
             Q_ASSERT(_transport->hasUpdates());
             const auto replacement             = _transport.toWeakRef();
             std::tie(transportEl, transportCB) = wrapOutgoingTransportUpdate();
             contentEl.appendChild(transportEl);
             if (_pendingTransportReplace == PendingTransportReplace::Planned)
                 _pendingTransportReplace = PendingTransportReplace::NeedAck;
+            const auto generation = ++_transportReplaceGeneration;
             if (_update.reason.isValid())
                 updates << _update.reason.toXml(doc);
-            return OutgoingUpdate { updates,
-                                    [this, guard = QPointer<Application>(this), replacement, transportCB](Task *task) {
-                                        transportCB(task);
-                                        if (!guard)
-                                            return;
-                                        auto expected = replacement.lock();
-                                        if (!expected || _transport != expected
-                                            || _pendingTransportReplace != PendingTransportReplace::NeedAck)
-                                            return;
+            return OutgoingUpdate {
+                updates,
+                [this, guard = QPointer<Application>(this), replacement, transportCB, generation](Task *task) {
+                    if (!guard || _state >= State::Finishing || _transportReplaceGeneration != generation)
+                        return;
+                    auto expected = replacement.lock();
+                    if (!expected || _transport != expected
+                        || _pendingTransportReplace != PendingTransportReplace::NeedAck)
+                        return;
 
-                                        if (task && task->success()) {
-                                            _pendingTransportReplace = PendingTransportReplace::InProgress;
-                                            return;
-                                        }
+                    // Retire the IQ before invoking any transport-specific code.
+                    // A callback may deliver another incoming IQ, duplicate this
+                    // completion, delete us or install a newer replacement.
+                    const bool accepted            = task && task->success();
+                    const auto completedGeneration = ++_transportReplaceGeneration;
+                    _pendingTransportReplace
+                        = accepted ? PendingTransportReplace::InProgress : PendingTransportReplace::Planned;
+                    transportCB(task);
+                    if (!guard || accepted || _state >= State::Finishing
+                        || _transportReplaceGeneration != completedGeneration || _transport != expected
+                        || _pendingTransportReplace != PendingTransportReplace::Planned)
+                        return;
 
-                                        // The peer did not acknowledge this replacement. Do not leave
-                                        // the application blocked in NeedAck; move to the next local
-                                        // candidate (or content-remove if none remain).
-                                        _pendingTransportReplace = PendingTransportReplace::Planned;
-                                        selectNextTransport();
-                                    } };
+                    // The peer did not acknowledge this replacement. Do not leave
+                    // the application blocked in NeedAck; move to the next local
+                    // candidate (or content-remove if none remain).
+                    selectNextTransport();
+                }
+            };
         }
         // This ACK completes a peer-initiated replacement. The transport callback may
         // reenter and select another transport, so completion is tied to the transport
@@ -594,11 +644,24 @@ namespace XMPP { namespace Jingle {
     bool Application::selectNextTransport(const QSharedPointer<Transport> alikeTransport)
     {
         qDebug("selecting next transport");
-        if (!_transportSelector->hasMoreTransports()) {
+        const auto expected   = _transport;
+        const auto generation = _transportReplaceGeneration;
+        auto       current    = [this, guard = QPointer<Application>(this), expected, generation] {
+            return guard && _state < State::Finishing && _transport == expected
+                && _transportReplaceGeneration == generation;
+        };
+        if (!current())
+            return false;
+        const bool hasMore = _transportSelector->hasMoreTransports();
+        if (!current())
+            return false;
+        if (!hasMore) {
             if (_transport) {
                 qDebug("Application::selectNextTransport: stopping %s transport", qPrintable(_transport->pad()->ns()));
                 _transport->disconnect(this);
                 _transport->stop();
+                if (!current())
+                    return false;
             }
             _state             = (isRemote() || _state > State::ApprovedToSend) ? State::Finishing : State::Finished;
             _terminationReason = Reason(Reason::FailedTransport);
@@ -608,15 +671,26 @@ namespace XMPP { namespace Jingle {
 
         if (alikeTransport) {
             auto tr = _transportSelector->getAlikeTransport(alikeTransport);
+            if (!current())
+                return false;
             if (tr && setTransport(tr))
+                return true;
+            if (!current())
+                return false;
+        }
+
+        while (current()) {
+            auto t = _transportSelector->getNextTransport();
+            if (!current())
+                return false;
+            if (!t)
+                break;
+            if (setTransport(t))
                 return true;
         }
 
-        QSharedPointer<Transport> t;
-        while ((t = _transportSelector->getNextTransport()))
-            if (setTransport(t))
-                return true;
-
+        if (!current())
+            return false;
         emit updated(); // will be evaluated to content-remove
         return false;
     }
@@ -678,23 +752,42 @@ namespace XMPP { namespace Jingle {
 
     bool Application::setTransport(const QSharedPointer<Transport> &transport, const Reason &reason)
     {
-        if (!isTransportReplaceEnabled() || !_transportSelector->replace(_transport, transport))
+        // Pin both transports (the argument may alias our member) and check
+        // identity after selector callbacks, including same-object reselection.
+        const auto replacement       = transport;
+        const auto expected          = _transport;
+        const auto generation        = _transportReplaceGeneration;
+        const auto replacementReason = reason;
+        auto       current           = [this, guard = QPointer<Application>(this), expected, generation] {
+            return guard && _state < State::Finishing && _transport == expected
+                && _transportReplaceGeneration == generation;
+        };
+        if (!replacement || !current())
             return false;
+        const bool enabled = isTransportReplaceEnabled();
+        if (!current() || !enabled)
+            return false;
+        const bool accepted = _transportSelector->replace(expected, replacement);
+        if (!current() || !accepted)
+            return false;
+
+        if (expected && expected->state() < State::Unacked && expected->creator() == _pad->session()->role()
+            && expected->pad()->ns() != replacement->pad()->ns()) {
+            _transportSelector->backupTransport(expected);
+            if (!current())
+                return false;
+        }
+        ++_transportReplaceGeneration;
 
         // in case we automatically select a new transport on our own we definitely will come up to this point
         if (_transport) {
-            if (_transport->state() < State::Unacked && _transport->creator() == _pad->session()->role()
-                && _transport->pad()->ns() != transport->pad()->ns()) {
-                // the transport will be reused later since the remote doesn't know about it yet
-                _transportSelector->backupTransport(_transport);
-            }
-
-            if (transport->isLocal()) {
+            if (replacement->isLocal()) {
                 auto ts = _transport->state() == State::Finished ? _transport->prevState() : _transport->state();
-                if (_transport->isRemote() || ts > State::Unacked) {
+                if (_transport->isRemote() || ts >= State::Unacked) {
+                    // Even when the previous transport still calls itself Unacked,
+                    // this successor has not been sent. It cannot inherit an IQ
+                    // completion belonging to the previous transport instance.
                     _pendingTransportReplace = PendingTransportReplace::Planned;
-                } else if (_transport->isLocal() && ts == State::Unacked) {
-                    _pendingTransportReplace = PendingTransportReplace::NeedAck;
                 }
             } else {
                 _pendingTransportReplace = PendingTransportReplace::InProgress;
@@ -702,20 +795,21 @@ namespace XMPP { namespace Jingle {
 
             if (_pendingTransportReplace != PendingTransportReplace::None) {
                 if (_transport->state() == State::Finished) { // initiate replace?
-                    _transportReplaceReason = reason.isValid() ? reason : _transport->lastReason();
+                    _transportReplaceReason
+                        = replacementReason.isValid() ? replacementReason : _transport->lastReason();
                 } else {
-                    _transportReplaceReason = reason;
+                    _transportReplaceReason = replacementReason;
                 }
             }
             qDebug("Application::setTransport: resetting %s transport in favor of %s",
-                   qPrintable(_transport->pad()->ns()), qPrintable(transport->pad()->ns()));
+                   qPrintable(_transport->pad()->ns()), qPrintable(replacement->pad()->ns()));
             _transport->disconnect(this);
             _transport.reset();
         } else {
-            qDebug("setting transport %s", qPrintable(transport->pad()->ns()));
+            qDebug("setting transport %s", qPrintable(replacement->pad()->ns()));
         }
 
-        _transport = transport;
+        _transport = replacement;
 
         connect(_transport.data(), &Transport::updated, this, &Application::updated);
         connect(_transport.data(), &Transport::failed, this, [this]() { selectNextTransport(); });

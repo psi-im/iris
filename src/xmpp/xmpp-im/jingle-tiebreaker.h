@@ -86,6 +86,10 @@ namespace XMPP { namespace Jingle {
             // Resource exhaustion is not a protocol tie-break. The dispatcher
             // must send this error before attempting ordinary action handling.
             std::optional<Stanza::Error> error;
+            // For Break, a detached snapshot of the outgoing action that won
+            // arbitration. Owners may use it to filter post-reply advisory work;
+            // it is not a live transaction or an instruction to replay it.
+            QDomElement localData;
         };
 
         TieBreaker();
@@ -103,7 +107,8 @@ namespace XMPP { namespace Jingle {
 
         // Every resolver registered for the matching Action is evaluated. The
         // aggregate wire decision is Break > Postpone > Continue; Break does not
-        // short-circuit owner callbacks because they may maintain local hints.
+        // short-circuit owner callbacks. Network/selector side effects belong
+        // after validation and the incoming reply, not inside resolve().
         Resolution resolveIncoming(Action action, const QDomElement &remoteData);
         // Call only after the incoming IQ reply has been dispatched. May retry
         // synchronously and destroy the coordinator/Session via resolver code.

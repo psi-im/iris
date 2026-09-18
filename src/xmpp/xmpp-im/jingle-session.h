@@ -138,9 +138,10 @@ namespace XMPP { namespace Jingle {
         friend class PublicationManager;
         friend class JTPush;
 
-        QString                                   reserveSid();
-        bool                                      incomingInitiate(const Jingle &jingle, const QDomElement &jingleEl);
-        bool                                      updateFromXml(Action action, const QDomElement &jingleEl);
+        QString reserveSid();
+        bool    incomingInitiate(const Jingle &jingle, const QDomElement &jingleEl);
+        // Dispatcher must invoke afterReply only after sending the incoming IQ reply.
+        bool updateFromXml(Action action, const QDomElement &jingleEl, std::function<void()> *afterReply = nullptr);
         static std::optional<QList<ContentGroup>> parseGroupings(const QDomElement &jingleEl);
         static bool validBundleAnswer(const QList<ContentGroup> &offer, const QList<ContentGroup> &answer);
         bool        validLocalGroupings() const;

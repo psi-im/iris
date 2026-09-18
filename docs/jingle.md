@@ -224,8 +224,9 @@ application into the session**. Configure it first, then call `Session::addConte
 
 ## Existing-session tie-break coordination
 
-Every incoming Jingle IQ for an already known session passes through the session-owned
-`Jingle::TieBreaker` before `Session::updateFromXml()` handles the action. The coordinator is
+Incoming Jingle IQs for an already known session use the session-owned `Jingle::TieBreaker`.
+For `transport-replace`, Session validates the batch before invoking arbitration; other actions
+enter the coordinator from `JTPush` before ordinary `Session::updateFromXml()` processing. The coordinator is
 intentionally generic with respect to application and transport semantics: it only correlates the
 currently outstanding local Jingle IQ with incoming actions and dispatches registered resolvers.
 
@@ -306,12 +307,19 @@ collision returns `Postpone`, applies the initiator action normally, and only re
 direction intent if its already outstanding IQ later fails. Unrelated contents using the same
 Jingle action return `Continue`.
 
-`transport-replace` deliberately remains on its specialized handler for now. Its crossed-action
-path has established semantics beyond accept/reject: losing peer transport proposals can be used
-as advisory sibling hints for `TransportSelector::getAlikeTransport()` / local reselection, and
-multi-content replacement currently permits partial success for supported siblings. A later
-migration must preserve those behaviours while moving only transaction arbitration into
-`TieBreaker`; transport semantics must not be moved into the coordinator.
+`transport-replace` registers an Application-owned resolver when serializing a local proposal.
+An initiator-side overlap in `(creator,name)` returns `Break`; responder processing uses
+`Continue`. Installing the winning remote transport invalidates completion of the losing local
+attempt. If the remote proposal is not installed, normal failed-IQ fallback remains the sole
+recovery path; there is no second retry owner or durable transport intent to replay.
+
+Transport semantics stay in Session/Application/selector. Session stages each incoming batch,
+including identity/generation snapshots, before arbitration. `Resolution::localData` is a
+detached snapshot of the winning outgoing action on `Break`, used to distinguish competing
+contents from advisory siblings. It does not retain a live transaction. Validated sibling
+hints are consumed after the IQ error, through a per-request `afterReply` closure guarded by
+Session/Application lifetime and transport generation. Supported/unsupported partial outcomes
+remain available on the ordinary, non-Break path.
 
 ## Signaling scheduler
 
@@ -647,13 +655,15 @@ The implementation has **two distinct state machines** which must not be conflat
 In particular, `Transport::State::Unacked` is **not** the lifetime of a `transport-replace` IQ.
 IBB happens to use `Unacked` while serializing some updates, while the built-in ICE transports
 can serialize their Jingle update and remain `ApprovedToSend`. Code deciding whether a
-`transport-replace` IQ is outstanding must use the application signaling state instead.
+`transport-replace` IQ is outstanding must use the Session TieBreaker's transaction lifetime.
+Application signaling state describes per-content workflow: in a multi-content IQ it can still
+be `NeedAck` after the IQ completed, while an earlier sibling's completion callback executes.
 
 | `PendingTransportReplace` | Meaning |
 | --- | --- |
 | `None` | No transport-replace transaction is active. |
 | `Planned` | A new local transport was selected, but its `transport-replace` has not been sent yet. |
-| `NeedAck` | Our `transport-replace` was serialized and the IQ result/error is still pending. |
+| `NeedAck` | Our `transport-replace` was serialized and this content's completion callback is still pending. |
 | `InProgress` | The replacement proposal is the current signaling attempt known to both sides; final `transport-accept` / `transport-reject` completion is pending. An incoming peer replacement enters this state while its IQ is being processed. |
 
 ```mermaid
@@ -709,9 +719,15 @@ sequenceDiagram
     S-->>Peer: IQ result
 ```
 
-The IQ completion callback is tied to the **specific transport instance** that produced the
-stanza. A stale ACK must not complete or start a newer replacement selected reentrantly while
-the old transport callback is running.
+The IQ completion callback is tied to the **specific transport instance and replacement
+generation** that produced the stanza. Completion retires that generation and changes NeedAck
+to InProgress (success) or Planned (failure) before calling transport-specific code. Reentrant
+or repeated delivery cannot invoke that transport callback twice. Terminated/deleted contents
+and superseded transports do not receive the stale completion. Failure falls back only if the
+same generation and transport are still current after the callback.
+
+A selected successor is a fresh Planned proposal even if the predecessor's Transport::State
+still says Unacked. It never inherits an outstanding IQ from its predecessor.
 
 ### Peer-initiated replacement
 
@@ -722,28 +738,38 @@ starts that same transport; it must not act on a newer transport selected by a c
 
 ### Crossed transport-replace and tie-break
 
-XEP-0166 resolves simultaneous same-action requests in an existing session in favor of the
-session initiator. Iris therefore treats an incoming `transport-replace` as a collision when
-the local endpoint is the initiator and its matching application is in `NeedAck`. The losing
-incoming action is rejected with stanza `<conflict/>` plus Jingle `<tie-break/>`.
+[XEP-0166 tie breaking, section 7.2.16](https://xmpp.org/extensions/xep-0166.html)
+gives the initiator precedence for competing actions in an existing session. Iris scopes
+`transport-replace` collisions to overlapping ContentKeys in the coordinator's current outgoing
+IQ snapshot. This content-scoped arbitration is an implementation policy. `NeedAck` alone is
+not proof of a simultaneous action. The losing incoming IQ receives `<conflict/>` plus
+Jingle `<tie-break/>`.
 
-There is an intentional historical optimization in the batch path: although the losing
+There is an advisory optimization in the batch path: although the losing
 incoming action is rejected as a whole, already validated sibling remote transport proposals
 are still useful as **hints** to `TransportSelector::getAlikeTransport()`. Iris may preselect a
 compatible local sibling transport before retrying its own action. The losing remote transport
 is not installed, and a prepared local sibling that is about to be signaled is kept intact.
-Removing this behavior would add avoidable signaling round-trips and regress the original
-transport-replace design.
+Hint selection happens after sending the rejection, and only if content identity, current
+transport and generation still match the validated snapshot. This includes same-object
+reselection and changes made reentrantly while sending the reply.
 
 ```mermaid
 flowchart TD
     Incoming["incoming transport-replace batch"] --> Validate["parse + validate every content"]
-    Validate --> Collision{"local initiator has NeedAck?"}
+    Validate --> Collision{"TieBreaker: in-flight overlapping initiator action?"}
     Collision -->|no| Apply["apply still-current validated replacements"]
     Apply --> RejectUnsupported["queue transport-reject for unsupported siblings"]
-    Collision -->|yes| Hints["use valid sibling proposals as selector hints"]
-    Hints --> Tie["reject whole incoming action: conflict + tie-break"]
+    Collision -->|yes| Tie["reply: conflict + tie-break; no remote installation"]
+    Tie --> Current{"sibling identity and generation still current?"}
+    Current -->|yes| Hints["use valid sibling proposals as local selector hints"]
+    Current -->|no| Discard["discard stale hint"]
 ```
+
+Replacement staging is bounded to 64 contents per IQ. Duplicate keys, unknown contents and
+malformed transport payloads fail before arbitration/hint selection. Incoming transport parsing
+constructs detached Transport instances and calls their `update()`; it is not a universal pure
+parser or a transactional rollback facility for arbitrary provider side effects.
 
 ### Batch atomicity and reentrancy
 
@@ -752,6 +778,11 @@ Transport callbacks and selector hooks are treated as reentrant boundaries. In p
 `selectNextTransport()`, `Transport::update()` and transport IQ callbacks can synchronously
 emit signals or invoke application code. Such code may remove an application, destroy the
 session, or select a newer transport for the same content.
+
+Replacement selection also rechecks owner lifetime and generation **inside**
+`selectNextTransport()` and `setTransport()` after selector callbacks. A callback that deletes
+the owner or installs a new generation cancels the older selection, even when the Transport
+pointer is unchanged. Current and candidate transports remain pinned across those callbacks.
 
 For that reason the incoming replace/accept/reject handlers use a validate-then-apply pattern:
 

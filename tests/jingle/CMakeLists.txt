@@ -102,6 +102,14 @@ add_executable(jingle_transportacceptackreentrancy_test transportacceptackreentr
 target_link_libraries(jingle_transportacceptackreentrancy_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
     Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
 add_test(NAME jingle_transportaccept_ack_reentrancy COMMAND jingle_transportacceptackreentrancy_test)
+add_executable(jingle_transportreplaceackboundary_test transportreplaceackboundary.cpp)
+target_link_libraries(jingle_transportreplaceackboundary_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
+    Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
+add_test(NAME jingle_transportreplace_ack_boundary COMMAND jingle_transportreplaceackboundary_test)
+add_executable(jingle_transportreplacedispatcher_test transportreplacedispatcher.cpp)
+target_link_libraries(jingle_transportreplacedispatcher_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
+    Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
+add_test(NAME jingle_transportreplace_dispatcher COMMAND jingle_transportreplacedispatcher_test)
 add_executable(jingle_transportreplacecorrectness_test transportreplacecorrectness.cpp)
 target_link_libraries(jingle_transportreplacecorrectness_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
     Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)

@@ -302,12 +302,11 @@ namespace XMPP { namespace Jingle {
                 postponed.append(resolverId);
         }
 
-        // Resolve every registered owner even when one already requested Break:
-        // transport/application resolvers may use resolve() to update local hints.
-        // The aggregate wire decision is still deterministic: Break dominates
+        // Resolve every registered owner even when one already requested Break.
+        // The aggregate wire decision is deterministic: Break dominates
         // Postpone, and Postpone dominates Continue.
         if (shouldBreak)
-            return { Solution::Break, 0 };
+            return { Solution::Break, 0, {}, localData.cloneNode(true).toElement() };
         if (postponed.isEmpty())
             return {};
 

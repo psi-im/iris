@@ -130,6 +130,11 @@ int main(int argc, char **argv)
               "Break short-circuited another resolver instead of evaluating the full action");
         check(!postponeRegistration.isPostponed() && !breakRegistration.isPostponed(),
               "Break armed postponed retry state");
+        auto snapshot = result.localData;
+        check(snapshot.attribute("name") == "local", "Break did not expose the winning IQ snapshot");
+        snapshot.setAttribute("name", "caller-mutation");
+        const auto again = tieBreaker.resolveIncoming(J::Action::ContentModify, remoteDoc.documentElement());
+        check(again.localData.attribute("name") == "local", "Break outcome aliased live transaction data");
     }
 
     // Remote processing may finish after our error. retry waits for both facts.

@@ -14,10 +14,11 @@ class ReentrantCanReplaceSelector : public TestSelector {
 public:
     bool canReplace(QSharedPointer<J::Transport> oldTransport, QSharedPointer<J::Transport> newTransport) override
     {
-        auto callback = std::move(onCanReplace);
+        const bool result   = TestSelector::canReplace(std::move(oldTransport), std::move(newTransport));
+        auto       callback = std::move(onCanReplace);
         if (callback)
             callback();
-        return TestSelector::canReplace(std::move(oldTransport), std::move(newTransport));
+        return result;
     }
 
     std::function<void()> onCanReplace;
@@ -303,6 +304,34 @@ static void testTransportAcceptSkipsReentrantStaleSibling(Client &client)
     check(video->replacePlanned(), "newer sibling transport lost its Planned replacement state");
 }
 
+static void testReplacementValidationIdentity(Client &client)
+{
+    for (bool destroy : { false, true }) {
+        J::Session session(client.jingleManager(), Jid("validation@example.test/device"), J::Origin::Initiator);
+        auto       old      = makeTransport(session, J::Origin::Initiator, J::State::Pending, "old");
+        auto       selector = std::make_unique<ReentrantCanReplaceSelector>();
+        auto       raw      = selector.get();
+        auto       app      = addApplication(session, "audio", J::Origin::Initiator, old, std::move(selector));
+        QPointer<TestApplication> guard(app);
+        raw->onCanReplace = [app, old, destroy] {
+            if (destroy)
+                delete app;
+            else
+                check(app->setTransport(old), "same-object reselection failed");
+        };
+        QDomDocument doc;
+        check(
+            session.updateFromXml(
+                J::Action::TransportReplace,
+                makeReplace(doc, { { "audio", J::Origin::Initiator, TestTransportManager::namespaceUri(), "stale" } })),
+            "reentrant validation rejected the entire partial batch");
+        if (destroy)
+            check(!guard, "selector did not delete its owner");
+        else
+            check(app->transport() == old, "validation overwrote a new generation of the same transport");
+    }
+}
+
 int main(int argc, char **argv)
 {
     QCoreApplication     application(argc, argv);
@@ -320,6 +349,7 @@ int main(int argc, char **argv)
     testTieBreakCarriesConflictCondition(client);
     testReentrantSiblingMutationInvalidatesValidatedCandidate(client);
     testTransportAcceptSkipsReentrantStaleSibling(client);
+    testReplacementValidationIdentity(client);
 
     qInfo("Transport-replace state matrix regressions passed");
     return 0;

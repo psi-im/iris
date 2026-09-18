@@ -220,13 +220,19 @@ namespace XMPP { namespace Jingle {
         virtual void incomingRemove(const Reason &r) = 0;
 
         /**
-         * @brief Whether our current transport-replace IQ is awaiting its IQ result.
+         * @brief Whether this content is awaiting its transport-replace completion callback.
          *
          * This is signaling state (`NeedAck`). Never infer the same fact from
          * Transport::State::Unacked: transport implementations, notably ICE, do not
-         * share one transport-state transition for Jingle IQ lifetime.
+         * share one transport-state transition for Jingle IQ lifetime. In a batch,
+         * the IQ may already be finished while an earlier owner's callback runs.
+         * Use the Session TieBreaker, not this flag, for collision arbitration.
          */
         bool transportReplaceAwaitingAck() const;
+
+        // Identity of the current replacement attempt, including same-object
+        // reselection. For guarded Session staging; not an IQ lifetime counter.
+        quint64 transportReplaceGeneration() const { return _transportReplaceGeneration; }
 
         /**
          * @brief Whether the current replacement is in the post-IQ negotiation phase.
@@ -289,15 +295,16 @@ namespace XMPP { namespace Jingle {
         /**
          * XEP-0166 transport-replace signaling state for this content.
          *
-         * This state machine is orthogonal to Transport::State. `NeedAck` is the only
-         * state that means a locally generated transport-replace IQ is outstanding;
+         * This state machine is orthogonal to Transport::State. `NeedAck` means
+         * this content's local completion callback has not run yet; the Session's
+         * TieBreaker independently tracks whether the batched IQ is outstanding.
          * `InProgress` is the subsequent accept/reject phase (or an incoming peer
          * replacement currently being negotiated).
          */
         enum class PendingTransportReplace {
             None,      ///< No transport-replace signaling transaction is active.
             Planned,   ///< A local successor is selected but not signaled yet.
-            NeedAck,   ///< transport-replace was sent; waiting for its IQ result/error.
+            NeedAck,   ///< transport-replace was serialized; waiting for this owner's completion.
             InProgress ///< Proposal is current; waiting for transport-accept/reject completion.
         };
 
@@ -329,6 +336,9 @@ namespace XMPP { namespace Jingle {
         // Jingle signaling transaction state for replacing _transport. Do not derive it
         // from Transport::State; concrete transports use those states differently.
         PendingTransportReplace _pendingTransportReplace = PendingTransportReplace::None;
+        // Invalidate saved IQ completions on serialization, completion and transport
+        // replacement, including reselection of the same Transport object.
+        quint64 _transportReplaceGeneration = 0;
 
         // Reason attached to the pending replacement when the previous transport failed.
         Reason _transportReplaceReason;
@@ -344,11 +354,15 @@ namespace XMPP { namespace Jingle {
     private:
         class ContentModifyTieBreakResolver;
         void ensureContentModifyTieBreakResolver();
+        class TransportReplaceTieBreakResolver;
+        void ensureTransportReplaceTieBreakResolver();
 
         // Registration is declared after the resolver so it is destroyed
         // first and never leaves TieBreaker with a dangling callback.
         std::unique_ptr<TieBreaker::Resolver> _contentModifyTieBreakResolver;
         TieBreaker::Registration              _contentModifyTieBreakRegistration;
+        std::unique_ptr<TieBreaker::Resolver> _transportReplaceTieBreakResolver;
+        TieBreaker::Registration              _transportReplaceTieBreakRegistration;
     };
 
     inline bool operator<(const Application::Update &a, const Application::Update &b)
