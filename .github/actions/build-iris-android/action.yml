@@ -50,6 +50,7 @@ runs:
       uses: jurplel/install-qt-action@v4
       with:
         version: ${{ inputs.qt-version }}
+        host: all_os
         target: android
         arch: ${{ inputs.qt-arch }}
         cache: true
