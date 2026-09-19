@@ -735,19 +735,33 @@ namespace XMPP { namespace Jingle {
         if (_pendingTransportReplace != PendingTransportReplace::InProgress || !_transport)
             return false;
 
-        const auto            expected = _transport;
+        auto prepared = _transport->prepareUpdate(el);
+        if (!prepared)
+            return false;
+        return incomingTransportAccept(std::move(prepared.update));
+    }
+
+    bool Application::incomingTransportAccept(Transport::PreparedUpdatePtr update)
+    {
+        if (_pendingTransportReplace != PendingTransportReplace::InProgress || !_transport || !update)
+            return false;
+
+        const auto            expected   = _transport;
+        const auto            generation = _transportReplaceGeneration;
         QPointer<Application> guard(this);
-        if (!expected->update(el))
+        if (!expected->commitPreparedUpdate(std::move(update)))
             return false;
         if (!guard)
             return true;
 
-        // update() is transport-specific and may synchronously select a newer
-        // replacement. The peer accepted expected, so never let that old
-        // acknowledgement complete or start the newer local transaction.
-        if (_transport != expected || _pendingTransportReplace != PendingTransportReplace::InProgress)
+        // Committing a transport payload may reenter application code and even
+        // reselect the same Transport object. Complete only the exact attempt
+        // for which this prepared value was staged.
+        if (_state >= State::Finishing || _transport != expected || _transportReplaceGeneration != generation
+            || _pendingTransportReplace != PendingTransportReplace::InProgress)
             return true;
 
+        ++_transportReplaceGeneration;
         _pendingTransportReplace = PendingTransportReplace::None;
         if (_state >= State::Connecting)
             expected->start();
