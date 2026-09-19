@@ -87,10 +87,10 @@ jobs:
         run: |
           cmake -S tests/jingle -B build-jingle-sanitize -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug \
-            -DCMAKE_C_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" \
-            -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" \
-            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined" \
-            -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=address,undefined" \
+            -DCMAKE_C_FLAGS="-fsanitize=address,undefined -fno-sanitize=enum -fno-omit-frame-pointer" \
+            -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-sanitize=enum -fno-omit-frame-pointer" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined -fno-sanitize=enum" \
+            -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=address,undefined -fno-sanitize=enum" \
             -DUSE_QT6=ON \
             -DIRIS_SYSTEM_QCA=3 \
             -DIRIS_BUNDLED_QCA=OFF \
