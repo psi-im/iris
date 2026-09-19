@@ -1,6 +1,6 @@
 # Native Jingle calls: план продолжения для нового чата с Sol
 
-Актуализировано 2026-09-18. Это самостоятельное задание для продолжения существующей реализации, а не предложение спроектировать стек заново. Начать с проверки веток/коммитов через GitHub connector и CI evidence новых исправлений. Старые исправленные замечания не реализовывать повторно.
+Актуализировано 2026-09-19. Это самостоятельное задание для продолжения существующей реализации, а не предложение спроектировать стек заново. Начать с проверки веток/коммитов через GitHub connector и CI evidence новых исправлений. Старые исправленные замечания не реализовывать повторно.
 
 ## 1. Контекст, репозитории и границы достоверности
 
@@ -19,498 +19,176 @@ Checkout и установка dependencies внутри CI job допустим
 Не утверждать, что workflow запущен/прошёл, по одному созданному commit или зелёному старому PR.
 Не требовать от пользователя клонирования/локальной сборки ради операций, доступных в CI.
 
-| Репозиторий | Ветка | Проверенный диапазон |
+| Репозиторий | Рабочая ветка | HEAD snapshot 2026-09-19 |
 | --- | --- | --- |
-| psi-im/psi | ai/jingle-native-calls | 9421bd0e3df1008d2b3cb1783d945061035d6333 → c8821dbeb30096e5aca1462cb2e660ad3705a5ad |
-| psi-im/iris | jingle/async-media | Архитектурная сверка fb7678d088834830e58b8bd733018a8ef83f72d2; прежний аудит ba784334 → be3833e |
-| psi-im/psimedia | jingle/rtcp-session | ab15f6829be56921920188f2381feebdd9d9d0ca → b4139cbddde3d9439568f4d59cf0af390dd7432f |
+| psi-im/psi | ai/jingle-native-calls | `78dee48c396c7815ef78284ea545c0c103e1149a` |
+| psi-im/iris | jingle/async-media | `bd5c86283c9eafbbe6e56efe7d69b480bc4cd7bd` |
+| psi-im/psimedia | jingle/rtcp-session | `2d067da46a70a74b1ccf91830c97b09a8c58713b` |
+| psi-im/psi | ci/psimedia-integration | `136af31dcaa64a7c3144fe3ed12e02f180d33a0b` |
 
-IRIS/PSI/MEDIA ниже означают корни GitHub репозиториев. Проверить remote heads перед
-работой. Аудит касается этих диапазонов, не неполученных commits.
-Iris subset/acceptance P0.1 уже опубликован: не просить пользователя публиковать его заново.
-QCA3 и libSRTP сохраняются, оснований менять crypto backend этот аудит не даёт.
-
-На 2026-09-17 поверх fb7678d локально реализованы T0 и Iris-части T1/T2/T3: полный suite 50/50
-прошёл (Qt 6.10.2, system QCA3, SRTP/SCTP enabled, последовательный CTest).
-Включены directionpolicy, directionoperation и sessioncallbacklifetime; реальные peer-to-peer
-звонки не выполнялись. Targeted ASan/UBSan/LSan для directionoperation также прошёл:
-инструментированы operation/controller/Application/TieBreaker, но не остальные units Iris/Qt.
-Эти Iris изменения вошли в локальный commit b5a1985, указанный ниже; не объявлять их
-опубликованными или проверенными GitHub CI без проверки remote head и конкретного run.
-Psi audio adapter также реализован локально поверх c8821dbe: собран target avcall и прошли
-4/4 AvCall CTest entries (policy, audiodirection, backend_lifecycle, capability_refresh).
-Targeted ASan/UBSan/LSan для production adapter и его теста прошёл; Iris/Qt в этом конкретном
-прогоне не инструментированы. Backend tests используют fake provider, это не GStreamer live gate.
-T0–T3 и форматирование теперь находятся в локальном Iris commit
-`b5a1985d788169e55a18da90a3aa5169162fbf38`. Перед публикацией Psi изменений нужен соответствующий
-submodule pin; не публиковать Psi с несуществующим в pinned Iris API. Наличие local commit
-не доказывает push/remote CI. T4 transport arbitration/completion изменения ниже остаются в worktree.
-Дополнительно исправлена обнаруженная LeakSanitizer утечка ExternalServiceDiscovery:
-это теперь QObject child своего Client. Проверка уничтожения включена в sessioncallbacklifetime.
-Это не новый полный аудит трёх репозиториев. GStreamer development package пользователь уже установил;
-отсутствие dependency больше не текущий блокер, но новых psimedia runtime results здесь нет.
-Live calls не подтверждены. Предыдущие Psi/psimedia findings сохраняют прежнюю область проверки.
+HEAD здесь только snapshot, не pin для будущей работы. Перед любым write заново читать все четыре
+ветки. Исторические T0–T5/A3/A4 детали остаются в git history и профильных docs; этот план хранит
+только текущий контракт, незакрытые gates и короткие markers уже завершённого.
 
 ### PR stack и CI
 
-Не мержить PR без прямого указания пользователя, не ломать stacked branches.
+- Iris #96 `jingle/async-media`; Psi #968 `ai/jingle-native-calls`; psimedia experimental
+  `jingle/rtcp-session`; Psi #969 `ci/psimedia-integration`.
+- Не мержить без прямого указания пользователя и не ломать stacked branches.
+- Для результата всегда фиксировать exact checkout SHA и фактически выполненные jobs/tests.
+- Cross-repo #969 остаётся staging/live gate; обычный green build не заменяет runtime evidence.
 
-- Iris #92 docs/jingle-architecture → #93 jingle/ice-udp1 → #94 jingle/group-negotiation → #95 jingle/rtp-extensions → #96 jingle/async-media.
-- Psi #968 ai/jingle-native-calls — основной call stack.
-- psimedia #15 → #16 — stacked работа, semantic packet API head a99960959.
-- psimedia jingle/rtcp-session — experimental bridge, просмотренный HEAD b4139cbd.
-- Psi #969 ci/psimedia-integration — отдельный real-provider smoke workflow. Перед окончательным merge вернуть нейтральную master/master конфигурацию, не оставлять временные branch pins.
+### Дисциплина веток, PR и CI
 
-Исторический failing job: 103558912674, Psi 250c1f6a, psimedia cbf3365, GStreamer 1.24.2. Он не характеризует новые исправления. Найти актуальные runs и сверить реальные checkout hashes. Slash branches и ai/** могут пропускаться старыми workflows; смотреть выполненные jobs, не только общий PR status.
+Продолжать существующие ветки; новый PR только для самостоятельной логической границы.
+Не создавать дублирующие workflows/runs без причины. Частые commits на `ai/**` могут не запускать
+тяжёлый CI автоматически; проверять trigger и фактические jobs, а не интерпретировать отсутствие
+run как success. Никаких `pull_request_target` с исполнением недоверенного branch code/secrets.
 
-Нужные gates: Psi modern, legacy/Win7 profile, cross-repo real psimedia smoke, isolated psimedia tests, Iris standalone QCA3+SRTP. В GitHub CI --parallel 4 допустим. Не создавать дублирующие runs одного и того же patch без причины; локальные сборки Sol не выполняет.
+### Уже реализовано — не повторять
 
-### Дисциплина веток, PR и CI opt-in
-
-Продолжать существующие рабочие ветки и PR stack. Не создавать branch/PR на каждый test,
-fixup или попытку CI. Новый PR — только для самостоятельной логической границы или
-реально необходимого stack, с кратким объяснением; не мержить без разрешения пользователя.
-
-ai/** специально допускают частые commits без автоматического запуска тяжёлых pipelines.
-Это намеренная политика, а не баг. По умолчанию использовать workflow_dispatch на выбранном
-checkpoint. Можно отдельно реализовать opt-in по маркеру commit message, например
-[run-ci], если это упрощает работу Sol; это пока предложение, не существующая возможность.
-
-Важно: branches-ignore: ai/** / push branches: master отбрасывают событие ДО job if.
-Одного contains(head_commit.message, '[run-ci]') в job недостаточно. Если добавлять marker:
-разрешить соответствующий push event и gate тяжёлые jobs: non-ai branch ИЛИ marker,
-сохранив explicit workflow_dispatch. Для pull_request поля head_commit нет: выбрать
-отдельную проверку head commit через API/gate job или оставить ai PR manual-only.
-Никогда не подставлять commit text в shell как код; не использовать pull_request_target
-для исполнения недоверенного branch code с secrets. Проверить матрицу ai/no-marker,
-ai/marker, normal push, ai PR, manual dispatch, зависимые jobs/skips и concurrency.
-Документировать стоимость: workflow event может появляться на каждый push, даже если
-тяжёлые jobs skipped. Если нужен буквально ноль runs — сохранить manual-only режим.
-
-### Что уже реализовано — не повторять
-
-- Native Iris Manager/Session/Application/Pad, ICE-UDP codec и custom ice:0 wire profile.
-- RTP descriptions/extensions/negotiation и async MediaSession/MediaOperation.
-- QCA3 DTLS fingerprint authentication, SRTP exporter/profile API; libSRTP для packet protection своим штатным backend. NSS у libSRTP не причина менять DTLS/SCTP путь на другой backend.
-- Iris media operation deadlines, bounded pending queue, completion/timeout arbitration.
-- Psi psimediajingle.cpp: lifecycle state, terminal error handling, one endpoint per media type, runtime errors, capability snapshot, semantic packets.
-- Psi AvCall: readiness по принятым applications, отдельные capture consent и senders. Исходный audio+video → audio-only happy path исправлен.
-- Legacy jinglertp/jinglertptasks удалены. Не добавлять новый параллельный native controller вместо исправления существующего AvCall.
-- GroupPlan/ConnectionRegistry/ConnectionMembership/ConnectionGroupTransaction и BundleRouter существуют как модели/тестируемые компоненты.
-- Router: допустимые PT, MID → SSRC → unique PT fallback, RTP bounds/padding, SharedRtcp, outgoing SSRC registration.
-- Media packet boundary: bytes + Rtp/Rtcp, не portOffset/ICE component.
-
-Verification новых исправлений P0 остаётся отдельным gate. Фраза «реализовано» не означает полного закрытия всех lifecycle/interop сценариев.
+- Iris Jingle Session/Application/Transport framework, transport-replace arbitration, ICE/DTLS/SCTP,
+  RTP descriptions/extensions, async media operations и direction policy/completion.
+- Psi использует существующие AvCall/AvCallManager; psimedia adapter/backend lifecycle и runtime
+  error handling уже подключены. Второй call controller/Jingle stack не создавать.
+- Semantic packet API — bytes + Rtp/Rtcp, без portOffset/ICE topology.
+- Grouping/BUNDLE foundation уже существует: GroupPlan, ConnectionRegistry,
+  ConnectionMembership, ConnectionGroupTransaction и BundleRouter с отдельными regressions.
+- psimedia RTP/RTCP bridge, capture consent/hotplug lifecycle и native-backend synthetic path уже
+  имеют отдельные tests/CI evidence. Старые подробности искать в git/docs, не восстанавливать заново.
+- Legacy Jingle FT S5B/IBB и существующий SCTP/datachannel FT считаются совместимостью, которую
+  новые lifecycle/BUNDLE изменения обязаны сохранить.
 
 ### Semantic packet API: сохранить достигнутую границу
 
-PRtpPacket::Type имеет underlying int, Rtp=0, Rtcp=1. Сохранены layout/value предпосылки provider boundary; static_asserts и cross-repo smoke полезны, но не доказывают совместимость всех старых бинарных потребителей изменённых методов.
-
-Не возвращать portOffset в adapter/API. psimedia не знает ICE, UDP ports, transport topology и BUNDLE membership. Обе копии публичного wrapper API (Psi/src/psimedia и psimedia/psimedia) должны оставаться согласованными; при несовместимом API отдельно учитывать rebuild/versioning потребителей.
+`PRtpPacket::Type` остаётся `Rtp=0/Rtcp=1`; не возвращать portOffset в adapter/API.
+psimedia не владеет ICE/BUNDLE topology. Обе public wrapper copies Psi/psimedia держать синхронными.
 
 ### Где заканчивается текущая реализация
 
-- Production ICE::Pad::connectionFor всё ещё создаёт отдельный IceConnection на Transport. Live BUNDLE не подключён и не должен рекламироваться.
-- SharedRtcp — результат router, **не готовый group-level ingress media engine**.
-- RtpSessionBridge подключён к production GstRtpSessionContext/RtpWorker packet path; это уже не задача «подключить с нуля».
-- Bridge входит в gstprovidersrc SOURCES безусловно: experimental runtime isolation не означает build isolation.
-- Один общий send/receive rtpsession на media type уже находится в GstRtpSessionContext; сохранить его при исправлении capture lifecycle.
-- rtpsession не заменяет jitter buffer, depayloader/decoder, congestion/retransmission implementation.
-- RTCP generation использовать реальным action signal send-rtcp-full, не выдуманной C-функцией.
-- JMI, live BUNDLE, полноценный feedback и network recovery остаются дальнейшими этапами.
+- Production `ICE::Pad::connectionFor(Transport*)` пока создаёт отдельный `IceConnection` на
+  каждый Transport. **Это недостающий production wiring, а не отсутствие BUNDLE design/tests.**
+- Исторически master с 2020 года мог автоматически сигналить `<group semantics='BUNDLE'>`, но
+  каждый ICE Transport всё равно имел собственные ICE/components/DTLS/SCTP. Это было grouping
+  signaling без реального shared network path.
+- 2026-09-10 commit `874a3a6b...` при RTP refactor намеренно перестал автоматически рекламировать
+  BUNDLE при независимых connections.
+- 2026-09-11 появились `ConnectionMembership`, session-local `ConnectionRegistry`,
+  `GroupPlan` и transactional `ConnectionGroupTransaction` с tests; 2026-09-11/12 —
+  authenticated `BundleRouter` и hardened routing contract. Эти primitives должны быть
+  **подключены**, а не перепроектированы.
+- Live BUNDLE пока не включать в discovery/offer до shared ICE/DTLS ownership, packet routing,
+  removal/restart и mixed RTP+SCTP regressions.
+- DataChannel/SCTP естественно позволяет нескольким file-transfer streams делить одну association;
+  текущий per-Transport IceConnection это не использует. После live BUNDLE одна association должна
+  обслуживать несколько DataChannel connections без закрытия соседних streams.
+- `src/irisnet/noncore/sctp/` содержит заимствованную mediasoup SCTP implementation
+  (см. его README). Не менять vendored core без доказанной необходимости; наш lifecycle/glue слой —
+  Jingle SCTP/DataChannel/ICE integration вокруг него.
+- FT live baseline: two-process Prosody ICE→DTLS→SCTP transfer с deterministic bytes и SHA-256
+  прошёл в run #75. Расширенная matrix ICE/S5B/IBB + transport-replace находится в работе;
+  run #76 подтвердил ICE и выявил standalone S5B stall сразу после `Prepare local offer`.
+- P1c ещё не закрыт: нет server-mediated real Psi↔Psi native call и Conversations interop.
+  P2 live BUNDLE не объявлять завершённым раньше этого gate.
 
-Смежные документы: [архитектура](jingle.md), [RTP design](jingle-rtp-design.md), [interop status](jingle-calls-interop.md). Исправлять устаревшие status statements без выдуманных результатов и без истории исправленных багов в описании текущей архитектуры.
+Смежные документы: [архитектура](jingle.md), [RTP design](jingle-rtp-design.md),
+[interop status](jingle-calls-interop.md).
 
-## 2. Новый audit gate: исправления, доказательства и оставшиеся проблемы
+## 2. Закрытые checkpoints и текущие gates
 
-### Уже реализовано — сохранить
+### Закрыто — только краткие markers
 
-- Iris P0.1 subset/reentrancy и P0.6 runtime SSRC retention.
-- Iris outgoing requestSenders, queued/in-flight targets, explicit senders XML, Active wakeup,
-  destructive notification guards и reentrant newer intent из ACK callback.
-- Psi capability transaction теперь общая для production и regression; pure AvCallPolicy
-  покрывает capability/transmit/direction predicates. Закрытие incoming dialog отвергает call.
-- psimedia construction cleanup, directional caps и owner-thread delivery.
-- P1a isolated tests: packet semantics/statistics/SR, periodic RTCP, bounded delivery и teardown.
-- Production bridge wiring (62643dc), negotiated PT на payloader, raw Opus format отдельно
-  от RTP clock/channels, disabled GstRtpChannel::write mutex fix (3d715ae).
-- Late live input attach/detach/reattach и production sender regression добавлены (b4139cb).
-  Это не закрытие всей privacy/hotplug/receive/A/V матрицы.
+- T0: Session/TieBreaker cancellation, reentrancy, bounded arbitration и IQ callback lifetime.
+- T1/T2/T3: tracked sender attempts, DirectionController/policy ownership и Psi audio adapter.
+- T4/T5: transport arbitration/completion и staged transport payload boundary.
+- A3/A4: capture source identity switch и hotplug/receive graph lifecycle.
+- P1a/P1b основа: semantic RTP/RTCP bridge, bounded queues, production provider path,
+  no-device/stop/runtime-error regressions, real installed psimedia plugin smoke.
+- FT baseline: feature-driven ICE → S5B → IBB selection regression; real Prosody SCTP/datachannel
+  transfer через два процесса. Детали и старые SHA остаются в git/interop docs.
 
-### A1 — arbitration реализована; сначала T0 hardening, не новый framework
+### Текущие обязательные gates
 
-Session-owned Jingle::TieBreaker в jingle-tiebreaker.{h,cpp} заменяет protocol-agnostic template.
-Application resolver для content-modify проверяет ContentKey и роль. Dispatcher/IQ-boundary
-tests уже существуют; больше не утверждать, что dispatcher не умеет tie-break.
-Transport-replace намеренно остаётся specialized handler.
-
-Сохранить Continue/Break/Postpone и whole-IQ aggregate Break > Postpone > Continue.
-Postpone означает recovery opportunity после error, не откладывание incoming IQ и не replay.
-Success не вызывает tie-break retry, но не доказывает удовлетворение более нового intent.
-Текущий resolver retry лишь будит _requestedSenders; он не сливает желания в Both.
-
-**T0: реализовано локально — cancellation/reentrancy и arbitration bounds.**
-Добавлены pinned SharedState, cancellation epoch, stable snapshots, idempotent terminal outcomes,
-Session guards и IQ reply-before-recovery. clear/delete из resolve/retry и удаление Session
-через реальный JTPush покрыты regression. Лимиты: 64 resolutions, 4096 XML nodes/attributes,
-64 уровня, 256 Ki UTF-16 characters; превышение — отдельный wait/resource-constraint.
-Один active outgoing IQ остаётся контрактом Session scheduler (debug assertion).
-Также добавлен sessioncallbacklifetime: настоящий Session scheduler отправляет stanza в
-записывающий ClientStream без сети, настоящий JT обрабатывает IQ completion. Проверяется
-удаление Session из Application completion и из resolver retry. Standalone TieBreaker вместе
-с новым regression прошёл ASan/UBSan. Дополнительно directionpolicy прошёл ASan/UBSan/LSan
-с инструментированными DirectionController, Application и TieBreaker, включая удаление Pad
-из callback. Остальная статическая Iris/Qt не инструментирована: это не полный sanitizer CI.
-Дальнейшие adjacent проверки, не повторная реализация T0:
-
-- Полный sanitizer CI для Session/Application/controller и поддерживаемых Qt конфигураций.
-- Wire-order regression с завершением local IQ прямо во время incoming handling: recovery
-  обязан следовать за actual incoming reply, не только за boolean Applied.
-- Generic completion каждого surviving участника multi-content batch, в том числе resolver
-  Continue; корреляция с upcoming operation handles, не только Postpone.
-- Для transport migration сохранить bounded hints и не делать transport install внутри resolve.
-
-Подробности и тестовая матрица: [Direction policy design decision](jingle-direction-policy.md).
-
-### A2 — durable policy, finite operation и IQ attempt должны иметь разных владельцев
-
-Psi audioPolicyTarget не имеет generic failure completion. Решать по шагам:
-
-1. **T1:** explicit attempt completion с request identity/revision, success/error/timeout/cancel.
-   Iris-часть реализована: requestSendersTracked, SendersAttemptResult, sendersAttemptFinished,
-   cancelQueuedSenders и sendersAttemptPending. requestSenders сохранён. Первая настоящая ACK
-   обновляет negotiated facts; duplicate/stale callback после завершения уже ничего не делает.
-   Тест contentmodifycompletion покрывает error/timeout/newer revision/reentrancy/cancel/delete.
-   Ещё требуется production Psi integration test; Iris green не закрывает зависание Psi policy.
-2. **T2:** RTP Pad-owned DirectionController, один policy writer от Psi плюс scoped constraint
-   tokens. Psi владеет device/permission/UI фактами, Iris не выбирает микрофоны. Application
-   queued target остаётся disposable attempt snapshot, не авторитетным user desire.
-   Минимальная Iris реализация уже в jingle-rtp-directions.{h,cpp}, getter на RTP::Pad,
-   немедленный RTP send gate в Application::allowsRtp. Policy status — живое состояние,
-   не finite operation. Three-proposal budget ограничивает автоматическую борьбу политик;
-   generic failure требует нового явного policy/constraint event, не busy retry.
-   directionpolicy проверяет обе роли, constraints/consent, superseded ACK, crossed actions
-   с обоими моментами reconcile относительно error, limit успешной борьбы с peer, recreation
-   content и удаление Pad/controller из scheduling callback. Не создавать второй controller.
-3. **T3:** finite DirectionOperation: per-content progress, Blocked(reason), deadline и one-shot
-   queued completion Succeeded/Failed/Cancelled/Superseded. Iris-часть реализована в
-   jingle-rtp-direction-operation.cpp, API в jingle-rtp-directions.h. Factory:
-   directionController()->requestLocalSending({{content, sending}, ...}, deadlineMs).
-   Не 1:1 с IQ; отмена/деструктор/таймаут наблюдателя не откатывают policy. Весь batch
-   валидируется до mutations; максимум 64 items и 32 pending handles, deadline по умолчанию
-   15 секунд. Policy/item содержат причины блокировки и typed failure + optional Stanza::Error.
-   directionoperation покрывает no-op/invalid batch, progress, supersede/late ACK, cancel,
-   blocked/recovery/deadline, generic error, capacity, recreation, session destruction при
-   удержанном Pad и синхронное удаление handle из callbacks. В Psi audio path подключён
-   через AvCallAudioDirection; старые pending state и прямой requestSenders удалены.
-4. **T4 (реализовано):** transport-replace resolver у Application, переживающего замену Transport;
-   централизованный IQ lifetime, validated sibling hints после reply, guarded fallback.
-5. **T5 (реализовано, 2026-09-19):** staged transport payload API для malformed-batch
-   atomicity: owned PreparedUpdate, prepare-all/commit pass для transport-accept/info,
-   built-in ICE/IBB/S5B и guarded reentrant commits. TransportAccept ACK retirement также
-   привязан к конкретной generation до внешнего transport callback.
-
-Обязательные design решения подробно изложены в
-[jingle-direction-policy.md](jingle-direction-policy.md); T0–T5 реализованы в Iris,
-а cross-repo/runtime/live integration gates остаются следующими шагами:
-
-- SetLocalSending и SetExactSenders различаются. Responder → Both после peer Initiator
-  корректно только для желания «отправлять самому», не для exact Responder target.
-- Consent/constraints закрывают local gate немедленно, не ждут ACK. Снятие device constraint
-  не возвращает отозванное разрешение. Не подменять durable user desire hardware-событием.
-- Не вводить global last-writer-wins или priority enum User/Recovery. Recovery — trigger
-  существующей policy. Для начала single writer + restrictive tokens достаточно.
-- Завершённый operation не хранит вечное желание и не воскресает. Cancellation не unsend IQ;
-  уничтожение observer handle не должно менять capture policy. Superseded завершает старое
-  наблюдение без silent rollback других contents; content identity включает incarnation.
-- Succeeded = выполнен predicate текущей revision, а не пришёл ACK. Невозможное желание
-  видно как Blocked/Failed; bounded retry, deadline и отсутствие ping-pong обязательны.
-- TieBreaker не знает logical operation groups: resolution group только связывает transaction,
-  remote outcome и независимо отзываемые registrations.
-
-#### Решения и открытые вопросы следующего этапа (не блокируют текущую разработку)
-
-- Текущий budget controller — три scheduled proposals на поколение policy/constraints.
-  Это консервативная защита от ping-pong, не требование XEP. При появлении реальной потребности
-  вынести в validated policy settings; не снимать ограничение ради успешного теста.
-- Satisfied относится к текущему предикату directions; это не подтверждение media connectivity.
-  До Connecting локальная proposal не считается согласованным успешным operation.
-- T3 выполнен: не создавать ещё один Intent/Operation framework. Handle — только finite
-  observer принятых policy revisions. Supersession не откатывает unaffected siblings,
-  finished вызывается один раз после установки всех snapshots. Ошибка item имеет приоритет
-  над supersession, а остальные Pending/Blocked items при прекращении batch observation
-  становятся Cancelled/ObservationEnded. Эти исходы не меняют durable policy.
-- Controller Policy и operation item уже сохраняют typed failure и optional signaling error;
-  constraint reason — диагностическая строка, не числовой приоритет policy writers.
-- Psi audio path мигрирован: audioPolicyTarget/audioDesiredWithCapture удалены, как и старые
-  shouldRequestSenders/reconcilePolicyTarget helpers. Один controller writer и device token
-  находятся в AvCallAudioDirection; не возвращать параллельный signaling policy path.
-  Начальную local-send preference брать из явного call/user intent; negotiated peer update
-  не должен становиться новым локальным consent. Для receive-only initial offer не включать
-  микрофон автоматически лишь потому, что captureAudioConsent разрешает его использование.
-- Передача local policy в Iris не отменяет синхронное выключение capture в psimedia. Packet
-  gate защищает отправку, но не индикатор микрофона и фактический сбор данных устройством.
-
-#### Production Psi integration: реализовано локально, remaining gates
-
-1. `src/avcall/avcall.cpp` использует `AvCallAudioDirection` из `avcallaudiodirection.{h,cpp}`
-   как adapter к существующему `RTP::Pad::directionController()`.
-   Не путать роль пользователя и wire mask: исходящий audio call явно желает local send;
-   принимаемый receive-only offer не создаёт такого желания автоматически. Решение принимать
-   при исходном call/accept action, а не при `sendersChangedByPeer`.
-2. Для принятого content уже передаётся начальное желание через requestLocalSending и хранится
-   finite handle. Для hotplug используется RAII constraint token с reason;
-   потеря устройства не заменяет durable желание на false. Возврат снимает лишь свой token.
-   Повторный capabilitiesChanged без изменения фактов не должен создавать revision/retry.
-3. `syncActiveTransmit` учитывает consent, реальное устройство, negotiated local bit
-   и controller gate. Локальный changed callback вызывает capture controls сразу, без ACK.
-   Не ограничиваться RTP packet dropping при живом capture pipeline.
-4. Adapter подписан на policyChanged и finished, хранит последний handle для чтения outcome.
-   Generic failure/timeout не должны оставлять pending target или порождать авто retry loop.
-   Наблюдатель может истечь при отсутствии устройства; его timeout не отзывает разрешение.
-   Новое явное действие или изменение constraint может запустить следующее наблюдение.
-5. Обход через прямой requestSenders для managed audio удалён. Peer notification обновляет
-   negotiated facts, но не выдаёт consent и не перезаписывает пользовательское желание.
-   Не расширять молча эту миграцию на camera/hold без определения их caller policy.
-6. `src/avcall/unittest/audiodirection.cpp` использует именно production adapter плюс реальные
-   Iris Application/Pad/DirectionController. Он покрывает error/timeout, receive-only,
-   loss/return с pending IQ, consent revoke, explicit retry после failure, recreated content
-   и reentrant adapter destruction. Fake Transport/Task дают signaling boundary без сети.
-   Это не полноценный тест AvCall UI или реального capture pipeline. Ubuntu CI regex включает
-   новый avcallaudiodirection_test; запуск CI и live capture пока не подтверждены.
-
-Осталось для A2 acceptance: cross-repo real-psimedia gate на точных heads и проверка реального
-звонка/микрофона. Отдельно нужна UI-подача failed/blocked operation (сейчас adapter сохраняет
-outcome, но не показывает новый диалог). Не завершать весь звонок из-за observation timeout:
-это не Session negotiation deadline. Camera/hold/permission UX не добавлять без отдельного
-определения их user policy. T4 transport-replace resolver и T5 staged payload boundary
-реализованы; следующие шаги — cross-repo/runtime gates P1 и оставшиеся media проверки.
-
-#### T4: transport TieBreaker — реализованный checkpoint (2026-09-18)
-
-Transport arbitration перенесена в существующий session-scoped TieBreaker. Не начинать
-этот перенос заново. Изменения находятся в локальном worktree поверх
-`b5a1985d788169e55a18da90a3aa5169162fbf38`; наличие кода здесь не доказывает push/CI.
-
-Перед продолжением через GitHub connector проверить наличие:
-`Application::TransportReplaceTieBreakResolver`, `Resolution::localData`,
-`Session::updateFromXml(..., afterReply)`, `transportreplacedispatcher.cpp` и
-`transportreplaceackboundary.cpp`. Если их ещё нет на remote, попросить пользователя
-опубликовать checkpoint, не создавать конкурирующую реализацию. Psi audio adapter также
-остаётся отдельным локальным изменением: проверить его публикацию и submodule pin.
-
-**Граница T4:** централизованная arbitration, сохранение sibling hints, guards и regression
-coverage. Это не staged API всех transport payloads (T5), не готовый live BUNDLE и не доказанная
-совместимость звонков. Архитектура описана в [jingle.md](jingle.md), policy/operations —
-в [jingle-direction-policy.md](jingle-direction-policy.md).
-
-##### Ownership и API, которые следует сохранить
-
-| Файлы в IRIS | Реализованная ответственность |
-| --- | --- |
-| `src/xmpp/xmpp-im/jingle-tiebreaker.{h,cpp}` | Реальный outgoing IQ lifetime, RAII resolver registrations, aggregate Break > Postpone > Continue, deferred recovery. Никаких Transport/RTP/selector semantics. |
-| `src/xmpp/xmpp-im/jingle-application.{h,cpp}` | Application-owned replacement resolver, completion generation, guards внутри setTransport/selectNextTransport, единственный failed-IQ fallback. |
-| `src/xmpp/xmpp-im/jingle-session.{h,cpp}` | Per-incoming-IQ validated replacement entries, ContentKey/owner/transport/generation snapshots, partial outcomes и post-reply hints. |
-| `src/xmpp/xmpp-im/jingle.cpp` | JTPush направляет replacement в validation/arbitration handler; отправляет один reply; затем выполняет guarded afterReply. Другие actions сохраняют прежний dispatcher path. |
-| `tests/jingle/transportreplacedispatcher.cpp` | Реальный Session/JT/JTPush для batch ACK, wire replies/hints; responder cases используют JTPush + явное завершение coordinator/owner callback. |
-| `tests/jingle/transportreplaceackboundary.cpp` | Per-content completion identity, duplicate/stale callbacks, same-object reselection, failure successor после IBB-like Unacked. |
-| `tests/jingle/transportreplace.cpp`, `transportreplacematrix.cpp`, `transportreplacecorrectness.cpp` | Сохранённые handler/partial outcome tests; collision fixtures теперь создают outgoingStarted, не просто выставляют NeedAck. |
-
-Application resolver регистрируется при serialization local replacement и живёт дольше
-конкретного Transport. Initiator возвращает Break при пересечении своего ContentKey в
-local/remote snapshots. Responder возвращает **Continue, не Postpone**:
-принятый remote transport инвалидирует completion проигравшего local proposal; если remote
-transport не установлен, normal failed-IQ fallback остаётся единственным recovery owner.
-Не добавлять второй retry/helper лишь ради симметрии с content-modify.
-Postpone по-прежнему доступен consumers с независимым durable intent, например направлениям RTP.
-
-Content-scoped overlap — политика Iris. Не выдавать её за дословное требование XEP-0166
-и не менять на action-wide collision без отдельного interop анализа.
-`PendingTransportReplace` нужен для workflow, но не является источником истины IQ lifetime.
-После JT completion второй Application в batch ещё может иметь NeedAck, пока callback первого
-реентрантно принимает новое действие; новый IQ уже не simultaneous.
-
-```text
-JT finished
-  → outgoingFinished(tx): закрыть collision lifetime
-  → completion callbacks всех owners
-  → outgoingCallbacksFinished(tx): разрешить deferred recovery других consumers
-
-incoming transport-replace
-  → validate all ContentKeys / structure; snapshot identities
-  → parse detached incoming transports; reject malformed batch before arbitration
-  → resolveIncoming(action, XML)
-      Break: не устанавливать ни один remote transport
-      Continue: apply supported entries; queue transport-reject for unsupported
-  → IQ result/error
-  → guarded afterReply: validated sibling hints; incomingFinished bookkeeping
-```
-
-Break имеет id=0 и detached `localData` snapshot winning outgoing IQ. Snapshot позволяет
-отличить colliding contents от advisory siblings, не сохраняет live transaction и не является
-командой повторить XML. `incomingFinished()` обслуживает Postpone correlation, а не общий
-outcome hook; поэтому transport hints находятся в Session closure, а не в retry().
-
-Prepared entries принадлежат одному incoming request, не mutable Session lastIncoming slot.
-Лимит — 64 contents на batch. У coordinator отдельно ограничены pending resolutions и XML
-snapshots; эти лимиты нельзя считать универсальным ограничителем любых будущих очередей.
-До arbitration проверяются duplicate/unknown keys, отсутствие transport и malformed payload.
-Валидный unsupported transport не равен malformed: обычный путь сохраняет partial acceptance.
-При Break совместимые **sibling** proposals остаются hints для локального selector, не скрытым
-remote acceptance. Prepared local sibling до Unacked не заменяется ради hint.
-
-После reply повторно проверяются Session/Application lifetime, content incarnation, transport
-identity и generation, включая same-pointer reselection. Проверки повторяются после каждого
-selector callback; внутри selectNextTransport/setTransport также есть guards, поскольку
-getAlikeTransport/replace/backupTransport/stop могут удалить owner или изменить текущую попытку.
-Не перемещать selection/network effects обратно внутрь Resolver::resolve().
-
-##### Recovery / acceptance contract
-
-| Ситуация | Обязательный результат |
-| --- | --- |
-| Local IQ success | Completion один раз; никакого tie-break retry. |
-| Local error без установленного remote winner | Один fallback для актуальной generation; при исчерпании selector content завершается. |
-| Local completion после установки remote winner | Старый callback не вызывает transport code и не восстанавливает проигравшее предложение. |
-| Generic invalid/unsupported remote proposal | Обычная validation/reject semantics; local error всё ещё обрабатывает единственный completion owner. |
-| Owner удалён / Session завершена / transport generation изменена | Старые completion/hints не меняют новое состояние. |
-| Callback переустанавливает тот же Transport | Pointer equality недостаточно; проверять generation. |
-
-Воспроизведены и исправлены: stale tie-break второго content внутри первого ACK callback
-реального batch; обращение к удалённому Application после selector getAlikeTransport().
-Регрессии также покрывают success/error, duplicate completion, malformed/duplicate batches,
-hints строго после reply, disjoint contents, удаление owner/Session из reply/hint callbacks,
-reselection внутри selector, responder accepted/malformed/unsupported proposals и fallback.
-Это headless fixtures с fake transports, не реальная двухсторонняя сеть.
-
-Verification checkpoint (2026-09-18): финальная локальная сборка с максимум -j2 и
-последовательный полный Jingle CTest прошли **52/52**, Qt 6.10.2 / system QCA3,
-SRTP/SCTP включены, 15.42 s. Это результат текущего worktree, не GitHub CI.
-Финальный targeted **ASan/UBSan/LSan прошёл**: instrumented dispatcher regression,
-jingle-application.cpp, jingle-session.cpp, jingle-tiebreaker.cpp и jingle.cpp;
-остальные Iris units, Qt и QCA слинкованы без instrumentation. Это не sanitizer-прогон
-всех transport providers. Проверка git diff --check также чистая.
-Для Sol обязательны собственные CI runs на точном опубликованном SHA.
-Не удалять contentmodify_dispatcher, directionpolicy/operation, sessioncallbacklifetime,
-tiebreaker и полный transport suite из regression gate.
-
-#### T5: staged transport payload boundary — реализованный checkpoint (2026-09-19)
-
-Порядок из исходного аудита был выполнен в существующей ветке/PR: опубликованный T4 →
-adjacent completion audit → staged transport payload work → targeted/full CI → sanitizer.
-Новых managers, generic template frameworks или параллельных policy owners не добавлено.
-
-1. **Adjacent audit — выполнен:** `Application::takeOutgoingUpdate(TransportAccept)`
-   теперь валидирует точную transport/generation попытку и retire-ит completion до внешнего
-   transport callback. `transportacceptackreentrancy.cpp` покрывает duplicate completion,
-   stale transport, same-object new generation, Application finishing/deletion и nested accept.
-   Replace counter не переносился механически на остальные actions.
-
-2. **Transport update effects — staged:** `jingle-transport.h` задаёт fail-closed
-   `prepareUpdate/commitPreparedUpdate`; ICE, IBB и S5B парсят в owned typed values без
-   live mutations/signals/network scheduling на prepare phase. Transport-specific commit
-   сохраняет прежние реальные side effects и остаётся reentrant boundary. Detached Transport
-   больше не используется как аргумент о «чистоте» mutating update.
-
-3. **Malformed-batch reproducer — выполнен:** `transportacceptatomicity.cpp` проверяет
-   transport-accept и transport-info с корректным первым и malformed вторым sibling. Первый
-   transport не меняет payload/state и не стартует до успешной подготовки всего batch.
-   Malformed и valid unsupported outcomes остаются различными.
-
-4. **Staged API — реализован:** `Transport::PreparedUpdate`,
-   `prepareUpdate()` и `commitPreparedUpdate()` являются текущим контрактом. Prepared values
-   owned и transport-specific; Session хранит отдельно Application/ContentKey/Transport/generation
-   snapshot. Compatibility default возвращает Unsupported и не fallback-ит на mutating update.
-
-5. **Session integration — реализована:** `handleIncomingTransportAccept/Info` сначала
-   готовят весь required batch, затем перед каждым commit повторно сверяют key/Application/
-   Transport/generation. Reentrant commit может supersede/remove sibling; его prepared value
-   тогда пропускается. Observer-atomic rollback после уже выполненного runtime commit не
-   заявляется; для этого потребовалась бы отдельная state/notification boundary.
-
-6. **Failure/lifetime coverage — выполнена для текущей boundary:** invalid/malformed sibling,
-   duplicate/unknown content, stale transport, same-pointer generation, peer reject/error,
-   Application deletion/termination и nested completion покрыты regression suite. Prepared
-   objects owned RAII и освобождаются на stale/error paths; nested event loops не добавлены.
-   Provider default fail-closed.
-
-7. **Gate — пройден на `df27dcc5936f3f7f18a0c31e4472867a80e7fcf0`:**
-   GitHub `Jingle regressions` run 35424993900: qca3-srtp и targeted transport
-   ASan+UBSan jobs success. Sanitizer отключает только legacy `Stringprep_profile_flags`
-   enum-check (`-fno-sanitize=enum`), который иначе abort-ит любой Jid construction до
-   Jingle path; AddressSanitizer и остальные UndefinedBehaviorSanitizer checks остаются.
-   `docs/jingle.md` обновлён только до достигнутой prepare-phase atomicity и guarded commits.
-   Cross-repo capture/privacy и live peer gates остаются отдельными задачами.
-
-### A3 [P1 privacy, checkpoint 2026-09-19] Capture source identity switch — исправлено
-
-В `psimedia:jingle/rtcp-session` `setInputDevices` сравнивает полную source identity:
-`none/live/file/data` плюс device/file/data identity. При смене running source старый sender
-и capture resources отзываются **до** commit новых полей. Live → file → live теперь реально
-rebuild-ит sender; unsupported QByteArray/file-data path fail-closed после teardown старого
-capture вместо неявного `filesrc` с пустым filename.
-
-Production regression `rtpsessioncontext_sender` использует бесконечный synthetic live source,
-создаёт конечный Ogg/Opus file, выполняет live → file → live и требует RTP от каждого нового
-source и EOS конечного file. Старый бесконечный live pipeline такой oracle пройти не может.
-Qt6/GStreamer GitHub run 35424941020 на `3709db69b521d309e6ca3a8f465d4f52ccc2d429`
-прошёл. Rapid/cancel и полноценная in-memory data source поддержка остаются отдельными
-возможностями; data replacement сейчас намеренно fail-closed.
-
-### A4 [P2 architecture/coverage, checkpoint 2026-09-19] Capture hotplug сохраняет receive graph
-
-Full `cleanup()` больше не используется для смены capture source. Выделен `cleanupSend()`,
-который удаляет sendbin/input device contexts и отзывает transmit state, но сохраняет
-`recvbin`, receive appsrc, audio sink и playback objects. При default shared-clock режиме
-смена send-master всё ещё делает bounded receive clock resync через READY → PLAYING; поэтому
-это не заявление об абсолютно бесшовном hotplug или сохранении всех timing observables.
-
-Production regression читает реальный GStreamer DOT через существующий `dumpPipeline()` и
-фиксирует identity audio receive `appsrcN` до live → file → live. Полный старый cleanup
-пересоздавал этот object; sender-only reset сохраняет identity. Полный Qt6/GStreamer suite
-прошёл на `cb9e11c60c2f22ada1d8e0376b09e2c9b0022d2d`, run 35425128012.
-
-Остаются P1b timing/media checks: SR RTP↔NTP mapping при legacy byte edge и queue delay,
-A/V sync, rapid/cancel during rebuild и более сильный continuous receive/send-video oracle.
-Не переносить teardown policy в Iris и не создавать второй media engine.
-
-### Дополнительные обязательные проверки P1b, не новые доказанные дефекты
-
-- Legacy byte edge теряет исходные GstBuffer timestamps; bridge ставит time-of-arrival.
-  Проверить SR RTP↔NTP mapping и A/V sync под queueing/encoder delay и hotplug.
-- Bounded handoff queues не ограничивают appsrc/appsink целиком; drain loop должен давать
-  owner event loop обрабатывать stop/timers при постоянном producer. Проверить byte/age limits.
-- Input ID replacement без изменения capability booleans и явная смена настроек пользователем:
-  проверить, что реальные notifications доходят до AvCall, а не только pure predicate.
-- Runtime bridge bus error должен доходить до provider error path; PLAYING success не
-  доказательство дальнейшего здоровья pipeline.
-- Pending/new media в уже active call не должно включать capture до собственного
-  authenticated Application Active. Проверить реальный controller, не только shouldTransmit.
-- SharedRtcp/FCI/XR и shared association остаются P2, не закрыты packet-type tests.
-
-### Housekeeping Sol — опубликована
-
-Ранее неиспользуемая cleanupSend declaration была удалена; после подтверждения A4 имя
-возвращено уже как реальная sender-only lifecycle boundary с production regression.
-License headers rtpworker.h/rwcontrol.cpp возвращены к исходному тексту без несвязанных правок.
-CTest timeout для
-rtpsessioncontext_sender увеличен с 20 до 45 s; внутренние ожидания не менялись.
-Проверить публикацию этих локальных изменений на GitHub, не дублировать patch.
-Общий deadline внутри теста и actual CI execution остаются verification задачами;
-увеличенный timeout сам по себе не исправляет deadlock и не доказывает прохождение теста.
+1. Довести live FT matrix: ICE, S5B, IBB отдельно; ICE→S5B и S5B→IBB через настоящий
+   `transport-replace`; затем drain/lifetime regressions для всех трёх transports.
+2. P1c: real server-mediated Psi↔Psi audio, затем A/V; consent/stop/no-device/runtime error.
+3. Pinned Conversations interoperability в обе стороны.
+4. Только затем P2 production live BUNDLE wiring существующих group/membership/router primitives.
+5. После wiring отдельно проверить multiple DataChannels on one SCTP association и mixed RTP+SCTP.
 
 ## 3. Архитектурные инварианты при дальнейшей работе
 
-1. Session::Active — signaling; Application readiness — применённая media configuration плюс authenticated packet attachment. Capture consent хранится отдельно в Psi.
-2. Per-content Transport остаётся per-content. Shared association находится под session-local ICE Pad; одинаковый JID не ключ для объединения соединений.
-3. Connection membership, ICE generation, DTLS epoch и routing revision — разные сущности. Не заменять их одним счётчиком.
-4. Удаление member освобождает только его channel/membership. Последний member завершает association; Session shutdown завершает все.
-5. Все callbacks/packet writers проверяют lifetime и актуальность generation/revision. После invalidation нет plaintext fallback или отправки старым writer.
-6. Входящий SRTP/SRTCP аутентифицируется один раз до доверенного SSRC learning и media delivery.
-7. RTP codecs, retransmission, jitter buffer и congestion control — media engine. Iris согласует capabilities и маршрутизирует, не становится вторым engine.
-8. Никаких nested event loops. Очереди ограничены байтами/пакетами/возрастом; worker-thread adapter не вызывает Jingle API напрямую.
-9. PubSub остаётся источником истины публикаций; не менять jingle-pub ради звонков. Не ломать file transfer, custom ICE и SCTP.
-10. Fingerprint over signaling не равен подтверждению личности через OMEMO. Не делать незаметный downgrade при crypto failure.
+1. Session::Active — signaling; Application readiness требует своих media/transport условий.
+   Capture consent хранится отдельно в Psi.
+2. Per-content `Transport` остаётся per-content. Shared association живёт под session-local ICE Pad;
+   одинаковый JID не является ключом sharing.
+3. Connection membership, ICE generation, DTLS epoch, routing revision и DataChannel stream lifetime —
+   разные сущности; одним счётчиком их не заменять.
+4. Удаление member/channel освобождает только его долю. Последний member может завершить association;
+   Session shutdown не должен случайно уничтожить ещё drain-ящиеся обязательные данные.
+5. Все callbacks/writers проверяют lifetime и generation/revision; после invalidation нет plaintext
+   fallback и отправки stale writer.
+6. Входящий SRTP/SRTCP аутентифицируется до доверенного routing/SSRC learning.
+7. RTP codecs/jitter/retransmission/congestion — media engine. Iris согласует и маршрутизирует.
+8. Никаких nested event loops; queues bounded; worker callbacks не вызывают Jingle API напрямую.
+9. PubSub не менять ради calls. Legacy IBB/S5B FT и existing SCTP FT не ломать.
+10. Fingerprint over signaling не равен OMEMO identity confirmation; crypto failure не downgrade.
+
+### BUNDLE: зафиксированная архитектура, которую надо довести до production
+
+- Не возвращаться к старому “добавить BUNDLE XML и оставить отдельные sockets”.
+- Negotiated `GroupPlan` должен атомарно коммититься в session-local `ConnectionRegistry`;
+  per-content Transport получает `ConnectionMembership` в общей association.
+- `ConnectionGroupTransaction` уже проверяет shared vs independent topology, owner removal,
+  final release, refusal fallback и rollback частичного commit.
+- `BundleRouter` уже проверяет authenticated MID/SSRC/PT routing, SharedRtcp, runtime outgoing
+  SSRC registration, revision fencing и removal. Production wiring должен использовать эти contracts.
+- Shared ICE/DTLS/SCTP ownership не означает shared `Transport` object: signaling/ACK state остаётся
+  per-content/per-action.
+- Для DataChannel одна SCTP association может обслуживать много `Connection`/streams. Закрытие или
+  draining одного файла не завершает association, если другие streams/members ещё живы.
+
+### `Finishing`: drain boundary, а не универсальный смысл
+
+`Finishing` нельзя трактовать одинаково на Connection, Transport, Application и Session.
+Это состояние означает: **новая работа данного вида уже не принимается, но объект ещё обязан
+завершить свой layer/application-specific хвост прежде чем стать `Finished`.**
+
+- Receiver-side byte stream: remote EOF/close означает “новых bytes больше не будет”, но уже
+  принятые bytes в `QIODevice`/Connection buffers должны оставаться читаемыми. `Finished` только
+  после drain либо после получения заранее объявленного количества bytes.
+- Sender-side критерий другой: после последнего application write могут ещё существовать
+  transport/QIODevice buffers или protocol acknowledgements. Нельзя зеркально использовать
+  receiver condition.
+- Message/datagram/DataChannel semantics могут требовать другой drain rule, чем sequential stream.
+  Конкретный Application определяет, что для него означает complete payload.
+- FT Application знает declared file size/range/hash/protocol completion и потому может завершаться
+  позже transport EOF; RTP Application обычно не имеет обязательства drain media после hangup.
+- IBB уже содержит явную legacy модель `Active → Finishing → Finished`: remote close оставляет
+  connection readable до `bytesAvailable()==0`. Сохранять эту семантику.
+- S5B и SCTP/DataChannel сначала охарактеризовать regression tests; не “унифицировать” методом
+  преждевременного `close()/delete`, который сломает их существующий buffering.
+- Нужен единый observable contract (no-more-input / draining / finished), но transport-specific
+  реализация и application completion condition могут различаться.
+
+### Session termination policy
+
+`session-terminate` — signaling event, а не универсальный приказ немедленно уничтожить все
+buffered data. Политика зависит от состава Session:
+
+- **File transfer only.** Нормальный `session-terminate success` должен обычно возникать автоматически
+  после успешного завершения всех FT applications/protocol confirmations. Если terminate приходит
+  раньше, это cancellation/failure: reason должен позволять отличить отмену/ошибку от успешного
+  окончания; уже принятые обязательные bytes нельзя терять только из-за signaling teardown.
+- **RTP call only.** Hangup/`session-terminate` — естественное окончание звонка. Ждать draining
+  media packets обычно не нужно; capture/writers можно revoke немедленно, затем deterministic cleanup.
+- **Mixed RTP + DataChannel/FT.** Самый опасный случай. Terminating RTP content/call не должен
+  уничтожить shared ICE/DTLS/SCTP association, если DataChannel member ещё обязан drain/finish.
+  И наоборот, закрытие одного DataChannel не завершает RTP. Session-level terminate допустим только
+  когда политика всех surviving applications согласована; иначе использовать content-level teardown
+  или явную cancellation semantics.
+- Session/Application/Transport lifetime не должны определяться одним enum comparison. Terminal
+  signaling может быть уже получен, пока отдельный Connection ещё законно живёт для local drain.
 
 ## 4. Оставшиеся этапы
 
@@ -575,40 +253,70 @@ P1b не должен протащить BUNDLE group knowledge в psimedia: gro
 
 ### P2. Подключить существующие group/membership/router к live BUNDLE
 
-Файлы IRIS: jingle-ice.cpp, jingle-ice-connection_p.h, jingle-ice-group_p.h, jingle-group-negotiation_p.h, jingle-session.cpp, jingle-rtp.cpp, jingle-rtp-router_p.*.
+Это **integration этап уже реализованной BUNDLE foundation**, не новая архитектура.
 
-Не создавать параллельный GroupManager. Расширять уже существующие сущности.
+Текущая база:
+- `GroupPlan` + validation shared transport parameters;
+- session-local `ConnectionRegistry` и move-only `ConnectionMembership`;
+- transactional `ConnectionGroupTransaction` с rollback/refusal/removal tests;
+- `BundleRouter` с MID/SSRC/PT, SharedRtcp, outgoing SSRC registration и revision fencing;
+- current production `ICE::Pad::connectionFor(Transport*)` всё ещё создаёт independent
+  `IceConnection`, поэтому BUNDLE не рекламируется.
 
-#### P2a. Ownership и per-content signaling
+Файлы IRIS: `jingle-ice.cpp`, `jingle-ice-connection_p.h`, `jingle-ice-group_p.h`,
+`jingle-group-negotiation_p.h`, `jingle-session.cpp`, `jingle-rtp.cpp`,
+`jingle-rtp-router_p.*`. Не создавать параллельный GroupManager.
 
-- ICE Pad использует ConnectionRegistry и результат GroupPlan вместо независимого create для каждого Transport.
-- IceConnection становится владельцем ICE/DTLS/SRTP callbacks. Callback не захватывает один Transport как владельца всей группы.
-- Каждый Transport имеет membership и свой signaling cursor: что из credentials/candidates/fingerprint уже включено в его pending/sent/ACKed update.
-- Network state общая, signaling transaction/ACK принадлежит конкретному действию. Error ACK не считается success и не повторяет start association для каждого member.
-- Incoming trickle адресуется допустимому content/owner согласно negotiated profile; применяется к общей association с проверкой generation. Dedup не теряет необходимые protocol updates.
-- Не подменять существующий custom transport wire semantics стандартным ice-udp:1.
+#### P2a. Commit negotiated membership в production ICE
 
-#### P2b. Транзакционный commit
+- Full answer validation → immutable GroupPlan → staged/transactional commit → memberships.
+- ICE Pad хранит session-local association registry; Transport не создаёт connection “по себе”
+  после согласованного BUNDLE.
+- Несгруппированные contents и BUNDLE refusal остаются independent associations.
+- Общие credentials/fingerprint/setup проверяются до commit. Invalid last member не оставляет
+  частично живую группу.
+- Per-content Transport сохраняет собственные signaling cursor/ACK/action state. Sharing network path
+  не означает sharing signaling transaction.
+- Owner removal требует явной ownership transition или модели, где network association вообще
+  не зависит от lifetime “первого” Transport.
+- Не рекламировать BUNDLE до реального shared ownership.
 
-- Full answer validation → GroupPlan → staged resources → commit. Invalid last content не оставляет частичную группу.
-- Сверять credentials/setup/fingerprint для объединяемых content, ordered membership и transport owner.
-- Initial refusal/subset BUNDLE: либо реально предложенные независимые transports, либо явный отказ. Не выдавать один скрытый общий socket за несколько несогласованных независимых соединений.
-- Пока runtime не готов, incoming группировку тоже нельзя молча принять с ложной семантикой. Выбрать протокольно корректный отказ/негруппированный answer.
-- Удаление owner требует явной допустимой owner transition/renegotiation либо завершения группы; не зависеть от порядка hash map.
+#### P2b. Shared ICE/DTLS/SRTP/SCTP lifetime
 
-#### P2c. Per-content channels
+- `IceConnection` владеет ICE agent/components/DTLS и общими callbacks; callback не должен
+  захватывать один Transport как lifetime owner всей группы.
+- Последний membership закрывает association. Удаление одного member не закрывает соседей.
+- ICE restart координируется один раз на association; stale generation не меняет новую.
+- RTP/SRTP и SCTP application data демультиплексируются на общей DTLS/ICE association согласно
+  wire profile; stopping RTP consumer не закрывает SCTP.
+- Для DataChannel association допускает несколько streams/files одновременно. Per-stream
+  `Connection` имеет собственный `Finishing/Finished`; association живёт до последнего member/channel.
+- Не менять vendored mediasoup SCTP core ради ownership, если нужное поведение реализуемо в нашем glue.
 
-Предлагаемая внутренняя сущность ContentPacketChannel в jingle-rtp-router_p.h: identity + membership + routing revision + weak association + writer/receive endpoint. Она заменяет прямую подписку всех Applications на общий SrtpSession::packetReceived.
+#### P2c. Packet/channel routing
 
-- Проверять content permission/PT/revision/epoch на отправке.
-- Incoming path: ICE → classification → один unprotect → router → нужный media ingress.
-- DTLS application data продолжает идти в SCTP; не направлять его в SRTP и не требовать SRTP для data-only association.
-- На removal отозвать только channel; не закрывать security других members.
-- Crypto invalidation закрывает соответствующие packet gates до восстановления.
+Внутренняя per-content channel identity должна связывать membership + routing revision + weak
+association + writer/receive endpoint.
 
-Тесты: две полноценные Session с audio/video; реально один ICE agent/association и handshake; удаление одного member; финальное закрытие; две Session к одному peer; отказ/subset группы; conflicting parameters; stale callbacks; RTP/RTCP routing, outgoing registrations и P0.6. Отдельно mixed RTP+SCTP, если этот профиль заявляется.
+- outgoing: content permission/PT/revision/crypto epoch;
+- incoming: classification → один authenticate/unprotect → BundleRouter → нужный media ingress;
+- DTLS application data → SCTP, не SRTP;
+- removal revoke только свой channel/routes;
+- crypto invalidation закрывает gates до восстановления;
+- SharedRtcp остаётся group-level ingress, не дублируется по endpoints.
 
-Только после этих тестов включать BUNDLE offer/advertising согласно точным правилам спецификаций.
+#### P2d. Обязательные regressions
+
+1. Audio+video: один реальный ICE agent/DTLS association; обе стороны routing.
+2. Remove одного member: другой продолжает; remove последнего закрывает association.
+3. BUNDLE refusal/subset/conflicting params/rollback.
+4. Две Session к одному peer не делят association.
+5. Restart/late callbacks/transport-replace с generation fencing.
+6. Mixed RTP+SCTP на одной association.
+7. Два и более DataChannel FT streams одновременно: закрытие/drain одного не влияет на остальные.
+8. Session/content termination в mixed case не уничтожает connection, который ещё обязан drain.
+
+Только после этих regressions включать BUNDLE offer/advertising.
 
 ### P3. JMI и выбор устройства
 
@@ -717,11 +425,33 @@ flowchart TD
 
 Это целевое владение, не заявление о текущей интеграции. Освобождение audio membership не уничтожает C, пока жив video membership.
 
+### Finishing/drain и завершение Session
+
+~~~mermaid
+stateDiagram-v2
+    [*] --> Active
+    Active --> Finishing: no more work/input for this layer
+    Finishing --> Finished: layer/application drain condition satisfied
+    Finished --> [*]
+~~~
+
+Переход `Finishing → Finished` не обязан иметь одинаковое условие:
+
+- FT receiver: declared bytes/range получены, buffered input drained, hash/protocol completion done.
+- FT sender: payload передан downstream, обязательные local/protocol buffers/acks завершены.
+- RTP call hangup: media drain обычно не обязателен; revoke и cleanup могут быть immediate.
+- Mixed Session: каждый Application/Connection выполняет своё правило; shared association
+  закрывается только когда нет surviving membership/обязательного drain.
+
+Regression должен намеренно закрывать peer-side Connection до чтения последнего buffered chunk и
+доказывать, что receiver всё равно получает ровно N bytes. Повторить для ICE/DataChannel, S5B и IBB,
+не ломая legacy IBB/S5B behavior.
+
 ### Teardown и recovery
 
-- User cancel: terminal guard → revoke capture/writers → cancel media operations → detach per-content delivery → release membership → terminal UI notification.
+- User cancel: определить application-specific cancellation reason → revoke новые writes/capture → сохранить обязательный local drain там, где он нужен → detach/release только после соответствующего terminal condition → один UI outcome.
 - Failed backend: отметить Failed до внешних сигналов → не вызывать API очищенного control → отменить/завершить связанные операции.
-- Remove member: отозвать его revision/operations, затем release; другие members работают.
+- Remove member: отозвать его revision/new work; если connection имеет обязательный drain, дождаться его локального completion; затем release membership. Другие members работают.
 - Restart: staging новой ICE generation → validated signaling commit → отдельная DTLS policy → authenticated gate → route revision commit. Старые callbacks не проходят generation checks.
 - После любого внешнего callback возможна синхронная deletion; QPointer/ownership guards проверять до следующего обращения.
 
@@ -795,7 +525,9 @@ transport → receive pipeline/decode. В CI использовать подхо
 | Два устройства peer | один принятый звонок, остальные перестали звонить |
 | TURN / network switch | working relay или bounded documented failure |
 | Packet loss / bandwidth limit | feedback действует, queues ограничены |
-| File transfer / SCTP рядом | прежние wire/crypto semantics сохранены |
+| File transfer / SCTP рядом | ICE/S5B/IBB FT сохранены; transport-replace работает; buffered tail не теряется |
+| Multiple DataChannels | одна SCTP association, независимые stream close/drain, соседний transfer жив |
+| Mixed RTP + DataChannel | RTP hangup не убивает обязательный FT drain; FT close не убивает RTP |
 
 Диагностика: local call ID, content/group, ICE generation, crypto epoch, operation ID, transition, duration, drops/queue depth. Не логировать private keys, exporter material, ICE/TURN passwords, plaintext media. Peer fixtures обезличить; версия Conversations обязательна.
 
@@ -823,9 +555,10 @@ Performance измерять отдельно: media encoding CPU, SRTP packet p
 
 Начать с remote heads и CI evidence через connector. Checkpoints T0–T5, Psi audio adapter,
 psimedia RTP/RTCP bridge и A3/A4 source lifecycle уже опубликованы; не реализовывать их повторно.
-Следующие gates: завершить оставшиеся P1b timing/error/notification проверки и cross-repo #969,
-затем P1c native peer checks. Параллельные policy owners не оставлять. P2 live BUNDLE, P3 JMI, P4 feedback/control, P5 recovery и P6 release
-выполняются по зависимостям наблюдённого peer. Не создавать существующие interfaces заново.
+Следующие gates: довести live FT transport matrix и drain semantics, затем P1c native peer checks.
+После P1c подключить существующие group/membership/router primitives к production live BUNDLE;
+не перепроектировать их заново. P3 JMI, P4 feedback/control, P5 recovery и P6 release выполнять
+по зависимостям наблюдённого peer.
 
 Каждый завершённый подпункт сопровождать:
 
