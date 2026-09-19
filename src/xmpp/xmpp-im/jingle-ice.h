@@ -51,6 +51,8 @@ namespace Jingle { namespace ICE {
         void                        prepare() override;
         void                        start() override;
         void                        stop() override;
+        PrepareUpdateResult         prepareUpdate(const QDomElement &transportEl) override;
+        bool                        commitPreparedUpdate(PreparedUpdatePtr update) override;
         bool                        update(const QDomElement &transportEl) override;
         bool                        hasUpdates() const override;
         OutgoingTransportInfoUpdate takeOutgoingUpdate(bool ensureTransportElement) override;
