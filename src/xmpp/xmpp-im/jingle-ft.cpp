@@ -171,10 +171,14 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
         {
             const auto previous = q->_state;
             q->_state           = s;
-            if (s >= State::Finishing && finalizeTimer) {
-                finalizeTimer->stop();
-                finalizeTimer->deleteLater();
-                finalizeTimer = nullptr;
+            if (s >= State::Finishing) {
+                if (finalizeTimer) {
+                    finalizeTimer->stop();
+                    finalizeTimer->deleteLater();
+                    finalizeTimer = nullptr;
+                }
+                if (connection)
+                    connection->setReadHook({});
             }
             if (s == State::Finished) {
                 if (device && closeDeviceOnFinish) {
@@ -184,7 +188,13 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
                 // waits for the transport-specific asynchronous close/drain.
                 // Hard failure/cancel still needs immediate best-effort close.
                 if (previous != State::Finishing && connection) {
-                    connection->close();
+                    const auto closing = connection;
+                    closing->close();
+                    // Application ownership ends at its terminal state. The
+                    // transport/association retains the connection until its
+                    // own close/drain protocol has completed.
+                    if (connection == closing)
+                        connection.reset();
                 }
                 if (q->transport())
                     q->disconnect(q->transport().data(), &Transport::updated, q, nullptr);
@@ -253,7 +263,9 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
         {
             lastReason = Reason(Reason::Condition::FailedApplication,
                                 errorMsg.isEmpty() ? QString::fromLatin1("stream failed") : errorMsg);
-            setState(State::Finished);
+            if (connection)
+                connection->setReadHook({});
+            q->remove(lastReason.condition(), lastReason.text());
         }
 
         void expectReceived()
@@ -570,6 +582,8 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
 
     Application::~Application()
     {
+        if (d->connection)
+            d->connection->setReadHook({});
         delete d->hasher;
         qDebug("jingle-ft: destroyed for %s", qUtf8Printable(pad()->session()->peer().full()));
     }

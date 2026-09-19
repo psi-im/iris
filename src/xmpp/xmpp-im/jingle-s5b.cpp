@@ -58,6 +58,15 @@ namespace XMPP { namespace Jingle { namespace S5B {
         bool                    closeSignalled = false;
 
     public:
+        ~Connection() override
+        {
+            if (client) {
+                client->disconnect(this);
+                delete client;
+                client = nullptr;
+            }
+        }
+
         void setSocksClient(SocksClient *client, Transport::Mode mode)
         {
             if (!client || !client->isOpen()) {
@@ -92,7 +101,10 @@ namespace XMPP { namespace Jingle { namespace S5B {
         QNetworkDatagram readDatagram(qint64 maxSize = -1)
         {
             Q_UNUSED(maxSize) // TODO or not?
-            return datagrams.size() ? datagrams.takeFirst() : QNetworkDatagram();
+            auto datagram = datagrams.size() ? datagrams.takeFirst() : QNetworkDatagram();
+            if (closing && !bytesAvailable() && datagrams.isEmpty())
+                finishSocksClose();
+            return datagram;
         }
 
         qint64 bytesAvailable() const
@@ -121,9 +133,12 @@ namespace XMPP { namespace Jingle { namespace S5B {
 
             closing       = true;
             closeWasLocal = true;
-            client->close();
-            setOpenMode(client->openMode());
-            if (!client->isOpen() && !bytesAvailable())
+            auto *closingClient = client;
+            closingClient->close();
+            if (client != closingClient)
+                return; // close completed synchronously
+            setOpenMode(closingClient->openMode());
+            if (!closingClient->isOpen() && !bytesAvailable() && datagrams.isEmpty())
                 finishSocksClose();
         }
 
@@ -140,7 +155,7 @@ namespace XMPP { namespace Jingle { namespace S5B {
             if (!client)
                 return -1;
             const auto ret = client->read(data, maxSize);
-            if (closing && !bytesAvailable())
+            if (closing && !bytesAvailable() && datagrams.isEmpty())
                 finishSocksClose();
             return ret;
         }
@@ -152,8 +167,8 @@ namespace XMPP { namespace Jingle { namespace S5B {
                 return;
             closing = true;
             closeWasLocal = closeWasLocal || local;
-            setOpenMode(client->bytesAvailable() ? QIODevice::ReadOnly : QIODevice::NotOpen);
-            if (!bytesAvailable())
+            setOpenMode((client->bytesAvailable() || !datagrams.isEmpty()) ? QIODevice::ReadOnly : QIODevice::NotOpen);
+            if (!bytesAvailable() && datagrams.isEmpty())
                 finishSocksClose();
         }
 
