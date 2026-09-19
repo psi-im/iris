@@ -227,6 +227,12 @@ namespace XMPP { namespace Jingle { namespace ICE {
         }
     };
 
+    class PreparedIceUpdate final : public XMPP::Jingle::Transport::PreparedUpdate {
+    public:
+        explicit PreparedIceUpdate(Element value) : element(std::move(value)) { }
+        Element element;
+    };
+
     class Resolver : public QObject {
         Q_OBJECT
         using QObject::QObject;
@@ -1164,7 +1170,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
             d->network->ice->startChecks();
     }
 
-    bool Transport::update(const QDomElement &transportEl)
+    Transport::PrepareUpdateResult Transport::prepareUpdate(const QDomElement &transportEl)
     {
         try {
             QDomDocument normalizedDoc;
@@ -1174,17 +1180,36 @@ namespace XMPP { namespace Jingle { namespace ICE {
                 normalized = iceUdpToInternal(normalizedDoc, transportEl, NS, &error);
                 if (normalized.isNull()) {
                     qWarning("ICE-UDP transport update failed: %s", qPrintable(error));
-                    return false;
+                    return { PrepareUpdateStatus::Invalid, {}, {} };
                 }
             }
-            Element e;
-            e.parse(normalized);
-            QTimer::singleShot(0, this, [this, e]() { d->handleRemoteUpdate(e); });
-            return true;
-        } catch (std::runtime_error &e) {
+
+            Element element;
+            element.parse(normalized);
+            return { PrepareUpdateStatus::Ready, std::make_unique<PreparedIceUpdate>(std::move(element)), {} };
+        } catch (const std::runtime_error &e) {
             qWarning("Transport update failed: %s", e.what());
-            return false;
+            return { PrepareUpdateStatus::Invalid, {}, {} };
         }
+    }
+
+    bool Transport::commitPreparedUpdate(PreparedUpdatePtr update)
+    {
+        auto prepared = dynamic_cast<PreparedIceUpdate *>(update.get());
+        if (!prepared)
+            return false;
+
+        // Preserve the existing deferred ICE application boundary. The caller has
+        // already validated the complete signaling batch before this work is queued.
+        const auto element = prepared->element;
+        QTimer::singleShot(0, this, [this, element]() { d->handleRemoteUpdate(element); });
+        return true;
+    }
+
+    bool Transport::update(const QDomElement &transportEl)
+    {
+        auto prepared = prepareUpdate(transportEl);
+        return prepared && commitPreparedUpdate(std::move(prepared.update));
     }
 
     bool Transport::hasUpdates() const
