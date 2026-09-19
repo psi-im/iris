@@ -1,8 +1,8 @@
 #include <QCoreApplication>
-#include <iris/jingle-ibb.h>
+#include <iris/xmpp-im/jingle-ibb.h>
 #include <iris/jingle-ice.h>
 #include <iris/jingle-nstransportslist.h>
-#include <iris/jingle-s5b.h>
+#include <iris/xmpp-im/jingle-s5b.h>
 #include <iris/jingle-session.h>
 #include <iris/xmpp_caps.h>
 #include <iris/xmpp_client.h>
