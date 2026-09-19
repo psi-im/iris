@@ -143,8 +143,7 @@ static void testFinishingApplicationRejectsLateCompletion(Client &client)
 static void testDeletedApplicationRejectsLateCompletion(Client &client)
 {
     AcceptFixture f(client, QStringLiteral("deleted@example.test/device"));
-    auto          ack   = f.takeAck();
-    const auto    state = f.remote->state();
+    auto          ack = f.takeAck();
 
     QDomDocument doc;
     auto         jingle = doc.createElementNS(J::NS, QStringLiteral("jingle"));
@@ -158,8 +157,14 @@ static void testDeletedApplicationRejectsLateCompletion(Client &client)
     check(!f.session.content(QStringLiteral("audio"), J::Origin::Initiator),
           "content-remove did not delete the application");
 
+    // Content removal is allowed to finish/change the retained transport itself.
+    // Snapshot the post-removal state: only mutations after this point belong to
+    // the stale ACK under test.
+    const auto state  = f.remote->state();
+    const auto starts = f.remote->starts();
+
     ack(&f.success);
-    check(f.remote->state() == state && f.remote->starts() == 0,
+    check(f.remote->state() == state && f.remote->starts() == starts,
           "late transport-accept ACK mutated retained transport after application deletion");
 }
 
