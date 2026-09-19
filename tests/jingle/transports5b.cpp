@@ -160,7 +160,9 @@ struct Fixture {
     Fixture(Client &client, J::Origin role = J::Origin::Responder) :
         session(client.jingleManager(), Jid(QStringLiteral("peer@example.test/device")), role)
     {
-        manager.setJingleManager(client.jingleManager());
+        // This fixture manager is intentionally not registered with the client's
+        // Jingle manager. Binding it manually would make its destructor unregister
+        // the client's built-in S5B manager.
         pad       = J::TransportManagerPad::Ptr(manager.pad(&session));
         transport = manager.newTransport(pad, session.peerRole()).staticCast<S::Transport>();
     }
