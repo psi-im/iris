@@ -577,31 +577,48 @@ namespace XMPP { namespace Jingle {
                 }
             };
         }
-        // This ACK completes a peer-initiated replacement. The transport callback may
-        // reenter and select another transport, so completion is tied to the transport
-        // instance that produced this stanza, not whatever _transport points to later.
+        // This ACK completes a peer-initiated replacement. Treat the outgoing
+        // transport-accept as its own attempt: validate and retire that attempt before
+        // invoking transport-specific code. The callback is a reentrant boundary and
+        // may delete us, install even the same Transport as a new generation, or cause
+        // this completion to be delivered again.
         case Action::TransportAccept: {
             Q_ASSERT(_transport->hasUpdates());
             const auto accepted                = _transport.toWeakRef();
+            const auto generation              = _transportReplaceGeneration;
             std::tie(transportEl, transportCB) = wrapOutgoingTransportUpdate();
             contentEl.appendChild(transportEl);
-            return OutgoingUpdate { updates,
-                                    [this, guard = QPointer<Application>(this), accepted, transportCB](Task *task) {
-                                        transportCB(task);
-                                        if (!guard)
-                                            return;
-                                        auto expected = accepted.lock();
-                                        if (!expected || _transport != expected
-                                            || _pendingTransportReplace != PendingTransportReplace::InProgress)
-                                            return;
+            return OutgoingUpdate {
+                updates,
+                [this, guard = QPointer<Application>(this), accepted, transportCB, generation](Task *task) {
+                    if (!guard || _state >= State::Finishing || _transportReplaceGeneration != generation)
+                        return;
+                    auto expected = accepted.lock();
+                    if (!expected || _transport != expected
+                        || _pendingTransportReplace != PendingTransportReplace::InProgress)
+                        return;
 
-                                        if (task && task->success()) {
-                                            _pendingTransportReplace = PendingTransportReplace::None;
-                                            if (_state == State::Connecting || _state == State::Active)
-                                                expected->start();
-                                        }
-                                        // Else the transport callback owns failure/fallback handling.
-                                    } };
+                    const bool succeeded         = task && task->success();
+                    const auto retiredGeneration = ++_transportReplaceGeneration;
+                    if (succeeded)
+                        _pendingTransportReplace = PendingTransportReplace::None;
+
+                    transportCB(task);
+                    if (!guard || _state >= State::Finishing || _transportReplaceGeneration != retiredGeneration
+                        || _transport != expected)
+                        return;
+
+                    if (succeeded) {
+                        if (_pendingTransportReplace != PendingTransportReplace::None)
+                            return;
+                        if (_state == State::Connecting || _state == State::Active)
+                            expected->start();
+                    }
+                    // On failure the transport callback retains ownership of
+                    // transport-specific failure/fallback handling. The generation
+                    // retirement above still makes duplicate/stale completions inert.
+                }
+            };
         }
         default:
             break;
