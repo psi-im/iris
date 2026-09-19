@@ -171,6 +171,41 @@ psimedia не владеет ICE/BUNDLE topology. Обе public wrapper copies P
 - Нужен единый observable contract (no-more-input / draining / finished), но transport-specific
   реализация и application completion condition могут различаться.
 
+### Application completion != Connection lifetime
+
+Completion работы Application с конкретным `Connection` не является разрешением уничтожить
+`Connection` и не обязано немедленно закрывать underlying transport.
+
+- После передачи/получения объявленных N bytes FT Application может отпустить свой
+  `Connection::Ptr`: это означает только **release application ownership** — Application больше
+  не является причиной держать connection и не планирует новую работу через него.
+- Connection-owning transport/association/Pad обязан сохранять strong ownership, пока
+  transport-specific asynchronous finishing не завершён. Это может включать peer close,
+  local buffer flush, stream reset/close acknowledgement, delayed close или иной protocol tail.
+- Generic contract задаёт ownership/lifetime boundary, но не общий shutdown algorithm. IBB, S5B и
+  SCTP/DataChannel вправе иметь разные процедуры и условия `Finished`.
+- Базовый `Connection` не должен получать hard dependency/strong reference на Jingle Pad только
+  ради lifetime. Реализация может сигнализировать owner о begin/release/finished, либо
+  transport-specific Connection может инициировать свою процедуру через уже существующий glue;
+  owner решает, когда удалить последнюю strong reference.
+- `application complete`, `Connection::Finishing`, protocol close и object destruction —
+  отдельные события и могут происходить в разном порядке на sender и receiver.
+- `Connection::~Connection()` выполняет cleanup уже прекращаемого объекта. Корректность протокола
+  не должна зависеть от того, что деструктор успеет отправить close/reset или дождаться peer ACK.
+- Legacy IBB использовать как поведенческий ориентир: remote/local completion не должен терять
+  buffered input и application release не должен сокращать обязательную finishing phase.
+  S5B/DataChannel сначала закрепить regression tests, затем приводить к тому же ownership contract.
+
+Архитектурный invariant:
+
+> Application completion and Connection lifetime are independent. Releasing the application's
+> Connection reference MUST NOT imply protocol teardown or destruction. The connection-owning
+> transport/association retains it until transport-specific asynchronous finishing has completed.
+
+Отдельный regression: FT отпускает последнюю application-side reference сразу после N bytes, но
+transport/association остаётся владельцем; peer/local delayed close доходит до terminal condition,
+buffered tail читается полностью, и только после `Finished` owner удаляет свою strong reference.
+
 ### Session termination policy
 
 `session-terminate` — signaling event, а не универсальный приказ немедленно уничтожить все
@@ -314,7 +349,9 @@ association + writer/receive endpoint.
 5. Restart/late callbacks/transport-replace с generation fencing.
 6. Mixed RTP+SCTP на одной association.
 7. Два и более DataChannel FT streams одновременно: закрытие/drain одного не влияет на остальные.
-8. Session/content termination в mixed case не уничтожает connection, который ещё обязан drain.
+8. Application-side FT reference отпускается сразу после payload completion; owner удерживает
+   Connection до transport-specific `Finished`, включая delayed peer close/stream close.
+9. Session/content termination в mixed case не уничтожает connection, который ещё обязан drain.
 
 Только после этих regressions включать BUNDLE offer/advertising.
 
@@ -444,8 +481,10 @@ stateDiagram-v2
   закрывается только когда нет surviving membership/обязательного drain.
 
 Regression должен намеренно закрывать peer-side Connection до чтения последнего buffered chunk и
-доказывать, что receiver всё равно получает ровно N bytes. Повторить для ICE/DataChannel, S5B и IBB,
-не ломая legacy IBB/S5B behavior.
+доказывать, что receiver всё равно получает ровно N bytes. Отдельно FT должен отпустить свою
+application-side reference сразу после payload completion: объект остаётся жив за счёт owner,
+завершает transport-specific async close и уничтожается только после `Finished`. Повторить для
+ICE/DataChannel, S5B и IBB, не ломая legacy IBB/S5B behavior.
 
 ### Teardown и recovery
 
