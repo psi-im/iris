@@ -1590,31 +1590,94 @@ namespace XMPP { namespace Jingle {
 
         bool handleIncomingTransportInfo(const QDomElement &jingleEl)
         {
-            QString                                                contentTag(QStringLiteral("content"));
-            QVector<QPair<QSharedPointer<Transport>, QDomElement>> updates;
+            struct ValidatedTransportInfo {
+                QPointer<Application>         application;
+                ContentKey                    key;
+                QWeakPointer<Transport>       current;
+                quint64                       generation = 0;
+                QDomElement                   transport;
+                Transport::PreparedUpdatePtr  prepared;
+            };
+
+            QString                             contentTag(QStringLiteral("content"));
+            std::vector<ValidatedTransportInfo> updates;
+            QSet<ContentKey>                    seen;
             for (QDomElement ce = jingleEl.firstChildElement(contentTag); !ce.isNull();
                  ce             = ce.nextSiblingElement(contentTag)) {
                 Application *app = nullptr;
                 ContentBase  cb(ce);
-                if (!cb.isValid() || !(app = q->content(cb.name, cb.creator)) || app->state() >= State::Finishing
-                    || !app->transport()) {
+                const ContentKey key { cb.name, cb.creator };
+                if (!cb.isValid() || seen.contains(key) || !(app = q->content(cb.name, cb.creator))
+                    || app->state() >= State::Finishing || !app->transport()) {
                     lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,
                                                     XMPP::Stanza::Error::ErrorCond::BadRequest);
                     return false;
                 }
+                seen.insert(key);
+
                 auto tel = ce.firstChildElement(QStringLiteral("transport"));
                 if (tel.isNull() || tel.namespaceURI() != app->transport()->pad()->ns()) {
                     lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,
                                                     XMPP::Stanza::Error::ErrorCond::BadRequest);
                     return false;
                 }
-                updates.append(qMakePair(app->transport(), tel));
+                updates.push_back(ValidatedTransportInfo { QPointer<Application>(app),
+                                                           key,
+                                                           app->transport().toWeakRef(),
+                                                           app->transportReplaceGeneration(),
+                                                           tel,
+                                                           {} });
             }
 
-            for (auto &u : updates) {
-                if (!u.first->update(u.second)) {
-                    lastError = u.first->lastError();
-                    return false; // failure should trigger transport replace
+            auto setPrepareError = [this](const Transport::PrepareUpdateResult &result) {
+                if (result.error) {
+                    lastError = *result.error;
+                    return;
+                }
+                const auto condition = result.status == Transport::PrepareUpdateStatus::Unsupported
+                    ? XMPP::Stanza::Error::ErrorCond::FeatureNotImplemented
+                    : XMPP::Stanza::Error::ErrorCond::BadRequest;
+                lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel, condition);
+            };
+
+            QPointer<Session> session(q);
+            for (auto &entry : updates) {
+                if (!session)
+                    return true;
+                auto app              = entry.application;
+                auto currentTransport = entry.current.lock();
+                if (!app || contentList.value(entry.key) != app.data() || app->state() >= State::Finishing
+                    || !currentTransport || app->transport() != currentTransport
+                    || app->transportReplaceGeneration() != entry.generation)
+                    continue;
+
+                auto prepared = currentTransport->prepareUpdate(entry.transport);
+                if (!session)
+                    return true;
+                if (!prepared) {
+                    setPrepareError(prepared);
+                    return false;
+                }
+                entry.prepared = std::move(prepared.update);
+            }
+
+            for (auto &entry : updates) {
+                if (!session)
+                    return true;
+                if (!entry.prepared)
+                    continue;
+                auto app              = entry.application;
+                auto currentTransport = entry.current.lock();
+                if (!app || contentList.value(entry.key) != app.data() || app->state() >= State::Finishing
+                    || !currentTransport || app->transport() != currentTransport
+                    || app->transportReplaceGeneration() != entry.generation)
+                    continue; // superseded by an earlier reentrant sibling commit
+
+                if (!currentTransport->commitPreparedUpdate(std::move(entry.prepared))) {
+                    if (!session)
+                        return true;
+                    lastError = currentTransport->lastError();
+                    return false; // runtime failure should trigger transport replace
                 }
             }
 
