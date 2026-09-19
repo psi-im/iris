@@ -25,7 +25,7 @@ static QDomElement payload(const QString &children)
 
 namespace XMPP { namespace Jingle { namespace S5B {
     struct TransportTestAccess {
-        static Candidate nominate(Transport &t, bool local, Candidate::State state, bool proxy = true)
+        static Candidate install(Transport &t, bool local, Candidate::State state, bool proxy = true, bool used = false)
         {
             auto el = payload(QStringLiteral("<candidate cid='chosen' host='127.0.0.1' port='54321'"
                                              " priority='100' jid='proxy.example.test' type='%1'/>")
@@ -35,10 +35,20 @@ namespace XMPP { namespace Jingle { namespace S5B {
             candidate.setState(state);
             auto &map            = local ? t.d->localCandidates : t.d->remoteCandidates;
             map[candidate.cid()] = candidate;
-            (local ? t.d->localUsedCandidate : t.d->remoteUsedCandidate) = candidate;
-            t._state                                                     = Jingle::State::Connecting;
+            if (used)
+                (local ? t.d->localUsedCandidate : t.d->remoteUsedCandidate) = candidate;
+            t._state = Jingle::State::Connecting;
             return candidate;
         }
+        static Candidate nominate(Transport &t, bool local, Candidate::State state, bool proxy = true)
+        {
+            return install(t, local, state, proxy, true);
+        }
+        static QString usedCid(const Transport &t, bool local)
+        {
+            return (local ? t.d->localUsedCandidate : t.d->remoteUsedCandidate).cid();
+        }
+        static bool remoteReportedCandidateError(const Transport &t) { return t.d->remoteReportedCandidateError; }
         static void outgoingProxyError(Transport &t)
         {
             t.d->offerSent      = true;
@@ -87,6 +97,44 @@ static void testPreparation(Client &client)
 
     check(bool(f.transport->prepareUpdate(payload(QStringLiteral("<candidate-used xmlns='urn:unknown'/>")))),
           "Foreign extension was interpreted as an S5B command");
+}
+
+static void testValidCommands(Client &client)
+{
+    {
+        Fixture f(client);
+        auto candidate = S::TransportTestAccess::install(*f.transport, true, S::Candidate::Pending);
+        auto prepared  = f.transport->prepareUpdate(payload(QStringLiteral("<candidate-used cid='chosen'/>")));
+        check(bool(prepared) && candidate.state() == S::Candidate::Pending,
+              "candidate-used preparation mutated or rejected valid state");
+        check(f.transport->commitPreparedUpdate(std::move(prepared.update)), "candidate-used commit failed");
+        check(candidate.state() == S::Candidate::Accepted
+                  && S::TransportTestAccess::usedCid(*f.transport, true) == QLatin1String("chosen"),
+              "candidate-used did not select the nominated local proxy");
+    }
+
+    {
+        Fixture f(client);
+        auto candidate = S::TransportTestAccess::install(*f.transport, true, S::Candidate::Pending, false);
+        auto prepared  = f.transport->prepareUpdate(payload(QStringLiteral("<candidate-error/>")));
+        check(bool(prepared) && candidate.state() == S::Candidate::Pending
+                  && !S::TransportTestAccess::remoteReportedCandidateError(*f.transport),
+              "candidate-error preparation mutated valid state");
+        check(f.transport->commitPreparedUpdate(std::move(prepared.update)), "candidate-error commit failed");
+        check(candidate.state() == S::Candidate::Discarded
+                  && S::TransportTestAccess::remoteReportedCandidateError(*f.transport),
+              "candidate-error did not discard local pending candidates");
+    }
+
+    {
+        Fixture f(client);
+        auto candidate = S::TransportTestAccess::nominate(*f.transport, false, S::Candidate::Accepted);
+        auto prepared  = f.transport->prepareUpdate(payload(QStringLiteral("<activated cid='chosen'/>")));
+        check(bool(prepared) && candidate.state() == S::Candidate::Accepted,
+              "activated preparation mutated or rejected valid proxy state");
+        check(f.transport->commitPreparedUpdate(std::move(prepared.update)), "activated commit failed");
+        check(candidate.state() == S::Candidate::Active, "activated did not activate the selected remote proxy");
+    }
 }
 
 static void testProxyError(Client &client, J::Origin role, bool local, S::Candidate::State state)
@@ -155,6 +203,7 @@ int main(int argc, char **argv)
     TcpPortReserver  reserver;
     client.setTcpPortReserver(&reserver);
     testPreparation(client);
+    testValidCommands(client);
     for (auto role : { J::Origin::Initiator, J::Origin::Responder }) {
         testProxyError(client, role, false, S::Candidate::Accepted);
         testProxyError(client, role, true, S::Candidate::Accepted);
