@@ -22,7 +22,7 @@ Checkout и установка dependencies внутри CI job допустим
 | Репозиторий | Рабочая ветка | HEAD snapshot 2026-09-19 |
 | --- | --- | --- |
 | psi-im/psi | ai/jingle-native-calls | `78dee48c396c7815ef78284ea545c0c103e1149a` |
-| psi-im/iris | jingle/async-media | `bd5c86283c9eafbbe6e56efe7d69b480bc4cd7bd` |
+| psi-im/iris | jingle/async-media | `3f54620ec660ac93ed2ca4ffeb81e05a0006e3c1` |
 | psi-im/psimedia | jingle/rtcp-session | `2d067da46a70a74b1ccf91830c97b09a8c58713b` |
 | psi-im/psi | ci/psimedia-integration | `136af31dcaa64a7c3144fe3ed12e02f180d33a0b` |
 
@@ -30,17 +30,26 @@ HEAD здесь только snapshot, не pin для будущей работ
 ветки. Исторические T0–T5/A3/A4 детали остаются в git history и профильных docs; этот план хранит
 только текущий контракт, незакрытые gates и короткие markers уже завершённого.
 
-### PR stack и CI
+### PR и CI
 
-- Iris #96 `jingle/async-media`; Psi #968 `ai/jingle-native-calls`; psimedia experimental
-  `jingle/rtcp-session`; Psi #969 `ci/psimedia-integration`.
-- Не мержить без прямого указания пользователя и не ломать stacked branches.
+- Iris #96 — единственная активная Iris Jingle development line: `jingle/async-media → master`.
+  Старые stacked PR #92–95 закрыты как superseded; их commits уже полностью достижимы из
+  `jingle/async-media` и не должны использоваться как отдельные рабочие базы.
+- Старые refs `docs/jingle-architecture`, `jingle/ice-udp1`, `jingle/group-negotiation`,
+  `jingle/rtp-extensions` считаются historical/absorbed. `automation/fix-jingle-parser` —
+  временная helper/runner ветка GitHub Actions; её automation commits не переносить в production line.
+- Psi #968 `ai/jingle-native-calls`; psimedia experimental `jingle/rtcp-session`;
+  Psi #969 `ci/psimedia-integration`.
+- Новую Iris Jingle работу коммитить только в `jingle/async-media`, если отдельно не согласована
+  новая самостоятельная ветка/PR.
+- Не мержить #96 без прямого указания пользователя.
 - Для результата всегда фиксировать exact checkout SHA и фактически выполненные jobs/tests.
 - Cross-repo #969 остаётся staging/live gate; обычный green build не заменяет runtime evidence.
 
 ### Дисциплина веток, PR и CI
 
-Продолжать существующие ветки; новый PR только для самостоятельной логической границы.
+Для Iris Jingle продолжать `jingle/async-media`; не восстанавливать прежний stacked branch chain.
+Новый PR только для самостоятельной логической границы вне этой development line.
 Не создавать дублирующие workflows/runs без причины. Частые commits на `ai/**` могут не запускать
 тяжёлый CI автоматически; проверять trigger и фактические jobs, а не интерпретировать отсутствие
 run как success. Никаких `pull_request_target` с исполнением недоверенного branch code/secrets.
