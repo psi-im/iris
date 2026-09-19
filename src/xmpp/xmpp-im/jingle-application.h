@@ -243,14 +243,21 @@ namespace XMPP { namespace Jingle {
         bool transportReplaceInProgress() const;
 
         /**
-         * @brief Apply a validated peer transport-accept to the current replacement.
+         * @brief Parse and apply a peer transport-accept to the current replacement.
          *
-         * Transport::update() may reenter application code and install a newer transport.
-         * Completion therefore belongs only to the transport instance snapshotted when
-         * this call started; an old acknowledgement must not complete/start a newer one.
-         * @return false if there is no matching InProgress transaction or parsing fails.
+         * This compatibility overload stages a single payload first. Session batch
+         * handling should prepare every sibling before calling the PreparedUpdate overload.
          */
         bool incomingTransportAccept(const QDomElement &el);
+
+        /**
+         * @brief Commit an already prepared peer transport-accept payload.
+         *
+         * Completion is tied to the current transport and replacement generation.
+         * commitPreparedUpdate() and start() are reentrant boundaries; a superseding
+         * same-pointer generation must not be completed by this acknowledgement.
+         */
+        bool incomingTransportAccept(Transport::PreparedUpdatePtr update);
 
         /**
          * @brief Apply a validated peer transport-reject to the current local replacement.
