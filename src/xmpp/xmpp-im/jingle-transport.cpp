@@ -51,6 +51,16 @@ namespace XMPP { namespace Jingle {
 
     void Transport::stop() { _state = State::Finished; }
 
+    Transport::PrepareUpdateResult Transport::prepareUpdate(const QDomElement &)
+    {
+        return {};
+    }
+
+    bool Transport::commitPreparedUpdate(PreparedUpdatePtr)
+    {
+        return false;
+    }
+
     int Transport::maxSupportedComponents() const { return 1; }
 
     void Transport::setComponentsCount(int) { }
