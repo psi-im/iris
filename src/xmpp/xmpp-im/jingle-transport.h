@@ -88,7 +88,11 @@ namespace XMPP { namespace Jingle {
         };
         using PreparedUpdatePtr = std::unique_ptr<PreparedUpdate>;
 
-        enum class PrepareUpdateStatus { Ready, Invalid, Unsupported };
+        enum class PrepareUpdateStatus {
+            Ready,       // owned payload is fully parsed and can be committed
+            Invalid,     // payload is malformed or invalid for the current transport state
+            Unsupported, // provider has no side-effect-free staging implementation
+        };
         struct PrepareUpdateResult {
             PrepareUpdateStatus                  status = PrepareUpdateStatus::Unsupported;
             PreparedUpdatePtr                    update;
