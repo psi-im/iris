@@ -84,6 +84,38 @@ static void testMalformedLaterPayloadDoesNotPartiallyCommit(Client &client)
           "malformed transport-accept member changed its own replacement state");
 }
 
+
+static void testMalformedLaterTransportInfoDoesNotPartiallyCommit(Client &client)
+{
+    J::Session session(client.jingleManager(), Jid(QStringLiteral("info-payload-atomic@example.test/device")),
+                       J::Origin::Initiator);
+
+    auto audio    = makeTransport(session, J::Origin::Responder, J::State::Active, QStringLiteral("audio-current"));
+    auto audioApp = addApplication(session, QStringLiteral("audio"), J::Origin::Initiator, audio,
+                                   std::make_unique<TestSelector>());
+
+    auto video    = makeTransport(session, J::Origin::Responder, J::State::Active, QStringLiteral("video-current"));
+    auto videoApp = addApplication(session, QStringLiteral("video"), J::Origin::Initiator, video,
+                                   std::make_unique<TestSelector>());
+
+    QDomDocument doc;
+    const bool   ok = session.updateFromXml(
+        J::Action::TransportInfo,
+        makeReplace(doc,
+                    { { QStringLiteral("audio"), J::Origin::Initiator, TestTransportManager::namespaceUri(),
+                        QStringLiteral("audio-update") },
+                      { QStringLiteral("video"), J::Origin::Initiator, TestTransportManager::namespaceUri(),
+                        QStringLiteral("video-malformed"), false } }));
+
+    check(!ok, "transport-info batch with a malformed later payload was accepted");
+    check(audioApp->transport().data() == audio.data() && audio->id() == QLatin1String("audio-current")
+              && audio->state() == J::State::Active,
+          "malformed later transport-info partially changed the earlier live transport");
+    check(videoApp->transport().data() == video.data() && video->id() == QLatin1String("video-current")
+              && video->state() == J::State::Active,
+          "malformed transport-info member changed its own live transport");
+}
+
 int main(int argc, char **argv)
 {
     QCoreApplication     application(argc, argv);
@@ -94,6 +126,7 @@ int main(int argc, char **argv)
 
     testInvalidLaterAcceptIsAtomic(client);
     testMalformedLaterPayloadDoesNotPartiallyCommit(client);
+    testMalformedLaterTransportInfoDoesNotPartiallyCommit(client);
 
     qInfo("Transport-accept atomicity regression passed");
     return 0;
