@@ -2,7 +2,77 @@
 
 This document records verified call-stack baselines and interoperability results. It intentionally distinguishes source-level support, synthetic tests, real packet-path tests and calls against external peers.
 
-## Current audit snapshot — 2026-09-13
+
+## Current native-media integration snapshot — 2026-09-19
+
+Verified code and CI inputs:
+
+- Psi `78dee48c396c7815ef78284ea545c0c103e1149a`.
+- Iris `e46ded145d99f4b9b06a22a8adb7b284881a8b9d`, pinned by that Psi commit.
+- psimedia `2d067da46a70a74b1ccf91830c97b09a8c58713b`.
+- Psi integration branch `ci/psimedia-integration` at `8b29d16dd28fe236c57b6dfbf0cc6f1c9fefc460`.
+- `PsiMedia integration` run `35453030643`, rerun job `105923759896`: **12/12 passed**.
+- `AI Windows GCC BASIC CI` run `35453169132`, job `105923753580`: **4/4 avcall tests passed**.
+
+The Linux integration job recorded Qt 6.4.2, QCA 3.0.7 release packages with
+`qca-ossl`, OpenSSL 3.0.13, GStreamer 1.24.2 and libsrtp2 2.5.0
+(Ubuntu package 2.5.0-3build1). The production psimedia plugin was built and
+loaded through Qt plugin loading as `libmediaplugin.so`, IID
+`org.psi-im.PsiMediaPlugin`, class `PsiMediaPlugin`. CMake selected system
+QCA 3 (`Qca3::Qca`).
+
+The remote integration gate now verifies the production path rather than only
+constructing interfaces:
+
+- real `GstProvider` prepares without physical input devices;
+- real audio and video endpoints negotiate Opus/48 kHz and VP8/90 kHz and apply
+  backend-produced payload descriptions;
+- semantic RTP and RTCP pass through Iris ICE/DTLS/SRTP to one real psimedia
+  backend and a synthetic media peer;
+- audio and video use independent ICE transports and independent SRTP sessions;
+  stopping the audio transport leaves the video transport and writer usable;
+- explicit consent starts a synthetic live audio source, produces RTP with the
+  negotiated payload type, and `stopPsiMediaJingleTransmit()` reaches
+  quiescence;
+- with no capture device IDs, transmit remains disabled while incoming RTP is
+  still accepted, a fresh RTCP receiver report is produced, and the independent
+  video transport stays authenticated;
+- an invalid real GStreamer capture source produces exactly one backend runtime
+  error, revokes endpoint packet I/O and cannot be used to resume capture after
+  the terminal error;
+- the same job runs the Psi backend-lifecycle test and psimedia RTP
+  sender/bridge/backpressure regressions serially. The Windows BASIC gate runs
+  policy, audio-direction, backend-lifecycle and capability-refresh tests.
+
+This is **synthetic one-real-backend packet-path evidence**, not a successful
+server-mediated Psi ↔ Psi call. Two real psimedia peers are deliberately not
+instantiated in one process because the current engine has process-global
+sender/receiver ownership. A real Psi ↔ Psi call therefore still requires two
+processes/clients and an XMPP server. Conversations is also still unpinned:
+there is no recorded release/commit, Android device, server/TURN configuration
+or authorized sanitized call capture. No Conversations parity or live BUNDLE
+result is claimed.
+
+Current P1c result matrix:
+
+| Scenario | Result | Evidence |
+| --- | --- | --- |
+| Production psimedia plugin load | pass | integration run `35453030643`, job `105923759896` |
+| Device-free real backend audio + video negotiation | pass | Opus + VP8 adapter smoke in the same job |
+| Independent audio/video ICE + DTLS-SRTP packet paths | pass | one real psimedia side + synthetic peer in the same job |
+| Consent → capture/transmit → stop | pass | negotiated-PT RTP and sender quiescence in the peer smoke |
+| No-device receive-only behaviour | pass | incoming RTP + fresh RTCP RR while capture stays disabled |
+| Real backend runtime error | pass | invalid GStreamer source → terminal backend error and endpoint revocation |
+| Psi ↔ Psi native audio through a server | **blocked — not run yet** | requires two real client processes/accounts and server test setup |
+| Psi ↔ Conversations audio | **blocked — peer not pinned** | exact peer/device/server/TURN metadata and sanitized fixture still missing |
+| Live audio + video BUNDLE | **not claimed** | P2 is intentionally not started before P1c live-peer acceptance |
+
+The remaining P1c acceptance blocker is therefore peer-level and reproducible:
+run the current pinned stack as two real Psi clients through a server, then pin
+and test the exact Conversations peer. Successful synthetic CI does not satisfy
+that live-call requirement.
+
+## Earlier audit snapshot — 2026-09-13
 
 Reviewed ranges:
 
