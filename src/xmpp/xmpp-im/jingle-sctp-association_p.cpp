@@ -227,7 +227,7 @@ namespace XMPP { namespace Jingle { namespace SCTP {
     {
         SCTP_DEBUG("adding new channel");
         int channelType = int(reliable);
-        if (ordered)
+        if (!ordered)
             channelType |= 0x80;
         auto channel
             = QSharedPointer<WebRTCDataChannel>::create(this, channelType, priority, reliability, label, protocol);

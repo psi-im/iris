@@ -88,6 +88,10 @@ int main(int argc, char **argv)
     }
     if (remoteOne->label != QLatin1String("one") || remoteTwo->label != QLatin1String("two"))
         return fail("incoming data-channel labels do not match");
+    if (remoteOne->protocol != QLatin1String("ft") || remoteTwo->protocol != QLatin1String("ft"))
+        return fail("incoming data-channel protocols do not match");
+    if ((remoteOne->channelType & 0x80) || (remoteTwo->channelType & 0x80))
+        return fail("ordered data channels were encoded as unordered");
 
     const QByteArray tail("buffered-tail");
     if (!leftOne->writeDatagram(QNetworkDatagram(tail)))
