@@ -474,6 +474,14 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
                 },
                 Qt::QueuedConnection);
 
+            connect(connection.data(), &ByteStream::connectionClosed, q, [this]() {
+                if (q->_state >= State::Finishing)
+                    return;
+                if (amIReceiver())
+                    tryFinalizeIncoming();
+                else
+                    handleStreamFail(QString::fromLatin1("connection closed before transfer completion"));
+            });
             if (amIReceiver()) {
                 connect(connection.data(), &Connection::disconnected, q, [this]() { tryFinalizeIncoming(); });
             }
@@ -488,9 +496,15 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
 
         void tryFinalizeIncoming()
         {
-            auto moreBytesExpected = bytesLeft && *bytesLeft > 0;
-            if (q->_state >= State::Finishing || outgoingReceived || (connection->isOpen() && moreBytesExpected))
+            const bool moreBytesExpected = bytesLeft && *bytesLeft > 0;
+            if (q->_state >= State::Finishing || outgoingReceived)
                 return;
+            if (moreBytesExpected) {
+                if (connection->isOpen())
+                    return;
+                handleStreamFail(QString::fromLatin1("connection closed before expected file size was received"));
+                return;
+            }
 
             // data read finished. check other stuff
             if (hasher && incomingChecksum.isEmpty()) {

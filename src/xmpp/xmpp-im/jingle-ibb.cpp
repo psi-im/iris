@@ -68,6 +68,10 @@ namespace XMPP { namespace Jingle { namespace IBB {
             connect(c, &IBBConnection::delayedCloseFinished, this, &Connection::handleIBBClosed);
             connect(c, &IBBConnection::aboutToClose, this, &Connection::aboutToClose);
             connect(c, &IBBConnection::connected, this, &Connection::handleConnnected);
+            connect(c, &IBBConnection::error, this, [this](int error) {
+                setError(error);
+                handleIBBClosed();
+            });
         }
 
         void handleConnnected()

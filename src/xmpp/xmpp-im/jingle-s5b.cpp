@@ -51,8 +51,11 @@ namespace XMPP { namespace Jingle { namespace S5B {
         Q_OBJECT
 
         QList<QNetworkDatagram> datagrams;
-        SocksClient            *client = nullptr;
-        Transport::Mode         mode   = Transport::Tcp;
+        SocksClient            *client         = nullptr;
+        Transport::Mode         mode           = Transport::Tcp;
+        bool                    closing        = false;
+        bool                    closeWasLocal  = false;
+        bool                    closeSignalled = false;
 
     public:
         void setSocksClient(SocksClient *client, Transport::Mode mode)
@@ -68,6 +71,12 @@ namespace XMPP { namespace Jingle { namespace S5B {
             connect(client, &SocksClient::readyRead, this, &Connection::readyRead);
             connect(client, &SocksClient::bytesWritten, this, &Connection::bytesWritten);
             connect(client, &SocksClient::aboutToClose, this, &Connection::aboutToClose);
+            connect(client, &SocksClient::connectionClosed, this, [this]() { handleSocksClosed(false); });
+            connect(client, &SocksClient::delayedCloseFinished, this, [this]() { handleSocksClosed(true); });
+            connect(client, &SocksClient::error, this, [this](int error) {
+                setError(error);
+                handleSocksClosed(false);
+            });
             setOpenMode(client->openMode());
             emit connected();
         }
@@ -98,33 +107,74 @@ namespace XMPP { namespace Jingle { namespace S5B {
 
         void close()
         {
+            if (closeSignalled)
+                return;
             if (!client) {
-                // was never opened
+                closeWasLocal  = true;
+                closeSignalled = true;
+                XMPP::Jingle::Connection::close();
+                emit delayedCloseFinished();
                 return;
             }
-            client->disconnect(this);
-            XMPP::Jingle::Connection::close();
-            client->deleteLater();
-            client = nullptr;
+            if (closing)
+                return;
+
+            closing       = true;
+            closeWasLocal = true;
+            client->close();
+            setOpenMode(client->openMode());
+            if (!client->isOpen() && !bytesAvailable())
+                finishSocksClose();
         }
 
     protected:
         qint64 writeData(const char *data, qint64 maxSize)
         {
-            if (mode == Transport::Tcp)
+            if (mode == Transport::Tcp && client)
                 return client->write(data, maxSize);
             return -1;
         }
 
         qint64 readDataInternal(char *data, qint64 maxSize)
         {
-            if (client) {
-                return client->read(data, maxSize);
-            } else
+            if (!client)
                 return -1;
+            const auto ret = client->read(data, maxSize);
+            if (closing && !bytesAvailable())
+                finishSocksClose();
+            return ret;
         }
 
     private:
+        void handleSocksClosed(bool local)
+        {
+            if (!client || closeSignalled)
+                return;
+            closing = true;
+            closeWasLocal = closeWasLocal || local;
+            setOpenMode(client->bytesAvailable() ? QIODevice::ReadOnly : QIODevice::NotOpen);
+            if (!bytesAvailable())
+                finishSocksClose();
+        }
+
+        void finishSocksClose()
+        {
+            if (closeSignalled)
+                return;
+            closeSignalled = true;
+            auto *finished = client;
+            client         = nullptr;
+            if (finished) {
+                finished->disconnect(this);
+                finished->deleteLater();
+            }
+            XMPP::Jingle::Connection::close();
+            if (closeWasLocal)
+                emit delayedCloseFinished();
+            else
+                emit connectionClosed();
+        }
+
         friend class Transport;
         void enqueueIncomingUDP(const QByteArray &data)
         {
