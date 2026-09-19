@@ -22,6 +22,7 @@ target_link_libraries(jingle_transports5b_test PRIVATE iris Qt${QT_DEFAULT_MAJOR
 # state without an external proxy. Reuse its generated private QObject moc.
 get_target_property(iris_binary_dir iris BINARY_DIR)
 target_include_directories(jingle_transports5b_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../src"
     "${iris_binary_dir}/iris_autogen/include" "${iris_binary_dir}/iris_autogen/include_$<CONFIG>")
 add_test(NAME jingle_transports5b COMMAND jingle_transports5b_test)
 set_tests_properties(jingle_transports5b PROPERTIES TIMEOUT 15)
