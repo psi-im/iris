@@ -205,11 +205,14 @@ Psi audioPolicyTarget не имеет generic failure completion. Решать �
    через AvCallAudioDirection; старые pending state и прямой requestSenders удалены.
 4. **T4 (реализовано):** transport-replace resolver у Application, переживающего замену Transport;
    централизованный IQ lifetime, validated sibling hints после reply, guarded fallback.
-5. **T5:** отдельный staged transport payload API для malformed-batch atomicity.
+5. **T5 (реализовано, 2026-09-19):** staged transport payload API для malformed-batch
+   atomicity: owned PreparedUpdate, prepare-all/commit pass для transport-accept/info,
+   built-in ICE/IBB/S5B и guarded reentrant commits. TransportAccept ACK retirement также
+   привязан к конкретной generation до внешнего transport callback.
 
 Обязательные design решения подробно изложены в
-[jingle-direction-policy.md](jingle-direction-policy.md); T0–T4 реализованы в Iris,
-а T5 и дальнейшие integration gates остаются следующими шагами:
+[jingle-direction-policy.md](jingle-direction-policy.md); T0–T5 реализованы в Iris,
+а cross-repo/runtime/live integration gates остаются следующими шагами:
 
 - SetLocalSending и SetExactSenders различаются. Responder → Both после peer Initiator
   корректно только для желания «отправлять самому», не для exact Responder target.
@@ -280,8 +283,8 @@ Psi audioPolicyTarget не имеет generic failure completion. Решать �
 звонка/микрофона. Отдельно нужна UI-подача failed/blocked operation (сейчас adapter сохраняет
 outcome, но не показывает новый диалог). Не завершать весь звонок из-за observation timeout:
 это не Session negotiation deadline. Camera/hold/permission UX не добавлять без отдельного
-определения их user policy. T4 transport-replace resolver реализован; следующий Iris этап —
-T5 staged payload API и bounded adjacent audit, описанные ниже.
+определения их user policy. T4 transport-replace resolver и T5 staged payload boundary
+реализованы; следующие шаги — cross-repo/runtime gates P1 и оставшиеся media проверки.
 
 #### T4: transport TieBreaker — реализованный checkpoint (2026-09-18)
 
@@ -391,98 +394,85 @@ jingle-application.cpp, jingle-session.cpp, jingle-tiebreaker.cpp и jingle.cpp;
 Не удалять contentmodify_dispatcher, directionpolicy/operation, sessioncallbacklifetime,
 tiebreaker и полный transport suite из regression gate.
 
-#### Следующий Iris этап для Sol: T5 и bounded adjacent audit
+#### T5: staged transport payload boundary — реализованный checkpoint (2026-09-19)
 
-**Порядок:** сверить опубликованный T4 → targeted/full CI → adjacent completion audit →
-staged transport payload work. Никаких новых managers, generic template frameworks или
-параллельных policy owners. Работать в существующей ветке/PR, не создавать PR на каждый test.
+Порядок из исходного аудита был выполнен в существующей ветке/PR: опубликованный T4 →
+adjacent completion audit → staged transport payload work → targeted/full CI → sanitizer.
+Новых managers, generic template frameworks или параллельных policy owners не добавлено.
 
-1. **Adjacent audit (потенциальный P0, ещё не отдельный подтверждённый дефект):**
-   `Application::takeOutgoingUpdate(TransportAccept)` вызывает transport callback до части
-   identity checks. Отдельными reproducer проверить duplicate completion, старый transport,
-   same-object new generation, Application termination/deletion и nested accept/reject.
-   Использовать/расширить `transportacceptackreentrancy.cpp`. Если дефект воспроизведён —
-   привязать completion к конкретной попытке, retirement до внешнего кода, guards после него.
-   Не переносить механически replace counter на все actions без определения их lifecycle.
+1. **Adjacent audit — выполнен:** `Application::takeOutgoingUpdate(TransportAccept)`
+   теперь валидирует точную transport/generation попытку и retire-ит completion до внешнего
+   transport callback. `transportacceptackreentrancy.cpp` покрывает duplicate completion,
+   stale transport, same-object new generation, Application finishing/deletion и nested accept.
+   Replace counter не переносился механически на остальные actions.
 
-2. **Inventory transport update effects:** в `jingle-transport.h` и реализациях
-   `jingle-ice.cpp`, `jingle-ibb.cpp`, `jingle-s5b.cpp` перечислить, что делает update:
-   parse, изменение credentials/candidates/security state, emission, scheduling/networking.
-   `parseIncomingTransport` сейчас создаёт отдельный Transport, но вызов update не становится
-   pure от слова prepare. Проверить отмену/Session deletion внутри factory/update callbacks;
-   локального QPointer после возврата недостаточно, если helper сам продолжил работу до возврата.
-   Не заявлять, что T4 даёт rollback произвольных provider side effects.
+2. **Transport update effects — staged:** `jingle-transport.h` задаёт fail-closed
+   `prepareUpdate/commitPreparedUpdate`; ICE, IBB и S5B парсят в owned typed values без
+   live mutations/signals/network scheduling на prepare phase. Transport-specific commit
+   сохраняет прежние реальные side effects и остаётся reentrant boundary. Detached Transport
+   больше не используется как аргумент о «чистоте» mutating update.
 
-3. **Первый T5 reproducer:** incoming transport-accept или transport-info с двумя валидными
-   ContentKeys: первый payload корректен и меняет действующий Transport, второй malformed.
-   Проверить, что сейчас ошибка второго не должна оставлять первое изменение применённым.
-   Oracle — actual credentials/candidates/state и отсутствие start/network signals, не только
-   bool return. Unknown/unsupported sibling и malformed payload имеют разные исходы.
+3. **Malformed-batch reproducer — выполнен:** `transportacceptatomicity.cpp` проверяет
+   transport-accept и transport-info с корректным первым и malformed вторым sibling. Первый
+   transport не меняет payload/state и не стартует до успешной подготовки всего batch.
+   Malformed и valid unsupported outcomes остаются различными.
 
-4. **Минимальный staged API:** предполагаемые имена `Transport::PreparedUpdate` /
-   `prepareUpdate` — предложение, не существующий контракт. Сначала распарсить/валидировать
-   все нужные payloads в owned typed values без изменения live transport. Prepared value
-   связан с transport identity/generation и не хранит висячие QDomElement references.
-   Затем проверить identities и commit. Не вызывать старый mutating update дважды,
-   не делать bool validate() с теми же side effects, не имитировать rollback произвольных
-   callbacks. Выбрать один transport consumer и regression, затем переносить остальные.
+4. **Staged API — реализован:** `Transport::PreparedUpdate`,
+   `prepareUpdate()` и `commitPreparedUpdate()` являются текущим контрактом. Prepared values
+   owned и transport-specific; Session хранит отдельно Application/ContentKey/Transport/generation
+   snapshot. Compatibility default возвращает Unsupported и не fallback-ит на mutating update.
 
-5. **Session integration:** `handleIncomingTransportAccept/Info` готовят весь required batch,
-   затем применяют его. Reentrant commit может удалить sibling или изменить generation:
-   определить stale outcome, не продолжать по raw pointers. Если нужен более сильный
-   observer-atomic контракт, отделить state commit от notifications; не обещать его до реализации.
-   Существующее partial acceptance валидных unsupported replacements сохранить отдельно.
+5. **Session integration — реализована:** `handleIncomingTransportAccept/Info` сначала
+   готовят весь required batch, затем перед каждым commit повторно сверяют key/Application/
+   Transport/generation. Reentrant commit может supersede/remove sibling; его prepared value
+   тогда пропускается. Observer-atomic rollback после уже выполненного runtime commit не
+   заявляется; для этого потребовалась бы отдельная state/notification boundary.
 
-6. **Failure и lifetime cases:** invalid first/last sibling, duplicate/unknown content,
-   stale transport того же pointer, peer reject/error, teardown между stage/commit,
-   timer/network side effects, provider unavailable. Prepared objects освобождаются на всех
-   error/cancel paths. Никаких nested event loops и бесконечных retry.
-   Public API compatibility defaults должны fail-closed; нельзя молча fallback на mutating
-   update до окончания общей validation.
+6. **Failure/lifetime coverage — выполнена для текущей boundary:** invalid/malformed sibling,
+   duplicate/unknown content, stale transport, same-pointer generation, peer reject/error,
+   Application deletion/termination и nested completion покрыты regression suite. Prepared
+   objects owned RAII и освобождаются на stale/error paths; nested event loops не добавлены.
+   Provider default fail-closed.
 
-7. **Gate:** reproducer → fix → targeted tests → полный Jingle suite → targeted sanitizer.
-   Sol выполняет это через GitHub CI, не через несуществующий локальный Qt.
-   Указать реальные instrumented units; старый зелёный PR или compile-only gate недостаточен.
-   После T5 обновить `docs/jingle.md` только по фактически достигнутой atomicity.
-   Cross-repo capture/privacy и live Conversations gates остаются отдельными задачами ниже.
+7. **Gate — пройден на `df27dcc5936f3f7f18a0c31e4472867a80e7fcf0`:**
+   GitHub `Jingle regressions` run 35424993900: qca3-srtp и targeted transport
+   ASan+UBSan jobs success. Sanitizer отключает только legacy `Stringprep_profile_flags`
+   enum-check (`-fno-sanitize=enum`), который иначе abort-ит любой Jid construction до
+   Jingle path; AddressSanitizer и остальные UndefinedBehaviorSanitizer checks остаются.
+   `docs/jingle.md` обновлён только до достигнутой prepare-phase atomicity и guarded commits.
+   Cross-repo capture/privacy и live peer gates остаются отдельными задачами.
 
-### A3 [P1 privacy, оставшийся старый gap] Live/file switch оставляет прежний capture source
+### A3 [P1 privacy, checkpoint 2026-09-19] Capture source identity switch — исправлено
 
-MEDIA/gstprovider/rtpworker_devices.cpp: setInputDevices; rtpworker.cpp: setupSendRecv;
-gstrtpsessioncontext.cpp: setFileInput/setFileDataInput/setAudioInputDevice.
+В `psimedia:jingle/rtcp-session` `setInputDevices` сравнивает полную source identity:
+`none/live/file/data` плюс device/file/data identity. При смене running source старый sender
+и capture resources отзываются **до** commit новых полей. Live → file → live теперь реально
+rebuild-ит sender; unsupported QByteArray/file-data path fail-closed после teardown старого
+capture вместо неявного `filesrc` с пустым filename.
 
-Rebuild выполняется только если и прежний, и новый source — live (пустые infile/indata).
-При live microphone → file/data выбор новых полей не пересоздаёт существующий sendbin:
-setupSendRecv пропускает startSend, поэтому старый mic может продолжать capture/output.
-Обратный переход тоже оставляет старый источник. Это не новая доказанная регрессия b4139cb,
-но privacy-цель нового механизма не закрыта для публичного source-selection API.
+Production regression `rtpsessioncontext_sender` использует бесконечный synthetic live source,
+создаёт конечный Ogg/Opus file, выполняет live → file → live и требует RTP от каждого нового
+source и EOS конечного file. Старый бесконечный live pipeline такой oracle пройти не может.
+Qt6/GStreamer GitHub run 35424941020 на `3709db69b521d309e6ca3a8f465d4f52ccc2d429`
+прошёл. Rapid/cancel и полноценная in-memory data source поддержка остаются отдельными
+возможностями; data replacement сейчас намеренно fail-closed.
 
-Сравнивать полноценную source identity/mode (none/live/file/data), не только ain/vin.
-Перед commit нового режима отозвать старый capture/output, затем применить новый либо
-остаться без capture с явной ошибкой. Если live file switching пока не поддерживается —
-явно отказать и прекратить старый capture, не молча сохранить mic.
-Regression: nonfinite live source → file → live, file-data замена, invalid new source,
-detach, rapid updates, cancel во время rebuild. Проверять остановку/освобождение source,
-а не только отсутствие RTP: pauseAudio сам по себе лишь packet gate.
+### A4 [P2 architecture/coverage, checkpoint 2026-09-19] Capture hotplug сохраняет receive graph
 
-### A4 [P2 architecture/coverage] Hotplug reset слишком широк для заявленной независимости media
+Full `cleanup()` больше не используется для смены capture source. Выделен `cleanupSend()`,
+который удаляет sendbin/input device contexts и отзывает transmit state, но сохраняет
+`recvbin`, receive appsrc, audio sink и playback objects. При default shared-clock режиме
+смена send-master всё ещё делает bounded receive clock resync через READY → PLAYING; поэтому
+это не заявление об абсолютно бесшовном hotplug или сохранении всех timing observables.
 
-setInputDevices вызывает cleanup(), который удаляет sendbin И recvbin, audio/video sources,
-audio sink и меняет clocks. Смена одного mic затрагивает playback и video, а не только input.
-Нынешний sender test не проверяет receive, соседнее media или физическое закрытие mic;
-finite first source уже достигает EOS до detach, поэтому это слабый privacy oracle.
+Production regression читает реальный GStreamer DOT через существующий `dumpPipeline()` и
+фиксирует identity audio receive `appsrcN` до live → file → live. Полный старый cleanup
+пересоздавал этот object; sender-only reset сохраняет identity. Полный Qt6/GStreamer suite
+прошёл на `cb9e11c60c2f22ada1d8e0376b09e2c9b0022d2d`, run 35425128012.
 
-Не объявлять бесшовный hotplug по этому тесту. Предпочтительно выделить controlled
-send/source lifecycle и сохранять unaffected receive/video; если общий reset пока необходим,
-задокументировать interruption и протестировать восстановление всех направлений.
-Согласовать clocks/base-time, SSRC sequence/timestamp continuity либо явную смену SSRC,
-SR state, queued packets/generation и bounded failure. Не сохранять rtpsession state
-формально, игнорируя реальный reset payloader.
-
-Production regression: непрерывные receive audio + send video во время mic swap/detach;
-callback/element state подтверждает закрытие старого source; no-capture negotiation;
-invalid replacement; отсутствие RTP после revocation и возобновление нового media.
-Не переносить этот teardown policy в Iris или создавать второй media engine.
+Остаются P1b timing/media checks: SR RTP↔NTP mapping при legacy byte edge и queue delay,
+A/V sync, rapid/cancel during rebuild и более сильный continuous receive/send-video oracle.
+Не переносить teardown policy в Iris и не создавать второй media engine.
 
 ### Дополнительные обязательные проверки P1b, не новые доказанные дефекты
 
@@ -498,10 +488,12 @@ invalid replacement; отсутствие RTP после revocation и возо�
   authenticated Application Active. Проверить реальный controller, не только shouldTransmit.
 - SharedRtcp/FCI/XR и shared association остаются P2, не закрыты packet-type tests.
 
-### Housekeeping Sol — выполнена локально после аудита
+### Housekeeping Sol — опубликована
 
-Удалена неиспользуемая cleanupSend declaration, license headers rtpworker.h/rwcontrol.cpp
-возвращены к исходному тексту без несвязанных правок. CTest timeout для
+Ранее неиспользуемая cleanupSend declaration была удалена; после подтверждения A4 имя
+возвращено уже как реальная sender-only lifecycle boundary с production regression.
+License headers rtpworker.h/rwcontrol.cpp возвращены к исходному тексту без несвязанных правок.
+CTest timeout для
 rtpsessioncontext_sender увеличен с 20 до 45 s; внутренние ожидания не менялись.
 Проверить публикацию этих локальных изменений на GitHub, не дублировать patch.
 Общий deadline внутри теста и actual CI execution остаются verification задачами;
@@ -829,12 +821,10 @@ Performance измерять отдельно: media encoding CPU, SRTP packet p
 
 ## 8. Как выполнять и сдавать работу
 
-Начать с remote heads и CI evidence через connector. Проверить, опубликован ли локальный
-checkpoint T0–T4 и Psi audio adapter, и не реализовывать их повторно. Следующий Iris
-этап — T5 с bounded adjacent audit, а для A2 требуются cross-repo/live gates; параллельные policy owners не оставлять.
-A3/A4 в psimedia остаются отдельными задачами. T5 вести отдельными ограниченными шагами,
-не повторять опубликованные subset fixes. Затем P1a isolated runtime → P1b production worker →
-P1c native peer checks. P2 live BUNDLE, P3 JMI, P4 feedback/control, P5 recovery и P6 release
+Начать с remote heads и CI evidence через connector. Checkpoints T0–T5, Psi audio adapter,
+psimedia RTP/RTCP bridge и A3/A4 source lifecycle уже опубликованы; не реализовывать их повторно.
+Следующие gates: завершить оставшиеся P1b timing/error/notification проверки и cross-repo #969,
+затем P1c native peer checks. Параллельные policy owners не оставлять. P2 live BUNDLE, P3 JMI, P4 feedback/control, P5 recovery и P6 release
 выполняются по зависимостям наблюдённого peer. Не создавать существующие interfaces заново.
 
 Каждый завершённый подпункт сопровождать:
