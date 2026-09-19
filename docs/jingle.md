@@ -321,6 +321,33 @@ hints are consumed after the IQ error, through a per-request `afterReply` closur
 Session/Application lifetime and transport generation. Supported/unsupported partial outcomes
 remain available on the ordinary, non-Break path.
 
+### Staged incoming transport payloads
+
+Incoming `transport-accept` and `transport-info` payloads use a staged transport-update
+contract. `Transport::prepareUpdate()` parses and validates one `<transport/>` into an owned
+`PreparedUpdate` without mutating live transport/network state, emitting signals or scheduling
+work. The default implementation is fail-closed (`Unsupported`); built-in ICE, IBB and S5B
+transports provide typed prepared values and apply them through `commitPreparedUpdate()`.
+
+Session first validates the complete content batch and prepares every still-current payload. A
+malformed later sibling therefore cannot leave an earlier transport update applied. Only after the
+whole required batch is prepared does Session enter the commit pass. Immediately before each
+commit it rechecks the content key, `Application`, current `Transport` identity and transport
+replacement generation. A reentrant earlier commit may remove or supersede a later sibling; that
+stale prepared value is then discarded instead of being applied through a raw pointer.
+
+The atomicity boundary is deliberately limited: parsing/preparation of one incoming batch is
+side-effect free, but a successful transport-specific commit may itself be reentrant. Iris does not
+pretend to roll back arbitrary callbacks or network effects if a later commit encounters a runtime
+failure. Stronger observer-atomic semantics would require separating transport state commit from
+notifications. Valid unsupported `transport-replace` entries keep their existing partial-outcome
+semantics and are not treated as malformed payloads.
+
+The outgoing `transport-accept` acknowledgement path uses the same replacement generation as a
+transaction identity. Completion is validated and retired before invoking transport-specific
+callbacks, so duplicate completion, stale transports, same-pointer reselection and nested
+accept/reject callbacks cannot complete a newer replacement attempt.
+
 ## Signaling scheduler
 
 A session serializes outgoing Jingle IQs through a small scheduler in `Session::Private`:
