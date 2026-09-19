@@ -10,6 +10,7 @@ permissions:
 
 env:
   QT_VERSION: 6.10.2
+  ANDROID_QT_VERSION: 6.11.2
   QCA_TAG: v3.0.1
   ANDROID_NDK_VERSION: r27c
   ANDROID_API: 28
@@ -226,7 +227,7 @@ jobs:
         id: build-iris
         uses: ./.github/actions/build-iris-android
         with:
-          qt-version: ${{ env.QT_VERSION }}
+          qt-version: ${{ env.ANDROID_QT_VERSION }}
           qt-arch: ${{ matrix.qt_arch }}
           abi: ${{ matrix.abi }}
           ndk-version: ${{ env.ANDROID_NDK_VERSION }}
