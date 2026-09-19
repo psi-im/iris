@@ -60,6 +60,10 @@ add_executable(jingle_sessioncallbacklifetime_test sessioncallbacklifetime.cpp)
 target_link_libraries(jingle_sessioncallbacklifetime_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
     Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
 add_test(NAME jingle_sessioncallback_lifetime COMMAND jingle_sessioncallbacklifetime_test)
+add_executable(jingle_sessionterminatedrain_test sessionterminatedrain.cpp)
+target_link_libraries(jingle_sessionterminatedrain_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
+    Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
+add_test(NAME jingle_sessionterminate_drain COMMAND jingle_sessionterminatedrain_test)
 add_executable(jingle_contentmodifydispatcher_test contentmodifydispatcher.cpp)
 target_link_libraries(jingle_contentmodifydispatcher_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
     Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)

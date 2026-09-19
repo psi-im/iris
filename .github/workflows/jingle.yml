@@ -102,6 +102,7 @@ jobs:
           cmake --build build-jingle-sanitize --parallel 2 --target \
             jingle_transports5b_test \
             jingle_transportsctp_test \
+            jingle_sessionterminatedrain_test \
             jingle_transportacceptatomicity_test \
             jingle_transportacceptackreentrancy_test \
             jingle_transportacceptselfreentrancy_test \
@@ -120,4 +121,4 @@ jobs:
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
         run: |
           ctest --test-dir build-jingle-sanitize --output-on-failure -j1 \
-            -R '^jingle_transport(accept|reject|replace|s5b|sctp)'
+            -R '^(jingle_transport(accept|reject|replace|s5b|sctp)|jingle_sessionterminate_drain)'
