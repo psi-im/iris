@@ -40,7 +40,7 @@ namespace XMPP { namespace Jingle { namespace S5B {
             map[candidate.cid()] = candidate;
             if (used)
                 (local ? t.d->localUsedCandidate : t.d->remoteUsedCandidate) = candidate;
-            t._state = Jingle::State::Connecting;
+            t._state = ::XMPP::Jingle::State::Connecting;
             return candidate;
         }
         static Candidate nominate(Transport &t, bool local, Candidate::State state, bool proxy = true)
