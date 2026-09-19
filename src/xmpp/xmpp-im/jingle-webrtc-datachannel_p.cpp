@@ -161,7 +161,24 @@ namespace XMPP { namespace Jingle { namespace SCTP {
         return actualSz;
     }
 
-    void WebRTCDataChannel::close() { XMPP::Jingle::Connection::close(); }
+    void WebRTCDataChannel::close()
+    {
+        if (closeRequested)
+            return;
+        closeRequested = true;
+
+        if (streamId >= 0 && association) {
+            // Stop accepting application writes immediately, but keep the
+            // read side alive until SCTP confirms the stream reset. Buffered
+            // peer data must remain readable during that finishing window.
+            if (openMode() & QIODevice::WriteOnly)
+                setOpenMode(openMode() & ~QIODevice::WriteOnly);
+            association->close(quint16(streamId));
+            return;
+        }
+
+        XMPP::Jingle::Connection::close();
+    }
 
     TransportFeatures WebRTCDataChannel::features() const
     {
@@ -183,11 +200,11 @@ namespace XMPP { namespace Jingle { namespace SCTP {
 
     void WebRTCDataChannel::onDisconnected(DisconnectReason reason)
     {
-        if (!(openMode() & QIODevice::WriteOnly))
-            return;
         streamId         = -1;
         disconnectReason = reason;
-        setOpenMode(openMode() & ~QIODevice::WriteOnly);
+        closeRequested   = true;
+        if (openMode() & QIODevice::WriteOnly)
+            setOpenMode(openMode() & ~QIODevice::WriteOnly);
         emit disconnected();
     }
 
