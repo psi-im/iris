@@ -128,6 +128,6 @@ int main(int argc, char **argv)
     testMalformedLaterPayloadDoesNotPartiallyCommit(client);
     testMalformedLaterTransportInfoDoesNotPartiallyCommit(client);
 
-    qInfo("Transport-accept atomicity regression passed");
+    qInfo("Transport payload atomicity regressions passed");
     return 0;
 }
