@@ -123,8 +123,10 @@ namespace XMPP { namespace Jingle { namespace SCTP {
         if (datagrams.size()) {
             auto dg = datagrams.takeFirst();
             _bytesAvailable -= dg.data().size();
+            finishCloseIfDrained();
             return dg;
         }
+        finishCloseIfDrained();
         return {};
     }
 
@@ -164,27 +166,31 @@ namespace XMPP { namespace Jingle { namespace SCTP {
             sz -= dataSz;
         } while (sz > 0 && !datagrams.isEmpty());
         _bytesAvailable -= actualSz;
+        finishCloseIfDrained();
         // qDebug("read %lld bytes. more %lld is available", actualSz, _bytesAvailable);
         return actualSz;
     }
 
     void WebRTCDataChannel::close()
     {
-        if (closeRequested)
+        if (closeRequested || closeSignalEmitted)
             return;
         closeRequested = true;
 
-        if (streamId >= 0 && association) {
-            // Stop accepting application writes immediately, but keep the
-            // read side alive until SCTP confirms the stream reset. Buffered
-            // peer data must remain readable during that finishing window.
-            if (openMode() & QIODevice::WriteOnly)
-                setOpenMode(openMode() & ~QIODevice::WriteOnly);
-            association->close(quint16(streamId));
+        if (streamClosed || streamId < 0 || !association) {
+            XMPP::Jingle::Connection::close();
+            closeWasLocal = true;
+            streamClosed  = true;
+            finishCloseIfDrained();
             return;
         }
 
-        XMPP::Jingle::Connection::close();
+        // Stop accepting application writes immediately, but keep the read
+        // side alive until SCTP confirms the stream reset. Buffered peer data
+        // must remain readable during that finishing window.
+        if (openMode() & QIODevice::WriteOnly)
+            setOpenMode(openMode() & ~QIODevice::WriteOnly);
+        association->close(quint16(streamId));
     }
 
     TransportFeatures WebRTCDataChannel::features() const
@@ -207,12 +213,30 @@ namespace XMPP { namespace Jingle { namespace SCTP {
 
     void WebRTCDataChannel::onDisconnected(DisconnectReason reason)
     {
-        streamId         = -1;
-        disconnectReason = reason;
-        closeRequested   = true;
+        if (streamClosed)
+            return;
+
+        closeWasLocal     = closeRequested;
+        streamClosed      = true;
+        streamId          = -1;
+        disconnectReason  = reason;
         if (openMode() & QIODevice::WriteOnly)
             setOpenMode(openMode() & ~QIODevice::WriteOnly);
         emit disconnected();
+        finishCloseIfDrained();
+    }
+
+    void WebRTCDataChannel::finishCloseIfDrained()
+    {
+        if (!streamClosed || closeSignalEmitted || bytesAvailable() > 0)
+            return;
+
+        closeSignalEmitted = true;
+        setOpenMode(QIODevice::NotOpen);
+        if (closeWasLocal)
+            emit delayedCloseFinished();
+        else
+            emit connectionClosed();
     }
 
     void WebRTCDataChannel::onIncomingData(const QByteArray &data, quint32 ppid)

@@ -99,17 +99,30 @@ int main(int argc, char **argv)
     if (!pumpUntil(left, right, [&]() { return remoteOne->hasPendingDatagrams(); }))
         return fail("tail did not arrive before stream close");
 
+    int localCloseFinished = 0;
+    int remoteCloseFinished = 0;
+    QObject::connect(leftOne.data(), &ByteStream::delayedCloseFinished, &app,
+                     [&localCloseFinished]() { ++localCloseFinished; });
+    QObject::connect(remoteOne.data(), &ByteStream::connectionClosed, &app,
+                     [&remoteCloseFinished]() { ++remoteCloseFinished; });
+
     // This is the FT finishing boundary: the application asks to close one
     // completed stream while the association and another FT stream stay live.
     leftOne->close();
 
-    if (!pumpUntil(left, right, [&]() { return left.channels().size() == 1 && right.channels().size() == 1; }))
-        return fail("SCTP stream reset did not release per-stream association ownership");
+    if (!pumpUntil(left, right, [&]() {
+            return left.channels().size() == 1 && right.channels().size() == 1 && localCloseFinished == 1;
+        }))
+        return fail("SCTP stream reset did not complete local per-stream close");
 
+    if (remoteCloseFinished != 0)
+        return fail("remote close completed before buffered data was drained");
     if (!remoteOne->hasPendingDatagrams())
         return fail("stream close discarded buffered peer data");
     if (remoteOne->readDatagram().data() != tail)
         return fail("buffered tail changed across stream close");
+    if (remoteCloseFinished != 1)
+        return fail("remote close did not complete after buffered data drain");
 
     const QByteArray survivor("surviving-channel");
     if (!leftTwo->writeDatagram(QNetworkDatagram(survivor)))

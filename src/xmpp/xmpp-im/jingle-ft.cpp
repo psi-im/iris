@@ -169,12 +169,21 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
 
         void setState(State s)
         {
-            q->_state = s;
+            const auto previous = q->_state;
+            q->_state           = s;
+            if (s >= State::Finishing && finalizeTimer) {
+                finalizeTimer->stop();
+                finalizeTimer->deleteLater();
+                finalizeTimer = nullptr;
+            }
             if (s == State::Finished) {
                 if (device && closeDeviceOnFinish) {
                     device->close();
                 }
-                if (connection) {
+                // Successful completion closes through finishTransfer(), which
+                // waits for the transport-specific asynchronous close/drain.
+                // Hard failure/cancel still needs immediate best-effort close.
+                if (previous != State::Finishing && connection) {
                     connection->close();
                 }
                 if (q->transport())
@@ -187,10 +196,46 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
             emit q->stateChanged(s);
         }
 
+        void finishTransfer()
+        {
+            if (q->_state >= State::Finishing)
+                return;
+
+            if (device && closeDeviceOnFinish)
+                device->close();
+
+            if (!connection) {
+                setState(State::Finished);
+                return;
+            }
+
+            const auto closing = connection;
+            const auto weak    = closing.toWeakRef();
+            auto completeClose = [this, weak]() {
+                if (q->_state != State::Finishing)
+                    return;
+                const auto closed = weak.lock();
+                if (closed && connection == closed)
+                    connection.reset();
+                setState(State::Finished);
+            };
+
+            q->connect(closing.data(), &ByteStream::connectionClosed, q, completeClose);
+            q->connect(closing.data(), &ByteStream::delayedCloseFinished, q, completeClose);
+
+            setState(State::Finishing);
+            closing->close();
+
+            // Synchronous transports such as S5B do not need a protocol-level
+            // close acknowledgement. Complete on the next turn after close().
+            if (q->_state == State::Finishing && !closing->isOpen())
+                QTimer::singleShot(0, q, completeClose);
+        }
+
         void onReceived()
         {
             lastReason = Reason(Reason::Condition::Success);
-            setState(State::Finished);
+            finishTransfer();
         }
 
         void onIncomingChecksum(const QList<Hash> &hashes)
@@ -294,7 +339,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
                             return;
                         }
                     }
-                    setState(State::Finished);
+                    finishTransfer();
                 } else {
                     handleStreamFail();
                 }
@@ -454,7 +499,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
                     qDebug("jingle-ft: Waiting for <checksum> timed out. But likely succeeded anyway. %s",
                            qUtf8Printable(q->pad()->session()->peer().full()));
                     lastReason = Reason(Reason::Condition::Success);
-                    setState(State::Finished);
+                    finishTransfer();
                 });
                 return;
             }
@@ -669,7 +714,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
                 Received received(creator(), _contentName);
                 return OutgoingUpdate { QList<QDomElement>() << received.toXml(doc), [this](bool) {
                                            d->lastReason = Reason(Reason::Condition::Success);
-                                           d->setState(State::Finished);
+                                           d->finishTransfer();
                                        } };
             }
             if (!d->outgoingChecksum.isEmpty()) {
