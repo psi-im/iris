@@ -72,14 +72,35 @@ public:
         ++starts_;
         setState(J::State::Active);
     }
-    bool update(const QDomElement &el) override
+    class Prepared : public J::Transport::PreparedUpdate {
+    public:
+        explicit Prepared(QString id) : id(std::move(id)) { }
+        QString id;
+    };
+
+    PrepareUpdateResult prepareUpdate(const QDomElement &el) override
     {
         if (el.attribute(QStringLiteral("parse")) == QLatin1String("fail"))
+            return { PrepareUpdateStatus::Invalid, {}, {} };
+        return { PrepareUpdateStatus::Ready,
+                 std::make_unique<Prepared>(el.attribute(QStringLiteral("id"))), {} };
+    }
+
+    bool commitPreparedUpdate(PreparedUpdatePtr update) override
+    {
+        auto prepared = dynamic_cast<Prepared *>(update.get());
+        if (!prepared)
             return false;
-        id_ = el.attribute(QStringLiteral("id"));
+        id_ = prepared->id;
         if (state() == J::State::Created)
             setState(J::State::Pending);
         return true;
+    }
+
+    bool update(const QDomElement &el) override
+    {
+        auto prepared = prepareUpdate(el);
+        return prepared && commitPreparedUpdate(std::move(prepared.update));
     }
     bool                           hasUpdates() const override { return hasUpdates_; }
     J::OutgoingTransportInfoUpdate takeOutgoingUpdate(bool ensureTransportElement) override
