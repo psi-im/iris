@@ -152,6 +152,7 @@ namespace Jingle { namespace S5B {
 
     private:
         friend class Manager;
+        friend struct TransportTestAccess;
 
         class Private;
         std::unique_ptr<Private> d;

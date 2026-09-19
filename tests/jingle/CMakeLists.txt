@@ -15,6 +15,16 @@ add_executable(jingle_signaling_test signaling.cpp)
 target_link_libraries(jingle_signaling_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
     Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
 enable_testing()
+add_executable(jingle_transports5b_test transports5b.cpp)
+target_link_libraries(jingle_transports5b_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
+    Qt${QT_DEFAULT_MAJOR_VERSION}::Network Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
+# The white-box test compiles the real S5B implementation to exercise candidate
+# state without an external proxy. Reuse its generated private QObject moc.
+get_target_property(iris_binary_dir iris BINARY_DIR)
+target_include_directories(jingle_transports5b_test PRIVATE
+    "${iris_binary_dir}/iris_autogen/include" "${iris_binary_dir}/iris_autogen/include_$<CONFIG>")
+add_test(NAME jingle_transports5b COMMAND jingle_transports5b_test)
+set_tests_properties(jingle_transports5b PROPERTIES TIMEOUT 15)
 add_test(NAME jingle_signaling COMMAND jingle_signaling_test)
 add_executable(jingle_tiebreaker_test tiebreaker.cpp)
 target_link_libraries(jingle_tiebreaker_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
