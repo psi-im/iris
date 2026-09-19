@@ -574,6 +574,24 @@ namespace XMPP { namespace Jingle { namespace S5B {
 
     bool Candidate::operator==(const Candidate &other) const { return d.data() == other.d.data(); }
 
+    class PreparedS5bUpdate final : public XMPP::Jingle::Transport::PreparedUpdate {
+    public:
+        enum class Kind { Candidates, CandidateUsed, CandidateError, Activated, ProxyError, HandledNoop, Empty };
+
+        Kind             kind = Kind::Empty;
+        QList<Candidate> candidates;
+        QString          cid;
+        Candidate::State expectedCandidateState = Candidate::New;
+
+        bool    hasBlockSize = false;
+        size_t  blockSize    = 0;
+        bool    setSid       = false;
+        QString sid;
+        bool    setDstaddr   = false;
+        QString dstaddr;
+        bool    newIncoming  = false;
+    };
+
     // ------------------------------------------------------------------
     // Transport::Private
     // ------------------------------------------------------------------
@@ -1438,50 +1456,255 @@ namespace XMPP { namespace Jingle { namespace S5B {
         d->checkAndFinishNegotiation();
     }
 
-    bool Transport::update(const QDomElement &transportEl)
+    Transport::PrepareUpdateResult Transport::prepareUpdate(const QDomElement &transportEl)
     {
-        // we can just on type of elements in transport-info
-        // so return as soon as any type handled. Though it leaves a room for  remote to send invalid transport-info
-        auto bs = transportEl.attribute(QString::fromLatin1("block-size"));
+        auto prepared         = std::make_unique<PreparedS5bUpdate>();
+        prepared->newIncoming = _state == State::Created && isRemote();
+
+        const auto bs = transportEl.attribute(QString::fromLatin1("block-size"));
         if (!bs.isEmpty()) {
-            size_t bsn = bs.toULongLong();
-            if (bsn && bsn <= d->blockSize) {
-                d->blockSize = bsn;
+            const size_t parsed = bs.toULongLong();
+            if (parsed && parsed <= d->blockSize) {
+                prepared->hasBlockSize = true;
+                prepared->blockSize    = parsed;
             }
         }
-        bool isNewIncoming = _state == State::Created && isRemote();
-        if (isNewIncoming && d->sid.isEmpty()) {
-            d->sid = transportEl.attribute(QStringLiteral("sid"));
+
+        if (prepared->newIncoming && d->sid.isEmpty()) {
+            prepared->setSid = true;
+            prepared->sid    = transportEl.attribute(QStringLiteral("sid"));
         }
-        auto dstaddr = transportEl.attribute(QStringLiteral("dstaddr"));
+
+        const auto dstaddr = transportEl.attribute(QStringLiteral("dstaddr"));
         if (!dstaddr.isEmpty()) {
-            d->dstaddr = dstaddr;
+            prepared->setDstaddr = true;
+            prepared->dstaddr    = dstaddr;
         }
 
-        try {
-            if (d->handleIncomingCandidate(transportEl) || d->handleIncomingCandidateUsed(transportEl)
-                || d->handleIncomingCandidateError(transportEl) || d->handleIncomingActivated(transportEl)
-                || d->handleIncomingProxyError(transportEl)) {
-                if (isNewIncoming) {
-                    d->connection->setRemote(true);
-                    setState(State::Pending);
+        const QString candidateTag(QStringLiteral("candidate"));
+        auto          candidateEl = transportEl.firstChildElement(candidateTag);
+        if (!candidateEl.isNull()) {
+            prepared->kind = PreparedS5bUpdate::Kind::Candidates;
+            for (; !candidateEl.isNull(); candidateEl = candidateEl.nextSiblingElement(candidateTag)) {
+                Candidate candidate(this, candidateEl);
+                if (!candidate) {
+                    return { PrepareUpdateStatus::Invalid,
+                             {},
+                             XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,
+                                                 XMPP::Stanza::Error::ErrorCond::BadRequest) };
                 }
-                if (_state == State::Pending && _creator == _pad->session()->role()) {
-                    // initial acceptance by remote of the local transport
-                    setState(State::Accepted);
-                }
-                return true;
+                prepared->candidates.append(std::move(candidate));
             }
-        } catch (XMPP::Stanza::Error &e) {
-            qWarning("Transport updated failed: %s", qPrintable(e.toString()));
-            _lastError = e;
-            return false;
+            return { PrepareUpdateStatus::Ready, std::move(prepared), {} };
         }
 
-        // Seems like we got an empty transport. It's still valid though.
-        QTimer::singleShot(0, this, [this]() { d->checkAndFinishNegotiation(); });
+        auto command = transportEl.firstChildElement(QStringLiteral("candidate-used"));
+        if (!command.isNull()) {
+            const QString cid = command.attribute(QStringLiteral("cid"));
+            const auto    it  = d->localCandidates.find(cid);
+            prepared->cid     = cid;
+            if (it == d->localCandidates.end()) {
+                if (d->localCandidatesTrack.contains(cid)) {
+                    prepared->kind = PreparedS5bUpdate::Kind::HandledNoop;
+                    return { PrepareUpdateStatus::Ready, std::move(prepared), {} };
+                }
+                return { PrepareUpdateStatus::Invalid,
+                         {},
+                         XMPP::Stanza::Error(
+                             XMPP::Stanza::Error::ErrorType::Cancel, XMPP::Stanza::Error::ErrorCond::ItemNotFound,
+                             QStringLiteral("failed to find incoming candidate-used candidate %1").arg(cid)) };
+            }
+
+            prepared->expectedCandidateState = it->second.state();
+            if (it->second.state() == Candidate::Pending && it->second.type() != Candidate::Proxy
+                && !it->second.isConnected()) {
+                return { PrepareUpdateStatus::Invalid,
+                         {},
+                         XMPP::Stanza::Error(
+                             XMPP::Stanza::Error::ErrorType::Cancel, XMPP::Stanza::Error::ErrorCond::NotAcceptable,
+                             QStringLiteral("incoming candidate-used refers a candidate w/o active socks connection: %1")
+                                 .arg(QString(it->second))) };
+            }
+            prepared->kind = PreparedS5bUpdate::Kind::CandidateUsed;
+            return { PrepareUpdateStatus::Ready, std::move(prepared), {} };
+        }
+
+        command = transportEl.firstChildElement(QStringLiteral("candidate-error"));
+        if (!command.isNull()) {
+            prepared->kind = PreparedS5bUpdate::Kind::CandidateError;
+            return { PrepareUpdateStatus::Ready, std::move(prepared), {} };
+        }
+
+        command = transportEl.firstChildElement(QStringLiteral("activated"));
+        if (!command.isNull()) {
+            prepared->cid = command.attribute(QStringLiteral("cid"));
+            if (prepared->cid.isEmpty()) {
+                return { PrepareUpdateStatus::Invalid,
+                         {},
+                         XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,
+                                             XMPP::Stanza::Error::ErrorCond::ItemNotFound,
+                                             QStringLiteral("failed to find incoming activated candidate")) };
+            }
+            const auto candidate = d->remoteUsedCandidate;
+            prepared->kind = candidate.cid() == prepared->cid && candidate.type() == Candidate::Proxy
+                    && candidate.state() == Candidate::Accepted
+                ? PreparedS5bUpdate::Kind::Activated
+                : PreparedS5bUpdate::Kind::HandledNoop;
+            return { PrepareUpdateStatus::Ready, std::move(prepared), {} };
+        }
+
+        command = transportEl.firstChildElement(QStringLiteral("proxy-error"));
+        if (!command.isNull()) {
+            prepared->cid = command.attribute(QStringLiteral("cid"));
+            const auto it  = d->localCandidates.find(prepared->cid);
+            if (it == d->localCandidates.end()) {
+                return { PrepareUpdateStatus::Invalid,
+                         {},
+                         XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,
+                                             XMPP::Stanza::Error::ErrorCond::ItemNotFound,
+                                             QStringLiteral("failed to find incoming proxy-error candidate")) };
+            }
+            prepared->kind = it->second == d->localUsedCandidate && it->second.state() == Candidate::Accepted
+                ? PreparedS5bUpdate::Kind::ProxyError
+                : PreparedS5bUpdate::Kind::HandledNoop;
+            return { PrepareUpdateStatus::Ready, std::move(prepared), {} };
+        }
+
+        prepared->kind = PreparedS5bUpdate::Kind::Empty;
+        return { PrepareUpdateStatus::Ready, std::move(prepared), {} };
+    }
+
+    bool Transport::commitPreparedUpdate(PreparedUpdatePtr update)
+    {
+        auto prepared = dynamic_cast<PreparedS5bUpdate *>(update.get());
+        if (!prepared)
+            return false;
+
+        // Revalidate all state-dependent references before touching even the
+        // transport attributes. This keeps stale prepared values side-effect free.
+        if (prepared->newIncoming && !(_state == State::Created && isRemote()))
+            return false;
+
+        if (prepared->kind == PreparedS5bUpdate::Kind::CandidateUsed) {
+            const auto it = d->localCandidates.find(prepared->cid);
+            if (it == d->localCandidates.end() || it->second.state() != prepared->expectedCandidateState)
+                return false;
+            if (it->second.state() == Candidate::Pending && it->second.type() != Candidate::Proxy
+                && !it->second.isConnected())
+                return false;
+        } else if (prepared->kind == PreparedS5bUpdate::Kind::Activated) {
+            const auto candidate = d->remoteUsedCandidate;
+            if (!(candidate.cid() == prepared->cid && candidate.type() == Candidate::Proxy
+                  && candidate.state() == Candidate::Accepted))
+                return false;
+        } else if (prepared->kind == PreparedS5bUpdate::Kind::ProxyError) {
+            const auto it = d->localCandidates.find(prepared->cid);
+            if (it == d->localCandidates.end() || it->second != d->localUsedCandidate
+                || it->second.state() != Candidate::Accepted)
+                return false;
+        }
+
+        if (prepared->hasBlockSize && prepared->blockSize <= d->blockSize)
+            d->blockSize = prepared->blockSize;
+        if (prepared->setSid)
+            d->sid = prepared->sid;
+        if (prepared->setDstaddr)
+            d->dstaddr = prepared->dstaddr;
+
+        QPointer<Session> session(_pad->session());
+        bool              handled = prepared->kind != PreparedS5bUpdate::Kind::Empty;
+
+        switch (prepared->kind) {
+        case PreparedS5bUpdate::Kind::Candidates: {
+            bool reallyAdded = false;
+            for (const auto &candidate : std::as_const(prepared->candidates)) {
+                if (!d->p2pAllowed && candidate.type() != Candidate::Proxy) {
+                    qDebug("new remote candidate discarded with forbidden p2p: %s", qPrintable(candidate));
+                    continue;
+                }
+                qDebug("new remote candidate: %s", qPrintable(candidate.toString()));
+                d->remoteCandidates.emplace(candidate.cid(), candidate);
+                reallyAdded = true;
+            }
+            if (reallyAdded) {
+                d->pendingActions &= ~Private::CandidateError;
+                d->localReportedCandidateError = false;
+                QTimer::singleShot(0, this, [this]() { d->tryConnectToRemoteCandidate(); });
+            }
+            break;
+        }
+        case PreparedS5bUpdate::Kind::CandidateUsed: {
+            auto it = d->localCandidates.find(prepared->cid);
+            if (it->second.state() == Candidate::Pending) {
+                it->second.setState(Candidate::Accepted);
+                d->localUsedCandidate = it->second;
+                d->updateMinimalPriorityOnConnected();
+                QTimer::singleShot(0, this, [this]() { d->checkAndFinishNegotiation(); });
+            } else {
+                d->localUsedCandidate           = Candidate();
+                d->remoteReportedCandidateError = true;
+            }
+            break;
+        }
+        case PreparedS5bUpdate::Kind::CandidateError:
+            d->remoteReportedCandidateError = true;
+            for (auto &[_, candidate] : d->localCandidates) {
+                if (candidate.state() == Candidate::Pending)
+                    candidate.setState(Candidate::Discarded);
+            }
+            qDebug("recv candidate-error: all local pending candidates were discarded");
+            QTimer::singleShot(0, this, [this]() { d->checkAndFinishNegotiation(); });
+            break;
+        case PreparedS5bUpdate::Kind::Activated: {
+            auto candidate = d->remoteUsedCandidate;
+            candidate.setState(Candidate::Active);
+            d->handleConnected(candidate);
+            break;
+        }
+        case PreparedS5bUpdate::Kind::ProxyError:
+            for (auto &[_, candidate] : d->localCandidates)
+                candidate.setState(Candidate::Discarded);
+            for (auto &[_, candidate] : d->remoteCandidates)
+                candidate.setState(Candidate::Discarded);
+            d->proxyDiscoveryInProgress = false;
+            delete d->disco;
+            d->disco = nullptr;
+            QTimer::singleShot(0, this, [this]() {
+                onFinish(Reason::Condition::ConnectivityError, QLatin1String("got proxy error from the peer"));
+            });
+            break;
+        case PreparedS5bUpdate::Kind::HandledNoop:
+            break;
+        case PreparedS5bUpdate::Kind::Empty:
+            handled = false;
+            QTimer::singleShot(0, this, [this]() { d->checkAndFinishNegotiation(); });
+            break;
+        }
+
+        if (!session)
+            return true;
+
+        if (handled && prepared->newIncoming) {
+            d->connection->setRemote(true);
+            setState(State::Pending);
+            if (!session)
+                return true;
+        }
+        if (handled && _state == State::Pending && _creator == _pad->session()->role())
+            setState(State::Accepted);
 
         return true;
+    }
+
+    bool Transport::update(const QDomElement &transportEl)
+    {
+        auto prepared = prepareUpdate(transportEl);
+        if (!prepared) {
+            if (prepared.error)
+                _lastError = *prepared.error;
+            return false;
+        }
+        return commitPreparedUpdate(std::move(prepared.update));
     }
 
     bool Transport::hasUpdates() const { return isValid() && d->pendingActions; }
