@@ -268,7 +268,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
 
         void expectFinalize(std::function<void()> &&timeoutCallback)
         {
-            if (finalizeTimer || q->state() == State::Finished)
+            if (finalizeTimer || q->state() >= State::Finishing)
                 return;
             finalizeTimer = new QTimer(q);
             finalizeTimer->setSingleShot(true);
@@ -489,7 +489,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
         void tryFinalizeIncoming()
         {
             auto moreBytesExpected = bytesLeft && *bytesLeft > 0;
-            if (q->_state == State::Finished || outgoingReceived || (connection->isOpen() && moreBytesExpected))
+            if (q->_state >= State::Finishing || outgoingReceived || (connection->isOpen() && moreBytesExpected))
                 return;
 
             // data read finished. check other stuff

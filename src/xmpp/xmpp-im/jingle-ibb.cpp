@@ -97,14 +97,20 @@ namespace XMPP { namespace Jingle { namespace IBB {
 
         void close()
         {
+            if (state >= State::Finishing)
+                return;
+
             if (connection) {
+                state = State::Finishing;
                 connection->close();
                 setOpenMode(connection->openMode());
+                if (!connection->isOpen() && !bytesAvailable())
+                    postCloseAllDataRead();
             } else {
+                state = State::Finished;
                 XMPP::Jingle::Connection::close();
                 emit connectionClosed();
             }
-            state = State::Finished;
         }
 
     protected:
@@ -122,6 +128,8 @@ namespace XMPP { namespace Jingle { namespace IBB {
     private:
         void handleIBBClosed()
         {
+            if (!connection || state == State::Finished)
+                return;
             state = State::Finishing;
             if (bytesAvailable())
                 setOpenMode(QIODevice::ReadOnly);
