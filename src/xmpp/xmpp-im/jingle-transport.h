@@ -25,6 +25,9 @@
 
 #include <QVariant>
 
+#include <memory>
+#include <optional>
+
 namespace XMPP { namespace Jingle {
 
     class TransportManager;
@@ -73,7 +76,51 @@ namespace XMPP { namespace Jingle {
          */
         virtual void start() = 0;
         virtual void stop();
-        virtual bool update(const QDomElement &el) = 0; // accepts transport element on incoming transport-info
+
+        /**
+         * An owned, transport-specific incoming update produced without mutating
+         * the live transport. Session code can prepare every member of a batch
+         * before committing any of them.
+         */
+        class PreparedUpdate {
+        public:
+            virtual ~PreparedUpdate() = default;
+        };
+        using PreparedUpdatePtr = std::unique_ptr<PreparedUpdate>;
+
+        enum class PrepareUpdateStatus { Ready, Invalid, Unsupported };
+        struct PrepareUpdateResult {
+            PrepareUpdateStatus                  status = PrepareUpdateStatus::Unsupported;
+            PreparedUpdatePtr                    update;
+            std::optional<XMPP::Stanza::Error>   error;
+
+            explicit operator bool() const
+            {
+                return status == PrepareUpdateStatus::Ready && bool(update);
+            }
+        };
+
+        /**
+         * Parse and validate an incoming <transport/> payload into an owned value.
+         *
+         * Implementations must not mutate transport/network state, emit signals,
+         * schedule work or invoke application callbacks from this method. The
+         * default is fail-closed (Unsupported) for transports not yet migrated.
+         */
+        virtual PrepareUpdateResult prepareUpdate(const QDomElement &el);
+
+        /**
+         * Apply a value previously returned by prepareUpdate().
+         *
+         * The caller owns transport/Application identity checks around this
+         * reentrant boundary. Implementations must reject values of another
+         * transport type without side effects.
+         */
+        virtual bool commitPreparedUpdate(PreparedUpdatePtr update);
+
+        // Compatibility entry point for callers that do not batch updates.
+        // Built-in transports implement it through prepareUpdate()/commitPreparedUpdate().
+        virtual bool update(const QDomElement &el) = 0;
         virtual bool hasUpdates() const            = 0;
 
         /**
