@@ -30,6 +30,7 @@
 #include <QSet>
 #include <QTimer>
 #include <algorithm>
+#include <vector>
 
 template <class T> constexpr std::add_const_t<T> &as_const(T &t) noexcept { return t; }
 
@@ -1254,21 +1255,22 @@ namespace XMPP { namespace Jingle {
         }
 
         // transport-accept is an acknowledgement of a transport-replace signaling
-        // transaction, not merely a transport state update. Validate the whole batch
-        // against PendingTransportReplace::InProgress before the first Transport::update().
-        // Transport::update() is reentrant, so the apply pass uses guarded identity
-        // snapshots and skips entries invalidated by an earlier sibling callback.
+        // transaction, not merely a transport state update. First validate identities
+        // and prepare every payload without live mutation. Only a completely prepared
+        // batch is allowed to enter the reentrant commit pass.
         bool handleIncomingTransportAccept(const QDomElement &jingleEl)
         {
             struct ValidatedTransportAccept {
-                QPointer<Application>   application;
-                ContentKey              key;
-                QWeakPointer<Transport> current;
-                QDomElement             transport;
+                QPointer<Application>          application;
+                ContentKey                     key;
+                QWeakPointer<Transport>        current;
+                quint64                        generation = 0;
+                QDomElement                    transport;
+                Transport::PreparedUpdatePtr   prepared;
             };
-            QString                           contentTag(QStringLiteral("content"));
-            QVector<ValidatedTransportAccept> updates;
-            QSet<ContentKey>                  seen;
+            QString                               contentTag(QStringLiteral("content"));
+            std::vector<ValidatedTransportAccept> updates;
+            QSet<ContentKey>                      seen;
             for (QDomElement ce = jingleEl.firstChildElement(contentTag); !ce.isNull();
                  ce             = ce.nextSiblingElement(contentTag)) {
                 ContentBase cb(ce);
@@ -1290,7 +1292,7 @@ namespace XMPP { namespace Jingle {
                 Application *app = contentList.value(key);
                 if (!app || !app->transport() || app->transport()->creator() != role
                     || app->transport()->state() != State::Pending || transportNS != app->transport()->pad()->ns()) {
-                    // ignore out of order
+                    // Ignore an out-of-order acknowledgement exactly as before.
                     qInfo("ignore out of order transport-accept");
                     continue;
                 }
@@ -1299,8 +1301,12 @@ namespace XMPP { namespace Jingle {
                                                     XMPP::Stanza::Error::ErrorCond::BadRequest);
                     return false;
                 }
-                updates.append(ValidatedTransportAccept { QPointer<Application>(app), key, app->transport().toWeakRef(),
-                                                          transportEl });
+                updates.push_back(ValidatedTransportAccept { QPointer<Application>(app),
+                                                             key,
+                                                             app->transport().toWeakRef(),
+                                                             app->transportReplaceGeneration(),
+                                                             transportEl,
+                                                             {} });
             }
 
             if (seen.isEmpty()) {
@@ -1309,17 +1315,60 @@ namespace XMPP { namespace Jingle {
                 return false;
             }
 
+            auto setPrepareError = [this](const Transport::PrepareUpdateResult &result) {
+                if (result.error) {
+                    lastError = *result.error;
+                    return;
+                }
+                const auto condition = result.status == Transport::PrepareUpdateStatus::Unsupported
+                    ? XMPP::Stanza::Error::ErrorCond::FeatureNotImplemented
+                    : XMPP::Stanza::Error::ErrorCond::BadRequest;
+                lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel, condition);
+            };
+
             QPointer<Session> session(q);
-            for (const auto &entry : std::as_const(updates)) {
+
+            // Pure preparation pass. A provider that has not implemented staged
+            // updates fails closed; falling back to update() here would reintroduce
+            // the partial-commit bug this boundary exists to prevent.
+            for (auto &entry : updates) {
                 if (!session)
                     return true;
                 auto app              = entry.application;
                 auto currentTransport = entry.current.lock();
                 if (!app || contentList.value(entry.key) != app.data() || !currentTransport
-                    || app->transport() != currentTransport)
-                    continue; // superseded or removed by a previous reentrant callback
+                    || app->transport() != currentTransport
+                    || app->transportReplaceGeneration() != entry.generation
+                    || !app->transportReplaceInProgress())
+                    continue;
 
-                if (!app->incomingTransportAccept(entry.transport)) {
+                auto prepared = currentTransport->prepareUpdate(entry.transport);
+                if (!session)
+                    return true;
+                if (!prepared) {
+                    setPrepareError(prepared);
+                    return false;
+                }
+                entry.prepared = std::move(prepared.update);
+            }
+
+            // Commit is intentionally a separate pass. Each commit may reenter and
+            // remove/supersede later siblings, so recheck key, transport and generation
+            // immediately before applying the owned value.
+            for (auto &entry : updates) {
+                if (!session)
+                    return true;
+                if (!entry.prepared)
+                    continue;
+                auto app              = entry.application;
+                auto currentTransport = entry.current.lock();
+                if (!app || contentList.value(entry.key) != app.data() || !currentTransport
+                    || app->transport() != currentTransport
+                    || app->transportReplaceGeneration() != entry.generation
+                    || !app->transportReplaceInProgress())
+                    continue;
+
+                if (!app->incomingTransportAccept(std::move(entry.prepared))) {
                     if (!session)
                         return true;
                     lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,
