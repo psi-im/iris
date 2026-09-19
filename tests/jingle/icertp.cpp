@@ -97,6 +97,22 @@ int main(int argc, char **argv)
     const bool       applicationMode = app.arguments().contains("--application");
     const bool       iceUdpMode      = app.arguments().contains("--ice-udp");
     const QString    transportNs     = iceUdpMode ? J::ICE::NS_ICE_UDP : J::ICE::NS;
+
+    // A standalone Iris Client is allowed to omit TcpPortReserver entirely.
+    // Creating an ICE pad must not dereference that optional integration hook.
+    {
+        Client     clientWithoutReserver;
+        J::Session sessionWithoutReserver(clientWithoutReserver.jingleManager(),
+                                          Jid("peer-no-reserver@example.test/device"),
+                                          J::Origin::Initiator);
+        auto *rawPad = clientWithoutReserver.jingleManager()->transportPad(&sessionWithoutReserver, transportNs);
+        check(rawPad, "ICE pad creation without TcpPortReserver failed");
+        J::TransportManagerPad::Ptr pad(rawPad);
+        auto icePad = qSharedPointerDynamicCast<J::ICE::Pad>(pad);
+        check(bool(icePad), "ICE pad without TcpPortReserver has wrong type");
+        check(icePad->discoScope() == nullptr, "ICE pad unexpectedly fabricated a TCP discovery scope");
+    }
+
     TcpPortReserver  reserver;
     Client           firstClient, secondClient;
     firstClient.setTcpPortReserver(&reserver);

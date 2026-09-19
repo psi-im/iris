@@ -100,7 +100,7 @@ namespace Jingle { namespace ICE {
 
         Manager      *_manager;
         Session      *_session;
-        TcpPortScope *_discoScope;
+        TcpPortScope *_discoScope = nullptr;
         bool          _allowGrouping = false;
     };
 

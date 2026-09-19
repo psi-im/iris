@@ -1416,8 +1416,11 @@ namespace XMPP { namespace Jingle { namespace ICE {
     //----------------------------------------------------------------
     Pad::Pad(Manager *manager, Session *session) : _manager(manager), _session(session)
     {
-        auto reserver = _session->manager()->client()->tcpPortReserver();
-        _discoScope   = reserver->scope(QString::fromLatin1("ice"));
+        // TcpPortReserver is an optional client facility. ICE currently keeps
+        // the legacy TCP discovery scope only as an integration hook, so a
+        // headless/embedded Client without a reserver must still be usable.
+        if (auto reserver = _session->manager()->client()->tcpPortReserver())
+            _discoScope = reserver->scope(QString::fromLatin1("ice"));
     }
 
     QString Pad::ns() const
