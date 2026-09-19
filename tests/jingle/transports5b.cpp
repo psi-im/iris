@@ -168,6 +168,18 @@ struct Fixture {
     }
 };
 
+static void testMissingPortScope(Client &client)
+{
+    Fixture f(client);
+    int failures = 0;
+    QObject::connect(f.transport.data(), &J::Transport::failed, &f.session, [&] { ++failures; });
+    f.transport->prepare();
+    check(f.transport->state() == J::State::Finished, "Missing S5B port scope did not finish transport");
+    check(failures == 1, "Missing S5B port scope did not report exactly one transport failure");
+    check(f.transport->lastReason().condition() == J::Reason::GeneralError,
+          "Missing S5B port scope reported the wrong reason");
+}
+
 static void testPreparation(Client &client)
 {
     Fixture    f(client);
@@ -325,6 +337,7 @@ int main(int argc, char **argv)
     Client           client;
     TcpPortReserver  reserver;
     client.setTcpPortReserver(&reserver);
+    testMissingPortScope(client);
     testPreparation(client);
     testValidCommands(client);
     testProxyErrorFallsBackToIbb(client);

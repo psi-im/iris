@@ -1310,7 +1310,15 @@ namespace XMPP { namespace Jingle { namespace S5B {
         m->addKeyMapping(d->directAddr, this);
 
         auto scope = _pad.staticCast<Pad>()->discoScope();
-        d->disco   = scope->disco(); // FIXME store and handle signal. delete when not needed
+        if (!scope) {
+            onFinish(Reason::GeneralError, QLatin1String("S5B TCP port scope is not registered"));
+            return;
+        }
+        d->disco = scope->disco(); // FIXME store and handle signal. delete when not needed
+        if (!d->disco) {
+            onFinish(Reason::GeneralError, QLatin1String("S5B TCP port discovery is unavailable"));
+            return;
+        }
 
         connect(d->disco, &TcpPortDiscoverer::portAvailable, this, [this]() { d->onLocalServerDiscovered(); });
         d->setLocalProbingMinimalPreference(0); // allow all on start
