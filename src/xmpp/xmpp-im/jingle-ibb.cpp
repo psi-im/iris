@@ -312,11 +312,13 @@ namespace XMPP { namespace Jingle { namespace IBB {
 
             bool inserted = false;
             if (_state == State::Created && isRemote()) {
+                d->connections.insert(prepared->sid, connection);
+                inserted = true;
+                // Publish state only after the new connection is fully installed:
+                // stateChanged() is an external reentrancy boundary.
                 setState(State::Pending);
                 if (!session)
                     return true;
-                d->connections.insert(prepared->sid, connection);
-                inserted = true;
             } else if (!wasAccepted() || notifyIncomingConnection(connection)) {
                 if (!session)
                     return true;
@@ -342,12 +344,13 @@ namespace XMPP { namespace Jingle { namespace IBB {
 
         if (prepared->blockSize < expected->_blockSize)
             expected->_blockSize = prepared->blockSize;
+        // Complete the connection mutation before publishing the transport state.
+        expected->state = State::Accepted;
         if (_creator == _pad->session()->role()) {
             setState(State::Accepted);
             if (!session)
                 return true;
         }
-        expected->state = State::Accepted;
 
         if (session && _state >= State::Connecting) {
             QTimer::singleShot(0, this, [this, expected]() mutable { d->checkAndStartConnection(expected); });
