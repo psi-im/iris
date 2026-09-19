@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #include "../../src/xmpp/xmpp-im/jingle-s5b.cpp"
+#include "../../src/xmpp/xmpp-im/jingle-ibb.h"
+#include "../../src/xmpp/xmpp-im/jingle-application.h"
+
 #include <QCoreApplication>
 #include <QtCrypto>
 
@@ -57,6 +60,96 @@ namespace XMPP { namespace Jingle { namespace S5B {
         static size_t remoteCount(const Transport &t) { return t.d->remoteCandidates.size(); }
     };
 }}}
+
+class QueueSelector final : public J::TransportSelector {
+public:
+    explicit QueueSelector(QList<QSharedPointer<J::Transport>> transports) : transports_(std::move(transports)) { }
+
+    QSharedPointer<J::Transport> getNextTransport() override
+    {
+        return transports_.isEmpty() ? QSharedPointer<J::Transport>() : transports_.takeFirst();
+    }
+
+    QSharedPointer<J::Transport> getAlikeTransport(QSharedPointer<J::Transport> alike) override
+    {
+        if (!alike)
+            return {};
+        for (qsizetype i = 0; i < transports_.size(); ++i) {
+            if (transports_[i] && transports_[i]->pad()->ns() == alike->pad()->ns())
+                return transports_.takeAt(i);
+        }
+        return {};
+    }
+
+    void backupTransport(QSharedPointer<J::Transport> transport) override
+    {
+        if (transport)
+            transports_.prepend(std::move(transport));
+    }
+
+    bool hasMoreTransports() const override { return !transports_.isEmpty(); }
+    bool hasTransport(QSharedPointer<J::Transport> transport) const override { return transports_.contains(transport); }
+    int compare(QSharedPointer<J::Transport> a, QSharedPointer<J::Transport> b) const override
+    {
+        return a == b ? 0 : a ? (b ? 0 : 1) : -1;
+    }
+    bool replace(QSharedPointer<J::Transport>, QSharedPointer<J::Transport> newer) override { return bool(newer); }
+
+private:
+    QList<QSharedPointer<J::Transport>> transports_;
+};
+
+class TestApplicationPad final : public J::ApplicationManagerPad {
+public:
+    explicit TestApplicationPad(J::Session *session) : session_(session) { }
+
+    QString ns() const override { return QStringLiteral("urn:test:s5b-fallback"); }
+    J::Session *session() const override { return session_; }
+    J::ApplicationManager *manager() const override { return nullptr; }
+    QString generateContentName(J::Origin) override { return QStringLiteral("fallback"); }
+
+private:
+    J::Session *session_;
+};
+
+class FallbackApplication final : public J::Application {
+public:
+    FallbackApplication(const QSharedPointer<TestApplicationPad> &pad, QList<QSharedPointer<J::Transport>> transports)
+    {
+        _pad               = pad;
+        _contentName       = QStringLiteral("fallback");
+        _creator           = pad->session()->role();
+        _senders           = J::Origin::Both;
+        _transportSelector = std::make_unique<QueueSelector>(std::move(transports));
+    }
+
+    void setState(J::State state) override { _state = state; }
+    const std::optional<XMPP::Stanza::Error> &lastError() const override { return error_; }
+    J::Reason lastReason() const override { return reason_; }
+    SetDescError setRemoteOffer(const QDomElement &) override { return Ok; }
+    SetDescError setRemoteAnswer(const QDomElement &) override { return Ok; }
+    void prepare() override { }
+    void start() override { }
+    void remove(J::Reason::Condition condition = J::Reason::Success, const QString &text = QString()) override
+    {
+        reason_ = J::Reason(condition, text);
+        _state  = J::State::Finished;
+    }
+
+protected:
+    QDomElement makeLocalOffer() override { return {}; }
+    QDomElement makeLocalAnswer() override { return {}; }
+    void incomingRemove(const J::Reason &reason) override
+    {
+        reason_ = reason;
+        _state  = J::State::Finished;
+    }
+    void prepareTransport() override { }
+
+private:
+    std::optional<XMPP::Stanza::Error> error_;
+    J::Reason                          reason_;
+};
 
 struct Fixture {
     J::Session                   session;
@@ -156,6 +249,33 @@ static void testProxyError(Client &client, J::Origin role, bool local, S::Candid
     check(failures == 1, "Proxy error signaled duplicate failure");
 }
 
+static void testProxyErrorFallsBackToIbb(Client &client)
+{
+    Fixture f(client, J::Origin::Initiator);
+
+    J::IBB::Manager ibbManager;
+    ibbManager.setJingleManager(client.jingleManager());
+    J::TransportManagerPad::Ptr ibbPad(ibbManager.pad(&f.session));
+    auto ibb = ibbManager.newTransport(ibbPad, f.session.role());
+    check(bool(ibb), "Could not create real IBB fallback transport");
+
+    auto appPad = QSharedPointer<TestApplicationPad>::create(&f.session);
+    FallbackApplication app(appPad, { f.transport, ibb });
+    check(app.selectNextTransport() && app.transport() == f.transport,
+          "Application did not select the S5B transport first");
+
+    auto candidate = S::TransportTestAccess::nominate(*f.transport, false, S::Candidate::Accepted);
+    auto prepared  = f.transport->prepareUpdate(payload(QStringLiteral("<proxy-error/>")));
+    check(bool(prepared), "Could not stage proxy-error for fallback");
+    check(f.transport->commitPreparedUpdate(std::move(prepared.update)), "Could not commit proxy-error for fallback");
+
+    QCoreApplication::processEvents();
+    QCoreApplication::processEvents();
+    check(candidate.state() == S::Candidate::Discarded, "Failed proxy remained nominated during fallback");
+    check(app.transport() && app.transport() == ibb && app.transport()->pad()->ns() == J::IBB::NS,
+          "S5B proxy failure did not select the real IBB fallback transport");
+}
+
 static void testStaleAndUnexpected(Client &client)
 {
     Fixture    f(client);
@@ -204,6 +324,7 @@ int main(int argc, char **argv)
     client.setTcpPortReserver(&reserver);
     testPreparation(client);
     testValidCommands(client);
+    testProxyErrorFallsBackToIbb(client);
     for (auto role : { J::Origin::Initiator, J::Origin::Responder }) {
         testProxyError(client, role, false, S::Candidate::Accepted);
         testProxyError(client, role, true, S::Candidate::Accepted);
