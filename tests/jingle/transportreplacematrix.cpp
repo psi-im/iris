@@ -28,9 +28,9 @@ class ReentrantUpdateTransport : public TestTransport {
 public:
     using TestTransport::TestTransport;
 
-    bool update(const QDomElement &el) override
+    bool commitPreparedUpdate(PreparedUpdatePtr update) override
     {
-        const bool ok       = TestTransport::update(el);
+        const bool ok       = TestTransport::commitPreparedUpdate(std::move(update));
         auto       callback = std::move(onUpdate);
         if (callback)
             callback();
