@@ -256,7 +256,8 @@ static void testProxyErrorFallsBackToIbb(Client &client)
     Fixture f(client, J::Origin::Initiator);
 
     J::IBB::Manager ibbManager;
-    ibbManager.setJingleManager(client.jingleManager());
+    // As with the S5B fixture manager, this local manager is not registered in
+    // the client's transport registry and must not unregister the built-in IBB manager.
     J::TransportManagerPad::Ptr ibbPad(ibbManager.pad(&f.session));
     auto ibb = ibbManager.newTransport(ibbPad, f.session.role());
     check(bool(ibb), "Could not create real IBB fallback transport");
