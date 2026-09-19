@@ -171,14 +171,12 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
         {
             const auto previous = q->_state;
             q->_state           = s;
-            if (s >= State::Finishing) {
-                if (finalizeTimer) {
-                    finalizeTimer->stop();
-                    finalizeTimer->deleteLater();
-                    finalizeTimer = nullptr;
-                }
-                if (connection)
-                    connection->setReadHook({});
+            if (s >= State::Finishing && connection)
+                connection->setReadHook({});
+            if (s == State::Finished && finalizeTimer) {
+                finalizeTimer->stop();
+                finalizeTimer->deleteLater();
+                finalizeTimer = nullptr;
             }
             if (s == State::Finished) {
                 if (device && closeDeviceOnFinish) {
@@ -206,10 +204,42 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
             emit q->stateChanged(s);
         }
 
-        void finishTransfer()
+        void beginPayloadFinishing()
         {
             if (q->_state >= State::Finishing)
                 return;
+
+            // The payload path is finished. From this point on jingle-ft may
+            // still exchange checksum/<received/> session-info, but it must not
+            // keep the data Connection alive just for that signaling tail.
+            setState(State::Finishing);
+
+            if (!connection)
+                return;
+
+            const auto closing = connection;
+            closing->close();
+
+            // Application ownership ends when it stops using the data path.
+            // IBB/S5B/SCTP owners retain their own strong reference until the
+            // transport-specific asynchronous close/reset has completed.
+            if (connection == closing)
+                connection.reset();
+        }
+
+        void finishTransfer()
+        {
+            if (q->_state == State::Finished)
+                return;
+
+            // Known-size transfers enter Finishing as soon as the payload path
+            // is complete. By the time finishTransfer() is called, only Jingle
+            // signaling (checksum/<received/>) was outstanding. Transport close
+            // completion is therefore not an application success condition.
+            if (q->_state == State::Finishing) {
+                setState(State::Finished);
+                return;
+            }
 
             if (device && closeDeviceOnFinish)
                 device->close();
@@ -219,6 +249,8 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
                 return;
             }
 
+            // Legacy/unknown-size streams still use connection closure as their
+            // EOF boundary, so preserve the transport-drain wait for that case.
             const auto closing = connection;
             const auto weak    = closing.toWeakRef();
             auto completeClose = [this, weak]() {
@@ -236,8 +268,6 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
             setState(State::Finishing);
             closing->close();
 
-            // Synchronous transports such as S5B do not need a protocol-level
-            // close acknowledgement. Complete on the next turn after close().
             if (q->_state == State::Finishing && !closing->isOpen())
                 QTimer::singleShot(0, q, completeClose);
         }
@@ -280,7 +310,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
 
         void expectFinalize(std::function<void()> &&timeoutCallback)
         {
-            if (finalizeTimer || q->state() >= State::Finishing)
+            if (finalizeTimer || q->state() == State::Finished)
                 return;
             finalizeTimer = new QTimer(q);
             finalizeTimer->setSingleShot(true);
@@ -311,7 +341,11 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
 
         void writeNextBlockToTransport()
         {
+            if (q->_state >= State::Finishing || !connection)
+                return;
+
             if (bytesLeft && *bytesLeft == 0) {
+                beginPayloadFinishing();
                 if (hasher) {
                     auto hash = hasher->result();
                     if (hash.isValid()) {
@@ -413,6 +447,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
                 }
             }
             if (bytesLeft && *bytesLeft == 0) {
+                beginPayloadFinishing();
                 tryFinalizeIncoming();
             }
         }
@@ -450,6 +485,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
                             *bytesLeft -= quint64(size);
                         }
                         if (bytesLeft && *bytesLeft == 0) {
+                            beginPayloadFinishing();
                             tryFinalizeIncoming();
                         }
                     });
@@ -479,10 +515,11 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
                                qUtf8Printable(q->pad()->session()->peer().full()));
                         writeLoggingStarted = true;
                     }
+                    if (q->_state >= State::Finishing || !connection)
+                        return;
                     auto bs = getBlockSize();
-                    if (q->pad()->session()->role() == q->senders() && quint64(connection->bytesToWrite()) < bs) {
+                    if (q->pad()->session()->role() == q->senders() && quint64(connection->bytesToWrite()) < bs)
                         writeNextBlockToTransport();
-                    }
                 },
                 Qt::QueuedConnection);
 
@@ -509,10 +546,12 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
         void tryFinalizeIncoming()
         {
             const bool moreBytesExpected = bytesLeft && *bytesLeft > 0;
-            if (q->_state >= State::Finishing || outgoingReceived)
+            if (q->_state == State::Finished || outgoingReceived)
                 return;
+            if (bytesLeft && !moreBytesExpected && q->_state < State::Finishing)
+                beginPayloadFinishing();
             if (moreBytesExpected) {
-                if (connection->isOpen())
+                if (connection && connection->isOpen())
                     return;
                 handleStreamFail(QString::fromLatin1("connection closed before expected file size was received"));
                 return;
@@ -719,7 +758,8 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
             return _update;
         }
 
-        if (_state == State::Active && (d->outgoingChecksum.size() > 0 || d->outgoingReceived))
+        if ((_state == State::Active || _state == State::Finishing)
+            && (d->outgoingChecksum.size() > 0 || d->outgoingReceived))
             _update = { Action::SessionInfo, Reason() };
         else
             return XMPP::Jingle::Application::evaluateOutgoingUpdate();

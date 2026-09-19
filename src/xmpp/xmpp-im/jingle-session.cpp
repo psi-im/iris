@@ -110,20 +110,12 @@ namespace XMPP { namespace Jingle {
         Jid     origFrom;   // "from" attr of IQ.
         Jid     otherParty; // either "from" or initiator/responder. it's where to send all requests.
         Jid     localParty; // that one will be set as initiator/responder if provided
-        bool    waitingAck                  = false;
-        bool    needNotifyGroup             = false; // whenever grouping info changes
-        bool    groupingAllowed             = false;
-        bool    remoteTerminateDrainPending = false;
-
-        bool hasDrainingContent() const
-        {
-            return std::any_of(contentList.cbegin(), contentList.cend(),
-                               [](const Application *app) { return app && app->state() == State::Finishing; });
-        }
+        bool    waitingAck      = false;
+        bool    needNotifyGroup = false; // whenever grouping info changes
+        bool    groupingAllowed = false;
 
         void setSessionFinished()
         {
-            remoteTerminateDrainPending = false;
             q->tieBreaker()->clear();
             state = State::Finished;
             emit q->terminated();
@@ -139,18 +131,6 @@ namespace XMPP { namespace Jingle {
                 vals.takeLast()->deleteLater();
             }
             q->deleteLater();
-        }
-
-        void finishRemoteTerminateIfDrained()
-        {
-            if (!remoteTerminateDrainPending || state == State::Finished || hasDrainingContent())
-                return;
-
-            // A successful peer session-terminate in an FT-only or mixed session
-            // is a peer-completion signal once local application drain has
-            // already started. Do not destroy those connections until their
-            // transport-specific Finishing phase reaches Finished.
-            setSessionFinished();
         }
 
         QList<QDomElement> genGroupingXML()
@@ -263,19 +243,9 @@ namespace XMPP { namespace Jingle {
 
         void doStep()
         {
-            if (state == State::Finished) {
-                qDebug("jingle-doStep: skip step: session already finished");
-                return;
-            }
-
-            if (remoteTerminateDrainPending) {
-                finishRemoteTerminateIfDrained();
-                if (remoteTerminateDrainPending || state == State::Finished)
-                    return;
-            }
-
-            if (waitingAck) {
-                qDebug("jingle-doStep: skip step: waitingAck");
+            if (waitingAck || state == State::Finished) {
+                // in waitingAck we will return here later
+                qDebug("jingle-doStep: skip step: %s", waitingAck ? "waitingAck" : "session already finished");
                 return;
             }
 
@@ -559,8 +529,6 @@ namespace XMPP { namespace Jingle {
                 signalingContent.insert(content);
                 planStep();
             });
-            QObject::connect(content, &Application::stateChanged, q,
-                             [this](State) { finishRemoteTerminateIfDrained(); });
             QObject::connect(content, &Application::destroyed, q, [this, content]() {
                 signalingContent.remove(content);
                 initialIncomingUnacceptedContent.removeOne(content);
@@ -570,7 +538,6 @@ namespace XMPP { namespace Jingle {
                         break;
                     }
                 }
-                finishRemoteTerminateIfDrained();
             });
         }
 
@@ -882,22 +849,7 @@ namespace XMPP { namespace Jingle {
 
         bool handleIncomingSessionTerminate(const QDomElement &jingleEl)
         {
-            const Reason incomingReason(jingleEl.firstChildElement(QString::fromLatin1("reason")));
-
-            // For a normal RTP hangup there is nothing to drain and termination
-            // remains immediate. If a file/data application has already entered
-            // Finishing, however, peer <success/> means the peer is done; it must
-            // not destroy our still-draining Connection. Non-success reasons are
-            // cancellation/failure and keep their immediate teardown semantics.
-            if (incomingReason.condition() == Reason::Condition::Success && state < State::Finishing
-                && hasDrainingContent()) {
-                terminateReason              = incomingReason;
-                remoteTerminateDrainPending = true;
-                state                        = State::Finishing;
-                return true;
-            }
-
-            terminateReason = incomingReason;
+            terminateReason = Reason(jingleEl.firstChildElement(QString::fromLatin1("reason")));
             setSessionFinished();
             return true;
         }
