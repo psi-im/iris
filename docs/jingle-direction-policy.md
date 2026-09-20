@@ -270,17 +270,21 @@ with no side effects until validation of all required siblings succeeds. Commit 
 need reentrancy guards; defined partial protocol acceptance is distinct from partial malformed
 payload application. This API deserves a separate bounded step, not another generic framework.
 
-## Implementation order and regression gate
+## Implementation status and regression gate
 
-1. Harden TieBreaker lifetime/clear/limits/idempotence and caller guards with failing tests first.
-2. Add explicit per-attempt completion with revision/identity; preserve existing requestSenders
-   until callers migrate. This alone fixes the observability hole in A2 without a huge framework.
-3. Add minimal Pad direction controller: one policy writer, local-bit operations, scoped gates,
-   finite batch operation handles. Migrate Psi and remove duplicate pending state.
-4. Prove two-peer convergence and no privacy reopening under crossed actions + newer policy.
-5. Transport-replace arbitration and post-reply hints are implemented; keep dispatcher,
-   completion-boundary and selector lifetime regressions alongside the existing transport suite.
-6. Next: stage transport-specific payload mutation as a separate atomicity task.
+1. TieBreaker lifetime/clear/limits/idempotence and caller guards are implemented with dedicated regressions.
+2. Per-attempt sender completion carries revision/identity and coexists with the compatibility
+   requestSenders API.
+3. RTP Pad direction policy, scoped constraints and finite DirectionOperation observation are
+   implemented; Psi audio uses the single policy path.
+4. Crossed-action reconciliation is bounded and generation/revision guarded; privacy gates close
+   synchronously rather than waiting for IQ completion.
+5. Transport-replace arbitration, post-reply hints and staged transport payload mutation are
+   implemented. ICE, IBB and S5B use `prepareUpdate()` / `commitPreparedUpdate()`, so malformed
+   later siblings cannot mutate earlier transports during batch validation.
+6. Negotiated BUNDLE adds a shared-association constraint on replacement: a partial member set is
+   rejected and a full pre-Connecting replacement is staged and switched atomically. Active-call
+   migration, member removal and SharedRtcp media ingress remain separate gates.
 
 Tests required in addition to existing dispatcher/transport regressions:
 
