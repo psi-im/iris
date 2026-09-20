@@ -167,17 +167,23 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
         QTimer                            *finalizeTimer = nullptr;
         FileHasher                        *hasher        = nullptr;
 
+        void cancelFinalize()
+        {
+            if (!finalizeTimer)
+                return;
+            finalizeTimer->stop();
+            finalizeTimer->deleteLater();
+            finalizeTimer = nullptr;
+        }
+
         void setState(State s)
         {
             const auto previous = q->_state;
             q->_state           = s;
             if (s >= State::Finishing && connection)
                 connection->setReadHook({});
-            if (s == State::Finished && finalizeTimer) {
-                finalizeTimer->stop();
-                finalizeTimer->deleteLater();
-                finalizeTimer = nullptr;
-            }
+            if (s == State::Finished)
+                cancelFinalize();
             if (s == State::Finished) {
                 if (device && closeDeviceOnFinish) {
                     device->close();
@@ -212,13 +218,15 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
             // The payload path is finished. From this point on jingle-ft may
             // still exchange checksum/<received/> session-info, but it must not
             // keep the data Connection alive just for that signaling tail.
+            QPointer<Application> guard(q);
             setState(State::Finishing);
-
-            if (!connection)
+            if (!guard || !connection)
                 return;
 
             const auto closing = connection;
             closing->close();
+            if (!guard)
+                return;
 
             // Application ownership ends when it stops using the data path.
             // IBB/S5B/SCTP owners retain their own strong reference until the
@@ -241,8 +249,12 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
                 return;
             }
 
-            if (device && closeDeviceOnFinish)
+            QPointer<Application> guard(q);
+            if (device && closeDeviceOnFinish) {
                 device->close();
+                if (!guard)
+                    return;
+            }
 
             if (!connection) {
                 setState(State::Finished);
@@ -266,7 +278,11 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
             q->connect(closing.data(), &ByteStream::delayedCloseFinished, q, completeClose);
 
             setState(State::Finishing);
+            if (!guard)
+                return;
             closing->close();
+            if (!guard)
+                return;
 
             if (q->_state == State::Finishing && !closing->isOpen())
                 QTimer::singleShot(0, q, completeClose);
@@ -345,7 +361,10 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
                 return;
 
             if (bytesLeft && *bytesLeft == 0) {
+                QPointer<Application> guard(q);
                 beginPayloadFinishing();
+                if (!guard)
+                    return;
                 if (hasher) {
                     auto hash = hasher->result();
                     if (hash.isValid()) {
@@ -447,8 +466,10 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
                 }
             }
             if (bytesLeft && *bytesLeft == 0) {
+                QPointer<Application> guard(q);
                 beginPayloadFinishing();
-                tryFinalizeIncoming();
+                if (guard)
+                    tryFinalizeIncoming();
             }
         }
 
@@ -485,13 +506,17 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
                             *bytesLeft -= quint64(size);
                         }
                         if (bytesLeft && *bytesLeft == 0) {
+                            QPointer<Application> guard(q);
                             beginPayloadFinishing();
-                            tryFinalizeIncoming();
+                            if (guard)
+                                tryFinalizeIncoming();
                         }
                     });
                 }
+                QPointer<Application> guard(q);
                 setState(State::Active);
-                emit q->connectionReady();
+                if (guard)
+                    emit q->connectionReady();
                 return;
             }
 
@@ -535,7 +560,10 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
                 connect(connection.data(), &Connection::disconnected, q, [this]() { tryFinalizeIncoming(); });
             }
 
+            QPointer<Application> guard(q);
             setState(State::Active);
+            if (!guard)
+                return;
             if (acceptFile.range().isValid()) {
                 emit q->deviceRequested(acceptFile.range().offset, bytesLeft);
             } else {
@@ -548,8 +576,12 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
             const bool moreBytesExpected = bytesLeft && *bytesLeft > 0;
             if (q->_state == State::Finished || outgoingReceived)
                 return;
-            if (bytesLeft && !moreBytesExpected && q->_state < State::Finishing)
+            if (bytesLeft && !moreBytesExpected && q->_state < State::Finishing) {
+                QPointer<Application> guard(q);
                 beginPayloadFinishing();
+                if (!guard)
+                    return;
+            }
             if (moreBytesExpected) {
                 if (connection && connection->isOpen())
                     return;
@@ -753,6 +785,8 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
 
     XMPP::Jingle::Application::Update Application::evaluateOutgoingUpdate()
     {
+        if (_terminationReason.isValid())
+            return XMPP::Jingle::Application::evaluateOutgoingUpdate();
         if (!isValid()) {
             _update = { Action::NoAction, Reason() };
             return _update;
@@ -830,18 +864,30 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
 
     void Application::remove(Reason::Condition cond, const QString &comment)
     {
-        if (_state >= State::Finishing)
+        if (_state == State::Finished)
+            return;
+        // Finishing is a successful payload/signaling tail, not an immunity to
+        // integrity or transport failure. Success cannot re-enter an existing
+        // finishing tail, but a fatal reason must remain able to terminate it.
+        if (_state == State::Finishing && cond == Reason::Condition::Success)
             return;
 
         _terminationReason = Reason(cond, comment);
+        d->lastReason      = _terminationReason;
+        d->cancelFinalize();
+
+        QPointer<Application> guard(this);
+        if (d->connection)
+            d->connection->setReadHook({});
         if (_transport) {
             _transport->disconnect(this);
             _transport->stop();
+            if (!guard)
+                return;
         }
 
         if (_creator == _pad->session()->role() && _state <= State::ApprovedToSend) {
             // local content, not yet sent to remote
-            d->lastReason = _terminationReason;
             setState(State::Finished);
             return;
         }
