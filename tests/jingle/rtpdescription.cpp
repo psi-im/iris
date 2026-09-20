@@ -11,17 +11,24 @@ static void check(bool value, const char *message)
         qFatal("%s", message);
 }
 
-static QDomElement xml(const QString &body)
+static std::optional<Description> parseXml(const QString &xml, bool advisory = false)
 {
     QDomDocument doc;
-    check(doc.setContent(body, true), "invalid test XML");
-    return doc.documentElement();
+    check(doc.setContent(xml, true), "invalid test XML");
+    return Description::fromXml(doc.documentElement(), advisory);
 }
 
 static std::optional<Description> parse(const QString &body, bool advisory = false)
 {
-    return Description::fromXml(
-        xml("<description xmlns='urn:xmpp:jingle:apps:rtp:1' media='audio'>" + body + "</description>"), advisory);
+    return parseXml("<description xmlns='urn:xmpp:jingle:apps:rtp:1' media='audio'>" + body + "</description>",
+                    advisory);
+}
+
+static QString opaqueNamespace(const QByteArray &xml)
+{
+    QDomDocument doc;
+    check(doc.setContent(xml, true), "invalid opaque extension XML");
+    return doc.documentElement().namespaceURI();
 }
 
 int main(int argc, char **argv)
@@ -76,12 +83,12 @@ int main(int argc, char **argv)
 
     QDomDocument doc;
     doc.appendChild(description->toXml(doc));
-    const auto roundtrip = Description::fromXml(xml(doc.toString()));
+    const auto roundtrip = parseXml(doc.toString());
     check(roundtrip && roundtrip->rtcpMux && roundtrip->feedback.size() == 1
               && roundtrip->payloads.first().feedback.size() == 1 && roundtrip->headerExtensions.size() == 1
               && roundtrip->sources.size() == 2 && roundtrip->sourceGroups.size() == 1
               && roundtrip->extensions.size() == 1
-              && roundtrip->extensions.first().namespaceURI() == "urn:example:rtp:future",
+              && opaqueNamespace(roundtrip->extensions.first()) == "urn:example:rtp:future",
           "typed or opaque extensions lost on roundtrip");
 
     const auto boundaryIds = parse(
