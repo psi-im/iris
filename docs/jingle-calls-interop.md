@@ -166,7 +166,7 @@ The last two targets exercise real local UDP/ICE/DTLS/SRTP with mock application
 
 ### Baseline transport profile
 
-The existing ICE Jingle transport uses `urn:xmpp:jingle:transports:ice:0`. It has an `Ice176` network engine, DTLS support and an experimental single-component RTP/RTCP-mux packet path. It does not yet implement or advertise the Stable XEP-0176 namespace `urn:xmpp:jingle:transports:ice-udp:1`.
+The ICE Jingle manager supports both the legacy `urn:xmpp:jingle:transports:ice:0` profile and the Stable XEP-0176 `urn:xmpp:jingle:transports:ice-udp:1` namespace on the shared `Ice176` engine. DTLS is advertised only when runtime support is available. Packet-oriented RTP requires authenticated RTP/RTCP mux and uses the negotiated secure ICE transport; IBB/S5B are not implicit RTP fallbacks.
 
 ### External peer baseline
 
