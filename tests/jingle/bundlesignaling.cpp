@@ -225,20 +225,24 @@ static WireOffer makeOffer(Client &client, TcpPortReserver *reserver)
     return offer;
 }
 
-static QDomElement replacementPayload(QDomDocument &doc, const WireOffer &offer, const QStringList &names)
+static QDomElement sourceContent(const WireOffer &offer, const QString &name)
+{
+    for (auto content = offer.root.firstChildElement(QStringLiteral("content")); !content.isNull();
+         content = content.nextSiblingElement(QStringLiteral("content"))) {
+        if (content.attribute(QStringLiteral("name")) == name)
+            return content;
+    }
+    return {};
+}
+
+static QDomElement replacementPayload(
+    QDomDocument &doc, const WireOffer &offer, const QList<QPair<QString, QString>> &contents)
 {
     auto root = doc.createElementNS(J::NS, QStringLiteral("jingle"));
     doc.appendChild(root);
 
-    for (const auto &name : names) {
-        QDomElement source;
-        for (auto content = offer.root.firstChildElement(QStringLiteral("content")); !content.isNull();
-             content = content.nextSiblingElement(QStringLiteral("content"))) {
-            if (content.attribute(QStringLiteral("name")) == name) {
-                source = content;
-                break;
-            }
-        }
+    for (const auto &[name, sourceName] : contents) {
+        const auto source = sourceContent(offer, sourceName);
         check(!source.isNull(), "replacement fixture could not find offered content");
         auto sourceTransport = source.firstChildElement(QStringLiteral("transport"));
         check(!sourceTransport.isNull(), "replacement fixture could not find offered ICE transport");
@@ -252,6 +256,89 @@ static QDomElement replacementPayload(QDomDocument &doc, const WireOffer &offer,
         content.appendChild(transport);
         root.appendChild(content);
     }
+    return root;
+}
+
+static QSet<Task *> directRootTasks(Client &client)
+{
+    QSet<Task *> tasks;
+    for (auto child : client.rootTask()->children()) {
+        if (auto task = qobject_cast<Task *>(child))
+            tasks.insert(task);
+    }
+    return tasks;
+}
+
+static void acknowledgeNewJingleTask(Client &client, const Jid &peer, const QSet<Task *> &before)
+{
+    Task *pending = nullptr;
+    for (auto child : client.rootTask()->children()) {
+        auto task = qobject_cast<Task *>(child);
+        if (!task || before.contains(task))
+            continue;
+        check(!pending, "more than one root task appeared while sending session-initiate");
+        pending = task;
+    }
+    check(pending, "session-initiate did not create a Jingle IQ task");
+
+    QDomDocument replyDoc;
+    auto reply = replyDoc.createElement(QStringLiteral("iq"));
+    replyDoc.appendChild(reply);
+    reply.setAttribute(QStringLiteral("type"), QStringLiteral("result"));
+    reply.setAttribute(QStringLiteral("from"), peer.full());
+    reply.setAttribute(QStringLiteral("id"), pending->id());
+    check(pending->take(reply), "session-initiate IQ result was not consumed");
+}
+
+static QDomElement sessionAcceptPayload(
+    QDomDocument &doc, const J::Session &session, const WireOffer &transportSource,
+    J::RTP::Application *audio, J::RTP::Application *video, const Jid &peer)
+{
+    J::Jingle jingle(J::Action::SessionAccept, session.sid());
+    jingle.setResponder(peer);
+    auto root = jingle.toXml(&doc);
+    doc.appendChild(root);
+
+    auto appendAnswer = [&](J::RTP::Application *application, const QString &sourceName, quint32 ssrc) {
+        const auto local = application->localDescription();
+        check(local.has_value(), "initiator RTP offer disappeared before session-accept");
+
+        auto answer = *local;
+        answer.ssrc = ssrc;
+
+        const auto source = sourceContent(transportSource, sourceName);
+        check(!source.isNull(), "session-accept fixture could not find source ICE content");
+        auto sourceTransport = source.firstChildElement(QStringLiteral("transport"));
+        check(!sourceTransport.isNull(), "session-accept fixture could not find source ICE transport");
+
+        J::ContentBase cb(J::Origin::Initiator, application->contentName());
+        cb.senders = J::Origin::Both;
+        auto content = cb.toXml(&doc, QStringLiteral("content"), J::NS);
+        content.appendChild(answer.toXml(doc));
+
+        auto transport = doc.importNode(sourceTransport, true).toElement();
+        transport.setAttribute(QStringLiteral("ufrag"), QStringLiteral("bundle-answer-ufrag"));
+        transport.setAttribute(QStringLiteral("pwd"), QStringLiteral("bundle-answer-password"));
+        auto fingerprint = transport.firstChildElement(QStringLiteral("fingerprint"));
+        if (!fingerprint.isNull())
+            fingerprint.setAttribute(QStringLiteral("setup"), QStringLiteral("passive"));
+        content.appendChild(transport);
+        root.appendChild(content);
+    };
+
+    appendAnswer(audio, transportSource.audioName, 0x33333333u);
+    appendAnswer(video, transportSource.videoName, 0x44444444u);
+
+    auto group = doc.createElementNS(QStringLiteral("urn:xmpp:jingle:apps:grouping:0"),
+                                     QStringLiteral("group"));
+    group.setAttribute(QStringLiteral("semantics"), QStringLiteral("BUNDLE"));
+    for (auto application : { audio, video }) {
+        auto member = doc.createElementNS(QStringLiteral("urn:xmpp:jingle:apps:grouping:0"),
+                                          QStringLiteral("content"));
+        member.setAttribute(QStringLiteral("name"), application->contentName());
+        group.appendChild(member);
+    }
+    root.appendChild(group);
     return root;
 }
 
@@ -334,7 +421,7 @@ static void exerciseResponder(const WireOffer &offer, TcpPortReserver *reserver,
     }
 }
 
-static void exerciseResponderReplacement(const WireOffer &offer, TcpPortReserver *reserver)
+static void exerciseInitiatorReplacement(const WireOffer &transportSource, TcpPortReserver *reserver)
 {
     Client client;
     client.setTcpPortReserver(reserver);
@@ -343,54 +430,64 @@ static void exerciseResponderReplacement(const WireOffer &offer, TcpPortReserver
     rtp->setMediaProvider(std::make_shared<Provider>());
     rtp->setTransportNamespaces({ J::ICE::NS });
 
-    const Jid peer(QStringLiteral("initiator@example.test/device"));
+    const Jid peer(QStringLiteral("responder@example.test/device"));
     setPeerFeatures(client, peer, rtpIcePeerFeatures(client, rtp));
 
-    J::Session session(client.jingleManager(), peer, J::Origin::Responder);
-    J::Jingle parsed(offer.root);
-    check(session.incomingInitiate(parsed, offer.root),
-          "replacement responder rejected BUNDLE session-initiate");
-    check(session.setGroupings(
-              { J::ContentGroup { QStringLiteral("BUNDLE"), { offer.audioName, offer.videoName } } }),
-          "replacement responder could not accept offered BUNDLE group");
-
+    J::Session session(client.jingleManager(), peer, J::Origin::Initiator);
     auto audio = dynamic_cast<J::RTP::Application *>(
-        session.content(offer.audioName, J::Origin::Initiator));
+        rtp->createOutgoing(&session, QStringLiteral("audio"), J::Origin::Both));
     auto video = dynamic_cast<J::RTP::Application *>(
-        session.content(offer.videoName, J::Origin::Initiator));
-    check(audio && video, "replacement responder did not create RTP applications");
+        rtp->createOutgoing(&session, QStringLiteral("video"), J::Origin::Both));
+    check(audio && video, "replacement initiator could not create RTP applications");
+    check(session.setGroupings(
+              { J::ContentGroup { QStringLiteral("BUNDLE"), { audio->contentName(), video->contentName() } } }),
+          "replacement initiator could not offer BUNDLE");
 
     auto audioTransport = qSharedPointerDynamicCast<J::ICE::Transport>(audio->transport());
     auto videoTransport = qSharedPointerDynamicCast<J::ICE::Transport>(video->transport());
-    check(audioTransport && videoTransport, "replacement responder did not create ICE transports");
+    check(audioTransport && videoTransport, "replacement initiator did not select ICE");
     auto icePad = audioTransport->pad().staticCast<J::ICE::Pad>();
 
-    // Apply deferred incoming ICE state while the Session is still Created,
-    // then use the real acceptance path. Session::accept() synchronously marks
-    // local consent and prepares all initial contents; the zero-delay stepTimer
-    // that would send session-accept cannot run until we return to the event loop.
-    QCoreApplication::processEvents(QEventLoop::AllEvents);
-    check(icePad->liveAssociationCount() == 0,
-          "replacement fixture allocated BUNDLE before local acceptance");
-    session.accept();
-    check(session.state() == J::State::ApprovedToSend
-              && audio->state() >= J::State::ApprovedToSend
-              && audio->state() < J::State::Finishing
-              && video->state() >= J::State::ApprovedToSend
-              && video->state() < J::State::Finishing
-              && icePad->liveAssociationCount() == 1,
-          "replacement fixture did not synchronously prepare one stable BUNDLE association");
+    // Exercise the real outgoing session-initiate state machine. There is no
+    // connected XMPP stream in this test process, so Task::go() intentionally
+    // stops at the wire boundary; inject the peer's real IQ result through the
+    // existing Task parser to complete exactly that transaction.
+    const auto tasksBeforeInitiate = directRootTasks(client);
+    session.initiate();
+    check(waitFor([&]() { return session.state() == J::State::Unacked; }),
+          "replacement initiator did not serialize session-initiate");
+    acknowledgeNewJingleTask(client, peer, tasksBeforeInitiate);
+    check(session.state() == J::State::Pending
+              && audio->state() == J::State::Pending
+              && video->state() == J::State::Pending,
+          "session-initiate IQ result did not establish the pending negotiation boundary");
+    check(icePad->liveAssociationCount() == 1,
+          "outgoing negotiated BUNDLE offer did not retain one shared association");
+
+    // Feed a genuine session-accept document through the same production parser
+    // used by JTPush. The payload uses production RTP description serialization
+    // and a production-generated ICE transport snapshot.
+    QDomDocument acceptDoc;
+    auto accept = sessionAcceptPayload(acceptDoc, session, transportSource, audio, video, peer);
+    check(session.updateFromXml(J::Action::SessionAccept, accept),
+          "production session-accept XML was rejected");
+    check(session.state() == J::State::Active
+              && audio->state() == J::State::Accepted
+              && video->state() == J::State::Accepted,
+          "session-accept XML did not establish the active negotiated session");
 
     bool audioBound = false, audioRequired = false, videoBound = false, videoRequired = false;
     auto *audioNetwork = icePad->groupedConnectionFor(audioTransport.data(), &audioBound, &audioRequired);
     auto *videoNetwork = icePad->groupedConnectionFor(videoTransport.data(), &videoBound, &videoRequired);
     check(audioBound && videoBound && audioRequired && videoRequired && audioNetwork
-              && audioNetwork == videoNetwork,
-          "replacement fixture did not establish the original shared association");
+              && audioNetwork == videoNetwork && icePad->liveAssociationCount() == 1,
+          "session-accept did not preserve the original shared BUNDLE association");
     QPointer<J::ICE::IceConnection> oldNetwork(audioNetwork);
 
     QDomDocument partialDoc;
-    auto partial = replacementPayload(partialDoc, offer, { offer.audioName });
+    auto partial = replacementPayload(
+        partialDoc, transportSource,
+        { qMakePair(audio->contentName(), transportSource.audioName) });
     check(!session.updateFromXml(J::Action::TransportReplace, partial),
           "partial negotiated BUNDLE transport-replace was accepted");
     check(audio->transport() == audioTransport && video->transport() == videoTransport
@@ -398,7 +495,10 @@ static void exerciseResponderReplacement(const WireOffer &offer, TcpPortReserver
           "partial BUNDLE transport-replace mutated the live association");
 
     QDomDocument fullDoc;
-    auto full = replacementPayload(fullDoc, offer, { offer.audioName, offer.videoName });
+    auto full = replacementPayload(
+        fullDoc, transportSource,
+        { qMakePair(audio->contentName(), transportSource.audioName),
+          qMakePair(video->contentName(), transportSource.videoName) });
     check(session.updateFromXml(J::Action::TransportReplace, full),
           "full negotiated BUNDLE transport-replace was rejected");
 
@@ -438,7 +538,7 @@ int main(int argc, char **argv)
     const auto offer = makeOffer(initiator, &reserver);
     exerciseResponder(offer, &reserver, true);
     exerciseResponder(offer, &reserver, false);
-    exerciseResponderReplacement(offer, &reserver);
+    exerciseInitiatorReplacement(offer, &reserver);
 
     qInfo("BUNDLE signaling-to-runtime regressions passed");
     return 0;
