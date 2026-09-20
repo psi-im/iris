@@ -14,6 +14,8 @@
 
 namespace XMPP::Jingle::RTP {
 
+struct Description;
+
 // Authenticated BUNDLE packet demultiplexing. The caller may pass packets here
 // only after SRTP/SRTCP authentication. This class never decrypts packets and
 // never broadcasts an ambiguous packet to multiple contents.
