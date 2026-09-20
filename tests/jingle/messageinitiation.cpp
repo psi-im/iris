@@ -162,6 +162,43 @@ int main(int argc, char **argv)
     {
         Client client;
         auto manager = client.jingleManager();
+        auto rtpManager = manager->rtpManager();
+
+        int                  rtpProposalSignals = 0;
+        QString              lastProposalId;
+        J::RTP::MediaSet     lastProposalMedia;
+        QObject::connect(rtpManager, &J::RTP::Manager::incomingProposal, &client,
+                         [&](const Message &, const QString &id, J::RTP::MediaSet media) {
+                             ++rtpProposalSignals;
+                             lastProposalId    = id;
+                             lastProposalMedia = media;
+                         });
+
+        Message sourceMessage(Jid(QStringLiteral("local@example.test")));
+        sourceMessage.setFrom(Jid(QStringLiteral("peer@example.test/device")));
+
+        J::MessageInitiation pureRtp(J::MessageInitiation::Action::Propose, QStringLiteral("pure-rtp"));
+        pureRtp.addDescription(J::RTP::Description::ns(), J::RTP::Proposal { J::RTP::Media::Audio });
+        pureRtp.addDescription(J::RTP::Description::ns(), J::RTP::Proposal { J::RTP::Media::Video });
+        manager->incomingMessageInitiation(sourceMessage, pureRtp);
+        check(rtpProposalSignals == 1 && lastProposalId == QStringLiteral("pure-rtp"),
+              "pure RTP proposal did not produce typed RTP signal");
+        check(lastProposalMedia.testFlag(J::RTP::Media::Audio)
+                  && lastProposalMedia.testFlag(J::RTP::Media::Video),
+              "typed RTP signal lost proposed media");
+
+        J::MessageInitiation mixed(J::MessageInitiation::Action::Propose, QStringLiteral("mixed"));
+        mixed.addDescription(J::RTP::Description::ns(), J::RTP::Proposal { J::RTP::Media::Audio });
+        mixed.addDescription(QStringLiteral("urn:example:other"), std::any());
+        manager->incomingMessageInitiation(sourceMessage, mixed);
+        check(rtpProposalSignals == 1, "mixed application proposal leaked into RTP convenience signal");
+
+        J::MessageInitiation duplicate(J::MessageInitiation::Action::Propose, QStringLiteral("duplicate"));
+        duplicate.addDescription(J::RTP::Description::ns(), J::RTP::Proposal { J::RTP::Media::Audio });
+        duplicate.addDescription(J::RTP::Description::ns(), J::RTP::Proposal { J::RTP::Media::Audio });
+        manager->incomingMessageInitiation(sourceMessage, duplicate);
+        check(rtpProposalSignals == 1, "duplicate RTP media proposal produced a typed RTP signal");
+
         check(manager && !manager->messageInitiationEnabled(), "JMI must be opt-in");
         check(!manager->discoFeatures().contains(J::MessageInitiation::ns()),
               "disabled JMI was advertised");

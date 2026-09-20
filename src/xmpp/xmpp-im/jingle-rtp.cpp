@@ -753,9 +753,41 @@ QStringList Manager::discoFeatures() const
 
 void Manager::setJingleManager(XMPP::Jingle::Manager *manager)
 {
+    if (jingle_ == manager)
+        return;
+
+    if (jmiConnection_)
+        disconnect(jmiConnection_);
+    jmiConnection_ = {};
+
     if (!manager)
         closeAll();
     jingle_ = manager;
+
+    if (!jingle_)
+        return;
+
+    jmiConnection_ = connect(
+        jingle_, &XMPP::Jingle::Manager::incomingMessageInitiation, this,
+        [this](const XMPP::Message &message, const MessageInitiation &initiation) {
+            if (initiation.action() != MessageInitiation::Action::Propose)
+                return;
+
+            MediaSet media;
+            for (const auto &description : initiation.descriptions()) {
+                if (description.applicationNamespace != Description::ns() || !description.isSupported()
+                    || description.data.type() != typeid(Proposal))
+                    return;
+
+                const auto &proposal = std::any_cast<const Proposal &>(description.data);
+                if (!proposal.isValid() || media.testFlag(proposal.media))
+                    return;
+                media |= proposal.media;
+            }
+
+            if (media != MediaSet())
+                emit incomingProposal(message, initiation.id(), media);
+        });
 }
 void Manager::setMediaProvider(std::shared_ptr<MediaProvider> provider) { provider_ = std::move(provider); }
 void Manager::setTransportNamespaces(const QStringList &transports) { transports_ = transports; }

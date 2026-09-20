@@ -14,6 +14,8 @@
 #include <memory>
 #include <optional>
 
+namespace XMPP { class Message; }
+
 namespace XMPP::Jingle::RTP {
 
 enum class Media : quint8 { None = 0x00, Audio = 0x01, Video = 0x02 };
