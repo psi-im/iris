@@ -80,10 +80,13 @@ Conversations remains unpinned: there is no recorded release/commit, Android dev
 server/TURN configuration or authorized sanitized call capture. Do not infer its caps,
 BUNDLE, JMI or transport-replace behavior from Psi/Psi tests.
 
-The capability-selection negative matrix is being expanded separately. Current RTP policy is
-fail-closed: advertising RTP/audio plus only IBB or S5B transport capability does not make those
-byte-stream transports valid for the packet-oriented RTP backend. A future low-bitrate codec
-does not change that contract without an explicitly implemented RTP transport/profile.
+The capability-selection negative matrix is also verified on Iris
+`b632ff84fbcb6d8cef008c75819fb89dd29cef79`: `Jingle regressions #271` passed both
+qca3-srtp and transport-sanitizer jobs. Current RTP policy is fail-closed: advertising RTP/audio
+plus only IBB or S5B transport capability does not make those byte-stream transports valid for
+the packet-oriented RTP backend; advertising grouping alongside IBB does not change that result.
+A future low-bitrate codec does not change this contract without an explicitly implemented RTP
+transport/profile.
 
 ## Earlier audit snapshot — 2026-09-13
 
