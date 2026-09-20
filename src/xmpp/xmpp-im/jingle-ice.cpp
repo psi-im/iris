@@ -233,6 +233,251 @@ namespace XMPP { namespace Jingle { namespace ICE {
         }
     };
 
+
+    class IceConnection::Runtime {
+    public:
+        struct Participant {
+            QPointer<Transport> transport;
+            std::function<void(const QList<Ice176::Candidate> &)> onLocalCandidates;
+            std::function<void()>                                 onGatheringComplete;
+            std::function<void(Ice176::Error)>                    onError;
+            std::function<void()>                                 onRawReady;
+            std::function<void()>                                 onFingerprintNeeded;
+        };
+
+        QPointer<Pad> pad;
+        Origin        creator = Origin::None;
+
+        bool initializationStarted       = false;
+        bool remoteFingerprintAccepted  = false;
+        bool dtlsAcceptanceStarted       = false;
+        bool gatheringComplete           = false;
+
+        QList<Participant>      participants;
+        QList<Ice176::Candidate> localCandidateHistory;
+
+        // Association-owned discovery/startup state. No asynchronous callback
+        // below is allowed to depend on one Transport::Private surviving.
+        int          basePort = -1;
+        bool         allowIpExposure = true;
+        QHostAddress selfAddr;
+        TurnClient::Proxy stunProxy;
+
+        QHostAddress extAddr;
+        QHostAddress stunBindAddr;
+        QHostAddress stunRelayUdpAddr;
+        QHostAddress stunRelayTcpAddr;
+        int          stunBindPort = 0;
+        int          stunRelayUdpPort = 0;
+        int          stunRelayTcpPort = 0;
+        QString      stunRelayUdpUser;
+        QString      stunRelayUdpPass;
+        QString      stunRelayTcpUser;
+        QString      stunRelayTcpPass;
+
+        QString                  remoteUfrag;
+        QString                  remotePassword;
+        QList<Ice176::Candidate> remoteCandidates;
+        QList<Ice176::SelectedCandidate> remoteSelectedCandidates;
+        bool                     remoteGatheringComplete = false;
+
+        void pruneParticipants()
+        {
+            participants.erase(std::remove_if(participants.begin(), participants.end(),
+                                              [](const Participant &p) { return p.transport.isNull(); }),
+                               participants.end());
+        }
+
+        bool hasParticipant(Transport *transport)
+        {
+            pruneParticipants();
+            return std::any_of(participants.cbegin(), participants.cend(),
+                               [transport](const Participant &p) { return p.transport == transport; });
+        }
+
+        void mergeRemoteIce(const Element &e)
+        {
+            if (!e.candidates.isEmpty()) {
+                remoteUfrag    = e.ufrag;
+                remotePassword = e.pwd;
+                for (const auto &candidate : e.candidates) {
+                    const auto duplicate = std::find_if(
+                        remoteCandidates.cbegin(), remoteCandidates.cend(), [&candidate](const Ice176::Candidate &known) {
+                            return !candidate.id.isEmpty() && candidate.id == known.id;
+                        });
+                    if (duplicate == remoteCandidates.cend())
+                        remoteCandidates.append(candidate);
+                }
+            }
+            if (e.gatheringComplete)
+                remoteGatheringComplete = true;
+            if (!e.remoteCandidates.isEmpty())
+                remoteSelectedCandidates = e.remoteCandidates;
+        }
+    };
+
+    static void startAssociationDtlsIfReady(IceConnection *network)
+    {
+        if (!network || !network->runtime || network->runtime->dtlsAcceptanceStarted
+            || !network->runtime->remoteFingerprintAccepted || !network->ice || !network->ice->canSendMedia())
+            return;
+        network->runtime->dtlsAcceptanceStarted = true;
+        for (const auto &component : std::as_const(network->components)) {
+            if (component.dtls)
+                component.dtls->onRemoteAcceptedFingerprint();
+        }
+    }
+
+    static void startAssociationIce(IceConnection *network)
+    {
+        if (!network || !network->runtime || network->ice)
+            return;
+        auto runtime = network->runtime.get();
+        auto pad     = runtime->pad.data();
+        if (!pad || !pad->session() || !pad->session()->manager() || !pad->session()->manager()->client())
+            return;
+
+        if (!runtime->stunBindAddr.isNull() && runtime->stunBindPort > 0)
+            qDebug("STUN service: %s;%d", qPrintable(runtime->stunBindAddr.toString()), runtime->stunBindPort);
+        if (!runtime->stunRelayUdpAddr.isNull() && runtime->stunRelayUdpPort > 0
+            && !runtime->stunRelayUdpUser.isEmpty())
+            qDebug("TURN w/ UDP service: %s;%d", qPrintable(runtime->stunRelayUdpAddr.toString()),
+                   runtime->stunRelayUdpPort);
+        if (!runtime->stunRelayTcpAddr.isNull() && runtime->stunRelayTcpPort > 0
+            && !runtime->stunRelayTcpUser.isEmpty())
+            qDebug("TURN w/ TCP service: %s;%d", qPrintable(runtime->stunRelayTcpAddr.toString()),
+                   runtime->stunRelayTcpPort);
+
+        auto listenAddrs = runtime->selfAddr.isNull() ? Ice176::availableNetworkAddresses()
+                                                      : QList<QHostAddress> { runtime->selfAddr };
+        QList<Ice176::LocalAddress> localAddrs;
+        QStringList                 strList;
+        for (const QHostAddress &host : std::as_const(listenAddrs)) {
+            Ice176::LocalAddress address;
+            address.addr = host;
+            localAddrs.append(address);
+            strList.append(host.toString());
+        }
+
+        if (runtime->basePort != -1) {
+            network->portReserver = new UdpPortReserver(network);
+            network->portReserver->setAddresses(listenAddrs);
+            network->portReserver->setPorts(runtime->basePort, 4);
+        }
+
+        if (!strList.isEmpty()) {
+            printf("Host addresses:\n");
+            for (const QString &host : std::as_const(strList))
+                printf("  %s\n", qPrintable(host));
+        }
+
+        network->ice = new Ice176(network);
+        network->ice->setAllowIpExposure(runtime->allowIpExposure);
+
+        QObject::connect(network->ice, &Ice176::started, network, [network]() {
+            for (const auto &component : std::as_const(network->components)) {
+                if (component.lowOverhead)
+                    network->ice->flagComponentAsLowOverhead(component.componentIndex);
+            }
+        });
+        QObject::connect(network->ice, &Ice176::error, network, [network](Ice176::Error error) {
+            if (!network->runtime)
+                return;
+            network->runtime->pruneParticipants();
+            const auto participants = network->runtime->participants;
+            for (const auto &participant : participants)
+                if (participant.onError)
+                    participant.onError(error);
+        });
+        QObject::connect(network->ice, &Ice176::localCandidatesReady, network,
+                         [network](const QList<Ice176::Candidate> &candidates) {
+                             if (!network->runtime)
+                                 return;
+                             network->runtime->localCandidateHistory += candidates;
+                             network->runtime->pruneParticipants();
+                             const auto participants = network->runtime->participants;
+                             for (const auto &participant : participants)
+                                 if (participant.onLocalCandidates)
+                                     participant.onLocalCandidates(candidates);
+                         });
+        QObject::connect(network->ice, &Ice176::localGatheringComplete, network, [network]() {
+            if (!network->runtime)
+                return;
+            network->runtime->gatheringComplete = true;
+            network->runtime->pruneParticipants();
+            const auto participants = network->runtime->participants;
+            for (const auto &participant : participants)
+                if (participant.onGatheringComplete)
+                    participant.onGatheringComplete();
+        });
+        QObject::connect(network->ice, &Ice176::readyToSendMedia, network, [network]() {
+            if (!network->runtime)
+                return;
+            qDebug("ICE reported ready to send media!");
+            if (!network->components.isEmpty() && network->components[0].dtls) {
+                startAssociationDtlsIfReady(network);
+                return;
+            }
+            network->runtime->pruneParticipants();
+            const auto participants = network->runtime->participants;
+            for (const auto &participant : participants)
+                if (participant.onRawReady)
+                    participant.onRawReady();
+        }, Qt::QueuedConnection);
+        QObject::connect(network->ice, &Ice176::readyRead, network, [network](int componentIndex) {
+            auto  buffer    = network->ice->readDatagram(componentIndex);
+            auto &component = network->components[componentIndex];
+            if (component.srtp) {
+                component.srtp->dispatchMuxed(std::move(buffer));
+            } else if (component.dtls) {
+                component.dtls->writeIncomingDatagram(buffer);
+            } else if (component.rawConnection) {
+                component.rawConnection->enqueueIncomingUDP(buffer);
+            }
+        });
+
+        network->ice->setProxy(runtime->stunProxy);
+        if (network->portReserver)
+            network->ice->setPortReserver(network->portReserver);
+        network->ice->setLocalAddresses(localAddrs);
+
+        if (!runtime->extAddr.isNull()) {
+            QList<Ice176::ExternalAddress> external;
+            for (const Ice176::LocalAddress &local : std::as_const(localAddrs)) {
+                Ice176::ExternalAddress address;
+                address.base = local;
+                address.addr = runtime->extAddr;
+                external.append(address);
+            }
+            network->ice->setExternalAddresses(external);
+        }
+
+        if (!runtime->stunBindAddr.isNull() && runtime->stunBindPort > 0)
+            network->ice->setStunBindService(runtime->stunBindAddr, runtime->stunBindPort);
+        if (!runtime->stunRelayUdpAddr.isNull() && !runtime->stunRelayUdpUser.isEmpty())
+            network->ice->setStunRelayUdpService(runtime->stunRelayUdpAddr, runtime->stunRelayUdpPort,
+                                                 runtime->stunRelayUdpUser, runtime->stunRelayUdpPass.toUtf8());
+        if (!runtime->stunRelayTcpAddr.isNull() && !runtime->stunRelayTcpUser.isEmpty())
+            network->ice->setStunRelayTcpService(runtime->stunRelayTcpAddr, runtime->stunRelayTcpPort,
+                                                 runtime->stunRelayTcpUser, runtime->stunRelayTcpPass.toUtf8());
+        network->ice->setStunDiscoverer(
+            pad->session()->manager()->client()->stunDiscoManager()->createMonitor());
+
+        network->ice->setComponentCount(network->components.count());
+        network->ice->setLocalFeatures(Ice176::Trickle);
+        if (!runtime->remoteCandidates.isEmpty()) {
+            network->ice->setRemoteCredentials(runtime->remoteUfrag, runtime->remotePassword);
+            network->ice->addRemoteCandidates(runtime->remoteCandidates);
+        }
+        if (runtime->remoteGatheringComplete)
+            network->ice->setRemoteGatheringComplete();
+        if (!runtime->remoteSelectedCandidates.isEmpty())
+            network->ice->setRemoteSelectedCandidadates(runtime->remoteSelectedCandidates);
+
+        const auto mode = runtime->creator == pad->session()->role() ? Ice176::Initiator : Ice176::Responder;
+        network->ice->start(mode);
+    }
+
     class PreparedIceUpdate final : public XMPP::Jingle::Transport::PreparedUpdate {
     public:
         explicit PreparedIceUpdate(Element value) : element(std::move(value)) { }
@@ -441,6 +686,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
 
     IceConnection::~IceConnection()
     {
+        runtime.reset();
         // Resource destruction must not re-enter packet routing while another
         // component is already being torn down.
         if (ice)
@@ -529,6 +775,15 @@ namespace XMPP { namespace Jingle { namespace ICE {
         {
             if (!network)
                 return;
+            if (network->runtime) {
+                auto &participants = network->runtime->participants;
+                participants.erase(std::remove_if(participants.begin(), participants.end(),
+                                                  [this](const IceConnection::Runtime::Participant &participant) {
+                                                      return participant.transport.isNull()
+                                                          || participant.transport == q;
+                                                  }),
+                                   participants.end());
+            }
             // No callback capturing this Transport::Private may survive the
             // logical content releasing its association membership.
             if (network->ice)
@@ -571,6 +826,55 @@ namespace XMPP { namespace Jingle { namespace ICE {
             }
             if (!network)
                 return false;
+            if (!network->runtime)
+                network->runtime = std::make_unique<IceConnection::Runtime>();
+            if (!network->runtime->pad)
+                network->runtime->pad = pad.data();
+            if (network->runtime->creator == Origin::None)
+                network->runtime->creator = q->creator();
+            if (!network->runtime->hasParticipant(q)) {
+                QPointer<Transport> guard(q);
+                IceConnection::Runtime::Participant participant;
+                participant.transport = guard;
+                participant.onLocalCandidates = [guard](const QList<Ice176::Candidate> &candidates) {
+                    if (!guard)
+                        return;
+                    auto d = guard->d.get();
+                    d->pendingActions |= NewCandidate;
+                    d->pendingLocalCandidates += candidates;
+                    emit guard->updated();
+                };
+                participant.onGatheringComplete = [guard]() {
+                    if (!guard)
+                        return;
+                    auto d = guard->d.get();
+                    if (guard->pad()->ns() == NS)
+                        d->pendingActions |= GatheringComplete;
+                    if (d->pendingActions)
+                        emit guard->updated();
+                };
+                participant.onError = [guard](Ice176::Error error) {
+                    if (guard)
+                        guard->onFinish(Reason::Condition::ConnectivityError,
+                                        QStringLiteral("ICE failed: %1").arg(error));
+                };
+                participant.onRawReady = [guard]() {
+                    if (guard)
+                        guard->d->notifyRawConnected();
+                };
+                participant.onFingerprintNeeded = [guard]() {
+                    if (!guard)
+                        return;
+                    auto d = guard->d.get();
+                    d->pendingActions |= NewFingerprint;
+                    emit guard->updated();
+                };
+                network->runtime->participants.append(std::move(participant));
+                if (!network->runtime->localCandidateHistory.isEmpty())
+                    network->runtime->participants.last().onLocalCandidates(network->runtime->localCandidateHistory);
+                if (network->runtime->gatheringComplete)
+                    network->runtime->participants.last().onGatheringComplete();
+            }
             if (network->components.isEmpty()) {
                 network->components.append(Component {});
                 network->components.last().componentIndex = 0;
@@ -590,8 +894,11 @@ namespace XMPP { namespace Jingle { namespace ICE {
         {
             qDebug("Setup DTLS");
             Q_ASSERT(componentIndex < network->components.length());
-            if (network->components[componentIndex].dtls)
+            if (network->components[componentIndex].dtls) {
+                if (componentIndex == 0)
+                    pendingActions |= NewFingerprint;
                 return true;
+            }
             network->components[componentIndex].dtls
                 = new Dtls(network, q->pad()->session()->me().full(), q->pad()->session()->peer().full());
 
@@ -610,12 +917,18 @@ namespace XMPP { namespace Jingle { namespace ICE {
             }
 
             if (componentIndex == 0) { // for other components it's the same but we don't need multiple fingerprints
-                dtls->connect(
-                    dtls, &Dtls::needRestart, q,
-                    [this]() {
-                        pendingActions |= NewFingerprint;
-                        remoteAcceptedFingerprint = false;
-                        emit q->updated();
+                QObject::connect(
+                    dtls, &Dtls::needRestart, network,
+                    [net = network]() {
+                        if (!net->runtime)
+                            return;
+                        net->runtime->remoteFingerprintAccepted = false;
+                        net->runtime->dtlsAcceptanceStarted      = false;
+                        net->runtime->pruneParticipants();
+                        const auto participants = net->runtime->participants;
+                        for (const auto &participant : participants)
+                            if (participant.onFingerprintNeeded)
+                                participant.onFingerprintNeeded();
                     },
                     Qt::QueuedConnection);
                 pendingActions |= NewFingerprint;
@@ -673,234 +986,103 @@ namespace XMPP { namespace Jingle { namespace ICE {
 
         void findStunAndTurn()
         {
+            if (!network || !network->runtime || network->runtime->initializationStarted)
+                return;
+            auto runtime = network->runtime.get();
+            runtime->initializationStarted = true;
+
+            auto manager          = dynamic_cast<Manager *>(q->pad()->manager())->d.get();
+            runtime->basePort     = manager->basePort;
+            runtime->allowIpExposure = manager->allowIpExposure;
+            runtime->selfAddr     = manager->selfAddr;
+            runtime->stunProxy    = manager->stunProxy;
+            runtime->stunBindPort = manager->stunBindPort;
+            runtime->stunRelayUdpPort = manager->stunRelayUdpPort;
+            runtime->stunRelayTcpPort = manager->stunRelayTcpPort;
+            runtime->stunRelayUdpUser = manager->stunRelayUdpUser;
+            runtime->stunRelayUdpPass = manager->stunRelayUdpPass;
+            runtime->stunRelayTcpUser = manager->stunRelayTcpUser;
+            runtime->stunRelayTcpPass = manager->stunRelayTcpPass;
+            runtime->mergeRemoteIce(*remoteState);
+
+            auto start = [guard = QPointer<IceConnection>(network)]() {
+                if (guard)
+                    startAssociationIce(guard.data());
+            };
+
             auto extDisco = q->pad()->session()->manager()->client()->externalServiceDiscovery();
             using namespace std::chrono_literals;
             if (extDisco->isSupported()) {
-                extDisco->services(q,
-                                   [this](const ExternalServiceList &services) {
-                                       ExternalService::Ptr stun;
-                                       ExternalService::Ptr turnUdp;
-                                       ExternalService::Ptr turnTcp;
-                                       for (auto const &s : std::as_const(services)) {
-                                           if (s->type == QLatin1String("stun")
-                                               && (s->transport.isEmpty() || s->transport == QLatin1String("udp")))
-                                               stun = s;
-                                           else if (s->type == QLatin1String("turn")) {
-                                               if (s->transport == QLatin1String("tcp"))
-                                                   turnTcp = s;
-                                               else
-                                                   turnUdp = s;
-                                           }
-                                       }
-                                       Resolver::ResolveList resList;
-                                       if (stun) {
-                                           stunBindAddr.setAddress(stun->host);
-                                           stunBindPort = stun->port;
-                                           if (stunBindAddr.isNull())
-                                               resList.emplace_back(stun->host, std::ref(stunBindAddr));
-                                       }
-                                       if (turnTcp) {
-                                           stunRelayTcpAddr.setAddress(turnTcp->host);
-                                           stunRelayTcpPort = turnTcp->port;
-                                           stunRelayTcpUser = turnTcp->username;
-                                           stunRelayTcpPass = turnTcp->password;
-                                           if (stunRelayTcpAddr.isNull())
-                                               resList.emplace_back(turnTcp->host, std::ref(stunRelayTcpAddr));
-                                       }
-                                       if (turnUdp) {
-                                           stunRelayUdpAddr.setAddress(turnUdp->host);
-                                           stunRelayUdpPort = turnUdp->port;
-                                           stunRelayUdpUser = turnUdp->username;
-                                           stunRelayUdpPass = turnUdp->password;
-                                           if (stunRelayUdpAddr.isNull())
-                                               resList.emplace_back(turnUdp->host, std::ref(stunRelayUdpAddr));
-                                       }
-                                       if (resList.empty()) {
-                                           startIce();
-                                       } else {
-                                           Resolver::resolve(q, resList, [this]() {
-                                               qDebug("resolver finished");
-                                               startIce();
-                                           });
-                                       }
-                                   },
-                                   5min, { "stun", "turn" });
+                extDisco->services(
+                    network,
+                    [guard = QPointer<IceConnection>(network), start](const ExternalServiceList &services) {
+                        if (!guard || !guard->runtime)
+                            return;
+                        auto runtime = guard->runtime.get();
+                        ExternalService::Ptr stun;
+                        ExternalService::Ptr turnUdp;
+                        ExternalService::Ptr turnTcp;
+                        for (const auto &service : services) {
+                            if (service->type == QLatin1String("stun")
+                                && (service->transport.isEmpty() || service->transport == QLatin1String("udp")))
+                                stun = service;
+                            else if (service->type == QLatin1String("turn")) {
+                                if (service->transport == QLatin1String("tcp"))
+                                    turnTcp = service;
+                                else
+                                    turnUdp = service;
+                            }
+                        }
+                        Resolver::ResolveList resolve;
+                        if (stun) {
+                            runtime->stunBindAddr.setAddress(stun->host);
+                            runtime->stunBindPort = stun->port;
+                            if (runtime->stunBindAddr.isNull())
+                                resolve.emplace_back(stun->host, std::ref(runtime->stunBindAddr));
+                        }
+                        if (turnTcp) {
+                            runtime->stunRelayTcpAddr.setAddress(turnTcp->host);
+                            runtime->stunRelayTcpPort = turnTcp->port;
+                            runtime->stunRelayTcpUser = turnTcp->username;
+                            runtime->stunRelayTcpPass = turnTcp->password;
+                            if (runtime->stunRelayTcpAddr.isNull())
+                                resolve.emplace_back(turnTcp->host, std::ref(runtime->stunRelayTcpAddr));
+                        }
+                        if (turnUdp) {
+                            runtime->stunRelayUdpAddr.setAddress(turnUdp->host);
+                            runtime->stunRelayUdpPort = turnUdp->port;
+                            runtime->stunRelayUdpUser = turnUdp->username;
+                            runtime->stunRelayUdpPass = turnUdp->password;
+                            if (runtime->stunRelayUdpAddr.isNull())
+                                resolve.emplace_back(turnUdp->host, std::ref(runtime->stunRelayUdpAddr));
+                        }
+                        if (resolve.empty())
+                            start();
+                        else
+                            Resolver::resolve(guard.data(), std::move(resolve), start);
+                    },
+                    5min, { "stun", "turn" });
                 return;
             }
 
-            auto manager     = dynamic_cast<Manager *>(q->pad()->manager())->d.get();
-            stunBindPort     = manager->stunBindPort;
-            stunRelayUdpPort = manager->stunRelayUdpPort;
-            stunRelayTcpPort = manager->stunRelayTcpPort;
-            stunRelayUdpUser = manager->stunRelayUdpUser;
-            stunRelayUdpPass = manager->stunRelayUdpPass;
-            stunRelayTcpUser = manager->stunRelayTcpUser;
-            stunRelayTcpPass = manager->stunRelayTcpPass;
-            Resolver::resolve(q,
-                              { { manager->extHost, std::ref(extAddr) },
-                                { manager->stunBindHost, std::ref(stunBindAddr) },
-                                { manager->stunRelayUdpHost, std::ref(stunRelayUdpAddr) },
-                                { manager->stunRelayTcpHost, std::ref(stunRelayTcpAddr) } },
-                              [this]() {
-                                  qDebug("resolver finished");
-                                  startIce();
-                              });
-        }
-
-        void startIce()
-        {
-            auto manager = dynamic_cast<Manager *>(q->_pad->manager())->d.get();
-
-            if (!stunBindAddr.isNull() && stunBindPort > 0)
-                qDebug("STUN service: %s;%d", qPrintable(stunBindAddr.toString()), stunBindPort);
-            if (!stunRelayUdpAddr.isNull() && stunRelayUdpPort > 0 && !stunRelayUdpUser.isEmpty())
-                qDebug("TURN w/ UDP service: %s;%d", qPrintable(stunRelayUdpAddr.toString()), stunRelayUdpPort);
-            if (!stunRelayTcpAddr.isNull() && stunRelayTcpPort > 0 && !stunRelayTcpUser.isEmpty())
-                qDebug("TURN w/ TCP service: %s;%d", qPrintable(stunRelayTcpAddr.toString()), stunRelayTcpPort);
-
-            auto listenAddrs = manager->selfAddr.isNull() ? Ice176::availableNetworkAddresses()
-                                                          : QList<QHostAddress> { manager->selfAddr };
-
-            QList<XMPP::Ice176::LocalAddress> localAddrs;
-
-            QStringList strList;
-            for (const QHostAddress &h : as_const(listenAddrs)) {
-                XMPP::Ice176::LocalAddress addr;
-                addr.addr = h;
-                localAddrs += addr;
-                strList += h.toString();
-            }
-
-            if (manager->basePort != -1) {
-                network->portReserver = new XMPP::UdpPortReserver(network);
-                network->portReserver->setAddresses(listenAddrs);
-                network->portReserver->setPorts(manager->basePort, 4);
-            }
-
-            if (!strList.isEmpty()) {
-                printf("Host addresses:\n");
-                for (const QString &s : as_const(strList))
-                    printf("  %s\n", qPrintable(s));
-            }
-
-            network->ice = new Ice176(network);
-            network->ice->setAllowIpExposure(manager->allowIpExposure);
-
-            q->connect(network->ice, &XMPP::Ice176::started, q, [this]() {
-                for (auto const &c : as_const(network->components)) {
-                    if (c.lowOverhead)
-                        network->ice->flagComponentAsLowOverhead(c.componentIndex);
-                }
-            });
-            q->connect(network->ice, &XMPP::Ice176::error, q, [this](XMPP::Ice176::Error err) {
-                q->onFinish(Reason::Condition::ConnectivityError, QString("ICE failed: %1").arg(err));
-            });
-            q->connect(network->ice, &XMPP::Ice176::localCandidatesReady, q,
-                       [this](const QList<XMPP::Ice176::Candidate> &candidates) {
-                           pendingActions |= NewCandidate;
-                           pendingLocalCandidates += candidates;
-                           qDebug("discovered %lld local candidates", qsizetype(candidates.size()));
-                           for (auto const &c : candidates) {
-                               qDebug(" - %s:%d", qPrintable(c.ip.toString()), c.port);
-                           }
-                           emit q->updated();
-                       });
-            q->connect(network->ice, &XMPP::Ice176::localGatheringComplete, q, [this]() {
-                if (q->pad()->ns() == NS)
-                    pendingActions |= GatheringComplete;
-                if (pendingActions)
-                    emit q->updated();
-            });
-            q->connect(
-                network->ice, &XMPP::Ice176::readyToSendMedia, q,
-                [this]() {
-                    qDebug("ICE reported ready to send media!");
-                    if (!network->components[0].dtls) // if empty
-                        notifyRawConnected();
-                    else if (remoteAcceptedFingerprint)
-                        for (const auto &c : as_const(network->components))
-                            c.dtls->onRemoteAcceptedFingerprint();
-                },
-                Qt::QueuedConnection); // signal is not DOR-SS
-            QObject::connect(network->ice, &Ice176::readyRead, network,
-                             [net = network](int componentIndex) {
-                                 auto  buf       = net->ice->readDatagram(componentIndex);
-                                 auto &component = net->components[componentIndex];
-                                 if (component.srtp) {
-                                     component.srtp->dispatchMuxed(std::move(buf));
-                                 } else if (component.dtls) {
-                                     component.dtls->writeIncomingDatagram(buf);
-                                 } else if (component.rawConnection) {
-                                     component.rawConnection->enqueueIncomingUDP(buf);
-                                 }
-                             });
-
-            network->ice->setProxy(manager->stunProxy);
-            if (network->portReserver)
-                network->ice->setPortReserver(network->portReserver);
-
-            // QList<XMPP::Ice176::LocalAddress> localAddrs;
-            // XMPP::Ice176::LocalAddress addr;
-
-            // FIXME: the following is not true, a local address is not
-            //   required, for example if you use TURN with TCP only
-
-            // a local address is required to use ice.  however, if
-            //   we don't have a local address, we won't handle it as
-            //   an error here.  instead, we'll start Ice176 anyway,
-            //   which should immediately error back at us.
-            /*if(manager->selfAddr.isNull())
-            {
-                printf("no self address to use.  this will fail.\n");
-                return;
-            }
-
-            addr.addr = manager->selfAddr;
-            localAddrs += addr;*/
-            network->ice->setLocalAddresses(localAddrs);
-
-            // if an external address is manually provided, then apply
-            //   it only to the selfAddr.  FIXME: maybe we should apply
-            //   it to all local addresses?
-            if (!extAddr.isNull()) {
-                QList<XMPP::Ice176::ExternalAddress> extAddrs;
-                /*XMPP::Ice176::ExternalAddress eaddr;
-                eaddr.base = addr;
-                eaddr.addr = extAddr;
-                extAddrs += eaddr;*/
-                for (const XMPP::Ice176::LocalAddress &la : as_const(localAddrs)) {
-                    XMPP::Ice176::ExternalAddress ea;
-                    ea.base = la;
-                    ea.addr = extAddr;
-                    extAddrs += ea;
-                }
-                network->ice->setExternalAddresses(extAddrs);
-            }
-
-            if (!stunBindAddr.isNull() && stunBindPort > 0)
-                network->ice->setStunBindService(stunBindAddr, stunBindPort);
-            if (!stunRelayUdpAddr.isNull() && !stunRelayUdpUser.isEmpty())
-                network->ice->setStunRelayUdpService(stunRelayUdpAddr, stunRelayUdpPort, stunRelayUdpUser,
-                                                     stunRelayUdpPass.toUtf8());
-            if (!stunRelayTcpAddr.isNull() && !stunRelayTcpUser.isEmpty())
-                network->ice->setStunRelayTcpService(stunRelayTcpAddr, stunRelayTcpPort, stunRelayTcpUser,
-                                                     stunRelayTcpPass.toUtf8());
-            network->ice->setStunDiscoverer(
-                q->pad()->session()->manager()->client()->stunDiscoManager()->createMonitor());
-
-            network->ice->setComponentCount(network->components.count());
-            network->ice->setLocalFeatures(Ice176::Trickle);
-
-            setupRemoteICE(*remoteState);
-            remoteState->cleanupICE();
-
-            auto mode = q->creator() == q->pad()->session()->role() ? XMPP::Ice176::Initiator : XMPP::Ice176::Responder;
-            network->ice->start(mode);
+            runtime->extAddr.setAddress(manager->extHost);
+            runtime->stunBindAddr.setAddress(manager->stunBindHost);
+            runtime->stunRelayUdpAddr.setAddress(manager->stunRelayUdpHost);
+            runtime->stunRelayTcpAddr.setAddress(manager->stunRelayTcpHost);
+            Resolver::ResolveList resolve {
+                { manager->extHost, std::ref(runtime->extAddr) },
+                { manager->stunBindHost, std::ref(runtime->stunBindAddr) },
+                { manager->stunRelayUdpHost, std::ref(runtime->stunRelayUdpAddr) },
+                { manager->stunRelayTcpHost, std::ref(runtime->stunRelayTcpAddr) }
+            };
+            Resolver::resolve(network, std::move(resolve), start);
         }
 
         void setupRemoteICE(const Element &e)
         {
             Q_ASSERT(network->ice != nullptr);
+            if (network->runtime)
+                network->runtime->mergeRemoteIce(e);
             if (!e.candidates.isEmpty()) {
                 network->ice->setRemoteCredentials(e.ufrag, e.pwd);
                 network->ice->addRemoteCandidates(e.candidates);
@@ -921,6 +1103,8 @@ namespace XMPP { namespace Jingle { namespace ICE {
                 q->onFinish(Reason::FailedTransport, QStringLiteral("Unable to allocate ICE association"));
                 return;
             }
+            if (network->runtime)
+                network->runtime->mergeRemoteIce(e);
 
             if (network->ice) {
                 setupRemoteICE(e);
@@ -1329,13 +1513,11 @@ namespace XMPP { namespace Jingle { namespace ICE {
                                                  // if we send our fingerprint as a response to remotely initiated dtls
                                                  // then on response we are sure remote server started dtls server and
                                                  // we can connect now.
-                                                 if (hasFingerprint) {
+                                                 if (hasFingerprint && d->network && d->network->runtime) {
                                                      d->remoteAcceptedFingerprint = true;
+                                                     d->network->runtime->remoteFingerprintAccepted = true;
+                                                     startAssociationDtlsIfReady(d->network);
                                                  }
-                                                 if (hasFingerprint && d->network->ice
-                                                     && d->network->ice->canSendMedia())
-                                                     for (auto &c : d->network->components)
-                                                         c.dtls->onRemoteAcceptedFingerprint();
                                              } };
     }
 

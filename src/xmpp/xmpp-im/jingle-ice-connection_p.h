@@ -11,6 +11,7 @@
 #include <QVector>
 #include <QWeakPointer>
 
+#include <memory>
 #include <utility>
 
 namespace XMPP {
@@ -57,10 +58,13 @@ namespace Jingle {
         // including releasing memberships, must happen on the connection's thread.
         class IceConnection : public QObject {
         public:
+            class Runtime;
+
             QVector<Component>   components;
             UdpPortReserver     *portReserver = nullptr;
             Ice176              *ice          = nullptr;
             ConnectionGeneration generation;
+            std::unique_ptr<Runtime> runtime;
 
             ~IceConnection() override;
         };
