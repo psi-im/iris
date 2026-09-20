@@ -66,6 +66,7 @@ namespace Jingle {
             ConnectionGeneration generation;
             std::unique_ptr<Runtime> runtime;
 
+            IceConnection();
             ~IceConnection() override;
         };
 

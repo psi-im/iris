@@ -316,168 +316,6 @@ namespace XMPP { namespace Jingle { namespace ICE {
         }
     };
 
-    static void startAssociationDtlsIfReady(IceConnection *network)
-    {
-        if (!network || !network->runtime || network->runtime->dtlsAcceptanceStarted
-            || !network->runtime->remoteFingerprintAccepted || !network->ice || !network->ice->canSendMedia())
-            return;
-        network->runtime->dtlsAcceptanceStarted = true;
-        for (const auto &component : std::as_const(network->components)) {
-            if (component.dtls)
-                component.dtls->onRemoteAcceptedFingerprint();
-        }
-    }
-
-    static void startAssociationIce(IceConnection *network)
-    {
-        if (!network || !network->runtime || network->ice)
-            return;
-        auto runtime = network->runtime.get();
-        auto pad     = runtime->pad.data();
-        if (!pad || !pad->session() || !pad->session()->manager() || !pad->session()->manager()->client())
-            return;
-
-        if (!runtime->stunBindAddr.isNull() && runtime->stunBindPort > 0)
-            qDebug("STUN service: %s;%d", qPrintable(runtime->stunBindAddr.toString()), runtime->stunBindPort);
-        if (!runtime->stunRelayUdpAddr.isNull() && runtime->stunRelayUdpPort > 0
-            && !runtime->stunRelayUdpUser.isEmpty())
-            qDebug("TURN w/ UDP service: %s;%d", qPrintable(runtime->stunRelayUdpAddr.toString()),
-                   runtime->stunRelayUdpPort);
-        if (!runtime->stunRelayTcpAddr.isNull() && runtime->stunRelayTcpPort > 0
-            && !runtime->stunRelayTcpUser.isEmpty())
-            qDebug("TURN w/ TCP service: %s;%d", qPrintable(runtime->stunRelayTcpAddr.toString()),
-                   runtime->stunRelayTcpPort);
-
-        auto listenAddrs = runtime->selfAddr.isNull() ? Ice176::availableNetworkAddresses()
-                                                      : QList<QHostAddress> { runtime->selfAddr };
-        QList<Ice176::LocalAddress> localAddrs;
-        QStringList                 strList;
-        for (const QHostAddress &host : std::as_const(listenAddrs)) {
-            Ice176::LocalAddress address;
-            address.addr = host;
-            localAddrs.append(address);
-            strList.append(host.toString());
-        }
-
-        if (runtime->basePort != -1) {
-            network->portReserver = new UdpPortReserver(network);
-            network->portReserver->setAddresses(listenAddrs);
-            network->portReserver->setPorts(runtime->basePort, 4);
-        }
-
-        if (!strList.isEmpty()) {
-            printf("Host addresses:\n");
-            for (const QString &host : std::as_const(strList))
-                printf("  %s\n", qPrintable(host));
-        }
-
-        network->ice = new Ice176(network);
-        network->ice->setAllowIpExposure(runtime->allowIpExposure);
-
-        QObject::connect(network->ice, &Ice176::started, network, [network]() {
-            for (const auto &component : std::as_const(network->components)) {
-                if (component.lowOverhead)
-                    network->ice->flagComponentAsLowOverhead(component.componentIndex);
-            }
-        });
-        QObject::connect(network->ice, &Ice176::error, network, [network](Ice176::Error error) {
-            if (!network->runtime)
-                return;
-            network->runtime->pruneParticipants();
-            const auto participants = network->runtime->participants;
-            for (const auto &participant : participants)
-                if (participant.onError)
-                    participant.onError(error);
-        });
-        QObject::connect(network->ice, &Ice176::localCandidatesReady, network,
-                         [network](const QList<Ice176::Candidate> &candidates) {
-                             if (!network->runtime)
-                                 return;
-                             network->runtime->localCandidateHistory += candidates;
-                             network->runtime->pruneParticipants();
-                             const auto participants = network->runtime->participants;
-                             for (const auto &participant : participants)
-                                 if (participant.onLocalCandidates)
-                                     participant.onLocalCandidates(candidates);
-                         });
-        QObject::connect(network->ice, &Ice176::localGatheringComplete, network, [network]() {
-            if (!network->runtime)
-                return;
-            network->runtime->gatheringComplete = true;
-            network->runtime->pruneParticipants();
-            const auto participants = network->runtime->participants;
-            for (const auto &participant : participants)
-                if (participant.onGatheringComplete)
-                    participant.onGatheringComplete();
-        });
-        QObject::connect(network->ice, &Ice176::readyToSendMedia, network, [network]() {
-            if (!network->runtime)
-                return;
-            qDebug("ICE reported ready to send media!");
-            if (!network->components.isEmpty() && network->components[0].dtls) {
-                startAssociationDtlsIfReady(network);
-                return;
-            }
-            network->runtime->pruneParticipants();
-            const auto participants = network->runtime->participants;
-            for (const auto &participant : participants)
-                if (participant.onRawReady)
-                    participant.onRawReady();
-        }, Qt::QueuedConnection);
-        QObject::connect(network->ice, &Ice176::readyRead, network, [network](int componentIndex) {
-            auto  buffer    = network->ice->readDatagram(componentIndex);
-            auto &component = network->components[componentIndex];
-            if (component.srtp) {
-                component.srtp->dispatchMuxed(std::move(buffer));
-            } else if (component.dtls) {
-                component.dtls->writeIncomingDatagram(buffer);
-            } else if (component.rawConnection) {
-                component.rawConnection->enqueueIncomingUDP(buffer);
-            }
-        });
-
-        network->ice->setProxy(runtime->stunProxy);
-        if (network->portReserver)
-            network->ice->setPortReserver(network->portReserver);
-        network->ice->setLocalAddresses(localAddrs);
-
-        if (!runtime->extAddr.isNull()) {
-            QList<Ice176::ExternalAddress> external;
-            for (const Ice176::LocalAddress &local : std::as_const(localAddrs)) {
-                Ice176::ExternalAddress address;
-                address.base = local;
-                address.addr = runtime->extAddr;
-                external.append(address);
-            }
-            network->ice->setExternalAddresses(external);
-        }
-
-        if (!runtime->stunBindAddr.isNull() && runtime->stunBindPort > 0)
-            network->ice->setStunBindService(runtime->stunBindAddr, runtime->stunBindPort);
-        if (!runtime->stunRelayUdpAddr.isNull() && !runtime->stunRelayUdpUser.isEmpty())
-            network->ice->setStunRelayUdpService(runtime->stunRelayUdpAddr, runtime->stunRelayUdpPort,
-                                                 runtime->stunRelayUdpUser, runtime->stunRelayUdpPass.toUtf8());
-        if (!runtime->stunRelayTcpAddr.isNull() && !runtime->stunRelayTcpUser.isEmpty())
-            network->ice->setStunRelayTcpService(runtime->stunRelayTcpAddr, runtime->stunRelayTcpPort,
-                                                 runtime->stunRelayTcpUser, runtime->stunRelayTcpPass.toUtf8());
-        network->ice->setStunDiscoverer(
-            pad->session()->manager()->client()->stunDiscoManager()->createMonitor());
-
-        network->ice->setComponentCount(network->components.count());
-        network->ice->setLocalFeatures(Ice176::Trickle);
-        if (!runtime->remoteCandidates.isEmpty()) {
-            network->ice->setRemoteCredentials(runtime->remoteUfrag, runtime->remotePassword);
-            network->ice->addRemoteCandidates(runtime->remoteCandidates);
-        }
-        if (runtime->remoteGatheringComplete)
-            network->ice->setRemoteGatheringComplete();
-        if (!runtime->remoteSelectedCandidates.isEmpty())
-            network->ice->setRemoteSelectedCandidadates(runtime->remoteSelectedCandidates);
-
-        const auto mode = runtime->creator == pad->session()->role() ? Ice176::Initiator : Ice176::Responder;
-        network->ice->start(mode);
-    }
-
     class PreparedIceUpdate final : public XMPP::Jingle::Transport::PreparedUpdate {
     public:
         explicit PreparedIceUpdate(Element value) : element(std::move(value)) { }
@@ -683,6 +521,170 @@ namespace XMPP { namespace Jingle { namespace ICE {
             emit readyRead();
         }
     };
+
+    IceConnection::IceConnection() = default;
+
+    static void startAssociationDtlsIfReady(IceConnection *network)
+    {
+        if (!network || !network->runtime || network->runtime->dtlsAcceptanceStarted
+            || !network->runtime->remoteFingerprintAccepted || !network->ice || !network->ice->canSendMedia())
+            return;
+        network->runtime->dtlsAcceptanceStarted = true;
+        for (const auto &component : std::as_const(network->components)) {
+            if (component.dtls)
+                component.dtls->onRemoteAcceptedFingerprint();
+        }
+    }
+
+    static void startAssociationIce(IceConnection *network)
+    {
+        if (!network || !network->runtime || network->ice)
+            return;
+        auto runtime = network->runtime.get();
+        auto pad     = runtime->pad.data();
+        if (!pad || !pad->session() || !pad->session()->manager() || !pad->session()->manager()->client())
+            return;
+
+        if (!runtime->stunBindAddr.isNull() && runtime->stunBindPort > 0)
+            qDebug("STUN service: %s;%d", qPrintable(runtime->stunBindAddr.toString()), runtime->stunBindPort);
+        if (!runtime->stunRelayUdpAddr.isNull() && runtime->stunRelayUdpPort > 0
+            && !runtime->stunRelayUdpUser.isEmpty())
+            qDebug("TURN w/ UDP service: %s;%d", qPrintable(runtime->stunRelayUdpAddr.toString()),
+                   runtime->stunRelayUdpPort);
+        if (!runtime->stunRelayTcpAddr.isNull() && runtime->stunRelayTcpPort > 0
+            && !runtime->stunRelayTcpUser.isEmpty())
+            qDebug("TURN w/ TCP service: %s;%d", qPrintable(runtime->stunRelayTcpAddr.toString()),
+                   runtime->stunRelayTcpPort);
+
+        auto listenAddrs = runtime->selfAddr.isNull() ? Ice176::availableNetworkAddresses()
+                                                      : QList<QHostAddress> { runtime->selfAddr };
+        QList<Ice176::LocalAddress> localAddrs;
+        QStringList                 strList;
+        for (const QHostAddress &host : std::as_const(listenAddrs)) {
+            Ice176::LocalAddress address;
+            address.addr = host;
+            localAddrs.append(address);
+            strList.append(host.toString());
+        }
+
+        if (runtime->basePort != -1) {
+            network->portReserver = new UdpPortReserver(network);
+            network->portReserver->setAddresses(listenAddrs);
+            network->portReserver->setPorts(runtime->basePort, 4);
+        }
+
+        if (!strList.isEmpty()) {
+            printf("Host addresses:\n");
+            for (const QString &host : std::as_const(strList))
+                printf("  %s\n", qPrintable(host));
+        }
+
+        network->ice = new Ice176(network);
+        network->ice->setAllowIpExposure(runtime->allowIpExposure);
+
+        QObject::connect(network->ice, &Ice176::started, network, [network]() {
+            for (const auto &component : std::as_const(network->components)) {
+                if (component.lowOverhead)
+                    network->ice->flagComponentAsLowOverhead(component.componentIndex);
+            }
+        });
+        QObject::connect(network->ice, &Ice176::error, network, [network](Ice176::Error error) {
+            if (!network->runtime)
+                return;
+            network->runtime->pruneParticipants();
+            const auto participants = network->runtime->participants;
+            for (const auto &participant : participants)
+                if (participant.onError)
+                    participant.onError(error);
+        });
+        QObject::connect(network->ice, &Ice176::localCandidatesReady, network,
+                         [network](const QList<Ice176::Candidate> &candidates) {
+                             if (!network->runtime)
+                                 return;
+                             network->runtime->localCandidateHistory += candidates;
+                             network->runtime->pruneParticipants();
+                             const auto participants = network->runtime->participants;
+                             for (const auto &participant : participants)
+                                 if (participant.onLocalCandidates)
+                                     participant.onLocalCandidates(candidates);
+                         });
+        QObject::connect(network->ice, &Ice176::localGatheringComplete, network, [network]() {
+            if (!network->runtime)
+                return;
+            network->runtime->gatheringComplete = true;
+            network->runtime->pruneParticipants();
+            const auto participants = network->runtime->participants;
+            for (const auto &participant : participants)
+                if (participant.onGatheringComplete)
+                    participant.onGatheringComplete();
+        });
+        QObject::connect(network->ice, &Ice176::readyToSendMedia, network, [network]() {
+            if (!network->runtime)
+                return;
+            qDebug("ICE reported ready to send media!");
+            if (!network->components.isEmpty() && network->components[0].dtls) {
+                startAssociationDtlsIfReady(network);
+                return;
+            }
+            network->runtime->pruneParticipants();
+            const auto participants = network->runtime->participants;
+            for (const auto &participant : participants)
+                if (participant.onRawReady)
+                    participant.onRawReady();
+        }, Qt::QueuedConnection);
+        QObject::connect(network->ice, &Ice176::readyRead, network, [network](int componentIndex) {
+            auto  buffer    = network->ice->readDatagram(componentIndex);
+            auto &component = network->components[componentIndex];
+            if (component.srtp) {
+                component.srtp->dispatchMuxed(std::move(buffer));
+            } else if (component.dtls) {
+                component.dtls->writeIncomingDatagram(buffer);
+            } else if (component.rawConnection) {
+                component.rawConnection->enqueueIncomingUDP(buffer);
+            }
+        });
+
+        network->ice->setProxy(runtime->stunProxy);
+        if (network->portReserver)
+            network->ice->setPortReserver(network->portReserver);
+        network->ice->setLocalAddresses(localAddrs);
+
+        if (!runtime->extAddr.isNull()) {
+            QList<Ice176::ExternalAddress> external;
+            for (const Ice176::LocalAddress &local : std::as_const(localAddrs)) {
+                Ice176::ExternalAddress address;
+                address.base = local;
+                address.addr = runtime->extAddr;
+                external.append(address);
+            }
+            network->ice->setExternalAddresses(external);
+        }
+
+        if (!runtime->stunBindAddr.isNull() && runtime->stunBindPort > 0)
+            network->ice->setStunBindService(runtime->stunBindAddr, runtime->stunBindPort);
+        if (!runtime->stunRelayUdpAddr.isNull() && !runtime->stunRelayUdpUser.isEmpty())
+            network->ice->setStunRelayUdpService(runtime->stunRelayUdpAddr, runtime->stunRelayUdpPort,
+                                                 runtime->stunRelayUdpUser, runtime->stunRelayUdpPass.toUtf8());
+        if (!runtime->stunRelayTcpAddr.isNull() && !runtime->stunRelayTcpUser.isEmpty())
+            network->ice->setStunRelayTcpService(runtime->stunRelayTcpAddr, runtime->stunRelayTcpPort,
+                                                 runtime->stunRelayTcpUser, runtime->stunRelayTcpPass.toUtf8());
+        network->ice->setStunDiscoverer(
+            pad->session()->manager()->client()->stunDiscoManager()->createMonitor());
+
+        network->ice->setComponentCount(network->components.count());
+        network->ice->setLocalFeatures(Ice176::Trickle);
+        if (!runtime->remoteCandidates.isEmpty()) {
+            network->ice->setRemoteCredentials(runtime->remoteUfrag, runtime->remotePassword);
+            network->ice->addRemoteCandidates(runtime->remoteCandidates);
+        }
+        if (runtime->remoteGatheringComplete)
+            network->ice->setRemoteGatheringComplete();
+        if (!runtime->remoteSelectedCandidates.isEmpty())
+            network->ice->setRemoteSelectedCandidadates(runtime->remoteSelectedCandidates);
+
+        const auto mode = runtime->creator == pad->session()->role() ? Ice176::Initiator : Ice176::Responder;
+        network->ice->start(mode);
+    }
 
     IceConnection::~IceConnection()
     {
