@@ -2,6 +2,7 @@
 #include <QCoreApplication>
 
 #include <iris/xmpp-im/jingle-ibb.h>
+#include <iris/xmpp-im/jingle-s5b.h>
 #include <iris/jingle-ice.h>
 #include <iris/jingle-rtp.h>
 #include <iris/jingle-session.h>
@@ -159,6 +160,20 @@ int main(int argc, char **argv)
         Client probe;
         incompatibleTransportCaps(probe.jingleIBBManager()->discoFeatures(),
                                   "RTP application accepted an IBB-only peer");
+    }
+
+    {
+        Client probe;
+        auto caps = probe.jingleIBBManager()->discoFeatures();
+        caps += QStringLiteral("urn:ietf:rfc:5888");
+        incompatibleTransportCaps(caps,
+                                  "RTP application accepted IBB because the peer also advertised grouping");
+    }
+
+    {
+        Client probe;
+        incompatibleTransportCaps(probe.jingleS5BManager()->discoFeatures(),
+                                  "RTP application accepted an S5B-only peer");
     }
 
     incompatibleTransportCaps({}, "RTP application accepted a peer with no compatible transport capability");
