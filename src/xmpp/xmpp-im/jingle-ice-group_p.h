@@ -236,6 +236,26 @@ namespace XMPP { namespace Jingle { namespace ICE {
             return false;
         }
 
+        // After a replacement generation has been finalized, keep memberships
+        // belonging to unrelated associations from the previous current
+        // snapshot. Only contents in replacedContents are retired.
+        void retainUnreplacedFrom(ConnectionGroupTransaction &&previous, const QSet<ContentKey> &replacedContents)
+        {
+            Q_ASSERT(isReplacement_ && replacementFinalized_);
+            for (auto &entry : previous.entries_) {
+                if (!replacedContents.contains(entry.content))
+                    entries_.push_back(std::move(entry));
+            }
+            previous.entries_.clear();
+
+            // The transaction is now the ordinary current membership snapshot.
+            // Replacement bookkeeping must not survive into a later restart.
+            replacements_.clear();
+            isReplacement_        = false;
+            replacementActive_    = false;
+            replacementFinalized_ = false;
+        }
+
     private:
         struct ReplacementAssociation {
             quint64                                    oldAssociationId = 0;
