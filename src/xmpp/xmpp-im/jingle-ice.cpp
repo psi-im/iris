@@ -1782,8 +1782,9 @@ namespace XMPP { namespace Jingle { namespace ICE {
 
         if (!d->groupStageAttempted) {
             d->groupStageAttempted = true;
-            d->stagedOfferGroups
-                = _session->role() == Origin::Initiator ? _session->groupings() : _session->remoteGroupings();
+            const bool provisionalOffer = _session->role() == Origin::Initiator;
+            d->stagedOfferGroups = provisionalOffer ? _session->groupings() : _session->remoteGroupings();
+            const auto stagedAnswerGroups = provisionalOffer ? d->stagedOfferGroups : _session->groupings();
 
             bool hasSharedOffer = false;
             for (const auto &group : std::as_const(d->stagedOfferGroups))
@@ -1801,7 +1802,8 @@ namespace XMPP { namespace Jingle { namespace ICE {
                 }
 
                 GroupNegotiation::Error error = GroupNegotiation::Error::None;
-                auto plan = GroupNegotiation::initialPlan(members, d->stagedOfferGroups, d->stagedOfferGroups, &error);
+                auto plan
+                    = GroupNegotiation::initialPlan(members, d->stagedOfferGroups, stagedAnswerGroups, &error);
                 if (!plan) {
                     d->groupStageFailed = true;
                 } else {
@@ -1832,14 +1834,19 @@ namespace XMPP { namespace Jingle { namespace ICE {
             }
         }
 
-        const bool offeredAsShared = d->stagedContents.contains(*content)
-            || std::any_of(d->stagedOfferGroups.cbegin(), d->stagedOfferGroups.cend(), [content](const ContentGroup &g) {
-                   return g.semantics == QLatin1String("BUNDLE") && g.contents.size() > 1
-                       && g.contents.contains(content->first);
-               });
+        const bool offeredAsShared = std::any_of(
+            d->stagedOfferGroups.cbegin(), d->stagedOfferGroups.cend(), [content](const ContentGroup &group) {
+                return group.semantics == QLatin1String("BUNDLE") && group.contents.size() > 1
+                    && group.contents.contains(content->first);
+            });
+        // Initiator-side staging is provisional until the peer answer arrives.
+        // A responder already knows its local answer before accept()/prepare(),
+        // so any refused member must stay on an independent association.
+        const bool requiresShared = d->stagedContents.contains(*content)
+            || (_session->role() == Origin::Initiator && offeredAsShared);
         if (groupRequired)
-            *groupRequired = offeredAsShared;
-        if (!offeredAsShared || d->groupStageFailed || !d->stagedGroups)
+            *groupRequired = requiresShared;
+        if (!requiresShared || d->groupStageFailed || !d->stagedGroups)
             return nullptr;
 
         auto connection = d->stagedGroups->connectionFor(*content);
@@ -1866,8 +1873,10 @@ namespace XMPP { namespace Jingle { namespace ICE {
         if (!content || !d->stagedContents.contains(*content))
             return true;
 
-        const auto answer
-            = _session->role() == Origin::Initiator ? _session->remoteGroupings() : _session->groupings();
+        if (_session->role() == Origin::Responder)
+            return true; // staged directly from the responder's actual local answer
+
+        const auto &answer = _session->remoteGroupings();
         for (const auto &offered : d->stagedOfferGroups) {
             if (offered.semantics != QLatin1String("BUNDLE") || !offered.contents.contains(content->first)
                 || offered.contents.size() < 2)
