@@ -20,6 +20,7 @@
 #include "jingle.h"
 
 #include "jingle-pub.h"
+#include "jingle-message.h"
 #include "jingle-rtp.h"
 
 #include "jingle-application.h"
@@ -570,8 +571,9 @@ namespace XMPP { namespace Jingle {
         Jid                                   redirectionJid;
         std::optional<XMPP::Stanza::Error>    lastError;
         QHash<QPair<Jid, QString>, Session *> sessions;
-        std::unique_ptr<PublicationManager>   publicationManager;
-        std::unique_ptr<RTP::Manager>         rtpManager;
+        std::unique_ptr<PublicationManager>        publicationManager;
+        std::unique_ptr<RTP::Manager>               rtpManager;
+        std::unique_ptr<MessageInitiationManager>    messageInitiationManager;
         int                                   maxSessions = -1; // no limit
 
         void setupSession(Session *s)
@@ -586,8 +588,9 @@ namespace XMPP { namespace Jingle {
         d->client  = client;
         d->manager = this;
         d->pushTask.reset(new JTPush(client->rootTask()));
-        d->publicationManager = std::make_unique<PublicationManager>(this);
-        d->rtpManager         = std::make_unique<RTP::Manager>();
+        d->publicationManager       = std::make_unique<PublicationManager>(this);
+        d->messageInitiationManager = std::make_unique<MessageInitiationManager>(this);
+        d->rtpManager               = std::make_unique<RTP::Manager>();
         registerApplication(d->rtpManager.get());
         /*
         static bool mtReg = false;
@@ -610,7 +613,8 @@ namespace XMPP { namespace Jingle {
     Client *Manager::client() const { return d->client; }
 
     PublicationManager *Manager::publicationManager() const { return d->publicationManager.get(); }
-    RTP::Manager       *Manager::rtpManager() const { return d->rtpManager.get(); }
+    RTP::Manager *Manager::rtpManager() const { return d->rtpManager.get(); }
+    MessageInitiationManager *Manager::messageInitiationManager() const { return d->messageInitiationManager.get(); }
 
     void Manager::setRedirection(const Jid &to) { d->redirectionJid = to; }
 
@@ -711,6 +715,8 @@ namespace XMPP { namespace Jingle {
     {
         QStringList ret { NS };
         ret += d->publicationManager->discoFeatures();
+        if (d->messageInitiationManager->enabled())
+            ret += MessageInitiation::ns();
         // RFC 5888 grouping is a protocol capability, not a promise that every
         // Jingle application/transport combination will use a shared association.
         // Concrete BUNDLE use still depends on negotiated groups and application

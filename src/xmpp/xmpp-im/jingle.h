@@ -43,6 +43,7 @@ namespace Jingle {
     extern IRIS_EXPORT const QString NS;
 
     class Manager;
+    class MessageInitiationManager;
     class Session;
     class TieBreaker;
     namespace RTP {
@@ -388,8 +389,9 @@ namespace Jingle {
         QString                                   registerSession(Session *session);
         const std::optional<XMPP::Stanza::Error> &lastError() const;
 
-        PublicationManager *publicationManager() const;
-        RTP::Manager       *rtpManager() const;
+        PublicationManager        *publicationManager() const;
+        RTP::Manager              *rtpManager() const;
+        MessageInitiationManager  *messageInitiationManager() const;
 
         // Source-compatible shortcuts for the original local-only XEP-0358 API.
         // Durable/PubSub publications should use publicationManager() directly.
