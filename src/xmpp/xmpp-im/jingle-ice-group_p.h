@@ -5,6 +5,8 @@
 #include "jingle-group-negotiation_p.h"
 #include "jingle-ice-connection_p.h"
 
+#include <QSet>
+
 #include <optional>
 #include <vector>
 
