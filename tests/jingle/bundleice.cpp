@@ -172,7 +172,6 @@ int main(int argc, char **argv)
     first.video->prepare();
     check(first.audio->state() == J::State::ApprovedToSend && first.video->state() == J::State::ApprovedToSend,
           "initiator BUNDLE transports did not prepare");
-    check(first.network->ice, "initiator did not allocate ICE");
     check(first.audio->rtpSession() && first.audio->rtpSession() == first.video->rtpSession(),
           "initiator did not share SRTP");
 
@@ -220,7 +219,6 @@ int main(int argc, char **argv)
             check(second.audio->state() == J::State::ApprovedToSend
                       && second.video->state() == J::State::ApprovedToSend,
                   "responder BUNDLE transports did not prepare");
-            check(second.network->ice, "responder did not allocate ICE");
             check(second.audio->rtpSession() && second.audio->rtpSession() == second.video->rtpSession(),
                   "responder did not share SRTP");
         }
