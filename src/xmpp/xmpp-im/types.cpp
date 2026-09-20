@@ -757,6 +757,7 @@ public:
     QList<StatelessFileSharing::Sources>     attachedFileSources; // XEP-0447 / XEP-0367
     QString                                  attachToId;          // XEP-0367
     QList<Jingle::JinglePub>                 jinglePublications;  // XEP-0358
+    QList<Jingle::MessageInitiation>         jingleMessageInitiations; // XEP-0353
     Forwarding                               forwarding;          // XEP-0297
     Message::Reactions                       reactions;           // XEP-0444
     QString                                  retraction;          // XEP-0424
@@ -1277,6 +1278,24 @@ void Message::setProcessingHints(const ProcessingHints &hints) { MessageD()->pro
 
 Message::ProcessingHints Message::processingHints() const { return d ? d->processingHints : ProcessingHints(); }
 
+const QList<Jingle::MessageInitiation> &Message::jingleMessageInitiations() const
+{
+    static const QList<Jingle::MessageInitiation> empty;
+    return d ? d->jingleMessageInitiations : empty;
+}
+
+void Message::addJingleMessageInitiation(const Jingle::MessageInitiation &initiation)
+{
+    if (initiation.isValid())
+        MessageD()->jingleMessageInitiations += initiation;
+}
+
+void Message::setJingleMessageInitiations(const QList<Jingle::MessageInitiation> &initiations)
+{
+    MessageD()->jingleMessageInitiations = initiations;
+}
+
+
 Stanza Message::toStanza(Stream *stream) const
 {
     if (!d) {
@@ -1542,6 +1561,13 @@ Stanza Message::toStanza(Stream *stream) const
         }
     }
 
+    // XEP-0353 Jingle Message Initiation
+    for (const auto &initiation : std::as_const(d->jingleMessageInitiations)) {
+        auto element = initiation.toXml(&s.doc());
+        if (!element.isNull())
+            s.appendChild(element);
+    }
+
     // XEP-0359: Unique and Stable Stanza IDs
     if (!d->originId.isEmpty()) {
         auto e = s.createElement(QStringLiteral("urn:xmpp:sid:0"), QStringLiteral("origin-id"));
@@ -1730,6 +1756,10 @@ bool Message::fromStanza(const Stanza &s, bool useTimeZoneOffset, int timeZoneOf
                 d->pubSubEvents += PubSubEvent(eventType, eventElement.attribute(QStringLiteral("node")), items,
                                                retractions, eventElement);
             }
+        } else if (e.namespaceURI() == Jingle::MessageInitiation::ns()) {
+            const auto initiation = Jingle::MessageInitiation::fromXml(e);
+            if (initiation.isValid())
+                d->jingleMessageInitiations += initiation;
         } else if (e.tagName() == QLatin1String("no-permanent-store")
                    && e.namespaceURI() == QLatin1String("urn:xmpp:hints")) {
             d->processingHints |= NoPermanentStore;

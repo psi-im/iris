@@ -22,6 +22,7 @@
 #include <iris/xmpp-im/xmpp_address.h>
 #include <iris/xmpp-im/xmpp_chatstate.h>
 #include <iris/xmpp-im/xmpp_file-sharing.h>
+#include <iris/xmpp-im/xmpp_jinglemessage.h>
 #include <iris/xmpp-im/xmpp_muc.h>
 #include <iris/xmpp-im/xmpp_receipts.h>
 #include <iris/xmpp-im/xmpp_reference.h>
@@ -208,6 +209,11 @@ public:
     QString          mucPassword() const;
     void             setMUCPassword(const QString &);
     bool             hasMUCUser() const;
+
+    // XEP-0353 Jingle Message Initiation
+    const QList<Jingle::MessageInitiation> &jingleMessageInitiations() const;
+    void addJingleMessageInitiation(const Jingle::MessageInitiation &initiation);
+    void setJingleMessageInitiations(const QList<Jingle::MessageInitiation> &initiations);
 
     // XEP-0359
     StanzaId stanzaId() const;
