@@ -1,6 +1,6 @@
 # Native Jingle calls: план продолжения для нового чата с Sol
 
-Актуализировано 2026-09-19. Это самостоятельное задание для продолжения существующей реализации, а не предложение спроектировать стек заново. Начать с проверки веток/коммитов через GitHub connector и CI evidence новых исправлений. Старые исправленные замечания не реализовывать повторно.
+Актуализировано 2026-09-20. Это самостоятельное задание для продолжения существующей реализации, а не предложение спроектировать стек заново. Начать с проверки веток/коммитов через GitHub connector и CI evidence новых исправлений. Старые исправленные замечания не реализовывать повторно.
 
 ## 1. Контекст, репозитории и границы достоверности
 
@@ -21,10 +21,10 @@ Checkout и установка dependencies внутри CI job допустим
 
 | Репозиторий | Рабочая ветка | HEAD snapshot 2026-09-19 |
 | --- | --- | --- |
-| psi-im/psi | ai/jingle-native-calls | `78dee48c396c7815ef78284ea545c0c103e1149a` |
-| psi-im/iris | jingle/async-media | `3f54620ec660ac93ed2ca4ffeb81e05a0006e3c1` |
+| psi-im/psi | ai/jingle-native-calls | `c6b6ac7df1167def8de65ef3c6facb5826d650cb` |
+| psi-im/iris | jingle/async-media | `8af85f489dc1cc196c7b95c1fa58f3f4a09ae4cd` |
 | psi-im/psimedia | jingle/rtcp-session | `2d067da46a70a74b1ccf91830c97b09a8c58713b` |
-| psi-im/psi | ci/psimedia-integration | `136af31dcaa64a7c3144fe3ed12e02f180d33a0b` |
+| psi-im/psi | ci/psimedia-integration | `4537a70cd50ed1a9db4d85fbae24ab3458e5f030` |
 
 HEAD здесь только snapshot, не pin для будущей работы. Перед любым write заново читать все четыре
 ветки. Исторические T0–T5/A3/A4 детали остаются в git history и профильных docs; этот план хранит
@@ -94,11 +94,16 @@ psimedia не владеет ICE/BUNDLE topology. Обе public wrapper copies P
 - `src/irisnet/noncore/sctp/` содержит заимствованную mediasoup SCTP implementation
   (см. его README). Не менять vendored core без доказанной необходимости; наш lifecycle/glue слой —
   Jingle SCTP/DataChannel/ICE integration вокруг него.
-- FT live baseline: two-process Prosody ICE→DTLS→SCTP transfer с deterministic bytes и SHA-256
-  прошёл в run #75. Расширенная matrix ICE/S5B/IBB + transport-replace находится в работе;
-  run #76 подтвердил ICE и выявил standalone S5B stall сразу после `Prepare local offer`.
-- P1c ещё не закрыт: нет server-mediated real Psi↔Psi native call и Conversations interop.
-  P2 live BUNDLE не объявлять завершённым раньше этого gate.
+- FT live matrix закрыта: real Prosody two-process ICE/S5B/IBB, ICE→S5B и S5B→IBB через
+  `transport-replace`, плюс truncated-source failure gate. FT payload completion отделён от
+  Connection transport tail: checksum/`<received/>` — signaling tail; SCTP/IBB/S5B close cleanup
+  не является условием application success после protocol confirmation.
+- Real server-mediated Psi↔Psi audio gate закрыт в Psi integration run #87 (`35475382811`), job
+  `xmpp-prosody-call` (`105983625438`): оба endpoint прошли ICE/DTLS/SRTP/Opus через настоящий
+  psimedia/GStreamer, получили по 622080 decoded bytes до hangup и завершились success. Exact Iris
+  checkout `8af85f489dc1cc196c7b95c1fa58f3f4a09ae4cd`, psimedia `2d067da46a70a74b1ccf91830c97b09a8c58713b`.
+- Conversations interop и real audio+video peer gate остаются открыты. P2 можно реализовывать и
+  тестировать в CI сейчас, но live BUNDLE нельзя объявлять interoperable до этих peer checks.
 
 Смежные документы: [архитектура](jingle.md), [RTP design](jingle-rtp-design.md),
 [interop status](jingle-calls-interop.md).
@@ -118,12 +123,12 @@ psimedia не владеет ICE/BUNDLE topology. Обе public wrapper copies P
 
 ### Текущие обязательные gates
 
-1. Довести live FT matrix: ICE, S5B, IBB отдельно; ICE→S5B и S5B→IBB через настоящий
-   `transport-replace`; затем drain/lifetime regressions для всех трёх transports.
-2. P1c: real server-mediated Psi↔Psi audio, затем A/V; consent/stop/no-device/runtime error.
-3. Pinned Conversations interoperability в обе стороны.
-4. Только затем P2 production live BUNDLE wiring существующих group/membership/router primitives.
-5. После wiring отдельно проверить multiple DataChannels on one SCTP association и mixed RTP+SCTP.
+1. P2 production live BUNDLE wiring существующих group/membership/router primitives: shared
+   association ownership, routing и removal/restart fencing; advertising остаётся выключенным до regressions.
+2. После wiring проверить audio+video на одной association, multiple DataChannels и mixed RTP+SCTP;
+   FT matrix обязана оставаться зелёной.
+3. P1c дополнить real audio+video Psi↔Psi gate и pinned Conversations interoperability в обе стороны.
+4. Только после shared-path regressions + peer evidence включать BUNDLE offer/advertising.
 
 ## 3. Архитектурные инварианты при дальнейшей работе
 
@@ -220,10 +225,12 @@ buffered tail читается полностью, и только после `F
 `session-terminate` — signaling event, а не универсальный приказ немедленно уничтожить все
 buffered data. Политика зависит от состава Session:
 
-- **File transfer only.** Нормальный `session-terminate success` должен обычно возникать автоматически
-  после успешного завершения всех FT applications/protocol confirmations. Если terminate приходит
-  раньше, это cancellation/failure: reason должен позволять отличить отмену/ошибку от успешного
-  окончания; уже принятые обязательные bytes нельзя терять только из-за signaling teardown.
+- **File transfer only.** `session-terminate success` после FT protocol completion — успех даже если
+  transport-specific Connection cleanup (SCTP stream reset, IBB/S5B close tail) ещё не завершён.
+  Для sender `<received/>` является application-level подтверждением получения файла; checksum и
+  `<received/>` могут жить после закрытия payload path как чистый Jingle signaling. Terminate до
+  обязательного FT protocol completion трактуется по reason/состоянию Application, а signaling
+  teardown не должен уничтожать уже принадлежащий transport owner buffered/closing Connection.
 - **RTP call only.** Hangup/`session-terminate` — естественное окончание звонка. Ждать draining
   media packets обычно не нужно; capture/writers можно revoke немедленно, затем deterministic cleanup.
 - **Mixed RTP + DataChannel/FT.** Самый опасный случай. Terminating RTP content/call не должен
@@ -603,9 +610,10 @@ Performance измерять отдельно: media encoding CPU, SRTP packet p
 
 Начать с remote heads и CI evidence через connector. Checkpoints T0–T5, Psi audio adapter,
 psimedia RTP/RTCP bridge и A3/A4 source lifecycle уже опубликованы; не реализовывать их повторно.
-Следующие gates: довести live FT transport matrix и drain semantics, затем P1c native peer checks.
-После P1c подключить существующие group/membership/router primitives к production live BUNDLE;
-не перепроектировать их заново. P3 JMI, P4 feedback/control, P5 recovery и P6 release выполнять
+Live FT matrix/drain semantics и real Psi↔Psi audio gate уже закрыты CI evidence. Следующий
+implementation gate — подключить существующие group/membership/router primitives к production live
+BUNDLE, не перепроектируя их заново; advertising держать выключенным до shared-path regressions.
+Real A/V Psi↔Psi и pinned Conversations interop остаются peer gates. P3 JMI, P4 feedback/control, P5 recovery и P6 release выполнять
 по зависимостям наблюдённого peer.
 
 Каждый завершённый подпункт сопровождать:
