@@ -87,7 +87,8 @@ private:
     static void    noteSsrc(const QHash<quint32, int> &mapping, quint32 ssrc, QSet<int> &routes);
 
     std::optional<ParsedRtp>    parseRtp(const QByteArray &packet) const;
-    bool                        collectRtcpRoutes(const QByteArray &packet, QSet<int> &routes) const;
+    bool                        collectRtcpRoutes(const QByteArray &packet, QSet<int> &routes,
+                                                  bool &unresolvedTarget) const;
     bool                        payloadAllowed(int routeIndex, quint8 payloadType) const;
     std::optional<RoutedPacket> routed(int routeIndex, const QByteArray &packet, SrtpContext::Packet kind);
     std::optional<RoutedPacket> routedSharedRtcp(const QSet<int> &routeIndexes, const QByteArray &packet);

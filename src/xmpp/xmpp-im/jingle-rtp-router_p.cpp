@@ -364,8 +364,20 @@ std::optional<BundleRouter::ParsedRtp> BundleRouter::parseRtp(const QByteArray &
     return result;
 }
 
-bool BundleRouter::collectRtcpRoutes(const QByteArray &packet, QSet<int> &routes) const
+bool BundleRouter::collectRtcpRoutes(const QByteArray &packet, QSet<int> &routes, bool &unresolvedTarget) const
 {
+    unresolvedTarget = false;
+    auto noteLocalTarget = [this, &routes, &unresolvedTarget](quint32 ssrc) {
+        if (!ssrc)
+            return;
+        const auto route = localSsrcRoutes_.constFind(ssrc);
+        if (route == localSsrcRoutes_.cend()) {
+            unresolvedTarget = true;
+            return;
+        }
+        routes.insert(route.value());
+    };
+
     int offset = 0;
     while (offset < packet.size()) {
         if (offset + 4 > packet.size())
@@ -397,7 +409,7 @@ bool BundleRouter::collectRtcpRoutes(const QByteArray &packet, QSet<int> &routes
                 return false;
             noteSsrc(incomingSsrcRoutes_, read32(packet, offset + 4), routes);
             for (int i = 0; i < count; ++i)
-                noteSsrc(localSsrcRoutes_, read32(packet, offset + 28 + i * 24), routes);
+                noteLocalTarget(read32(packet, offset + 28 + i * 24));
             break;
         }
         case 201: { // Receiver Report
@@ -405,7 +417,7 @@ bool BundleRouter::collectRtcpRoutes(const QByteArray &packet, QSet<int> &routes
                 return false;
             noteSsrc(incomingSsrcRoutes_, read32(packet, offset + 4), routes);
             for (int i = 0; i < count; ++i)
-                noteSsrc(localSsrcRoutes_, read32(packet, offset + 8 + i * 24), routes);
+                noteLocalTarget(read32(packet, offset + 8 + i * 24));
             break;
         }
         case 202: { // SDES
@@ -456,7 +468,7 @@ bool BundleRouter::collectRtcpRoutes(const QByteArray &packet, QSet<int> &routes
             if (payloadEnd - offset < 12)
                 return false;
             noteSsrc(incomingSsrcRoutes_, read32(packet, offset + 4), routes);
-            noteSsrc(localSsrcRoutes_, read32(packet, offset + 8), routes);
+            noteLocalTarget(read32(packet, offset + 8));
             break;
         case 207: // XR
             if (payloadEnd - offset < 8)
@@ -578,15 +590,23 @@ std::optional<BundleRouter::RoutedPacket> BundleRouter::routeIncoming(const QByt
     }
 
     QSet<int> routes;
-    if (!collectRtcpRoutes(packet, routes)) {
+    bool      unresolvedTarget = false;
+    if (!collectRtcpRoutes(packet, routes, unresolvedTarget)) {
         lastError_ = Error::MalformedPacket;
         return {};
     }
+    // Report/media SSRCs refer to our own producers. If one is explicitly
+    // present but no longer belongs to this association, never reassign that
+    // packet to a surviving member after BUNDLE membership changes.
+    if (unresolvedTarget) {
+        lastError_ = Error::UnknownRoute;
+        return {};
+    }
     if (routes.isEmpty()) {
-        // On a dedicated SRTP association there is no demultiplexing ambiguity:
-        // RTCP such as an empty Receiver Report can legitimately mention only a
-        // previously unseen sender SSRC. Shared BUNDLE associations must still
-        // fail closed unless the packet itself identifies a content.
+        // On a dedicated SRTP association there is no demultiplexing ambiguity
+        // for sender-only RTCP such as an empty Receiver Report. Shared BUNDLE
+        // associations must still fail closed unless the packet identifies a
+        // content.
         if (routes_.size() == 1)
             return routed(0, packet, kind);
         lastError_ = Error::UnknownRoute;

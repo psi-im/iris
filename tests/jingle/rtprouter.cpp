@@ -372,6 +372,13 @@ int main(int argc, char **argv)
               && dynamic.lastError() == BundleRouter::Error::UnknownRoute,
           "removed member retained an RTCP route");
 
+    auto learnedAudio = dynamic.routeIncoming(rtp(0x77770000, {}, 1, false, AudioPt), SrtpContext::Packet::Rtp);
+    check(learnedAudio && learnedAudio->content == dynamicAudio.content,
+          "survivor sender-learning setup failed");
+    check(!dynamic.routeIncoming(receiverReport(0x77770000, VideoLocal), SrtpContext::Packet::Rtcp)
+              && dynamic.lastError() == BundleRouter::Error::UnknownRoute,
+          "known survivor sender overrode an unresolved removed target");
+
     // Registering a source that is also present in signaling must still create
     // runtime ownership. Otherwise removing the static declaration on a later
     // reconfigure silently loses RTCP routing for the live sender.
