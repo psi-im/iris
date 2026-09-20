@@ -21,6 +21,7 @@
 #include "jingle-sctp-association_p.h"
 
 #include <QtEndian>
+#include <QTimer>
 
 #include <cstring>
 #include <limits>
@@ -123,7 +124,10 @@ namespace XMPP { namespace Jingle { namespace SCTP {
         if (datagrams.size()) {
             auto dg = datagrams.takeFirst();
             _bytesAvailable -= dg.data().size();
-            finishCloseIfDrained();
+            // Do not emit connectionClosed synchronously from inside readDatagram():
+            // the caller has not yet accounted the returned bytes. Defer the drain
+            // edge to the event loop so application state observes the payload first.
+            QTimer::singleShot(0, this, [this]() { finishCloseIfDrained(); });
             return dg;
         }
         finishCloseIfDrained();
@@ -166,7 +170,9 @@ namespace XMPP { namespace Jingle { namespace SCTP {
             sz -= dataSz;
         } while (sz > 0 && !datagrams.isEmpty());
         _bytesAvailable -= actualSz;
-        finishCloseIfDrained();
+        // read() has the same ordering requirement as readDatagram(): closure
+        // notification must not overtake accounting of the bytes being returned.
+        QTimer::singleShot(0, this, [this]() { finishCloseIfDrained(); });
         // qDebug("read %lld bytes. more %lld is available", actualSz, _bytesAvailable);
         return actualSz;
     }
