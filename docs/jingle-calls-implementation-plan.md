@@ -22,7 +22,7 @@ Checkout и установка dependencies внутри CI job допустим
 | Репозиторий | Рабочая ветка | HEAD snapshot 2026-09-19 |
 | --- | --- | --- |
 | psi-im/psi | ai/jingle-native-calls | `c6b6ac7df1167def8de65ef3c6facb5826d650cb` |
-| psi-im/iris | jingle/async-media | `8af85f489dc1cc196c7b95c1fa58f3f4a09ae4cd` |
+| psi-im/iris | jingle/async-media | `9985f52d573176a7b3be9c40fdbf6911a3f4e7f1` |
 | psi-im/psimedia | jingle/rtcp-session | `2d067da46a70a74b1ccf91830c97b09a8c58713b` |
 | psi-im/psi | ci/psimedia-integration | `4537a70cd50ed1a9db4d85fbae24ab3458e5f030` |
 
@@ -75,23 +75,23 @@ psimedia не владеет ICE/BUNDLE topology. Обе public wrapper copies P
 
 ### Где заканчивается текущая реализация
 
-- Production `ICE::Pad::connectionFor(Transport*)` пока создаёт отдельный `IceConnection` на
-  каждый Transport. **Это недостающий production wiring, а не отсутствие BUNDLE design/tests.**
-- Исторически master с 2020 года мог автоматически сигналить `<group semantics='BUNDLE'>`, но
-  каждый ICE Transport всё равно имел собственные ICE/components/DTLS/SCTP. Это было grouping
-  signaling без реального shared network path.
-- 2026-09-10 commit `874a3a6b...` при RTP refactor намеренно перестал автоматически рекламировать
-  BUNDLE при независимых connections.
-- 2026-09-11 появились `ConnectionMembership`, session-local `ConnectionRegistry`,
-  `GroupPlan` и transactional `ConnectionGroupTransaction` с tests; 2026-09-11/12 —
-  authenticated `BundleRouter` и hardened routing contract. Эти primitives должны быть
-  **подключены**, а не перепроектированы.
-- На feature branch `jingle/async-media` grouping/BUNDLE capability можно рекламировать для CI/live interop,
-  чтобы тестировать production negotiation path. Перенос advertising в master/release остаётся gated на
-  removal/restart, mixed RTP+SCTP, DataChannel и peer interop regressions.
-- DataChannel/SCTP естественно позволяет нескольким file-transfer streams делить одну association;
-  текущий per-Transport IceConnection это не использует. После live BUNDLE одна association должна
-  обслуживать несколько DataChannel connections без закрытия соседних streams.
+- Production RTP/BUNDLE wiring теперь подключён: negotiated BUNDLE members получают одну session-local
+  `IceConnection` через `ConnectionRegistry`/`ConnectionGroupTransaction`, при этом per-content
+  `Transport` остаются отдельными signaling owners.
+- Инициаторский regression проходит реальный production signaling boundary:
+  `session-initiate` serialization + IQ result → `session-accept` XML parser → negotiated BUNDLE →
+  partial/full `transport-replace`. Partial replacement отклоняется без mutation; full replacement
+  создаёт новую shared association и атомарно retire-ит предыдущую, не выставляя две live associations.
+- Replacement preparation идёт через обычный RTP `prepareTransport()`; тест больше не вызывает
+  `groupedConnectionFor()` для replacement вручную. SRTP/DTLS callbacks привязаны к transport incarnation,
+  поэтому teardown старой association после `setTransport()` не может завершить уже переключённый RTP content.
+- Feature branch рекламирует grouping/BUNDLE для CI. Master/release advertising всё ещё gated на
+  active-call restart/migration, member removal, mixed RTP+SCTP/multiple DataChannels и peer interop.
+- Active RTP migration ещё намеренно не заявлена: `RTP::Application::isTransportReplaceEnabled()`
+  запрещает replacement начиная с `Connecting`. Не снимать guard, пока не определены media/SRTP migration
+  semantics для уже работающего звонка.
+- DataChannel/SCTP должен уметь делить одну association между несколькими streams/members; этот mixed path,
+  независимое закрытие stream и сохранение соседних streams остаются отдельным P2 gate.
 - `src/irisnet/noncore/sctp/` содержит заимствованную mediasoup SCTP implementation
   (см. его README). Не менять vendored core без доказанной необходимости; наш lifecycle/glue слой —
   Jingle SCTP/DataChannel/ICE integration вокруг него.
@@ -119,18 +119,23 @@ psimedia не владеет ICE/BUNDLE topology. Обе public wrapper copies P
 - A3/A4: capture source identity switch и hotplug/receive graph lifecycle.
 - P1a/P1b основа: semantic RTP/RTCP bridge, bounded queues, production provider path,
   no-device/stop/runtime-error regressions, real installed psimedia plugin smoke.
+- P2 RTP/BUNDLE baseline: real session-initiate/session-accept XML negotiation, one shared ICE/DTLS/SRTP
+  association for negotiated audio+video, atomic full-BUNDLE transport replacement, partial-replace rejection
+  and stale SRTP callback fencing are covered by Jingle regressions.
 - FT baseline: feature-driven ICE → S5B → IBB selection regression; real Prosody SCTP/datachannel
   transfer через два процесса. Детали и старые SHA остаются в git/interop docs.
 
 ### Текущие обязательные gates
 
-1. P2 production live BUNDLE wiring существующих group/membership/router primitives: shared
-   association ownership, routing и removal/restart fencing; feature-branch advertising разрешён для тестов,
-   но master/release advertising остаётся gated до regressions.
-2. После wiring проверить audio+video на одной association, multiple DataChannels и mixed RTP+SCTP;
-   FT matrix обязана оставаться зелёной.
-3. P1c дополнить real audio+video Psi↔Psi gate и pinned Conversations interoperability в обе стороны.
-4. Только после shared-path regressions + peer evidence переносить BUNDLE offer/advertising из feature branch в master/release.
+1. Закрыть caps-driven selection matrix для RTP: advertised RTP + совместимый ICE выбирается; advertised RTP
+   + IBB-only/S5B-only/no transport capability fail closed. Отдельно зафиксировать policy для missing RTP media,
+   DTLS и grouping caps — не угадывать Conversations behavior без fixture/interop evidence.
+2. Довести P2 shared path после уже работающего RTP/BUNDLE wiring: active-call ICE restart/migration,
+   member removal, multiple DataChannels и mixed RTP+SCTP; FT matrix обязана оставаться зелёной.
+3. Довести `Finishing`/Connection lifetime contract на IBB/S5B/SCTP: application payload completion не
+   уничтожает Connection до transport-specific async tail/peer-close/drain.
+4. P1c дополнить real audio+video Psi↔Psi gate и pinned Conversations interoperability в обе стороны.
+5. Только после shared-path regressions + peer evidence переносить BUNDLE offer/advertising из feature branch в master/release.
 
 ## 3. Архитектурные инварианты при дальнейшей работе
 
@@ -163,6 +168,24 @@ psimedia не владеет ICE/BUNDLE topology. Обе public wrapper copies P
   per-content/per-action.
 - Для DataChannel одна SCTP association может обслуживать много `Connection`/streams. Закрытие или
   draining одного файла не завершает association, если другие streams/members ещё живы.
+
+### Caps-driven RTP/transport selection
+
+Caps отвечают на два разных вопроса и их нельзя смешивать:
+
+- application/media capability: peer действительно объявляет поддерживаемый RTP profile/media;
+- transport capability: среди transport whitelist данного RTP backend есть namespace, который peer объявил.
+
+Текущий packet-oriented RTP backend использует ICE; наличие RTP/audio в caps не делает IBB или S5B
+совместимым RTP transport. Поэтому RTP+IBB-only, RTP+S5B-only и RTP без transport capability должны
+fail closed, а не подбирать generic byte-stream transport. Это особенно важно, даже если будущие AI
+audio codecs будут иметь достаточно малый bitrate для IBB: такой transport должен появиться только как
+явно реализованный RTP backend/profile, а не как побочный эффект generic selector.
+
+Negative matrix расширять независимо от BUNDLE. Missing DTLS, grouping и media-specific caps требуют
+отдельного policy/interop решения: сначала зафиксировать ожидаемый profile по Conversations/спецификации,
+потом кодировать fail/accept behavior. Не использовать отсутствие одного optional feature как повод
+ослабить security или молча downgrade-нуть транспорт.
 
 ### `Finishing`: drain boundary, а не универсальный смысл
 
@@ -613,9 +636,12 @@ Performance измерять отдельно: media encoding CPU, SRTP packet p
 
 Начать с remote heads и CI evidence через connector. Checkpoints T0–T5, Psi audio adapter,
 psimedia RTP/RTCP bridge и A3/A4 source lifecycle уже опубликованы; не реализовывать их повторно.
-Live FT matrix/drain semantics и real Psi↔Psi audio gate уже закрыты CI evidence. Следующий
-implementation gate — подключить существующие group/membership/router primitives к production live
-BUNDLE, не перепроектируя их заново; feature-branch advertising использовать для CI/interop, а master/release держать gated до shared-path regressions.
+Live FT matrix/drain semantics и real Psi↔Psi audio gate уже закрыты CI evidence. RTP production
+BUNDLE wiring и atomic pre-Connecting replacement также закрыты regression evidence; не возвращаться к
+per-content ICE association и не строить replacement fixture через ручные internal mutators.
+Следующий implementation gate — caps-driven RTP/transport negative matrix, затем remaining P2
+active-call restart/removal/mixed RTP+SCTP/DataChannel и Connection finishing ownership.
+Feature-branch advertising использовать для CI/interop, а master/release держать gated до shared-path regressions.
 Real A/V Psi↔Psi и pinned Conversations interop остаются peer gates. P3 JMI, P4 feedback/control, P5 recovery и P6 release выполнять
 по зависимостям наблюдённого peer.
 
