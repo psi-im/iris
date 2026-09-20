@@ -1,8 +1,8 @@
 # Native RTP, asynchronous media and DTLS-SRTP
 
-This document describes the RTP integration reviewed at Iris `be3833e`, Psi `c8821dbe` /
-psimedia `b4139cbd`, with the direction-arbitration update reviewed at Iris `fb7678d`.
-It is implementation documentation,
+This document describes the current native RTP implementation on `jingle/async-media` as of
+2026-09-20. Historical review SHAs and live-peer evidence are recorded in
+[jingle-calls-interop.md](jingle-calls-interop.md). It is implementation documentation,
 not a development roadmap. [Jingle architecture](jingle.md) describes the generic signaling
 and file-transfer lifecycle. Media capture, codecs, playback, device policy and RTP generation
 remain outside Iris.
@@ -12,16 +12,17 @@ remain outside Iris.
 | Layer | Implemented in Iris | Boundary |
 | --- | --- | --- |
 | RTP signaling | Description, initial offer/answer, prepared answers, session-info, incoming direction/advisory updates | No complete dynamic codec/track renegotiation |
-| Media integration | Provider/session/endpoint interfaces, serialized asynchronous operations, cancellation, deadlines | External backend; Iris tests use mock media |
-| Transport | Custom `ice:0` and standard `ice-udp:1` wire profiles on the existing ICE implementation | One production network connection per Transport |
+| Media integration | Provider/session/endpoint interfaces, serialized asynchronous operations, cancellation, deadlines | External backend; Iris unit/integration tests use mock media, while cross-repo gates exercise real psimedia |
+| Transport | Custom `ice:0` and standard `ice-udp:1` wire profiles on the existing ICE implementation | Per-content Transport signaling; negotiated BUNDLE members may share one session-local IceConnection |
 | Security | QCA DTLS verification/export and optional libSRTP RTP/SRTCP | No plaintext fallback for packet-capable RTP |
-| Grouping | Session grouping snapshots and standalone transactional group/membership models | Models do not drive production shared transport |
-| Routing | Standalone authenticated BundleRouter, PT/MID/SSRC validation and shared RTCP result | Not connected to the production RTP Application packet path |
-| Interoperability | Synthetic signaling and local UDP/DTLS/SRTP regressions | No live peer call is established by these tests |
+| Grouping | Session grouping snapshots plus transactional group/membership models wired into ICE::Pad | Initial negotiated BUNDLE and full-group pre-Connecting replacement are implemented; active-call migration/removal still have separate gates |
+| Routing | Authenticated BundleRouter wired into RTP::Pad per SrtpSession ingress | Per-content RTP/RTCP routing is live; SharedRtcp still lacks group-level media ingress |
+| Interoperability | Local UDP/DTLS/SRTP, negotiated-BUNDLE regressions and server-mediated Psi↔Psi audio | No Conversations result or external live BUNDLE peer result is claimed |
 
-Creating or advertising a grouping object does not enable BUNDLE. The ICE Pad does not
-automatically advertise a shared connection. JMI and group-coordinated transport recovery
-are not supplied by the code described here.
+Advertising the grouping capability alone still does not force BUNDLE: the peer answer must
+negotiate a compatible group and every member must support sharing. Once negotiated, ICE::Pad
+uses the session-local group registry to bind members to a shared association. JMI and
+active-call group-coordinated recovery remain separate work.
 
 ## Object and ownership model
 
@@ -47,17 +48,20 @@ flowchart TD
     A --> OP[Owned MediaOperation handles]
     OP -. cancel / operation ID .-> MS
     A --> T[Per-content Transport]
-    T --> IC[Per-transport IceConnection]
+    T --> IP[Session-local ICE Pad]
+    IP --> CR[ConnectionRegistry / group transaction]
+    CR --> IC[Standalone or shared IceConnection]
     IC --> D[QCA-backed Dtls]
     IC --> SS[SrtpSession]
     D -->|verified keys| SS
-    SS -->|authenticated packets| A
+    SS --> BR[BundleRouter ingress]
+    BR -->|authenticated routed packets| A
     A -->|receivePacket / PacketWriter| E
 ```
 
-This is the current production topology, not the proposed shared BUNDLE topology.
-The generic byte/datagram `Connection` API used by file transfer is separate from RTP's
-`PacketTransport` interface.
+Per-content `Transport` objects keep signaling and replacement identity even when several
+BUNDLE members share one `IceConnection`/DTLS/SRTP association. The generic byte/datagram
+`Connection` API used by file transfer is separate from RTP's `PacketTransport` interface.
 
 ## Descriptions and initial negotiation
 
@@ -189,9 +193,12 @@ Signaling-only endpoints do not become Active merely because their transport is 
 transport implementation. This is not a second ICE agent. `NSTransportsList` selects the
 available profile rather than requiring the peer to advertise every manager namespace.
 
-Production `ICE::Pad::connectionFor(Transport*)` maintains a weak transport-to-connection map.
-Each Transport has its own reference-counted IceConnection. Some callbacks and signaling state
-still depend on that Transport; no live group-sharing registry is used here.
+Production `ICE::Pad` owns a session-local `ConnectionRegistry`. Independent contents obtain
+their own membership, while negotiated BUNDLE contents are staged through
+`ConnectionGroupTransaction` and resolve through `groupedConnectionFor()` to one shared
+`IceConnection`. Transport objects remain per-content and retain signaling/generation identity.
+A full negotiated BUNDLE replacement stages a fresh group and switches ownership atomically only
+after every member has bound; the old association is then retired.
 
 For packet-capable RTP, `PacketTransport::enableRtpMux()` selects the one-component authenticated
 RTP/RTCP path. The answer must accept rtcp-mux; an incompatible answer does not enable raw RTP.
@@ -230,21 +237,20 @@ coexist. SRTP unavailability must not be equated with plain DTLS/SCTP unavailabi
 
 ## Group and routing components
 
-These are implemented private components, **not production shared-transport wiring**:
+These private components now participate in the production shared RTP path:
 
 | Component | Current responsibility |
 | --- | --- |
 | Session grouping snapshots | Ordered proposals and validated initial peer grouping |
-| `GroupNegotiation::initialPlan()` | Pure initial association plan from members, groups and optional transport snapshots |
+| `GroupNegotiation::initialPlan()` | Pure association plan from members and negotiated groups |
 | `GroupPlan::readyToCommit()` | Distinguishes preflight from a plan with required transport parameters |
-| `ConnectionRegistry` / `ConnectionMembership` | Association identity and explicit member lifetime |
-| `ConnectionGroupTransaction` | Acquires owner/member handles transactionally; releases acquired handles on failure |
-| `BundleRouter` | Routes already authenticated packets against an explicit route table |
+| `ConnectionRegistry` / `ConnectionMembership` | Session-local association identity and explicit member lifetime |
+| `ConnectionGroupTransaction` | Transactional initial BUNDLE commit and staged full-group replacement |
+| `BundleRouter` | Routes authenticated RTP/RTCP for every content sharing one SrtpSession |
 
 Group planning checks content identity, sharing support, namespaces and supplied transport
-parameter compatibility. These checks must not be mistaken for production Session committing
-network groups: current Session grouping validation and ICE connection allocation are separate.
-ICE generation, security epoch and route revision are distinct state.
+parameter compatibility before ICE ownership is committed. ICE generation, security epoch,
+transport-replace generation and route revision remain distinct state and are fenced separately.
 
 BundleRouter uses MID, then known incoming SSRC, then globally unique PT fallback. The selected
 content must allow the PT. It validates RTP header/CSRC/extension/padding bounds. Learning and
@@ -261,9 +267,15 @@ It neither splits nor broadcasts the packet. Unknown or malformed routing input 
 Support for a packet-type case is not exhaustive parsing of every feedback FCI or XR report
 block. Consumers need an explicit policy for those additional source references.
 
-No production Application currently consumes SharedRtcp or gets a per-content channel from a
-shared association. A client cannot turn this into working BUNDLE simply by setting groups.
-The existing single-transport stop path also cannot serve as shared-member release.
+RTP Applications bind their negotiated descriptions into the Pad-owned `BundleRouter` keyed by
+the actual `SrtpSession`. Ordinary authenticated RTP/RTCP is delivered to the selected content,
+so negotiated audio/video members can share one association without sharing one Transport object.
+
+`BundleRouter::Delivery::SharedRtcp` is the remaining routing exception: a compound RTCP packet
+that legitimately spans multiple BUNDLE contents is recognized, but the current psimedia API has
+no group-level RTCP ingress and Iris intentionally drops that delivery rather than duplicating it
+to per-content inputs. This must be resolved before claiming complete live multi-content BUNDLE.
+Member removal and active-call shared-association restart also remain separate lifecycle gates.
 
 ## Signaling and runtime capabilities
 
@@ -322,8 +334,9 @@ transitions are excluded from this rebuild condition and must not be treated as 
 capture-switch guarantee. Audio-only sender regression checks late attach/detach/reattach
 RTP, not physical source closure or uninterrupted video/receive playback.
 
-Production bridge wiring is therefore implemented, while complete hotplug/privacy, recovery,
-timing and live interoperability validation remain separate gates. Live BUNDLE is still absent.
+Production bridge wiring and negotiated RTP BUNDLE are implemented, while complete hotplug/privacy,
+recovery, SharedRtcp media ingress, active-call shared-association migration and external BUNDLE
+interoperability remain separate gates.
 
 DTLS fingerprint/setup negotiation is carried in transport descriptions. A generic
 security-info handler is not a prerequisite for that path. Transport replacement for an RTP
@@ -342,9 +355,10 @@ ownership, RTP negotiation/prepared answers, media operations, application/runti
 subset acceptance, routing, SRTP and transport ACK regressions.
 
 With system QCA3 and SRTP enabled it also includes loopback ICE/SRTP and mock-media packet
-tests in both ICE wire profiles. DTLS tests cover verified keys and, when SCTP is enabled,
-DTLS application data/data channels alongside SRTP contexts. These tests do not validate
-NAT/TURN deployment, actual encoded media, BUNDLE runtime or Conversations.
+tests in both ICE wire profiles, plus shared BUNDLE ICE/media/signaling regressions. DTLS tests
+cover verified keys and, when SCTP is enabled, DTLS application data/data channels alongside
+SRTP contexts. These tests do not validate NAT/TURN deployment, an external BUNDLE peer or
+Conversations; actual encoded media is covered by separate cross-repo psimedia gates.
 
 Read [interop status](jingle-calls-interop.md) for test scope/results and
 [the implementation plan](jingle-calls-implementation-plan.md) for remaining work.
@@ -358,8 +372,9 @@ Paths below are relative to `src/xmpp/xmpp-im` unless stated otherwise.
 - `jingle-rtp-media.cpp`: serialized operations and deadlines.
 - `jingle-rtp-description.*`, `jingle-rtp-negotiation.*`, `jingle-rtp-info.*`: XML and negotiation.
 - `jingle-rtp-srtp.*`: PacketTransport, capability probe and SRTP binding.
-- `jingle-rtp-router_p.*`: standalone authenticated router.
-- `jingle-group-negotiation_p.h`, `jingle-ice-group_p.h`: group planning/commit model.
+- `jingle-rtp-router_p.*`: authenticated RTP/RTCP router used by the production RTP Pad.
+- `jingle-group-negotiation_p.h`, `jingle-ice-group_p.h`: production group planning,
+  membership registry and transactional BUNDLE commit/replacement model.
 - `jingle-ice-connection_p.h`, `jingle-ice.*`: resources and production transport.
 - `jingle-ice-udp.*`: standard transport wire codec.
 - `src/irisnet/noncore/dtls.*`: QCA wrapper and authentication gate.
