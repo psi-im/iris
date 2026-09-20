@@ -38,6 +38,7 @@ public:
     QString            id;
     QUrl               uri;
     QList<Meta>        meta;
+    QDomDocument       descriptionsDocument;
     QList<QDomElement> descriptions;
 };
 
@@ -123,17 +124,36 @@ QList<JinglePub::Meta> JinglePub::meta() const { return d ? d->meta : QList<Meta
 void                   JinglePub::setMeta(const QList<Meta> &meta) { ensureD()->meta = meta; }
 void                   JinglePub::addMeta(const Meta &meta) { ensureD()->meta.append(meta); }
 QList<QDomElement>     JinglePub::descriptions() const { return d ? d->descriptions : QList<QDomElement>(); }
-void JinglePub::setDescriptions(const QList<QDomElement> &descriptions) { ensureD()->descriptions = descriptions; }
-void JinglePub::addDescription(const QDomElement &description) { ensureD()->descriptions.append(description); }
+
+void JinglePub::setDescriptions(const QList<QDomElement> &descriptions)
+{
+    auto data = ensureD();
+    data->descriptions.clear();
+    data->descriptionsDocument = QDomDocument();
+    for (const auto &description : descriptions) {
+        const auto imported = data->descriptionsDocument.importNode(description, true).toElement();
+        if (!imported.isNull())
+            data->descriptions.append(imported);
+    }
+}
+
+void JinglePub::addDescription(const QDomElement &description)
+{
+    if (description.isNull())
+        return;
+    auto       data     = ensureD();
+    const auto imported = data->descriptionsDocument.importNode(description, true).toElement();
+    if (!imported.isNull())
+        data->descriptions.append(imported);
+}
 
 void JinglePub::addDescription(const QString &applicationNamespace)
 {
     if (applicationNamespace.isEmpty())
         return;
-    QDomDocument doc;
-    auto         element = doc.createElementNS(applicationNamespace, QStringLiteral("description"));
-    doc.appendChild(element);
-    ensureD()->descriptions.append(element);
+    auto data    = ensureD();
+    auto element = data->descriptionsDocument.createElementNS(applicationNamespace, QStringLiteral("description"));
+    data->descriptions.append(element);
 }
 
 bool JinglePub::fromXml(const QDomElement &element)
@@ -169,7 +189,9 @@ bool JinglePub::fromXml(const QDomElement &element)
             parsed.meta.append(meta);
         } else if (child.localName() == QLatin1String("description") && child.namespaceURI() != JINGLEPUB_NS
                    && !child.namespaceURI().isEmpty()) {
-            parsed.descriptions.append(child);
+            const auto imported = parsed.descriptionsDocument.importNode(child, true).toElement();
+            if (!imported.isNull())
+                parsed.descriptions.append(imported);
         }
     }
     if (parsed.descriptions.isEmpty())
