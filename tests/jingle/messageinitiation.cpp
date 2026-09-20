@@ -46,6 +46,7 @@ int main(int argc, char **argv)
                 "<future xmlns='urn:iris:test' value='opaque'/>"
                 "</description>"
                 "<description xmlns='urn:xmpp:jingle:apps:rtp:1' media='video'/>"
+                "<description xmlns='urn:example:jingle:application' custom='opaque'/>"
                 "<vendor xmlns='urn:iris:vendor' flag='1'/>"
                 "</propose>"),
             &source);
@@ -54,11 +55,15 @@ int main(int argc, char **argv)
         check(initiation.isValid(), "valid JMI propose was rejected");
         check(initiation.action() == J::MessageInitiation::Action::Propose, "propose action was not parsed");
         check(initiation.id() == QStringLiteral("call-1"), "propose id was not parsed");
-        check(initiation.descriptions().size() == 2, "propose descriptions were not preserved");
-        check(initiation.descriptions().at(0).ns == QStringLiteral("urn:xmpp:jingle:apps:rtp:1"),
+        check(initiation.descriptions().size() == 3, "propose descriptions were not preserved");
+        check(initiation.descriptions().at(0).namespaceURI() == QStringLiteral("urn:xmpp:jingle:apps:rtp:1"),
               "description namespace was not preserved");
-        check(initiation.descriptions().at(0).media == QStringLiteral("audio"),
-              "description media was not preserved");
+        check(initiation.descriptions().at(0).attribute(QStringLiteral("media")) == QStringLiteral("audio"),
+              "RTP-specific description attributes were not preserved");
+        check(initiation.descriptions().at(2).namespaceURI() == QStringLiteral("urn:example:jingle:application"),
+              "non-RTP description namespace was not preserved");
+        check(initiation.descriptions().at(2).attribute(QStringLiteral("custom")) == QStringLiteral("opaque"),
+              "non-RTP description attributes were not preserved");
         check(initiation.extensions().size() == 1, "unknown JMI extension was not preserved");
 
         source = QDomDocument();
@@ -107,10 +112,9 @@ int main(int argc, char **argv)
     {
         Message message;
         J::MessageInitiation ringing(J::MessageInitiation::Action::Ringing, QStringLiteral("call-4"));
-        message.addJingleMessageInitiation(ringing);
-        check(message.jingleMessageInitiations().size() == 1,
-              "Message did not retain typed JMI payload");
-        check(message.jingleMessageInitiations().first().action() == J::MessageInitiation::Action::Ringing,
+        message.setJingleMessageInitiation(ringing);
+        check(message.jingleMessageInitiation().isValid(), "Message did not retain typed JMI payload");
+        check(message.jingleMessageInitiation().action() == J::MessageInitiation::Action::Ringing,
               "Message changed typed JMI action");
     }
 

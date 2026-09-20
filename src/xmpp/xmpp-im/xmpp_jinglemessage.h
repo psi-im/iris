@@ -13,12 +13,12 @@
 
 #include <iris/iris_export.h>
 
-#include <QByteArray>
+#include <QDomElement>
 #include <QList>
+#include <QSharedDataPointer>
 #include <QString>
 
 class QDomDocument;
-class QDomElement;
 
 namespace XMPP { namespace Jingle {
 
@@ -26,19 +26,11 @@ class IRIS_EXPORT MessageInitiation {
 public:
     enum class Action { None, Propose, Ringing, Proceed, Reject, Retract, Finish };
 
-    struct Description {
-        QString    ns;
-        QString    media;
-        QByteArray xml;
-
-        bool operator==(const Description &other) const
-        {
-            return ns == other.ns && media == other.media && xml == other.xml;
-        }
-    };
-
     MessageInitiation();
     MessageInitiation(Action action, const QString &id);
+    MessageInitiation(const MessageInitiation &);
+    MessageInitiation &operator=(const MessageInitiation &);
+    ~MessageInitiation();
 
     static const QString &ns();
     static MessageInitiation fromXml(const QDomElement &element);
@@ -47,10 +39,12 @@ public:
     Action  action() const;
     QString id() const;
 
-    const QList<Description> &descriptions() const;
-    void addDescription(const QString &descriptionNs, const QString &media = QString(),
-                        const QByteArray &xml = QByteArray());
-    void setDescriptions(const QList<Description> &descriptions);
+    // JMI is application-agnostic. Each description is preserved as the
+    // original foreign-namespace XML and owned by this value object.
+    QList<QDomElement> descriptions() const;
+    void setDescriptions(const QList<QDomElement> &descriptions);
+    void addDescription(const QDomElement &description);
+    void addDescription(const QString &applicationNamespace);
 
     QString reasonCondition() const;
     QString reasonText() const;
@@ -62,20 +56,16 @@ public:
     QString migratedTo() const;
     void setMigratedTo(const QString &id);
 
-    const QList<QByteArray> &extensions() const;
-    void addExtension(const QByteArray &xml);
+    QList<QDomElement> extensions() const;
+    void addExtension(const QDomElement &element);
 
     QDomElement toXml(QDomDocument *doc) const;
 
 private:
-    Action             action_ = Action::None;
-    QString            id_;
-    QList<Description> descriptions_;
-    QString            reasonCondition_;
-    QString            reasonText_;
-    bool               tieBreak_ = false;
-    QString            migratedTo_;
-    QList<QByteArray>  extensions_;
+    class Private;
+    Private *ensureD();
+
+    QSharedDataPointer<Private> d;
 };
 
 }} // namespace XMPP::Jingle

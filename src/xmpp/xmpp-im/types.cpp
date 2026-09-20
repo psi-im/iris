@@ -757,7 +757,7 @@ public:
     QList<StatelessFileSharing::Sources>     attachedFileSources; // XEP-0447 / XEP-0367
     QString                                  attachToId;          // XEP-0367
     QList<Jingle::JinglePub>                 jinglePublications;  // XEP-0358
-    QList<Jingle::MessageInitiation>         jingleMessageInitiations; // XEP-0353
+    Jingle::MessageInitiation                jingleMessageInitiation;  // XEP-0353
     Forwarding                               forwarding;          // XEP-0297
     Message::Reactions                       reactions;           // XEP-0444
     QString                                  retraction;          // XEP-0424
@@ -1278,21 +1278,14 @@ void Message::setProcessingHints(const ProcessingHints &hints) { MessageD()->pro
 
 Message::ProcessingHints Message::processingHints() const { return d ? d->processingHints : ProcessingHints(); }
 
-const QList<Jingle::MessageInitiation> &Message::jingleMessageInitiations() const
+Jingle::MessageInitiation Message::jingleMessageInitiation() const
 {
-    static const QList<Jingle::MessageInitiation> empty;
-    return d ? d->jingleMessageInitiations : empty;
+    return d ? d->jingleMessageInitiation : Jingle::MessageInitiation();
 }
 
-void Message::addJingleMessageInitiation(const Jingle::MessageInitiation &initiation)
+void Message::setJingleMessageInitiation(const Jingle::MessageInitiation &initiation)
 {
-    if (initiation.isValid())
-        MessageD()->jingleMessageInitiations += initiation;
-}
-
-void Message::setJingleMessageInitiations(const QList<Jingle::MessageInitiation> &initiations)
-{
-    MessageD()->jingleMessageInitiations = initiations;
+    MessageD()->jingleMessageInitiation = initiation.isValid() ? initiation : Jingle::MessageInitiation();
 }
 
 
@@ -1562,8 +1555,8 @@ Stanza Message::toStanza(Stream *stream) const
     }
 
     // XEP-0353 Jingle Message Initiation
-    for (const auto &initiation : std::as_const(d->jingleMessageInitiations)) {
-        auto element = initiation.toXml(&s.doc());
+    if (d->jingleMessageInitiation.isValid()) {
+        auto element = d->jingleMessageInitiation.toXml(&s.doc());
         if (!element.isNull())
             s.appendChild(element);
     }
@@ -1692,6 +1685,7 @@ bool Message::fromStanza(const Stanza &s, bool useTimeZoneOffset, int timeZoneOf
     int          n;
     bool         hasBodyOrThread = false;
     bool         hasSubject      = false;
+    int          jmiElementCount = 0;
     for (QDomElement e = root.firstChildElement(); !e.isNull(); e = e.nextSiblingElement()) {
         if (e.namespaceURI() == s.baseNS()) {
             if (e.tagName() == QLatin1String("subject")) {
@@ -1757,9 +1751,15 @@ bool Message::fromStanza(const Stanza &s, bool useTimeZoneOffset, int timeZoneOf
                                                retractions, eventElement);
             }
         } else if (e.namespaceURI() == Jingle::MessageInitiation::ns()) {
-            const auto initiation = Jingle::MessageInitiation::fromXml(e);
-            if (initiation.isValid())
-                d->jingleMessageInitiations += initiation;
+            ++jmiElementCount;
+            if (jmiElementCount == 1) {
+                d->jingleMessageInitiation = Jingle::MessageInitiation::fromXml(e);
+            } else {
+                // XEP-0353 defines one JMI action per message stanza. Multiple
+                // actions have no specified ordering or combined semantics, so
+                // fail closed rather than inventing one.
+                d->jingleMessageInitiation = {};
+            }
         } else if (e.tagName() == QLatin1String("no-permanent-store")
                    && e.namespaceURI() == QLatin1String("urn:xmpp:hints")) {
             d->processingHints |= NoPermanentStore;

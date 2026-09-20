@@ -24,7 +24,8 @@ MessageInitiationManager::MessageInitiationManager(Manager *manager) : QObject(m
         if (effective.type() != Message::Type::Chat)
             return;
 
-        for (const auto &initiation : effective.jingleMessageInitiations())
+        const auto initiation = effective.jingleMessageInitiation();
+        if (initiation.isValid())
             emit incoming(effective, initiation);
     });
 }
@@ -44,7 +45,7 @@ bool MessageInitiationManager::send(const Jid &to, const MessageInitiation &init
     Message message(to);
     message.setType(Message::Type::Chat);
     message.setProcessingHints(Message::ProcessingHints(Message::Store));
-    message.addJingleMessageInitiation(initiation);
+    message.setJingleMessageInitiation(initiation);
     manager_->client()->sendMessage(message);
     return true;
 }

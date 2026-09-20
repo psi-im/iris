@@ -211,9 +211,8 @@ public:
     bool             hasMUCUser() const;
 
     // XEP-0353 Jingle Message Initiation
-    const QList<Jingle::MessageInitiation> &jingleMessageInitiations() const;
-    void addJingleMessageInitiation(const Jingle::MessageInitiation &initiation);
-    void setJingleMessageInitiations(const QList<Jingle::MessageInitiation> &initiations);
+    Jingle::MessageInitiation jingleMessageInitiation() const;
+    void setJingleMessageInitiation(const Jingle::MessageInitiation &initiation);
 
     // XEP-0359
     StanzaId stanzaId() const;

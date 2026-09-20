@@ -6,7 +6,7 @@
 #include "xmpp_jinglemessage.h"
 
 #include <QDomDocument>
-#include <QDomElement>
+#include <QSharedData>
 
 namespace XMPP { namespace Jingle {
 namespace {
@@ -16,29 +16,6 @@ const QString JingleNs(QStringLiteral("urn:xmpp:jingle:1"));
 QString localName(const QDomElement &element)
 {
     return element.localName().isEmpty() ? element.tagName().section(QLatin1Char(':'), -1) : element.localName();
-}
-
-QByteArray serializeElement(const QDomElement &element)
-{
-    if (element.isNull())
-        return {};
-    QDomDocument owned;
-    const auto   imported = owned.importNode(element, true);
-    if (imported.isNull())
-        return {};
-    owned.appendChild(imported);
-    return owned.toByteArray(-1);
-}
-
-QDomElement deserializeElement(QDomDocument &target, const QByteArray &xml)
-{
-    if (xml.isEmpty())
-        return {};
-    QDomDocument owned;
-    if (!owned.setContent(xml, true))
-        return {};
-    const auto root = owned.documentElement();
-    return root.isNull() ? QDomElement() : target.importNode(root, true).toElement();
 }
 
 MessageInitiation::Action actionFromName(const QString &name)
@@ -80,32 +57,61 @@ QString actionName(MessageInitiation::Action action)
 }
 } // namespace
 
+class MessageInitiation::Private : public QSharedData {
+public:
+    Action             action = Action::None;
+    QString            id;
+    QDomDocument       descriptionsDocument;
+    QList<QDomElement> descriptions;
+    QString            reasonCondition;
+    QString            reasonText;
+    bool               tieBreak = false;
+    QString            migratedTo;
+    QDomDocument       extensionsDocument;
+    QList<QDomElement> extensions;
+};
+
 MessageInitiation::MessageInitiation() = default;
 
-MessageInitiation::MessageInitiation(Action action, const QString &id) : action_(action), id_(id) { }
+MessageInitiation::MessageInitiation(Action action, const QString &id) : d(new Private)
+{
+    d->action = action;
+    d->id     = id;
+}
+
+MessageInitiation::MessageInitiation(const MessageInitiation &) = default;
+MessageInitiation &MessageInitiation::operator=(const MessageInitiation &) = default;
+MessageInitiation::~MessageInitiation() = default;
+
+MessageInitiation::Private *MessageInitiation::ensureD()
+{
+    if (!d)
+        d = new Private;
+    return d.data();
+}
 
 const QString &MessageInitiation::ns() { return JmiNs; }
 
 MessageInitiation MessageInitiation::fromXml(const QDomElement &element)
 {
-    MessageInitiation result;
     if (element.isNull() || element.namespaceURI() != JmiNs)
-        return result;
+        return {};
 
-    result.action_ = actionFromName(localName(element));
-    result.id_     = element.attribute(QStringLiteral("id"));
-    if (result.action_ == Action::None || result.id_.isEmpty())
-        return MessageInitiation();
+    const auto action = actionFromName(localName(element));
+    const auto id     = element.attribute(QStringLiteral("id"));
+    if (action == Action::None || id.isEmpty())
+        return {};
+
+    MessageInitiation result(action, id);
+    auto              data = result.ensureD();
 
     for (auto child = element.firstChildElement(); !child.isNull(); child = child.nextSiblingElement()) {
         const auto name = localName(child);
-        if (result.action_ == Action::Propose && name == QLatin1String("description")
+        if (action == Action::Propose && name == QLatin1String("description")
             && !child.namespaceURI().isEmpty() && child.namespaceURI() != JmiNs) {
-            Description description;
-            description.ns    = child.namespaceURI();
-            description.media = child.attribute(QStringLiteral("media"));
-            description.xml   = serializeElement(child);
-            result.descriptions_ += description;
+            const auto imported = data->descriptionsDocument.importNode(child, true).toElement();
+            if (!imported.isNull())
+                data->descriptions.append(imported);
             continue;
         }
 
@@ -116,75 +122,110 @@ MessageInitiation MessageInitiation::fromXml(const QDomElement &element)
                     continue;
                 const auto reasonName = localName(reasonChild);
                 if (reasonName == QLatin1String("text"))
-                    result.reasonText_ = reasonChild.text();
-                else if (result.reasonCondition_.isEmpty())
-                    result.reasonCondition_ = reasonName;
+                    data->reasonText = reasonChild.text();
+                else if (data->reasonCondition.isEmpty())
+                    data->reasonCondition = reasonName;
             }
             continue;
         }
 
         if (name == QLatin1String("tie-break") && child.namespaceURI() == JmiNs) {
-            result.tieBreak_ = true;
+            data->tieBreak = true;
             continue;
         }
 
         if (name == QLatin1String("migrated") && child.namespaceURI() == JmiNs) {
-            result.migratedTo_ = child.attribute(QStringLiteral("to"));
+            data->migratedTo = child.attribute(QStringLiteral("to"));
             continue;
         }
 
-        const auto serialized = serializeElement(child);
-        if (!serialized.isEmpty())
-            result.extensions_ += serialized;
+        const auto imported = data->extensionsDocument.importNode(child, true).toElement();
+        if (!imported.isNull())
+            data->extensions.append(imported);
     }
 
-    if (!result.isValid())
-        return MessageInitiation();
-    return result;
+    return result.isValid() ? result : MessageInitiation();
 }
 
 bool MessageInitiation::isValid() const
 {
-    return action_ != Action::None && !id_.isEmpty() && (action_ != Action::Propose || !descriptions_.isEmpty());
+    if (!d || d->action == Action::None || d->id.isEmpty())
+        return false;
+    if (d->action != Action::Propose)
+        return true;
+    if (d->descriptions.isEmpty())
+        return false;
+    for (const auto &description : d->descriptions) {
+        if (description.isNull() || localName(description) != QLatin1String("description")
+            || description.namespaceURI().isEmpty() || description.namespaceURI() == JmiNs)
+            return false;
+    }
+    return true;
 }
 
-MessageInitiation::Action MessageInitiation::action() const { return action_; }
+MessageInitiation::Action MessageInitiation::action() const { return d ? d->action : Action::None; }
 
-QString MessageInitiation::id() const { return id_; }
+QString MessageInitiation::id() const { return d ? d->id : QString(); }
 
-const QList<MessageInitiation::Description> &MessageInitiation::descriptions() const { return descriptions_; }
+QList<QDomElement> MessageInitiation::descriptions() const { return d ? d->descriptions : QList<QDomElement>(); }
 
-void MessageInitiation::addDescription(const QString &descriptionNs, const QString &media, const QByteArray &xml)
+void MessageInitiation::setDescriptions(const QList<QDomElement> &descriptions)
 {
-    descriptions_ += Description { descriptionNs, media, xml };
+    auto data = ensureD();
+    data->descriptions.clear();
+    data->descriptionsDocument = QDomDocument();
+    for (const auto &description : descriptions)
+        addDescription(description);
 }
 
-void MessageInitiation::setDescriptions(const QList<Description> &descriptions) { descriptions_ = descriptions; }
+void MessageInitiation::addDescription(const QDomElement &description)
+{
+    if (description.isNull())
+        return;
+    auto data     = ensureD();
+    auto imported = data->descriptionsDocument.importNode(description, true).toElement();
+    if (!imported.isNull())
+        data->descriptions.append(imported);
+}
 
-QString MessageInitiation::reasonCondition() const { return reasonCondition_; }
+void MessageInitiation::addDescription(const QString &applicationNamespace)
+{
+    if (applicationNamespace.isEmpty() || applicationNamespace == JmiNs)
+        return;
+    auto data        = ensureD();
+    auto description = data->descriptionsDocument.createElementNS(applicationNamespace, QStringLiteral("description"));
+    data->descriptions.append(description);
+}
 
-QString MessageInitiation::reasonText() const { return reasonText_; }
+QString MessageInitiation::reasonCondition() const { return d ? d->reasonCondition : QString(); }
+
+QString MessageInitiation::reasonText() const { return d ? d->reasonText : QString(); }
 
 void MessageInitiation::setReason(const QString &condition, const QString &text)
 {
-    reasonCondition_ = condition;
-    reasonText_      = text;
+    auto data             = ensureD();
+    data->reasonCondition = condition;
+    data->reasonText      = text;
 }
 
-bool MessageInitiation::tieBreak() const { return tieBreak_; }
+bool MessageInitiation::tieBreak() const { return d && d->tieBreak; }
 
-void MessageInitiation::setTieBreak(bool enabled) { tieBreak_ = enabled; }
+void MessageInitiation::setTieBreak(bool enabled) { ensureD()->tieBreak = enabled; }
 
-QString MessageInitiation::migratedTo() const { return migratedTo_; }
+QString MessageInitiation::migratedTo() const { return d ? d->migratedTo : QString(); }
 
-void MessageInitiation::setMigratedTo(const QString &id) { migratedTo_ = id; }
+void MessageInitiation::setMigratedTo(const QString &id) { ensureD()->migratedTo = id; }
 
-const QList<QByteArray> &MessageInitiation::extensions() const { return extensions_; }
+QList<QDomElement> MessageInitiation::extensions() const { return d ? d->extensions : QList<QDomElement>(); }
 
-void MessageInitiation::addExtension(const QByteArray &xml)
+void MessageInitiation::addExtension(const QDomElement &element)
 {
-    if (!xml.isEmpty())
-        extensions_ += xml;
+    if (element.isNull())
+        return;
+    auto data     = ensureD();
+    auto imported = data->extensionsDocument.importNode(element, true).toElement();
+    if (!imported.isNull())
+        data->extensions.append(imported);
 }
 
 QDomElement MessageInitiation::toXml(QDomDocument *doc) const
@@ -192,53 +233,41 @@ QDomElement MessageInitiation::toXml(QDomDocument *doc) const
     if (!doc || !isValid())
         return {};
 
-    const auto name = actionName(action_);
+    const auto name = actionName(d->action);
     if (name.isEmpty())
         return {};
 
     auto element = doc->createElementNS(JmiNs, name);
-    element.setAttribute(QStringLiteral("id"), id_);
+    element.setAttribute(QStringLiteral("id"), d->id);
 
-    if (action_ == Action::Propose) {
-        for (const auto &description : descriptions_) {
-            QDomElement child = deserializeElement(*doc, description.xml);
-            if (child.isNull()) {
-                if (description.ns.isEmpty())
-                    continue;
-                child = doc->createElementNS(description.ns, QStringLiteral("description"));
-                if (!description.media.isEmpty())
-                    child.setAttribute(QStringLiteral("media"), description.media);
-            }
-            element.appendChild(child);
-        }
+    if (d->action == Action::Propose) {
+        for (const auto &description : d->descriptions)
+            element.appendChild(doc->importNode(description, true));
     }
 
-    if (!reasonCondition_.isEmpty() || !reasonText_.isEmpty()) {
+    if (!d->reasonCondition.isEmpty() || !d->reasonText.isEmpty()) {
         auto reason = doc->createElementNS(JingleNs, QStringLiteral("reason"));
-        if (!reasonCondition_.isEmpty())
-            reason.appendChild(doc->createElementNS(JingleNs, reasonCondition_));
-        if (!reasonText_.isEmpty()) {
+        if (!d->reasonCondition.isEmpty())
+            reason.appendChild(doc->createElementNS(JingleNs, d->reasonCondition));
+        if (!d->reasonText.isEmpty()) {
             auto text = doc->createElementNS(JingleNs, QStringLiteral("text"));
-            text.appendChild(doc->createTextNode(reasonText_));
+            text.appendChild(doc->createTextNode(d->reasonText));
             reason.appendChild(text);
         }
         element.appendChild(reason);
     }
 
-    if (tieBreak_)
+    if (d->tieBreak)
         element.appendChild(doc->createElementNS(JmiNs, QStringLiteral("tie-break")));
 
-    if (!migratedTo_.isEmpty()) {
+    if (!d->migratedTo.isEmpty()) {
         auto migrated = doc->createElementNS(JmiNs, QStringLiteral("migrated"));
-        migrated.setAttribute(QStringLiteral("to"), migratedTo_);
+        migrated.setAttribute(QStringLiteral("to"), d->migratedTo);
         element.appendChild(migrated);
     }
 
-    for (const auto &extensionXml : extensions_) {
-        const auto extension = deserializeElement(*doc, extensionXml);
-        if (!extension.isNull())
-            element.appendChild(extension);
-    }
+    for (const auto &extension : d->extensions)
+        element.appendChild(doc->importNode(extension, true));
 
     return element;
 }
