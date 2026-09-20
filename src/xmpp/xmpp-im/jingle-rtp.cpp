@@ -530,10 +530,12 @@ void Application::applied(MediaOperation::Id id, MediaError error)
     // accepted payload set in both directions, independent of offer preferences.
     for (const auto &payload : (isLocal() ? remote : local)->payloads)
         negotiatedPayloads_.insert(payload.id);
-    auto pad = _pad.staticCast<Pad>();
-    if (!security_ || !pad || !pad->bindPacketRoute(this, security_, *local, *remote)) {
-        remove(Reason::FailedApplication, QStringLiteral("Authenticated RTP route configuration failed"));
-        return;
+    if (endpoint_->supportsPacketIo()) {
+        auto pad = _pad.staticCast<Pad>();
+        if (!security_ || !pad || !pad->bindPacketRoute(this, security_, *local, *remote)) {
+            remove(Reason::FailedApplication, QStringLiteral("Authenticated RTP route configuration failed"));
+            return;
+        }
     }
     beforeAnswer_.reset();
     auto                  transport = _transport;

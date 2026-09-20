@@ -98,6 +98,13 @@ static QByteArray receiverReport(quint32 sender, quint32 reported)
     return rtcp(201, 1, payload);
 }
 
+static QByteArray receiverReport(quint32 sender)
+{
+    QByteArray payload(4, '\0');
+    write32(payload, 0, sender);
+    return rtcp(201, 0, payload);
+}
+
 static QByteArray receiverReport(quint32 sender, quint32 firstReported, quint32 secondReported)
 {
     QByteArray payload(52, '\0');
@@ -308,6 +315,12 @@ int main(int argc, char **argv)
     check(!rtcpRouter.routeIncoming(senderReport(0x99999999), SrtpContext::Packet::Rtcp)
               && rtcpRouter.lastError() == BundleRouter::Error::UnknownRoute,
           "unknown RTCP sender was guessed");
+
+    BundleRouter singleRtcp;
+    check(singleRtcp.configure({ audio }), "single-content RTCP route table rejected");
+    auto emptyRr = singleRtcp.routeIncoming(receiverReport(0x99999999), SrtpContext::Packet::Rtcp);
+    check(emptyRr && emptyRr->delivery == BundleRouter::Delivery::Content && emptyRr->content == audio.content,
+          "dedicated association dropped RTCP with no demuxing SSRC");
     check(!rtcpRouter.routeIncoming(rtcp(208, 0, QByteArray(4, '\0')), SrtpContext::Packet::Rtcp)
               && rtcpRouter.lastError() == BundleRouter::Error::MalformedPacket,
           "unknown RTCP packet type was attached to another compound route");

@@ -583,6 +583,12 @@ std::optional<BundleRouter::RoutedPacket> BundleRouter::routeIncoming(const QByt
         return {};
     }
     if (routes.isEmpty()) {
+        // On a dedicated SRTP association there is no demultiplexing ambiguity:
+        // RTCP such as an empty Receiver Report can legitimately mention only a
+        // previously unseen sender SSRC. Shared BUNDLE associations must still
+        // fail closed unless the packet itself identifies a content.
+        if (routes_.size() == 1)
+            return routed(0, packet, kind);
         lastError_ = Error::UnknownRoute;
         return {};
     }
