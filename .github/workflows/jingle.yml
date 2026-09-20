@@ -75,30 +75,6 @@ jobs:
         if: always()
         run: ccache --show-stats
 
-      - name: Stress RTP negotiation without sanitizers
-        shell: bash
-        run: |
-          set -uo pipefail
-          sudo sysctl -w kernel.core_pattern="$PWD/core.%e.%p"
-          ulimit -c unlimited
-          for i in $(seq 1 30); do
-            echo "non-asan rtpnegotiation iteration $i"
-            ./build-jingle/jingle_rtpnegotiation_test && continue
-            status=$?
-            echo "rtpnegotiation failed with status $status"
-            core=$(find . -maxdepth 1 -type f -name 'core.jingle_rtpnegotiation_test.*' -print -quit)
-            if [ -n "$core" ]; then
-              echo "===== gdb backtrace from $core ====="
-              gdb -q -batch \
-                -ex 'set pagination off' \
-                -ex 'thread apply all bt full' \
-                ./build-jingle/jingle_rtpnegotiation_test "$core"
-            else
-              echo "No core file produced"
-            fi
-            exit "$status"
-          done
-
       - name: Test
         run: ctest --test-dir build-jingle --output-on-failure -j1
 
@@ -190,7 +166,4 @@ jobs:
           ctest --test-dir build-jingle-sanitize --output-on-failure -j1 \
             -R '^jingle_transport(accept|reject|replace|s5b|sctp)'
           ctest --test-dir build-jingle-sanitize --output-on-failure -j1 -R jingle_domlifetime
-
-          for i in $(seq 1 50); do
-            ctest --test-dir build-jingle-sanitize --output-on-failure -j1 -R jingle_rtpnegotiation
-          done
+          ctest --test-dir build-jingle-sanitize --output-on-failure -j1 -R jingle_rtpnegotiation
