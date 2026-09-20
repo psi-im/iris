@@ -124,6 +124,86 @@ int main(int argc, char **argv)
         replacementRegistry.prune();
     }
 
+    // Replacing one BUNDLE group must not retire memberships belonging to
+    // another group in the same Pad/current snapshot.
+    {
+        const QList<GroupNegotiation::Member> fourMembers {
+            member("a1"), member("a2"), member("b1"), member("b2")
+        };
+        const QList<ContentGroup> twoGroups {
+            { QStringLiteral("BUNDLE"), { QStringLiteral("a1"), QStringLiteral("a2") } },
+            { QStringLiteral("BUNDLE"), { QStringLiteral("b1"), QStringLiteral("b2") } }
+        };
+        auto fullPlan = GroupNegotiation::initialPlan(fourMembers, twoGroups, twoGroups);
+        check(fullPlan && fullPlan->readyToCommit(), "two-group plan was not committable");
+
+        ConnectionRegistry multiRegistry;
+        auto current = ConnectionGroupTransaction::stageBundled(
+            *fullPlan, multiRegistry, QStringLiteral("urn:xmpp:jingle:transports:ice:0"));
+        check(current && current->size() == 4 && multiRegistry.liveAssociationCount() == 2,
+              "failed to seed two independent BUNDLE associations");
+
+        const auto a1 = fourMembers.at(0).content;
+        const auto a2 = fourMembers.at(1).content;
+        const auto b1 = fourMembers.at(2).content;
+        const auto b2 = fourMembers.at(3).content;
+        QPointer<IceConnection> oldA(current->connectionFor(a1));
+        QPointer<IceConnection> stableB(current->connectionFor(b1));
+        check(oldA && stableB && oldA != stableB && current->connectionFor(b2) == stableB,
+              "two-group seed topology was wrong");
+
+        const QList<GroupNegotiation::Member> aMembers { fourMembers.at(0), fourMembers.at(1) };
+        const QList<ContentGroup> aGroup {
+            { QStringLiteral("BUNDLE"), { QStringLiteral("a1"), QStringLiteral("a2") } }
+        };
+        auto aPlan = GroupNegotiation::initialPlan(aMembers, aGroup, aGroup);
+        check(aPlan && aPlan->readyToCommit(), "first replacement plan invalid");
+        auto replaceA = ConnectionGroupTransaction::stageBundledReplacement(
+            *aPlan, multiRegistry, *current, QStringLiteral("urn:xmpp:jingle:transports:ice:0"));
+        check(replaceA && replaceA->activateReplacement(multiRegistry),
+              "first group replacement did not activate");
+        check(stableB && current->connectionFor(b1) == stableB && multiRegistry.liveAssociationCount() == 2,
+              "activating first group replacement disturbed second group");
+        check(replaceA->rollbackReplacement(multiRegistry),
+              "first group replacement rollback failed");
+        check(stableB && current->connectionFor(b1) == stableB && multiRegistry.liveAssociationCount() == 2,
+              "rolling back first group replacement disturbed second group");
+
+        check(replaceA->activateReplacement(multiRegistry) && replaceA->finalizeReplacement(multiRegistry),
+              "first group replacement did not finalize");
+        auto newA = replaceA->connectionFor(a1);
+        QPointer<IceConnection> newAGuard(newA);
+        replaceA->retainUnreplacedFrom(std::move(*current), QSet<ContentKey> { a1, a2 });
+        current = std::move(replaceA);
+        check(!oldA && newAGuard && stableB && current->connectionFor(a1) == newAGuard
+                  && current->connectionFor(b1) == stableB && current->connectionFor(b2) == stableB
+                  && multiRegistry.liveAssociationCount() == 2,
+              "committing first group replacement retired unrelated group");
+
+        const QList<GroupNegotiation::Member> bMembers { fourMembers.at(2), fourMembers.at(3) };
+        const QList<ContentGroup> bGroup {
+            { QStringLiteral("BUNDLE"), { QStringLiteral("b1"), QStringLiteral("b2") } }
+        };
+        auto bPlan = GroupNegotiation::initialPlan(bMembers, bGroup, bGroup);
+        check(bPlan && bPlan->readyToCommit(), "second replacement plan invalid");
+        auto replaceB = ConnectionGroupTransaction::stageBundledReplacement(
+            *bPlan, multiRegistry, *current, QStringLiteral("urn:xmpp:jingle:transports:ice:0"));
+        check(replaceB && replaceB->activateReplacement(multiRegistry)
+                  && replaceB->finalizeReplacement(multiRegistry),
+              "second group replacement did not finalize");
+        QPointer<IceConnection> newB(replaceB->connectionFor(b1));
+        replaceB->retainUnreplacedFrom(std::move(*current), QSet<ContentKey> { b1, b2 });
+        current = std::move(replaceB);
+        check(newAGuard && newB && current->connectionFor(a1) == newAGuard
+                  && current->connectionFor(b1) == newB && multiRegistry.liveAssociationCount() == 2,
+              "committing second group replacement retired first group");
+
+        current.reset();
+        multiRegistry.prune();
+        check(!newAGuard && !newB && multiRegistry.liveAssociationCount() == 0,
+              "two-group replacement regression leaked associations");
+    }
+
     auto refusalPlan = GroupNegotiation::initialPlan(members, offer, {});
     check(refusalPlan && refusalPlan->readyToCommit(), "BUNDLE refusal did not produce a committable fallback plan");
     auto refusal = ConnectionGroupTransaction::commit(*refusalPlan, registry);
