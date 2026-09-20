@@ -16,10 +16,14 @@
 
 namespace XMPP::Jingle::RTP {
 
-struct IRIS_EXPORT Proposal {
-    QString media;
+enum class Media : quint8 { None = 0x00, Audio = 0x01, Video = 0x02 };
+Q_DECLARE_FLAGS(MediaSet, Media)
+Q_DECLARE_OPERATORS_FOR_FLAGS(MediaSet)
 
-    bool isValid() const { return !media.isEmpty(); }
+struct IRIS_EXPORT Proposal {
+    Media media = Media::None;
+
+    bool isValid() const { return media == Media::Audio || media == Media::Video; }
 };
 
 // All calls occur on the Jingle thread. Factories and negotiation must not
@@ -270,6 +274,12 @@ public:
     // transport selection and RTP discovery; an empty or unusable whitelist means
     // this manager must not advertise RTP support.
     void         setTransportNamespaces(const QStringList &);
+
+    // Start an XEP-0353 proposal for a new RTP call. The returned UUID is also
+    // the Jingle SID that must be used after <proceed/>.
+    QString propose(const Jid &peer, MediaSet media);
+
+    Application *createOutgoing(Session *, Media media, Origin senders = Origin::Both);
     Application *createOutgoing(Session *, const QString &media, Origin senders = Origin::Both);
     Application *startApplication(const ApplicationManagerPad::Ptr &, const QString &, Origin, Origin) override;
     ApplicationManagerPad *pad(Session *) override;

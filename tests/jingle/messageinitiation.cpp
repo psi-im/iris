@@ -62,7 +62,7 @@ int main(int argc, char **argv)
               "RTP proposal namespace was not retained");
         check(rtpDescription.isSupported(), "registered RTP proposal was not parsed");
         const auto rtpProposal = std::any_cast<J::RTP::Proposal>(rtpDescription.data);
-        check(rtpProposal.media == QStringLiteral("audio"), "RTP proposal media was not parsed by RTP manager");
+        check(rtpProposal.media == J::RTP::Media::Audio, "RTP proposal media was not parsed by RTP manager");
 
         const auto unknown = initiation.descriptions().at(1);
         check(unknown.applicationNamespace == QStringLiteral("urn:example:jingle:application"),
@@ -71,25 +71,37 @@ int main(int argc, char **argv)
 
         source = QDomDocument();
         check(std::any_cast<J::RTP::Proposal>(initiation.descriptions().at(0).data).media
-                  == QStringLiteral("audio"),
+                  == J::RTP::Media::Audio,
               "typed RTP proposal depended on source DOM lifetime");
     }
 
     {
+        const J::RTP::MediaSet media = J::RTP::Media::Audio | J::RTP::Media::Video;
+        check(media.testFlag(J::RTP::Media::Audio) && media.testFlag(J::RTP::Media::Video),
+              "audio+video RTP media flags did not compose");
+
         J::MessageInitiation initiation(J::MessageInitiation::Action::Propose, QStringLiteral("call-out"));
-        initiation.addDescription(J::RTP::Description::ns(), J::RTP::Proposal { QStringLiteral("video") });
+        if (media.testFlag(J::RTP::Media::Audio))
+            initiation.addDescription(J::RTP::Description::ns(), J::RTP::Proposal { J::RTP::Media::Audio });
+        if (media.testFlag(J::RTP::Media::Video))
+            initiation.addDescription(J::RTP::Description::ns(), J::RTP::Proposal { J::RTP::Media::Video });
 
         QDomDocument target;
         const auto serialized = initiation.toXml(
             &target, [&rtp](const QString &ns, const std::any &data, QDomDocument *document) {
                 return ns == J::RTP::Description::ns() ? rtp.serializeProposal(data, document) : QDomElement();
             });
-        check(!serialized.isNull(), "typed RTP proposal could not be serialized");
-        const auto description = serialized.firstChildElement();
-        check(description.namespaceURI() == J::RTP::Description::ns(),
-              "serialized RTP proposal namespace changed");
-        check(description.attribute(QStringLiteral("media")) == QStringLiteral("video"),
-              "serialized RTP proposal media changed");
+        check(!serialized.isNull(), "typed audio+video RTP proposal could not be serialized");
+
+        const auto audio = serialized.firstChildElement();
+        const auto video = audio.nextSiblingElement();
+        check(audio.namespaceURI() == J::RTP::Description::ns()
+                  && audio.attribute(QStringLiteral("media")) == QStringLiteral("audio"),
+              "audio proposal description was not serialized first");
+        check(video.namespaceURI() == J::RTP::Description::ns()
+                  && video.attribute(QStringLiteral("media")) == QStringLiteral("video"),
+              "video proposal description was not serialized second");
+        check(video.nextSiblingElement().isNull(), "audio+video proposal emitted extra descriptions");
     }
 
     {
@@ -159,6 +171,18 @@ int main(int argc, char **argv)
         manager->setMessageInitiationEnabled(false);
         check(!manager->discoFeatures().contains(J::MessageInitiation::ns()),
               "disabled JMI remained advertised");
+
+        const Jid sessionPeer(QStringLiteral("peer@example.test/device"));
+        auto fixed = manager->newSession(sessionPeer, QStringLiteral("jmi-session-id"));
+        check(fixed && fixed->sid() == QStringLiteral("jmi-session-id"),
+              "JMI id was not accepted as an outgoing Jingle sid");
+        check(manager->session(sessionPeer, QStringLiteral("jmi-session-id")) == fixed,
+              "preselected JMI sid was not registered");
+        check(!manager->newSession(sessionPeer, QStringLiteral("jmi-session-id")),
+              "duplicate JMI sid was accepted for the same peer");
+        delete fixed;
+        check(!manager->session(sessionPeer, QStringLiteral("jmi-session-id")),
+              "destroyed preselected session remained registered");
 
         J::MessageInitiation unsupported(J::MessageInitiation::Action::Propose, QStringLiteral("call-5"));
         unsupported.addDescription(QStringLiteral("urn:example:unknown"));

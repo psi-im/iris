@@ -387,7 +387,9 @@ namespace Jingle {
 
         Session                                  *session(const Jid &remoteJid, const QString &sid);
         Session                                  *newSession(const Jid &j);
-        QString                                   registerSession(Session *session);
+        Session                                  *newSession(const Jid &j, const QString &sid);
+        QString                                   registerSession(Session *session,
+                                                                  const QString &requestedSid = QString());
         const std::optional<XMPP::Stanza::Error> &lastError() const;
 
         PublicationManager *publicationManager() const;

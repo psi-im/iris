@@ -5,9 +5,33 @@
 #include "jingle-rtp-router_p.h"
 #include "jingle-session.h"
 #include <QDomDocument>
+#include <QUuid>
 #include <algorithm>
 
 namespace XMPP::Jingle::RTP {
+namespace {
+QString mediaName(Media media)
+{
+    switch (media) {
+    case Media::Audio:
+        return QStringLiteral("audio");
+    case Media::Video:
+        return QStringLiteral("video");
+    case Media::None:
+        break;
+    }
+    return {};
+}
+
+Media mediaFromName(const QString &name)
+{
+    if (name == QLatin1String("audio"))
+        return Media::Audio;
+    if (name == QLatin1String("video"))
+        return Media::Video;
+    return Media::None;
+}
+} // namespace
 class Pad::RoutingPrivate {
 public:
     struct SecurityIngress {
@@ -675,7 +699,7 @@ std::optional<std::any> Manager::parseProposal(const QDomElement &element) const
     if (name != QLatin1String("description") || element.namespaceURI() != Description::ns())
         return std::nullopt;
 
-    Proposal proposal { element.attribute(QStringLiteral("media")) };
+    Proposal proposal { mediaFromName(element.attribute(QStringLiteral("media"))) };
     if (!proposal.isValid())
         return std::nullopt;
     return std::any(std::move(proposal));
@@ -690,8 +714,12 @@ QDomElement Manager::serializeProposal(const std::any &data, QDomDocument *docum
     if (!proposal.isValid())
         return {};
 
+    const auto media = mediaName(proposal.media);
+    if (media.isEmpty())
+        return {};
+
     auto element = document->createElementNS(Description::ns(), QStringLiteral("description"));
-    element.setAttribute(QStringLiteral("media"), proposal.media);
+    element.setAttribute(QStringLiteral("media"), media);
     return element;
 }
 
@@ -731,6 +759,32 @@ void Manager::setJingleManager(XMPP::Jingle::Manager *manager)
 }
 void Manager::setMediaProvider(std::shared_ptr<MediaProvider> provider) { provider_ = std::move(provider); }
 void Manager::setTransportNamespaces(const QStringList &transports) { transports_ = transports; }
+
+QString Manager::propose(const Jid &peer, MediaSet media)
+{
+    if (!jingle_ || !jingle_->messageInitiationEnabled() || !peer.isValid() || !media)
+        return {};
+
+    const auto features = discoFeatures();
+    if (media.testFlag(Media::Audio)
+        && !features.contains(QStringLiteral("urn:xmpp:jingle:apps:rtp:audio")))
+        return {};
+    if (media.testFlag(Media::Video)
+        && !features.contains(QStringLiteral("urn:xmpp:jingle:apps:rtp:video")))
+        return {};
+
+    const auto id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    MessageInitiation initiation(MessageInitiation::Action::Propose, id);
+    if (media.testFlag(Media::Audio))
+        initiation.addDescription(Description::ns(), Proposal { Media::Audio });
+    if (media.testFlag(Media::Video))
+        initiation.addDescription(Description::ns(), Proposal { Media::Video });
+
+    if (!jingle_->sendMessageInitiation(Jid(peer.bare()), initiation))
+        return {};
+    return id;
+}
+
 ApplicationManagerPad *Manager::pad(Session *session)
 {
     if (!provider_ || !session || session->manager() != jingle_)
@@ -756,6 +810,12 @@ Application *Manager::startApplication(const ApplicationManagerPad::Ptr &base, c
     });
     return app;
 }
+Application *Manager::createOutgoing(Session *session, Media media, Origin senders)
+{
+    const auto name = mediaName(media);
+    return name.isEmpty() ? nullptr : createOutgoing(session, name, senders);
+}
+
 Application *Manager::createOutgoing(Session *session, const QString &media, Origin senders)
 {
     if (!session || session->manager() != jingle_ || session->state() >= State::Finishing

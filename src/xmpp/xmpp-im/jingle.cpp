@@ -581,6 +581,14 @@ namespace XMPP { namespace Jingle {
         {
             QObject::connect(s, &Session::terminated, manager,
                              [this, s]() { sessions.remove(qMakePair(s->peer(), s->sid())); });
+            QObject::connect(s, &QObject::destroyed, manager, [this, s]() {
+                for (auto it = sessions.begin(); it != sessions.end();) {
+                    if (it.value() == s)
+                        it = sessions.erase(it);
+                    else
+                        ++it;
+                }
+            });
         }
     };
 
@@ -846,10 +854,38 @@ namespace XMPP { namespace Jingle {
         return s;
     }
 
-    QString Manager::registerSession(Session *session)
+    Session *Manager::newSession(const Jid &j, const QString &sid)
     {
+        if (sid.isEmpty())
+            return nullptr;
+
+        auto s = new Session(this, j);
+        const auto registeredSid = registerSession(s, sid);
+        if (registeredSid.isEmpty()) {
+            delete s;
+            return nullptr;
+        }
+        s->d->sid = registeredSid;
+        d->setupSession(s);
+        return s;
+    }
+
+    QString Manager::registerSession(Session *session, const QString &requestedSid)
+    {
+        if (!session)
+            return {};
+
+        auto peer = session->peer();
+        if (!requestedSid.isEmpty()) {
+            const auto key      = qMakePair(peer, requestedSid);
+            const auto existing = d->sessions.value(key, nullptr);
+            if (existing && existing != session)
+                return {};
+            d->sessions.insert(key, session);
+            return requestedSid;
+        }
+
         QString id;
-        auto    peer = session->peer();
         do {
 #if QT_VERSION >= QT_VERSION_CHECK(5, 10, 0)
             id = QString("%1").arg(QRandomGenerator::global()->generate(), 6, 32, QChar('0'));
