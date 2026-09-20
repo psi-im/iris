@@ -121,6 +121,10 @@ static void localAdvertisement()
     }
 
     const auto features = rtpFeatures(rtp);
+    check(client.jingleManager()->discoFeatures().contains(J::NS),
+          "Jingle manager did not advertise the generic Jingle capability");
+    check(client.makeDiscoResult().features().test(J::NS),
+          "Client disco omitted the Jingle manager's generic capability");
     check(client.jingleICEManager()->discoFeatures().contains(J::ICE::NS_DTLS),
           "secure RTP was advertised while the ICE manager omitted DTLS");
     check(client.jingleManager()->discoFeatures().contains(QStringLiteral("urn:ietf:rfc:5888")),
