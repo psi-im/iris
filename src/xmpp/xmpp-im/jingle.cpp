@@ -860,12 +860,10 @@ namespace XMPP { namespace Jingle {
             return nullptr;
 
         auto s = new Session(this, j);
-        const auto registeredSid = registerSession(s, sid);
-        if (registeredSid.isEmpty()) {
+        if (s->reserveSid(sid).isEmpty()) {
             delete s;
             return nullptr;
         }
-        s->d->sid = registeredSid;
         d->setupSession(s);
         return s;
     }
