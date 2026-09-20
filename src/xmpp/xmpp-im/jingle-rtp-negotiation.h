@@ -34,7 +34,7 @@ public:
     Result setRemoteOffer(const Description &offer, const Description &localAnswer);
     Result setRemoteAnswer(const Description &, const CodecNegotiator &);
     State  state() const { return state_; }
-    // Detached copies: modifying extension QDomElements cannot change snapshots.
+    // Detached value copies: opaque XML extensions do not retain parser-owned DOM handles.
     std::optional<Description> localDescription() const;
     std::optional<Description> remoteDescription() const;
 
