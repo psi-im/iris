@@ -122,14 +122,18 @@ psimedia не владеет ICE/BUNDLE topology. Обе public wrapper copies P
 - P2 RTP/BUNDLE baseline: real session-initiate/session-accept XML negotiation, one shared ICE/DTLS/SRTP
   association for negotiated audio+video, atomic full-BUNDLE transport replacement, partial-replace rejection
   and stale SRTP callback fencing are covered by Jingle regressions.
+- RTP caps baseline: compatible ICE is selected; IBB-only, S5B-only and no-compatible-transport
+  peers fail closed, and grouping capability does not make IBB a valid packet RTP transport.
 - FT baseline: feature-driven ICE → S5B → IBB selection regression; real Prosody SCTP/datachannel
   transfer через два процесса. Детали и старые SHA остаются в git/interop docs.
 
 ### Текущие обязательные gates
 
-1. Закрыть caps-driven selection matrix для RTP: advertised RTP + совместимый ICE выбирается; advertised RTP
-   + IBB-only/S5B-only/no transport capability fail closed. Отдельно зафиксировать policy для missing RTP media,
-   DTLS и grouping caps — не угадывать Conversations behavior без fixture/interop evidence.
+1. Базовая caps-driven RTP transport matrix закрыта: advertised RTP + совместимый ICE выбирается;
+   RTP + IBB-only/S5B-only/no compatible transport fail closed, включая ложное добавление grouping caps
+   поверх IBB. Подтверждено `Jingle regressions #271` на `b632ff84fbcb6d8cef008c75819fb89dd29cef79`.
+   Открытым остаётся policy для missing RTP media, DTLS и grouping caps — не угадывать Conversations
+   behavior без fixture/interop evidence.
 2. Довести P2 shared path после уже работающего RTP/BUNDLE wiring: active-call ICE restart/migration,
    member removal, multiple DataChannels и mixed RTP+SCTP; FT matrix обязана оставаться зелёной.
    Отдельно реализовать group-level media ingress для `BundleRouter::Delivery::SharedRtcp`:
