@@ -143,7 +143,8 @@ jobs:
             jingle_transportreplaceackboundary_test \
             jingle_transportreplacedispatcher_test \
             jingle_transportreplacecorrectness_test \
-            jingle_transportreplaceprotocol_test
+            jingle_transportreplaceprotocol_test \
+            jingle_rtpnegotiation_test
 
       - name: Save sanitizer compiler cache
         if: success()
@@ -163,3 +164,7 @@ jobs:
         run: |
           ctest --test-dir build-jingle-sanitize --output-on-failure -j1 \
             -R '^jingle_transport(accept|reject|replace|s5b|sctp)'
+          for i in $(seq 1 50); do
+            ctest --test-dir build-jingle-sanitize --output-on-failure -j1 -R '^jingle_rtpnegotiation
+
+          done
