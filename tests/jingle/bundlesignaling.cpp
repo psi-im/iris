@@ -109,9 +109,7 @@ static void setPeerFeatures(Client &client, const Jid &peer, QStringList feature
 
 static QStringList rtpIcePeerFeatures(Client &client, J::RTP::Manager *rtp)
 {
-    auto features = client.jingleManager()->discoFeatures();
-    features += J::NS; // Client-level generic Jingle capability.
-    features.removeDuplicates();
+    const auto features = client.jingleManager()->discoFeatures();
     check(features.contains(J::RTP::Description::ns()), "production caps omitted RTP description support");
     check(features.contains(J::ICE::NS), "production caps omitted ICE support");
     check(features.contains(QStringLiteral("urn:ietf:rfc:5888")),
