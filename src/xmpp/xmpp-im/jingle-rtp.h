@@ -260,8 +260,9 @@ public:
     ~Manager() override;
     void setJingleManager(XMPP::Jingle::Manager *) override;
     void setMediaProvider(std::shared_ptr<MediaProvider>);
-    // Explicit experimental transport whitelist. Empty by default until native
-    // client interoperability is verified. Never used for discovery.
+    // Explicit transport whitelist for this RTP backend. It gates both
+    // transport selection and RTP discovery; an empty or unusable whitelist means
+    // this manager must not advertise RTP support.
     void         setTransportNamespaces(const QStringList &);
     Application *createOutgoing(Session *, const QString &media, Origin senders = Origin::Both);
     Application *startApplication(const ApplicationManagerPad::Ptr &, const QString &, Origin, Origin) override;
