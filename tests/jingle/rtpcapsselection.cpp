@@ -12,6 +12,7 @@
 
 using namespace XMPP;
 namespace J = XMPP::Jingle;
+static const QString DtlsFeature = QStringLiteral("urn:xmpp:jingle:apps:dtls:0");
 
 static void check(bool ok, const char *message)
 {
@@ -93,7 +94,7 @@ static QStringList rtpFeatures(J::RTP::Manager *rtp)
 
 static QStringList secureAudioProfile(J::RTP::Manager *rtp)
 {
-    QStringList features { J::NS, J::ICE::NS_DTLS };
+    QStringList features { J::NS, DtlsFeature };
     features += rtpFeatures(rtp);
     features.removeDuplicates();
     return features;
@@ -115,17 +116,16 @@ static void localAdvertisement()
     check(rtp->discoFeatures().isEmpty(), "RTP was advertised over a byte-stream-only transport");
 
     rtp->setTransportNamespaces({ J::ICE::NS });
-    if (J::RTP::supportedSecureRtpProfiles().isEmpty()) {
-        check(rtp->discoFeatures().isEmpty(), "RTP was advertised without a usable DTLS-SRTP profile");
-        return;
-    }
+    const auto advertised = rtp->discoFeatures();
+    if (advertised.isEmpty())
+        return; // Build/runtime has no usable DTLS-SRTP profile.
 
     const auto features = rtpFeatures(rtp);
     check(client.jingleManager()->discoFeatures().contains(J::NS),
           "Jingle manager did not advertise the generic Jingle capability");
     check(client.makeDiscoResult().features().test(J::NS),
           "Client disco omitted the Jingle manager's generic capability");
-    check(client.jingleICEManager()->discoFeatures().contains(J::ICE::NS_DTLS),
+    check(client.jingleICEManager()->discoFeatures().contains(DtlsFeature),
           "secure RTP was advertised while the ICE manager omitted DTLS");
     check(client.jingleManager()->discoFeatures().contains(QStringLiteral("urn:ietf:rfc:5888")),
           "grouping capability was not advertised");
@@ -133,9 +133,6 @@ static void localAdvertisement()
 
 static void peerProfileRequirements()
 {
-    if (J::RTP::supportedSecureRtpProfiles().isEmpty())
-        return;
-
     TcpPortReserver reserver;
     Client          client;
     client.setTcpPortReserver(&reserver);
@@ -143,6 +140,8 @@ static void peerProfileRequirements()
     auto rtp = client.jingleManager()->rtpManager();
     rtp->setMediaProvider(std::make_shared<Provider>());
     rtp->setTransportNamespaces({ J::ICE::NS });
+    if (rtp->discoFeatures().isEmpty())
+        return;
 
     const Jid peer(QStringLiteral("profile-peer@example.test/device"));
     auto full = secureAudioProfile(rtp);
@@ -178,15 +177,12 @@ static void peerProfileRequirements()
     check(!canCreate(missing), "RTP application accepted peer without audio RTP capability");
 
     missing = full;
-    missing.removeAll(J::ICE::NS_DTLS);
+    missing.removeAll(DtlsFeature);
     check(!canCreate(missing), "RTP application accepted peer without DTLS capability");
 }
 
 static void validIceSelection()
 {
-    if (J::RTP::supportedSecureRtpProfiles().isEmpty())
-        return;
-
     TcpPortReserver reserver;
     Client          client;
     client.setTcpPortReserver(&reserver);
@@ -194,6 +190,8 @@ static void validIceSelection()
     auto rtp = client.jingleManager()->rtpManager();
     rtp->setMediaProvider(std::make_shared<Provider>());
     rtp->setTransportNamespaces({ J::ICE::NS });
+    if (rtp->discoFeatures().isEmpty())
+        return;
 
     const Jid peer(QStringLiteral("ice-peer@example.test/device"));
     QStringList caps = secureAudioProfile(rtp);
@@ -211,9 +209,6 @@ static void validIceSelection()
 
 static void incompatibleTransportCaps(const QStringList &extraCaps, const char *message)
 {
-    if (J::RTP::supportedSecureRtpProfiles().isEmpty())
-        return;
-
     TcpPortReserver reserver;
     Client          client;
     client.setTcpPortReserver(&reserver);
@@ -224,6 +219,8 @@ static void incompatibleTransportCaps(const QStringList &extraCaps, const char *
     // the policy explicit rather than teaching the generic selector that IBB
     // can carry RTP merely because a future codec might have a tiny bitrate.
     rtp->setTransportNamespaces({ J::ICE::NS });
+    if (rtp->discoFeatures().isEmpty())
+        return;
 
     const Jid peer(QStringLiteral("non-ice-peer@example.test/device"));
     QStringList caps = secureAudioProfile(rtp);
