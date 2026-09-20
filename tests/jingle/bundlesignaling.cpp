@@ -732,8 +732,11 @@ static void exerciseTwoGroupReplacement(const WireOffer &transportSource, TcpPor
               && rb1 && rb2 && rq1 && rq2,
           "first group replacement changed second group identity");
 
-    QPointer<J::ICE::IceConnection> stableA(icePad->groupedConnectionFor(ra1.data()));
-    check(stableA && stableA != stableB, "first replacement association missing");
+    bool stableABound = false, stableARequired = false;
+    QPointer<J::ICE::IceConnection> stableA(
+        icePad->groupedConnectionFor(ra1.data(), &stableABound, &stableARequired));
+    check(stableABound && stableARequired && stableA && stableA != stableB,
+          "first replacement association missing");
 
     QDomDocument replaceBDoc;
     auto replaceB = replacementPayload(
