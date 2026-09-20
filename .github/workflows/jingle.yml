@@ -189,7 +189,7 @@ jobs:
         run: |
           ctest --test-dir build-jingle-sanitize --output-on-failure -j1 \
             -R '^jingle_transport(accept|reject|replace|s5b|sctp)'
-          ctest --test-dir build-jingle-sanitize --output-on-failure -j1 -R '^jingle_domlifetime
+          ctest --test-dir build-jingle-sanitize --output-on-failure -j1 -R jingle_domlifetime
 
           for i in $(seq 1 50); do
             ctest --test-dir build-jingle-sanitize --output-on-failure -j1 -R jingle_rtpnegotiation
