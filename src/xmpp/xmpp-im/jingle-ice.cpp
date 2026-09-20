@@ -1350,6 +1350,8 @@ namespace XMPP { namespace Jingle { namespace ICE {
     QList<XMPP::Jingle::Connection::Ptr> Transport::channels() const
     {
         QList<XMPP::Jingle::Connection::Ptr> ret;
+        if (!d->network)
+            return ret;
         for (auto &c : d->network->components) {
             if (c.rawConnection)
                 ret.append(c.rawConnection.staticCast<XMPP::Jingle::Connection>());
