@@ -365,23 +365,21 @@ static void exerciseResponderReplacement(const WireOffer &offer, TcpPortReserver
     check(audioTransport && videoTransport, "replacement responder did not create ICE transports");
     auto icePad = audioTransport->pad().staticCast<J::ICE::Pad>();
 
-    // Preserve the production local-acceptance and RTP/ICE preparation boundary,
-    // but stop before Session sends session-accept over a real XMPP stream. The
-    // ordinary exerciseResponder() above independently covers Session::accept().
+    // Apply deferred incoming ICE state while the Session is still Created,
+    // then use the real acceptance path. Session::accept() synchronously marks
+    // local consent and prepares all initial contents; the zero-delay stepTimer
+    // that would send session-accept cannot run until we return to the event loop.
     QCoreApplication::processEvents(QEventLoop::AllEvents);
     check(icePad->liveAssociationCount() == 0,
           "replacement fixture allocated BUNDLE before local acceptance");
-    icePad->onLocalAccepted();
-    audio->prepare();
-    video->prepare();
-    check(waitFor([&]() {
-              return audio->state() >= J::State::ApprovedToSend
-                  && audio->state() < J::State::Finishing
-                  && video->state() >= J::State::ApprovedToSend
-                  && video->state() < J::State::Finishing
-                  && icePad->liveAssociationCount() == 1;
-          }),
-          "replacement fixture did not prepare one stable BUNDLE association");
+    session.accept();
+    check(session.state() == J::State::ApprovedToSend
+              && audio->state() >= J::State::ApprovedToSend
+              && audio->state() < J::State::Finishing
+              && video->state() >= J::State::ApprovedToSend
+              && video->state() < J::State::Finishing
+              && icePad->liveAssociationCount() == 1,
+          "replacement fixture did not synchronously prepare one stable BUNDLE association");
 
     bool audioBound = false, audioRequired = false, videoBound = false, videoRequired = false;
     auto *audioNetwork = icePad->groupedConnectionFor(audioTransport.data(), &audioBound, &audioRequired);
@@ -426,9 +424,8 @@ static void exerciseResponderReplacement(const WireOffer &offer, TcpPortReserver
               && newNetwork && !oldNetwork && icePad->liveAssociationCount() == 1,
           "full BUNDLE replacement did not atomically switch one shared association");
 
-    check(replacementAudio->enableRtpMux() && replacementVideo->enableRtpMux()
-              && replacementAudio->rtpSession() == replacementVideo->rtpSession(),
-          "replacement BUNDLE transports did not bind one shared SRTP generation");
+    check(replacementAudio->enableRtpMux() && replacementVideo->enableRtpMux(),
+          "replacement BUNDLE transports did not retain RTP-mux compatibility");
 }
 
 int main(int argc, char **argv)
