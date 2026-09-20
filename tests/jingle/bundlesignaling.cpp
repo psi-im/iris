@@ -443,17 +443,21 @@ static void exerciseInitiatorReplacement(const WireOffer &transportSource, TcpPo
               { J::ContentGroup { QStringLiteral("BUNDLE"), { audio->contentName(), video->contentName() } } }),
           "replacement initiator could not offer BUNDLE");
 
-    auto audioTransport = qSharedPointerDynamicCast<J::ICE::Transport>(audio->transport());
-    auto videoTransport = qSharedPointerDynamicCast<J::ICE::Transport>(video->transport());
-    check(audioTransport && videoTransport, "replacement initiator did not select ICE");
-    auto icePad = audioTransport->pad().staticCast<J::ICE::Pad>();
-
-    // Exercise the real outgoing session-initiate state machine. There is no
-    // connected XMPP stream in this test process, so Task::go() intentionally
-    // stops at the wire boundary; inject the peer's real IQ result through the
-    // existing Task parser to complete exactly that transaction.
+    // Exercise the real outgoing session-initiate state machine. initiate()
+    // owns the production preparation boundary: RTP selects ICE synchronously
+    // from prepare(), while media/DTLS completion and stanza serialization are
+    // asynchronous. Do not inspect transport selection before this call.
     const auto tasksBeforeInitiate = directRootTasks(client);
     session.initiate();
+
+    auto audioTransport = qSharedPointerDynamicCast<J::ICE::Transport>(audio->transport());
+    auto videoTransport = qSharedPointerDynamicCast<J::ICE::Transport>(video->transport());
+    check(audioTransport && videoTransport, "replacement initiator did not select ICE during initiate()");
+    auto icePad = audioTransport->pad().staticCast<J::ICE::Pad>();
+
+    // There is no connected XMPP stream in this test process, so Task::go()
+    // intentionally stops at the wire boundary; inject the peer's real IQ result
+    // through the existing Task parser to complete exactly that transaction.
     check(waitFor([&]() { return session.state() == J::State::Unacked; }),
           "replacement initiator did not serialize session-initiate");
     acknowledgeNewJingleTask(client, peer, tasksBeforeInitiate);
