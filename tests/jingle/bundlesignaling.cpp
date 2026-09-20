@@ -124,6 +124,15 @@ static WireOffer makeOffer(Client &client, TcpPortReserver *reserver)
         rtp->createOutgoing(&session, QStringLiteral("video"), J::Origin::Both));
     check(audio && video, "failed to create outgoing RTP applications");
 
+    // This isolated peer has no disco/caps task, so NSTransportsList would
+    // correctly reject every namespace at checkPeerCaps(). Bind the production
+    // ICE transports explicitly, exactly as the existing icertp regression does;
+    // the responder half below remains fully parser-driven.
+    auto audioTransport = qSharedPointerDynamicCast<J::ICE::Transport>(session.newOutgoingTransport(J::ICE::NS));
+    auto videoTransport = qSharedPointerDynamicCast<J::ICE::Transport>(session.newOutgoingTransport(J::ICE::NS));
+    check(audioTransport && videoTransport && audio->setTransport(audioTransport) && video->setTransport(videoTransport),
+          "failed to bind production ICE transports for wire offer");
+
     const QString audioName = audio->contentName();
     const QString videoName = video->contentName();
     check(session.setGroupings(
@@ -133,9 +142,6 @@ static WireOffer makeOffer(Client &client, TcpPortReserver *reserver)
     audio->prepare();
     video->prepare();
 
-    auto audioTransport = qSharedPointerDynamicCast<J::ICE::Transport>(audio->transport());
-    auto videoTransport = qSharedPointerDynamicCast<J::ICE::Transport>(video->transport());
-    check(audioTransport && videoTransport, "outgoing RTP did not select ICE");
     auto icePad = audioTransport->pad().staticCast<J::ICE::Pad>();
 
     check(waitFor([&]() {
