@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #include "../../src/xmpp/xmpp-im/jingle-ice-connection_p.h"
 #include <QCoreApplication>
+#include <QChildEvent>
 #include <QElapsedTimer>
 #include <QEventLoop>
 #include <QTimer>
@@ -259,27 +260,67 @@ static QDomElement replacementPayload(
     return root;
 }
 
-static QSet<Task *> directRootTasks(Client &client)
-{
-    QSet<Task *> tasks;
-    for (auto child : client.rootTask()->children()) {
-        if (auto task = qobject_cast<Task *>(child))
-            tasks.insert(task);
+class RootTaskKeeper final : public QObject {
+public:
+    explicit RootTaskKeeper(Task *root) : root_(root)
+    {
+        check(root_, "missing client root task");
+        for (auto child : root_->children())
+            existing_.insert(child);
+        root_->installEventFilter(this);
     }
-    return tasks;
-}
 
-static void acknowledgeNewJingleTask(Client &client, const Jid &peer, const QSet<Task *> &before)
-{
-    Task *pending = nullptr;
-    for (auto child : client.rootTask()->children()) {
-        auto task = qobject_cast<Task *>(child);
-        if (!task || before.contains(task))
-            continue;
-        check(!pending, "more than one root task appeared while sending session-initiate");
-        pending = task;
+    ~RootTaskKeeper() override
+    {
+        if (root_)
+            root_->removeEventFilter(this);
+        release();
     }
-    check(pending, "session-initiate did not create a Jingle IQ task");
+
+    Task *task() const { return qobject_cast<Task *>(held_.data()); }
+
+    void release()
+    {
+        if (!held_)
+            return;
+        auto object = held_.data();
+        object->removeEventFilter(this);
+        held_.clear();
+        object->deleteLater();
+    }
+
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override
+    {
+        if (watched == root_ && event->type() == QEvent::ChildAdded) {
+            auto child = static_cast<QChildEvent *>(event)->child();
+            if (child && !existing_.contains(child)) {
+                check(!held_ || held_ == child,
+                      "more than one root task appeared while sending session-initiate");
+                if (!held_) {
+                    held_ = child;
+                    child->installEventFilter(this);
+                }
+            }
+        } else if (held_ && watched == held_ && event->type() == QEvent::DeferredDelete) {
+            // Task::go(true) schedules deletion immediately when no real XMPP
+            // stream is connected. Keep this one serialized Jingle IQ alive
+            // until the fixture feeds its real <iq type='result'/> reply.
+            return true;
+        }
+        return QObject::eventFilter(watched, event);
+    }
+
+private:
+    QPointer<Task>    root_;
+    QSet<QObject *>   existing_;
+    QPointer<QObject> held_;
+};
+
+static void acknowledgeJingleTask(RootTaskKeeper &keeper, const Jid &peer)
+{
+    auto pending = keeper.task();
+    check(pending, "session-initiate did not create a retained Jingle IQ task");
 
     QDomDocument replyDoc;
     auto reply = replyDoc.createElement(QStringLiteral("iq"));
@@ -288,6 +329,7 @@ static void acknowledgeNewJingleTask(Client &client, const Jid &peer, const QSet
     reply.setAttribute(QStringLiteral("from"), peer.full());
     reply.setAttribute(QStringLiteral("id"), pending->id());
     check(pending->take(reply), "session-initiate IQ result was not consumed");
+    keeper.release();
 }
 
 static QDomElement sessionAcceptPayload(
@@ -447,7 +489,7 @@ static void exerciseInitiatorReplacement(const WireOffer &transportSource, TcpPo
     // owns the production preparation boundary: RTP selects ICE synchronously
     // from prepare(), while media/DTLS completion and stanza serialization are
     // asynchronous. Do not inspect transport selection before this call.
-    const auto tasksBeforeInitiate = directRootTasks(client);
+    RootTaskKeeper pendingInitiate(client.rootTask());
     session.initiate();
 
     auto audioTransport = qSharedPointerDynamicCast<J::ICE::Transport>(audio->transport());
@@ -460,7 +502,7 @@ static void exerciseInitiatorReplacement(const WireOffer &transportSource, TcpPo
     // through the existing Task parser to complete exactly that transaction.
     check(waitFor([&]() { return session.state() == J::State::Unacked; }),
           "replacement initiator did not serialize session-initiate");
-    acknowledgeNewJingleTask(client, peer, tasksBeforeInitiate);
+    acknowledgeJingleTask(pendingInitiate, peer);
     check(session.state() == J::State::Pending
               && audio->state() == J::State::Pending
               && video->state() == J::State::Pending,
