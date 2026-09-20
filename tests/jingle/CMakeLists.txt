@@ -77,6 +77,11 @@ target_include_directories(jingle_iceudp_test PRIVATE ../../src/xmpp/xmpp-im)
 target_link_libraries(jingle_iceudp_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
     Qt${QT_DEFAULT_MAJOR_VERSION}::Network Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
 add_test(NAME jingle_iceudp COMMAND jingle_iceudp_test)
+add_executable(jingle_domlifetime_test domlifetime.cpp)
+target_include_directories(jingle_domlifetime_test PRIVATE ../../src/xmpp/xmpp-im)
+target_link_libraries(jingle_domlifetime_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
+    Qt${QT_DEFAULT_MAJOR_VERSION}::Network Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
+add_test(NAME jingle_domlifetime COMMAND jingle_domlifetime_test)
 add_executable(jingle_icereplacestate_test icereplacestate.cpp)
 target_link_libraries(jingle_icereplacestate_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
     Qt${QT_DEFAULT_MAJOR_VERSION}::Network Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
