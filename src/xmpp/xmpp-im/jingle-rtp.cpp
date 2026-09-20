@@ -1,14 +1,40 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #include "jingle-rtp.h"
 #include "jingle-nstransportslist.h"
+#include "jingle-rtp-router_p.h"
 #include "jingle-session.h"
 #include <algorithm>
 
 namespace XMPP::Jingle::RTP {
+class Pad::RoutingPrivate {
+public:
+    struct SecurityIngress {
+        QPointer<SrtpSession>                         security;
+        BundleRouter                                  router;
+        QMap<ContentKey, BundleRouter::Route>         routes;
+        QMap<ContentKey, QPointer<Application>>       applications;
+        QMetaObject::Connection                       packetConnection;
+        QMetaObject::Connection                       destroyedConnection;
+    };
+
+    QHash<SrtpSession *, QSharedPointer<SecurityIngress>> ingresses;
+    QHash<Application *, SrtpSession *>                   applicationSecurity;
+};
+
+static QList<BundleRouter::Route> routeList(const QMap<ContentKey, BundleRouter::Route> &routes)
+{
+    QList<BundleRouter::Route> result;
+    result.reserve(routes.size());
+    for (const auto &route : routes)
+        result.append(route);
+    return result;
+}
+
 Pad::Pad(Manager *manager, Session *session, std::shared_ptr<MediaProvider> provider, QStringList transports) :
     manager_(manager), session_(session), provider_(std::move(provider)), transports_(std::move(transports))
 {
     directions_ = new DirectionController(this);
+    routing_    = std::make_unique<RoutingPrivate>();
     if (provider_)
         media_ = provider_->createSession();
     if (media_)
@@ -23,6 +49,138 @@ QString             Pad::ns() const { return Description::ns(); }
 Session            *Pad::session() const { return session_; }
 ApplicationManager *Pad::manager() const { return manager_; }
 MediaSession       *Pad::mediaSession() const { return media_.get(); }
+
+bool Pad::bindPacketRoute(Application *application, SrtpSession *security, const Description &local,
+                          const Description &remote)
+{
+    if (!application || !security || application->pad().data() != this || !session_)
+        return false;
+
+    const ContentKey key { application->contentName(), application->creator() };
+    const bool localContent = application->creator() == session_->role();
+    auto route = bundleRouteForDescriptions(key, localContent, local, remote);
+    if (!route)
+        return false;
+
+    auto ingress = routing_->ingresses.value(security);
+    const bool newIngress = !ingress;
+    if (!ingress) {
+        ingress = QSharedPointer<RoutingPrivate::SecurityIngress>::create();
+        ingress->security = security;
+    }
+
+    auto candidate = ingress->routes;
+    candidate.insert(key, *route);
+    if (!ingress->router.configure(routeList(candidate)))
+        return false;
+
+    // Commit the target route before releasing an older security association so
+    // reconfiguration cannot leave the application unrouted on validation error.
+    auto oldSecurity = routing_->applicationSecurity.value(application, nullptr);
+    if (oldSecurity && oldSecurity != security)
+        unbindPacketRoute(application);
+
+    ingress->routes       = std::move(candidate);
+    ingress->applications.insert(key, application);
+    routing_->applicationSecurity.insert(application, security);
+
+    if (newIngress) {
+        routing_->ingresses.insert(security, ingress);
+        ingress->packetConnection = connect(
+            security, &SrtpSession::packetReceived, this,
+            [this, security](const QByteArray &bytes, SrtpContext::Packet kind, quint64 epoch) {
+                auto ingress = routing_->ingresses.value(security);
+                if (!ingress || ingress->security != security)
+                    return;
+                auto routed = ingress->router.routeIncoming(bytes, kind);
+                if (!routed || !ingress->router.isCurrent(*routed))
+                    return;
+
+                if (routed->delivery == BundleRouter::Delivery::Content) {
+                    auto application = ingress->applications.value(routed->content);
+                    if (application)
+                        application->receiveRoutedPacket(routed->data, routed->kind, epoch);
+                    return;
+                }
+
+                // A compound RTCP packet spanning multiple BUNDLE contents needs
+                // one group-level media ingress. The current psimedia API has no
+                // such endpoint, so never duplicate it across per-content inputs.
+                // This path is unreachable while every content has an independent
+                // security association and must be implemented before live
+                // multi-content BUNDLE is enabled.
+                qWarning("jingle-rtp: dropping shared RTCP until group media ingress is wired");
+            });
+        ingress->destroyedConnection = connect(security, &QObject::destroyed, this, [this, security]() {
+            auto ingress = routing_->ingresses.take(security);
+            if (!ingress)
+                return;
+            for (auto application : std::as_const(ingress->applications)) {
+                if (application && routing_->applicationSecurity.value(application) == security)
+                    routing_->applicationSecurity.remove(application);
+            }
+        });
+    }
+    return true;
+}
+
+void Pad::unbindPacketRoute(Application *application)
+{
+    if (!application)
+        return;
+    auto security = routing_->applicationSecurity.take(application);
+    if (!security)
+        return;
+    auto ingress = routing_->ingresses.value(security);
+    if (!ingress)
+        return;
+
+    const ContentKey key { application->contentName(), application->creator() };
+    auto candidate = ingress->routes;
+    candidate.remove(key);
+    ingress->applications.remove(key);
+
+    if (candidate.isEmpty()) {
+        QObject::disconnect(ingress->packetConnection);
+        QObject::disconnect(ingress->destroyedConnection);
+        routing_->ingresses.remove(security);
+        return;
+    }
+
+    if (!ingress->router.configure(routeList(candidate))) {
+        // Removing a route from a previously valid table cannot introduce a
+        // collision. Fail closed if that invariant is ever violated.
+        ingress->router.reset();
+        QObject::disconnect(ingress->packetConnection);
+        QObject::disconnect(ingress->destroyedConnection);
+        for (auto survivor : std::as_const(ingress->applications)) {
+            if (survivor && routing_->applicationSecurity.value(survivor) == security)
+                routing_->applicationSecurity.remove(survivor);
+        }
+        routing_->ingresses.remove(security);
+        return;
+    }
+    ingress->routes = std::move(candidate);
+}
+
+bool Pad::registerOutgoingRtp(Application *application, const QByteArray &packet)
+{
+    if (!application || packet.size() < 12)
+        return false;
+    const auto *bytes = reinterpret_cast<const uchar *>(packet.constData());
+    if ((bytes[0] >> 6) != 2)
+        return false;
+    const quint32 ssrc = (quint32(bytes[8]) << 24) | (quint32(bytes[9]) << 16) | (quint32(bytes[10]) << 8)
+        | quint32(bytes[11]);
+    if (!ssrc)
+        return false;
+
+    auto security = routing_->applicationSecurity.value(application, nullptr);
+    auto ingress  = security ? routing_->ingresses.value(security) : QSharedPointer<RoutingPrivate::SecurityIngress>();
+    if (!ingress)
+        return false;
+    return ingress->router.registerOutgoingSsrc(ContentKey { application->contentName(), application->creator() }, ssrc);
+}
 bool                Pad::incomingSessionInfo(const QDomElement &xml)
 {
     if (!session_ || session_->state() >= State::Finishing)
@@ -85,6 +243,8 @@ void Application::stopMedia()
     prepareOperation_.reset();
     applyOperation_.reset();
     pendingRemoteOffer_.reset();
+    if (auto pad = _pad.staticCast<Pad>())
+        pad->unbindPacketRoute(this);
     if (security_)
         security_->disconnect(this);
     security_.clear();
@@ -323,17 +483,6 @@ void Application::prepareTransport()
             [this]() { remove(Reason::SecurityError, QStringLiteral("RTP security association invalidated")); });
     connect(security_, &QObject::destroyed, this,
             [this]() { remove(Reason::SecurityError, QStringLiteral("RTP security association destroyed")); });
-    connect(
-        security_, &SrtpSession::packetReceived, this,
-        [this](const QByteArray &bytes, SrtpContext::Packet kind, quint64 epoch) {
-            if (_state != State::Active || !attached_ || !security_ || !security_->isReady()
-                || epoch != security_->epoch())
-                return;
-            if (kind == SrtpContext::Packet::Rtp
-                && (!allowsRtp(false) || bytes.size() < 12 || !negotiatedPayloads_.contains(quint8(bytes[1]) & 0x7f)))
-                return;
-            endpoint_->receivePacket(bytes, kind);
-        });
 }
 void Application::start()
 {
@@ -381,6 +530,11 @@ void Application::applied(MediaOperation::Id id, MediaError error)
     // accepted payload set in both directions, independent of offer preferences.
     for (const auto &payload : (isLocal() ? remote : local)->payloads)
         negotiatedPayloads_.insert(payload.id);
+    auto pad = _pad.staticCast<Pad>();
+    if (!security_ || !pad || !pad->bindPacketRoute(this, security_, *local, *remote)) {
+        remove(Reason::FailedApplication, QStringLiteral("Authenticated RTP route configuration failed"));
+        return;
+    }
     beforeAnswer_.reset();
     auto                  transport = _transport;
     QPointer<Application> guard(this);
@@ -423,11 +577,28 @@ bool Application::sendPacket(QByteArray data, SrtpContext::Packet kind, quint64 
 {
     if (_state != State::Active || !attached_ || !security_ || !security_->isReady() || epoch != security_->epoch())
         return false;
-    if (kind == SrtpContext::Packet::Rtp
-        && (!allowsRtp(true) || data.size() < 12 || !negotiatedPayloads_.contains(quint8(data[1]) & 0x7f)))
-        return false;
+    if (kind == SrtpContext::Packet::Rtp) {
+        if (!allowsRtp(true) || data.size() < 12 || !negotiatedPayloads_.contains(quint8(data[1]) & 0x7f))
+            return false;
+        auto pad = _pad.staticCast<Pad>();
+        if (!pad || !pad->registerOutgoingRtp(this, data)) {
+            remove(Reason::FailedApplication, QStringLiteral("Outgoing RTP source routing conflict"));
+            return false;
+        }
+    }
     auto packets = dynamic_cast<PacketTransport *>(_transport.data());
     return packets && packets->sendRtpPacket(std::move(data), kind, epoch);
+}
+
+void Application::receiveRoutedPacket(const QByteArray &bytes, SrtpContext::Packet kind, quint64 epoch)
+{
+    if (_state != State::Active || !attached_ || !endpoint_ || !security_ || !security_->isReady()
+        || epoch != security_->epoch())
+        return;
+    if (kind == SrtpContext::Packet::Rtp
+        && (!allowsRtp(false) || bytes.size() < 12 || !negotiatedPayloads_.contains(quint8(bytes[1]) & 0x7f)))
+        return;
+    endpoint_->receivePacket(bytes, kind);
 }
 void Application::remove(Reason::Condition condition, const QString &text)
 {

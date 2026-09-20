@@ -158,6 +158,7 @@ public:
 };
 
 class Manager;
+class Application;
 class IRIS_EXPORT Pad : public ApplicationManagerPad {
     Q_OBJECT
 public:
@@ -179,6 +180,12 @@ signals:
     void mediaError(const XMPP::Jingle::RTP::MediaError &);
 
 private:
+    friend class Application;
+    class RoutingPrivate;
+    bool bindPacketRoute(Application *, SrtpSession *, const Description &local, const Description &remote);
+    void unbindPacketRoute(Application *);
+    bool registerOutgoingRtp(Application *, const QByteArray &);
+
     QPointer<Manager> manager_;
     QPointer<Session> session_;
     // Provider outlives its media session; endpoints outlive neither.
@@ -187,6 +194,7 @@ private:
     QStringList                    transports_;
     quint64                        nextName_   = 0;
     DirectionController           *directions_ = nullptr; // QObject child
+    std::unique_ptr<RoutingPrivate> routing_;
 };
 
 class IRIS_EXPORT Application : public XMPP::Jingle::Application {
@@ -224,6 +232,7 @@ private:
     void                            failPreparation(Reason::Condition, const QString &);
     void                            activateMedia();
     bool                            sendPacket(QByteArray, SrtpContext::Packet, quint64 epoch);
+    void                            receiveRoutedPacket(const QByteArray &, SrtpContext::Packet, quint64 epoch);
     bool                            allowsRtp(bool sending) const;
     Negotiation                     negotiation_;
     std::optional<Negotiation>      beforeAnswer_;

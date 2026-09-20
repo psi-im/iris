@@ -108,6 +108,12 @@ private:
     Error                      lastError_      = Error::None;
 };
 
+// Convert negotiated endpoint descriptions into the static part of one router
+// entry. Runtime outgoing SSRCs are registered separately when packets appear.
+std::optional<BundleRouter::Route> bundleRouteForDescriptions(const ContentKey &content, bool localContent,
+                                                               const Description &local,
+                                                               const Description &remote);
+
 }
 
 #endif // JINGLE_RTP_ROUTER_P_H

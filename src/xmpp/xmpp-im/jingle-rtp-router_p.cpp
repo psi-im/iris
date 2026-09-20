@@ -36,6 +36,56 @@ void BundleRouter::advanceRevision()
         ++revision_;
 }
 
+namespace {
+constexpr auto MidUri = "urn:ietf:params:rtp-hdrext:sdes:mid";
+
+void appendSources(QSet<quint32> &target, const Description &description)
+{
+    if (description.ssrc && *description.ssrc)
+        target.insert(*description.ssrc);
+    for (const auto &source : description.sources) {
+        if (source.ssrc)
+            target.insert(source.ssrc);
+    }
+}
+}
+
+std::optional<BundleRouter::Route> bundleRouteForDescriptions(const ContentKey &content, bool localContent,
+                                                               const Description &local,
+                                                               const Description &remote)
+{
+    if (content.first.isEmpty() || local.media.isEmpty() || remote.media.isEmpty() || local.media != remote.media
+        || !local.rtcpMux || !remote.rtcpMux)
+        return std::nullopt;
+
+    // Current negotiation preserves payload identifiers. The answer is the
+    // accepted set in both directions: remote for locally-created content,
+    // local for remotely-created content.
+    const auto &accepted = localContent ? remote : local;
+    if (accepted.payloads.isEmpty())
+        return std::nullopt;
+
+    BundleRouter::Route route;
+    route.content = content;
+    for (const auto &payload : accepted.payloads)
+        route.incomingPayloadTypes.insert(payload.id);
+
+    // Source declarations describe the endpoint that emitted that description.
+    appendSources(route.incomingSsrcs, remote);
+    appendSources(route.localSsrcs, local);
+
+    // MID is useful only when it survived offer/answer negotiation. The content
+    // name is the Jingle grouping identity corresponding to SDP MID semantics.
+    for (const auto &extension : accepted.headerExtensions) {
+        if (extension.uri == QLatin1String(MidUri)) {
+            route.midExtensionId = extension.id;
+            route.mid            = content.first.toUtf8();
+            break;
+        }
+    }
+    return route;
+}
+
 bool BundleRouter::configure(const QList<Route> &routes)
 {
     if (routes.isEmpty() || routes.size() > MaxRoutes) {
