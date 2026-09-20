@@ -2,6 +2,7 @@
 #ifndef JINGLE_ICE_UDP_H
 #define JINGLE_ICE_UDP_H
 
+#include <QByteArray>
 #include <QDomElement>
 #include <QHostAddress>
 #include <QList>
@@ -40,7 +41,7 @@ struct UdpTransportDescription {
     QString                           ufrag;
     QList<UdpCandidate>               candidates;
     std::optional<UdpRemoteCandidate> remoteCandidate;
-    QList<QDomElement>                extensions;
+    QList<QByteArray>                  extensions; // serialized foreign XML; no parser-document lifetime
 
     bool isValid(QString *error = nullptr) const;
 };
