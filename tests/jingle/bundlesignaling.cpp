@@ -7,9 +7,9 @@
 
 #define private public
 #include <iris/jingle-session.h>
+#include <iris/jingle-ice.h>
 #undef private
 
-#include <iris/jingle-ice.h>
 #include <iris/jingle-rtp.h>
 #include <iris/xmpp_client.h>
 #include <iris/xmpp_task.h>
