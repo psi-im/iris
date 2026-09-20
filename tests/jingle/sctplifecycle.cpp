@@ -121,8 +121,11 @@ int main(int argc, char **argv)
         return fail("stream close discarded buffered peer data");
     if (remoteOne->readDatagram().data() != tail)
         return fail("buffered tail changed across stream close");
+    if (remoteCloseFinished != 0)
+        return fail("remote close notification overtook accounting of final datagram");
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 5);
     if (remoteCloseFinished != 1)
-        return fail("remote close did not complete after buffered data drain");
+        return fail("remote close did not complete after final datagram returned");
 
     const QByteArray survivor("surviving-channel");
     if (!leftTwo->writeDatagram(QNetworkDatagram(survivor)))
