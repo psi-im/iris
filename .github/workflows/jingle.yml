@@ -75,6 +75,14 @@ jobs:
         if: always()
         run: ccache --show-stats
 
+      - name: Stress RTP negotiation without sanitizers
+        shell: bash
+        run: |
+          for i in $(seq 1 30); do
+            echo "non-asan rtpnegotiation iteration $i"
+            ctest --test-dir build-jingle --output-on-failure -j1 -R jingle_rtpnegotiation
+          done
+
       - name: Test
         run: ctest --test-dir build-jingle --output-on-failure -j1
 
