@@ -164,6 +164,8 @@ int main(int argc, char **argv)
                          });
 
         QPointer<TestApplication> guard(transfer);
+        int prematureUpdates = 0;
+        QObject::connect(transfer, &J::Application::updated, &eventLoop, [&]() { ++prematureUpdates; });
         QObject::connect(transfer, &J::Application::stateChanged, &eventLoop,
                          [transfer](J::State state) {
                              if (state == J::State::Finishing)
@@ -175,6 +177,7 @@ int main(int argc, char **argv)
         transport->connection()->closeDuringNextRead();
         transport->connection()->feed(QByteArrayLiteral("tail"));
         check(!guard, "FT application was not deleted from Finishing callback");
+        check(prematureUpdates == 0, "synchronous final-read close was misclassified as truncated transfer");
         check(sink.data() == QByteArrayLiteral("tail"), "FT receiver lost the final payload before reentrant deletion");
     }
 
