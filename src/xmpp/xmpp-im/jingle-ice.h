@@ -99,7 +99,7 @@ namespace Jingle { namespace ICE {
 
     private:
         friend class Transport;
-        ConnectionMembership membershipFor(Transport *transport);
+        ConnectionMembership membershipFor(Transport *transport, bool *contentBound);
         qsizetype             liveAssociationCount() const;
 
         class Private;

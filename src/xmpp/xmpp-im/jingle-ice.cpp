@@ -556,8 +556,11 @@ namespace XMPP { namespace Jingle { namespace ICE {
             if (!pad)
                 return false;
 
-            membership = pad->membershipFor(q);
-            if (membership) {
+            bool contentBound = false;
+            membership        = pad->membershipFor(q, &contentBound);
+            if (contentBound) {
+                if (!membership)
+                    return false; // registry/ownership conflict: never fail open
                 network = membership.connection();
             } else {
                 // Low-level callers may use ICE Transport without attaching it
@@ -1497,8 +1500,10 @@ namespace XMPP { namespace Jingle { namespace ICE {
         return requested.isEmpty() ? NS : requested;
     }
 
-    ConnectionMembership Pad::membershipFor(Transport *transport)
+    ConnectionMembership Pad::membershipFor(Transport *transport, bool *contentBound)
     {
+        if (contentBound)
+            *contentBound = false;
         if (!transport || transport->pad().data() != this || !_session)
             return {};
 
@@ -1512,6 +1517,8 @@ namespace XMPP { namespace Jingle { namespace ICE {
         }
         if (!content)
             return {}; // compatibility path for direct low-level Transport users
+        if (contentBound)
+            *contentBound = true;
 
         // A transport-replace is an ownership transition for this logical
         // content. The replaced Transport may survive in a selector backup, but
