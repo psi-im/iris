@@ -970,8 +970,9 @@ QString Message::pubsubNode() const
 {
     if (!d)
         return {};
-    QString node;
-    for (const auto &event : d->pubSubEvents) {
+    QString     node;
+    const auto &events = d->pubSubEvents;
+    for (const auto &event : events) {
         if (event.type() == PubSubEvent::Type::Items)
             node = event.node();
     }
@@ -983,7 +984,8 @@ QList<PubSubItem> Message::pubsubItems() const
     QList<PubSubItem> items;
     if (!d)
         return items;
-    for (const auto &event : d->pubSubEvents) {
+    const auto &events = d->pubSubEvents;
+    for (const auto &event : events) {
         if (event.type() != PubSubEvent::Type::Items)
             continue;
         // Preserve the legacy accessor's behavior: payload-less item
@@ -1001,7 +1003,8 @@ QList<PubSubRetraction> Message::pubsubRetractions() const
     QList<PubSubRetraction> retractions;
     if (!d)
         return retractions;
-    for (const auto &event : d->pubSubEvents) {
+    const auto &events = d->pubSubEvents;
+    for (const auto &event : events) {
         if (event.type() == PubSubEvent::Type::Items)
             retractions += event.retractions();
     }
