@@ -10,6 +10,25 @@ namespace {
     const QString NS_RTP_HDREXT(QStringLiteral("urn:xmpp:jingle:apps:rtp:rtp-hdrext:0"));
     const QString NS_SSMA(QStringLiteral("urn:xmpp:jingle:apps:rtp:ssma:0"));
 
+    QByteArray serializeOpaqueExtension(const QDomElement &element)
+    {
+        QDomDocument owned;
+        const auto   imported = owned.importNode(element, true);
+        if (imported.isNull())
+            return {};
+        owned.appendChild(imported);
+        return owned.toByteArray(-1);
+    }
+
+    QDomElement deserializeOpaqueExtension(QDomDocument &target, const QByteArray &xml)
+    {
+        QDomDocument owned;
+        if (!owned.setContent(xml, true))
+            return {};
+        const auto element = owned.documentElement();
+        return element.isNull() ? QDomElement() : target.importNode(element, true).toElement();
+    }
+
     std::optional<quint32> number(const QString &text)
     {
         if (text.isEmpty())
@@ -281,7 +300,7 @@ std::optional<Description> Description::fromXml(const QDomElement &element, bool
                     if (!payload.feedbackTrrInt)
                         return {};
                 } else {
-                    payload.extensions.append(param.cloneNode(true).toElement());
+                    payload.extensions.append(serializeOpaqueExtension(param));
                 }
             }
             result.payloads.append(std::move(payload));
@@ -317,7 +336,7 @@ std::optional<Description> Description::fromXml(const QDomElement &element, bool
                 return {};
             result.sourceGroups.append(std::move(*group));
         } else {
-            result.extensions.append(child.cloneNode(true).toElement());
+            result.extensions.append(serializeOpaqueExtension(child));
         }
     }
     if (!advisory && result.payloads.isEmpty())
@@ -360,8 +379,11 @@ QDomElement Description::toXml(QDomDocument &doc) const
             child.appendChild(feedbackToXml(doc, entry));
         if (payload.feedbackTrrInt)
             child.appendChild(feedbackTrrIntToXml(doc, *payload.feedbackTrrInt));
-        for (const auto &extension : payload.extensions)
-            child.appendChild(doc.importNode(extension, true));
+        for (const auto &extension : payload.extensions) {
+            const auto element = deserializeOpaqueExtension(doc, extension);
+            if (!element.isNull())
+                child.appendChild(element);
+        }
         root.appendChild(child);
     }
     if (rtcpMux)
@@ -374,8 +396,11 @@ QDomElement Description::toXml(QDomDocument &doc) const
         root.appendChild(headerExtensionToXml(doc, extension));
     if (extmapAllowMixed)
         root.appendChild(doc.createElementNS(NS_RTP_HDREXT, QStringLiteral("extmap-allow-mixed")));
-    for (const auto &extension : extensions)
-        root.appendChild(doc.importNode(extension, true));
+    for (const auto &extension : extensions) {
+        const auto element = deserializeOpaqueExtension(doc, extension);
+        if (!element.isNull())
+            root.appendChild(element);
+    }
     return root;
 }
 }
