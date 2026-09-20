@@ -61,7 +61,10 @@ public:
     void        setMeta(const QList<Meta> &meta);
     void        addMeta(const Meta &meta);
 
+    // Returned DOM handles are backed by this JinglePub's shared data. They
+    // remain valid while a JinglePub instance sharing that data is alive.
     QList<QDomElement> descriptions() const;
+    // Inputs are deep-imported; the caller's QDomDocument may be destroyed after return.
     void               setDescriptions(const QList<QDomElement> &descriptions);
     void               addDescription(const QDomElement &description);
     void               addDescription(const QString &applicationNamespace);
