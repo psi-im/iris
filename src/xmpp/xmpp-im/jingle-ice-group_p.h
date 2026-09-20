@@ -80,6 +80,109 @@ namespace XMPP { namespace Jingle { namespace ICE {
             return result;
         }
 
+
+        // Stage a new physical association for an already-active BUNDLE group
+        // without touching the registry-visible generation. This is the
+        // make-before-break primitive used by transport-replace/ICE restart.
+        static std::optional<ConnectionGroupTransaction>
+        stageBundledReplacement(const GroupPlan &plan, ConnectionRegistry &registry,
+                                const ConnectionGroupTransaction &current,
+                                const QString &transportNamespace)
+        {
+            ConnectionGroupTransaction result;
+            result.isReplacement_ = true;
+
+            for (const auto &association : plan.associations()) {
+                if (!association.bundled || association.members.size() < 2
+                    || association.transportNamespace != transportNamespace)
+                    continue;
+                if (association.owner != association.members.first())
+                    return std::nullopt;
+
+                const auto oldAssociationId = current.associationIdFor(association.owner);
+                if (!oldAssociationId)
+                    return std::nullopt;
+                for (const auto &content : association.members) {
+                    if (current.associationIdFor(content) != oldAssociationId)
+                        return std::nullopt;
+                }
+
+                auto oldState = registry.associations_.value(oldAssociationId).toStrongRef();
+                if (!oldState || oldState->members.size() != association.members.size())
+                    return std::nullopt;
+                for (const auto &content : association.members) {
+                    if (!oldState->members.contains(content))
+                        return std::nullopt;
+                }
+
+                auto newState        = QSharedPointer<ConnectionAssociationState>::create();
+                newState->id         = registry.nextAssociationId_++;
+                newState->connection = QSharedPointer<IceConnection>::create();
+                for (const auto &content : association.members)
+                    newState->members.insert(content);
+                newState->connection->generation.membershipRevision
+                    += quint64(association.members.size());
+
+                result.replacements_.push_back(
+                    ReplacementAssociation { oldAssociationId, std::move(oldState), newState });
+
+                for (const auto &content : association.members) {
+                    result.entries_.push_back(
+                        Entry { association.id, content, ConnectionMembership(newState, content) });
+                }
+            }
+
+            if (result.replacements_.empty())
+                return std::nullopt;
+            return result;
+        }
+
+        bool activateReplacement(ConnectionRegistry &registry)
+        {
+            if (!isReplacement_ || replacementActive_)
+                return false;
+
+            // Revalidate the complete old generation before mutating the weak
+            // registry index. Membership owners keep the old connections alive.
+            for (const auto &replacement : replacements_) {
+                if (registry.associations_.value(replacement.oldAssociationId).toStrongRef()
+                    != replacement.oldState)
+                    return false;
+                if (registry.associations_.contains(replacement.newState->id))
+                    return false;
+            }
+
+            for (const auto &replacement : replacements_)
+                registry.associations_.remove(replacement.oldAssociationId);
+            for (const auto &replacement : replacements_)
+                registry.associations_.insert(replacement.newState->id, replacement.newState.toWeakRef());
+
+            replacementActive_ = true;
+            return true;
+        }
+
+        bool rollbackReplacement(ConnectionRegistry &registry)
+        {
+            if (!isReplacement_ || !replacementActive_)
+                return false;
+
+            for (const auto &replacement : replacements_) {
+                if (registry.associations_.value(replacement.newState->id).toStrongRef()
+                    != replacement.newState)
+                    return false;
+            }
+            for (const auto &replacement : replacements_)
+                registry.associations_.remove(replacement.newState->id);
+            for (const auto &replacement : replacements_)
+                registry.associations_.insert(replacement.oldAssociationId, replacement.oldState.toWeakRef());
+
+            replacementActive_ = false;
+            return true;
+        }
+
+        bool isReplacement() const { return isReplacement_; }
+        bool replacementActive() const { return replacementActive_; }
+
         qsizetype size() const { return qsizetype(entries_.size()); }
 
         IceConnection *connectionFor(const ContentKey &content) const
@@ -112,7 +215,16 @@ namespace XMPP { namespace Jingle { namespace ICE {
         }
 
     private:
-        std::vector<Entry> entries_;
+        struct ReplacementAssociation {
+            quint64                                    oldAssociationId = 0;
+            QSharedPointer<ConnectionAssociationState> oldState;
+            QSharedPointer<ConnectionAssociationState> newState;
+        };
+
+        std::vector<Entry>                  entries_;
+        std::vector<ReplacementAssociation> replacements_;
+        bool                                isReplacement_    = false;
+        bool                                replacementActive_ = false;
     };
 
 }}}

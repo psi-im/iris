@@ -77,6 +77,7 @@ namespace Jingle {
         };
 
         class ConnectionRegistry;
+        class ConnectionGroupTransaction;
 
         // A logical content's strong share in one session-local network association.
         // Move-only so copying a convenience handle cannot accidentally extend the
@@ -124,6 +125,7 @@ namespace Jingle {
 
         private:
             friend class ConnectionRegistry;
+            friend class ConnectionGroupTransaction;
             ConnectionMembership(QSharedPointer<ConnectionAssociationState> state, ContentKey content) :
                 state_(std::move(state)), content_(std::move(content))
             {
@@ -189,6 +191,8 @@ namespace Jingle {
             }
 
         private:
+            friend class ConnectionGroupTransaction;
+
             bool containsContent(const ContentKey &content) const
             {
                 for (auto it = associations_.cbegin(); it != associations_.cend(); ++it) {

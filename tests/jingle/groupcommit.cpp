@@ -60,6 +60,63 @@ int main(int argc, char **argv)
     check(transaction->release(members.at(2).content), "independent membership could not be released");
     check(!screenGuard && registry.liveAssociationCount() == 0, "final release retained a network association");
 
+    // A BUNDLE restart/transport-replace must be make-before-break. The
+    // replacement association is fully allocated while the registry still
+    // exposes the old generation, then the weak index flips atomically. Old
+    // memberships continue to own the previous connection until explicitly
+    // retired by the higher-level signaling/runtime coordinator.
+    {
+        ConnectionRegistry replacementRegistry;
+        auto current = ConnectionGroupTransaction::stageBundled(
+            *plan, replacementRegistry, QStringLiteral("urn:xmpp:jingle:transports:ice:0"));
+        check(current && current->size() == 2 && replacementRegistry.liveAssociationCount() == 1,
+              "failed to seed active BUNDLE replacement generation");
+
+        const auto oldId = current->associationIdFor(members.at(0).content);
+        auto *oldConnection = current->connectionFor(members.at(0).content);
+        QPointer<IceConnection> oldGuard(oldConnection);
+
+        auto replacement = ConnectionGroupTransaction::stageBundledReplacement(
+            *plan, replacementRegistry, *current,
+            QStringLiteral("urn:xmpp:jingle:transports:ice:0"));
+        check(replacement && replacement->isReplacement() && !replacement->replacementActive(),
+              "failed to stage BUNDLE replacement generation");
+        const auto newId = replacement->associationIdFor(members.at(0).content);
+        auto *newConnection = replacement->connectionFor(members.at(0).content);
+        QPointer<IceConnection> newGuard(newConnection);
+        check(newId && newId != oldId && newConnection && newConnection != oldConnection,
+              "replacement reused the active BUNDLE association");
+        check(replacementRegistry.contains(oldId) && !replacementRegistry.contains(newId)
+                  && replacementRegistry.liveAssociationCount() == 1,
+              "staging replacement changed the registry-visible generation");
+
+        check(replacement->activateReplacement(replacementRegistry)
+                  && replacement->replacementActive(),
+              "BUNDLE replacement generation did not activate atomically");
+        check(!replacementRegistry.contains(oldId) && replacementRegistry.contains(newId)
+                  && replacementRegistry.liveAssociationCount() == 1,
+              "replacement activation exposed mixed BUNDLE generations");
+        check(oldGuard && newGuard,
+              "replacement activation broke make-before-break connection lifetime");
+
+        check(replacement->rollbackReplacement(replacementRegistry)
+                  && !replacement->replacementActive(),
+              "BUNDLE replacement rollback failed");
+        check(replacementRegistry.contains(oldId) && !replacementRegistry.contains(newId)
+                  && oldGuard && newGuard,
+              "replacement rollback did not restore the old registry generation");
+
+        check(replacement->activateReplacement(replacementRegistry),
+              "BUNDLE replacement could not be reactivated after rollback");
+        current.reset();
+        check(!oldGuard && newGuard && replacementRegistry.contains(newId),
+              "retiring old BUNDLE memberships destroyed the new generation");
+        replacement.reset();
+        check(!newGuard && replacementRegistry.liveAssociationCount() == 0,
+              "replacement generation leaked after final membership release");
+        replacementRegistry.prune();
+    }
+
     auto refusalPlan = GroupNegotiation::initialPlan(members, offer, {});
     check(refusalPlan && refusalPlan->readyToCommit(), "BUNDLE refusal did not produce a committable fallback plan");
     auto refusal = ConnectionGroupTransaction::commit(*refusalPlan, registry);
