@@ -145,6 +145,7 @@ struct OwnedXml {
 
     operator QDomElement() const { return root; }
     QDomElement firstChildElement() const { return root.firstChildElement(); }
+    QDomNode cloneNode(bool deep = true) const { return root.cloneNode(deep); }
 };
 
 static OwnedXml infoXml(const QString &body)
