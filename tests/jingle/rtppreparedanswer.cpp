@@ -22,10 +22,7 @@ static R::Description description()
     opus.clockrate = 48000;
     opus.channels  = 2;
     result.payloads.append(opus);
-    QDomDocument doc;
-    auto         extension = doc.createElementNS(QStringLiteral("urn:iris:test"), QStringLiteral("test"));
-    extension.setAttribute(QStringLiteral("value"), QStringLiteral("original"));
-    result.extensions.append(extension);
+    result.extensions.append(QByteArrayLiteral("<test xmlns=\"urn:iris:test\" value=\"original\"/>"));
     return result;
 }
 
@@ -38,10 +35,9 @@ int main(int argc, char **argv)
     answer.ssrc = 42;
     R::Negotiation prepared;
     check(prepared.setRemoteOffer(offer, answer) == R::Negotiation::Result::Ok, "prepared answer was not committed");
-    offer.extensions.first().setAttribute(QStringLiteral("value"), QStringLiteral("changed"));
+    offer.extensions.first() = QByteArrayLiteral("<test xmlns=\"urn:iris:test\" value=\"changed\"/>");
     answer.payloads.first().name = QStringLiteral("changed");
-    check(prepared.remoteDescription()->extensions.first().attribute(QStringLiteral("value"))
-              == QStringLiteral("original"),
+    check(prepared.remoteDescription()->extensions.first().contains("value=\"original\""),
           "prepared offer snapshot leaked caller mutation");
     check(prepared.localDescription()->payloads.first().name == QStringLiteral("opus"),
           "prepared answer snapshot leaked caller mutation");
