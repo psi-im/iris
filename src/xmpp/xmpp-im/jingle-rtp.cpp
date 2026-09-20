@@ -4,6 +4,7 @@
 #include "jingle-nstransportslist.h"
 #include "jingle-rtp-router_p.h"
 #include "jingle-session.h"
+#include <QDomDocument>
 #include <algorithm>
 
 namespace XMPP::Jingle::RTP {
@@ -665,6 +666,34 @@ Manager::Manager(QObject *parent) : ApplicationManager(parent)
     qRegisterMetaType<MediaError>();
 }
 Manager::~Manager() { closeAll(); }
+
+std::optional<std::any> Manager::parseProposal(const QDomElement &element) const
+{
+    const auto name = element.localName().isEmpty()
+        ? element.tagName().section(QLatin1Char(':'), -1)
+        : element.localName();
+    if (name != QLatin1String("description") || element.namespaceURI() != Description::ns())
+        return std::nullopt;
+
+    Proposal proposal { element.attribute(QStringLiteral("media")) };
+    if (!proposal.isValid())
+        return std::nullopt;
+    return std::any(std::move(proposal));
+}
+
+QDomElement Manager::serializeProposal(const std::any &data, QDomDocument *document) const
+{
+    if (!document || data.type() != typeid(Proposal))
+        return {};
+
+    const auto &proposal = std::any_cast<const Proposal &>(data);
+    if (!proposal.isValid())
+        return {};
+
+    auto element = document->createElementNS(Description::ns(), QStringLiteral("description"));
+    element.setAttribute(QStringLiteral("media"), proposal.media);
+    return element;
+}
 
 QStringList Manager::discoFeatures() const
 {

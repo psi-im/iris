@@ -115,7 +115,6 @@ set(XMPP_IM_HEADERS
     xmpp-im/xmpp_task.h
     xmpp-im/xmpp_tasks.h
     xmpp-im/jingle.h
-    xmpp-im/jingle-message.h
     xmpp-im/jingle-connection.h
     xmpp-im/jingle-transport.h
     xmpp-im/jingle-nstransportslist.h
@@ -199,7 +198,6 @@ target_sources(iris PRIVATE
     xmpp-im/stundisco.cpp
 
     xmpp-im/jingle.cpp
-    xmpp-im/jingle-message.cpp
     xmpp-im/jingle-tiebreaker.cpp
     xmpp-im/jingle-connection.cpp
     xmpp-im/jingle-session.cpp

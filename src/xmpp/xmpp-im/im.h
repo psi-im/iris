@@ -36,7 +36,6 @@
 #include <iris/xmpp-im/xmpp_liveroster.h>
 #include <iris/xmpp-im/xmpp_liverosteritem.h>
 #include <iris/xmpp-im/xmpp_message.h>
-#include <iris/xmpp-im/jingle-message.h>
 #include <iris/xmpp-im/xmpp_jinglemessage.h>
 #include <iris/xmpp-im/xmpp_muc.h>
 #include <iris/xmpp-im/xmpp_omemostorage.h>

@@ -16,6 +16,12 @@
 
 namespace XMPP::Jingle::RTP {
 
+struct IRIS_EXPORT Proposal {
+    QString media;
+
+    bool isValid() const { return !media.isEmpty(); }
+};
+
 // All calls occur on the Jingle thread. Factories and negotiation must not
 // capture media, start a nested event loop, or initiate network activity.
 // The adapter owns its internal worker threads and must join them on destruction.
@@ -268,8 +274,10 @@ public:
     Application *startApplication(const ApplicationManagerPad::Ptr &, const QString &, Origin, Origin) override;
     ApplicationManagerPad *pad(Session *) override;
     void                   closeAll(const QString & = QString()) override;
-    QStringList            ns() const override { return { Description::ns() }; }
-    QStringList            discoFeatures() const override;
+    std::optional<std::any> parseProposal(const QDomElement &) const override;
+    QDomElement             serializeProposal(const std::any &, QDomDocument *) const override;
+    QStringList             ns() const override { return { Description::ns() }; }
+    QStringList             discoFeatures() const override;
 
 private:
     QPointer<XMPP::Jingle::Manager> jingle_;

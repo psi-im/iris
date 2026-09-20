@@ -25,6 +25,7 @@
 #include "xmpp_features.h"
 #include "xmpp_forwarding.h"
 #include "xmpp_ibb.h"
+#include "jingle.h"
 #include "xmpp_reference.h"
 #include "xmpp_xmlcommon.h"
 
@@ -1289,7 +1290,9 @@ void Message::setJingleMessageInitiation(const Jingle::MessageInitiation &initia
 }
 
 
-Stanza Message::toStanza(Stream *stream) const
+Stanza Message::toStanza(Stream *stream) const { return toStanza(stream, nullptr); }
+
+Stanza Message::toStanza(Stream *stream, Jingle::Manager *jingleManager) const
 {
     if (!d) {
         return Stanza();
@@ -1554,11 +1557,20 @@ Stanza Message::toStanza(Stream *stream) const
         }
     }
 
-    // XEP-0353 Jingle Message Initiation
+    // XEP-0353 Jingle Message Initiation. Application-specific proposal
+    // payloads are serialized only by their registered ApplicationManager.
     if (d->jingleMessageInitiation.isValid()) {
-        auto element = d->jingleMessageInitiation.toXml(&s.doc());
-        if (!element.isNull())
-            s.appendChild(element);
+        Jingle::MessageInitiation::DescriptionSerializer serializer;
+        if (jingleManager) {
+            serializer = [jingleManager](const QString &applicationNamespace, const std::any &data,
+                                         QDomDocument *document) {
+                return jingleManager->serializeMessageInitiationDescription(applicationNamespace, data, document);
+            };
+        }
+        auto element = d->jingleMessageInitiation.toXml(&s.doc(), serializer);
+        if (element.isNull())
+            return {};
+        s.appendChild(element);
     }
 
     // XEP-0359: Unique and Stable Stanza IDs
@@ -1635,12 +1647,15 @@ Stanza Message::toStanza(Stream *stream) const
 /**
   \brief Create Message from Stanza \a s, using given \a timeZoneOffset (old style)
   */
-bool Message::fromStanza(const Stanza &s, int timeZoneOffset) { return fromStanza(s, true, timeZoneOffset); }
+bool Message::fromStanza(const Stanza &s, int timeZoneOffset)
+{
+    return fromStanza(s, true, timeZoneOffset, nullptr);
+}
 
 /**
   \brief Create Message from Stanza \a s
   */
-bool Message::fromStanza(const Stanza &s) { return fromStanza(s, false, 0); }
+bool Message::fromStanza(const Stanza &s) { return fromStanza(s, false, 0, nullptr); }
 
 /**
   \brief Create Message from Stanza \a s
@@ -1651,6 +1666,12 @@ bool Message::fromStanza(const Stanza &s) { return fromStanza(s, false, 0); }
   This function exists to make transition between old and new style easier.
   */
 bool Message::fromStanza(const Stanza &s, bool useTimeZoneOffset, int timeZoneOffset)
+{
+    return fromStanza(s, useTimeZoneOffset, timeZoneOffset, nullptr);
+}
+
+bool Message::fromStanza(const Stanza &s, bool useTimeZoneOffset, int timeZoneOffset,
+                         Jingle::Manager *jingleManager)
 {
     if (s.kind() != Stanza::Message)
         return false;
@@ -1753,7 +1774,13 @@ bool Message::fromStanza(const Stanza &s, bool useTimeZoneOffset, int timeZoneOf
         } else if (e.namespaceURI() == Jingle::MessageInitiation::ns()) {
             ++jmiElementCount;
             if (jmiElementCount == 1) {
-                d->jingleMessageInitiation = Jingle::MessageInitiation::fromXml(e);
+                Jingle::MessageInitiation::DescriptionParser parser;
+                if (jingleManager) {
+                    parser = [jingleManager](const QDomElement &description) {
+                        return jingleManager->parseMessageInitiationDescription(description);
+                    };
+                }
+                d->jingleMessageInitiation = Jingle::MessageInitiation::fromXml(e, parser);
             } else {
                 // XEP-0353 defines one JMI action per message stanza. Multiple
                 // actions have no specified ordering or combined semantics, so

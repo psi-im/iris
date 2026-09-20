@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-#include <iris/xmpp-im/jingle-message.h>
+#include <iris/xmpp-im/jingle-rtp.h>
 #include <iris/xmpp-im/jingle.h>
 #include <iris/xmpp-im/xmpp_client.h>
 #include <iris/xmpp-im/xmpp_jinglemessage.h>
@@ -7,6 +7,9 @@
 
 #include <QCoreApplication>
 #include <QDomDocument>
+
+#include <any>
+#include <optional>
 
 using namespace XMPP;
 namespace J = XMPP::Jingle;
@@ -23,19 +26,10 @@ static QDomElement parseRoot(const QString &xml, QDomDocument *document)
     return document->documentElement();
 }
 
-static void churnDom()
-{
-    for (int i = 0; i < 128; ++i) {
-        QDomDocument document;
-        auto root = document.createElement(QStringLiteral("churn"));
-        root.setAttribute(QStringLiteral("i"), i);
-        document.appendChild(root);
-    }
-}
-
 int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
+    J::RTP::Manager rtp;
 
     {
         QDomDocument source;
@@ -43,45 +37,77 @@ int main(int argc, char **argv)
             QStringLiteral(
                 "<propose xmlns='urn:xmpp:jingle-message:0' id='call-1'>"
                 "<description xmlns='urn:xmpp:jingle:apps:rtp:1' media='audio'>"
-                "<future xmlns='urn:iris:test' value='opaque'/>"
+                "<future xmlns='urn:iris:test' value='application-owned'/>"
                 "</description>"
-                "<description xmlns='urn:xmpp:jingle:apps:rtp:1' media='video'/>"
-                "<description xmlns='urn:example:jingle:application' custom='opaque'/>"
-                "<vendor xmlns='urn:iris:vendor' flag='1'/>"
+                "<proposal xmlns='urn:example:jingle:application'>"
+                "<nested value='opaque-to-jmi'/>"
+                "</proposal>"
                 "</propose>"),
             &source);
 
-        auto initiation = J::MessageInitiation::fromXml(root);
+        auto initiation = J::MessageInitiation::fromXml(
+            root, [&rtp](const QDomElement &description) -> std::optional<std::any> {
+                if (description.namespaceURI() == J::RTP::Description::ns())
+                    return rtp.parseProposal(description);
+                return std::nullopt;
+            });
+
         check(initiation.isValid(), "valid JMI propose was rejected");
         check(initiation.action() == J::MessageInitiation::Action::Propose, "propose action was not parsed");
         check(initiation.id() == QStringLiteral("call-1"), "propose id was not parsed");
-        check(initiation.descriptions().size() == 3, "propose descriptions were not preserved");
-        check(initiation.descriptions().at(0).namespaceURI() == QStringLiteral("urn:xmpp:jingle:apps:rtp:1"),
-              "description namespace was not preserved");
-        check(initiation.descriptions().at(0).attribute(QStringLiteral("media")) == QStringLiteral("audio"),
-              "RTP-specific description attributes were not preserved");
-        check(initiation.descriptions().at(2).namespaceURI() == QStringLiteral("urn:example:jingle:application"),
-              "non-RTP description namespace was not preserved");
-        check(initiation.descriptions().at(2).attribute(QStringLiteral("custom")) == QStringLiteral("opaque"),
-              "non-RTP description attributes were not preserved");
-        check(initiation.extensions().size() == 1, "unknown JMI extension was not preserved");
+        check(initiation.descriptions().size() == 2, "proposal descriptions were not retained");
+
+        const auto rtpDescription = initiation.descriptions().at(0);
+        check(rtpDescription.applicationNamespace == J::RTP::Description::ns(),
+              "RTP proposal namespace was not retained");
+        check(rtpDescription.isSupported(), "registered RTP proposal was not parsed");
+        const auto rtpProposal = std::any_cast<J::RTP::Proposal>(rtpDescription.data);
+        check(rtpProposal.media == QStringLiteral("audio"), "RTP proposal media was not parsed by RTP manager");
+
+        const auto unknown = initiation.descriptions().at(1);
+        check(unknown.applicationNamespace == QStringLiteral("urn:example:jingle:application"),
+              "unknown proposal namespace was not retained");
+        check(!unknown.isSupported(), "unknown proposal unexpectedly acquired a typed payload");
 
         source = QDomDocument();
-        churnDom();
+        check(std::any_cast<J::RTP::Proposal>(initiation.descriptions().at(0).data).media
+                  == QStringLiteral("audio"),
+              "typed RTP proposal depended on source DOM lifetime");
+    }
+
+    {
+        J::MessageInitiation initiation(J::MessageInitiation::Action::Propose, QStringLiteral("call-out"));
+        initiation.addDescription(J::RTP::Description::ns(), J::RTP::Proposal { QStringLiteral("video") });
 
         QDomDocument target;
-        const auto serialized = initiation.toXml(&target);
-        check(!serialized.isNull(), "owned JMI propose could not be serialized after source destruction");
-        target.appendChild(serialized);
-        const auto audio = serialized.firstChildElement(QStringLiteral("description"));
-        check(audio.namespaceURI() == QStringLiteral("urn:xmpp:jingle:apps:rtp:1"),
-              "description namespace changed on round trip");
-        check(audio.attribute(QStringLiteral("media")) == QStringLiteral("audio"),
-              "description media changed on round trip");
-        check(audio.firstChildElement(QStringLiteral("future")).namespaceURI() == QStringLiteral("urn:iris:test"),
-              "opaque description XML was lost");
-        check(serialized.lastChildElement(QStringLiteral("vendor")).namespaceURI() == QStringLiteral("urn:iris:vendor"),
-              "opaque top-level JMI XML was lost");
+        const auto serialized = initiation.toXml(
+            &target, [&rtp](const QString &ns, const std::any &data, QDomDocument *document) {
+                return ns == J::RTP::Description::ns() ? rtp.serializeProposal(data, document) : QDomElement();
+            });
+        check(!serialized.isNull(), "typed RTP proposal could not be serialized");
+        const auto description = serialized.firstChildElement();
+        check(description.namespaceURI() == J::RTP::Description::ns(),
+              "serialized RTP proposal namespace changed");
+        check(description.attribute(QStringLiteral("media")) == QStringLiteral("video"),
+              "serialized RTP proposal media changed");
+    }
+
+    {
+        QDomDocument document;
+        auto unsupported = J::MessageInitiation::fromXml(
+            parseRoot(
+                QStringLiteral(
+                    "<propose xmlns='urn:xmpp:jingle-message:0' id='unknown'>"
+                    "<payload xmlns='urn:example:unknown'><nested/></payload>"
+                    "</propose>"),
+                &document));
+        check(unsupported.isValid(), "unknown application proposal should remain structurally valid");
+        check(unsupported.descriptions().size() == 1 && !unsupported.descriptions().at(0).isSupported(),
+              "unknown application proposal was not marked unsupported");
+
+        QDomDocument output;
+        check(unsupported.toXml(&output).isNull(),
+              "unsupported proposal must not be re-emitted by inventing application XML");
     }
 
     {
@@ -100,6 +126,9 @@ int main(int argc, char **argv)
         check(reject.reasonText() == QStringLiteral("Already in a call"), "reject reason text was not parsed");
         check(reject.tieBreak(), "tie-break marker was not parsed");
         check(reject.migratedTo() == QStringLiteral("call-3"), "migrated target was not parsed");
+
+        QDomDocument output;
+        check(!reject.toXml(&output).isNull(), "non-proposal JMI unexpectedly required an application serializer");
     }
 
     {
@@ -121,16 +150,20 @@ int main(int argc, char **argv)
     {
         Client client;
         auto manager = client.jingleManager();
-        auto jmi = manager->messageInitiationManager();
-        check(jmi && !jmi->enabled(), "JMI manager must be opt-in");
+        check(manager && !manager->messageInitiationEnabled(), "JMI must be opt-in");
         check(!manager->discoFeatures().contains(J::MessageInitiation::ns()),
               "disabled JMI was advertised");
-        jmi->setEnabled(true);
+        manager->setMessageInitiationEnabled(true);
         check(manager->discoFeatures().contains(J::MessageInitiation::ns()),
               "enabled JMI was not advertised");
-        jmi->setEnabled(false);
+        manager->setMessageInitiationEnabled(false);
         check(!manager->discoFeatures().contains(J::MessageInitiation::ns()),
               "disabled JMI remained advertised");
+
+        J::MessageInitiation unsupported(J::MessageInitiation::Action::Propose, QStringLiteral("call-5"));
+        unsupported.addDescription(QStringLiteral("urn:example:unknown"));
+        check(!manager->sendMessageInitiation(Jid(QStringLiteral("peer@example.test")), unsupported),
+              "manager sent a proposal that no application can serialize");
     }
 
     qInfo("XEP-0353 Jingle Message Initiation regressions passed");

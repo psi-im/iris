@@ -8,6 +8,8 @@
 #include <QDomDocument>
 #include <QSharedData>
 
+#include <utility>
+
 namespace XMPP { namespace Jingle {
 namespace {
 const QString JmiNs(QStringLiteral("urn:xmpp:jingle-message:0"));
@@ -61,14 +63,11 @@ class MessageInitiation::Private : public QSharedData {
 public:
     Action             action = Action::None;
     QString            id;
-    QDomDocument       descriptionsDocument;
-    QList<QDomElement> descriptions;
+    QList<Description> descriptions;
     QString            reasonCondition;
     QString            reasonText;
     bool               tieBreak = false;
     QString            migratedTo;
-    QDomDocument       extensionsDocument;
-    QList<QDomElement> extensions;
 };
 
 MessageInitiation::MessageInitiation() = default;
@@ -92,7 +91,12 @@ MessageInitiation::Private *MessageInitiation::ensureD()
 
 const QString &MessageInitiation::ns() { return JmiNs; }
 
-MessageInitiation MessageInitiation::fromXml(const QDomElement &element)
+bool MessageInitiation::Description::isValid() const
+{
+    return !applicationNamespace.isEmpty() && applicationNamespace != MessageInitiation::ns();
+}
+
+MessageInitiation MessageInitiation::fromXml(const QDomElement &element, const DescriptionParser &parser)
 {
     if (element.isNull() || element.namespaceURI() != JmiNs)
         return {};
@@ -107,11 +111,15 @@ MessageInitiation MessageInitiation::fromXml(const QDomElement &element)
 
     for (auto child = element.firstChildElement(); !child.isNull(); child = child.nextSiblingElement()) {
         const auto name = localName(child);
-        if (action == Action::Propose && name == QLatin1String("description")
-            && !child.namespaceURI().isEmpty() && child.namespaceURI() != JmiNs) {
-            const auto imported = data->descriptionsDocument.importNode(child, true).toElement();
-            if (!imported.isNull())
-                data->descriptions.append(imported);
+
+        // XEP-0353 deliberately permits arbitrary foreign-namespace children
+        // inside <propose/>. Only the matching Jingle application interprets
+        // their attributes or nested structure.
+        if (action == Action::Propose && !child.namespaceURI().isEmpty() && child.namespaceURI() != JmiNs) {
+            std::optional<std::any> parsed;
+            if (parser)
+                parsed = parser(child);
+            data->descriptions.append({ child.namespaceURI(), parsed ? std::move(*parsed) : std::any() });
             continue;
         }
 
@@ -139,9 +147,9 @@ MessageInitiation MessageInitiation::fromXml(const QDomElement &element)
             continue;
         }
 
-        const auto imported = data->extensionsDocument.importNode(child, true).toElement();
-        if (!imported.isNull())
-            data->extensions.append(imported);
+        // Unknown JMI-level extensions are intentionally not retained. Iris is
+        // an endpoint, not a lossless XML proxy; application payloads are routed
+        // through their registered codecs instead.
     }
 
     return result.isValid() ? result : MessageInitiation();
@@ -156,8 +164,7 @@ bool MessageInitiation::isValid() const
     if (d->descriptions.isEmpty())
         return false;
     for (const auto &description : d->descriptions) {
-        if (description.isNull() || localName(description) != QLatin1String("description")
-            || description.namespaceURI().isEmpty() || description.namespaceURI() == JmiNs)
+        if (!description.isValid())
             return false;
     }
     return true;
@@ -167,34 +174,26 @@ MessageInitiation::Action MessageInitiation::action() const { return d ? d->acti
 
 QString MessageInitiation::id() const { return d ? d->id : QString(); }
 
-QList<QDomElement> MessageInitiation::descriptions() const { return d ? d->descriptions : QList<QDomElement>(); }
+QList<MessageInitiation::Description> MessageInitiation::descriptions() const
+{
+    return d ? d->descriptions : QList<Description>();
+}
 
-void MessageInitiation::setDescriptions(const QList<QDomElement> &descriptions)
+void MessageInitiation::setDescriptions(const QList<Description> &descriptions)
 {
     auto data = ensureD();
     data->descriptions.clear();
-    data->descriptionsDocument = QDomDocument();
-    for (const auto &description : descriptions)
-        addDescription(description);
+    for (const auto &description : descriptions) {
+        if (description.isValid())
+            data->descriptions.append(description);
+    }
 }
 
-void MessageInitiation::addDescription(const QDomElement &description)
+void MessageInitiation::addDescription(const QString &applicationNamespace, std::any payload)
 {
-    if (description.isNull())
-        return;
-    auto data     = ensureD();
-    auto imported = data->descriptionsDocument.importNode(description, true).toElement();
-    if (!imported.isNull())
-        data->descriptions.append(imported);
-}
-
-void MessageInitiation::addDescription(const QString &applicationNamespace)
-{
-    if (applicationNamespace.isEmpty() || applicationNamespace == JmiNs)
-        return;
-    auto data        = ensureD();
-    auto description = data->descriptionsDocument.createElementNS(applicationNamespace, QStringLiteral("description"));
-    data->descriptions.append(description);
+    Description description { applicationNamespace, std::move(payload) };
+    if (description.isValid())
+        ensureD()->descriptions.append(std::move(description));
 }
 
 QString MessageInitiation::reasonCondition() const { return d ? d->reasonCondition : QString(); }
@@ -216,19 +215,7 @@ QString MessageInitiation::migratedTo() const { return d ? d->migratedTo : QStri
 
 void MessageInitiation::setMigratedTo(const QString &id) { ensureD()->migratedTo = id; }
 
-QList<QDomElement> MessageInitiation::extensions() const { return d ? d->extensions : QList<QDomElement>(); }
-
-void MessageInitiation::addExtension(const QDomElement &element)
-{
-    if (element.isNull())
-        return;
-    auto data     = ensureD();
-    auto imported = data->extensionsDocument.importNode(element, true).toElement();
-    if (!imported.isNull())
-        data->extensions.append(imported);
-}
-
-QDomElement MessageInitiation::toXml(QDomDocument *doc) const
+QDomElement MessageInitiation::toXml(QDomDocument *doc, const DescriptionSerializer &serializer) const
 {
     if (!doc || !isValid())
         return {};
@@ -241,8 +228,20 @@ QDomElement MessageInitiation::toXml(QDomDocument *doc) const
     element.setAttribute(QStringLiteral("id"), d->id);
 
     if (d->action == Action::Propose) {
-        for (const auto &description : d->descriptions)
-            element.appendChild(doc->importNode(description, true));
+        if (!serializer)
+            return {};
+
+        for (const auto &description : d->descriptions) {
+            if (!description.isSupported())
+                return {};
+
+            auto descriptionElement
+                = serializer(description.applicationNamespace, description.data, doc);
+            if (descriptionElement.isNull()
+                || descriptionElement.namespaceURI() != description.applicationNamespace)
+                return {};
+            element.appendChild(descriptionElement);
+        }
     }
 
     if (!d->reasonCondition.isEmpty() || !d->reasonText.isEmpty()) {
@@ -265,9 +264,6 @@ QDomElement MessageInitiation::toXml(QDomDocument *doc) const
         migrated.setAttribute(QStringLiteral("to"), d->migratedTo);
         element.appendChild(migrated);
     }
-
-    for (const auto &extension : d->extensions)
-        element.appendChild(doc->importNode(extension, true));
 
     return element;
 }

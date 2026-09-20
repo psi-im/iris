@@ -42,10 +42,15 @@ class HTMLElement;
 class HttpAuthRequest;
 class IBBData;
 class Jid;
+class JT_Message;
+class JT_PushMessage;
 class PubSubEvent;
 class PubSubItem;
 class PubSubRetraction;
 class XData;
+namespace Jingle {
+class Manager;
+}
 
 typedef QMap<QString, QString> StringMap;
 
@@ -269,6 +274,13 @@ public:
     bool   fromStanza(const Stanza &s, bool useTimeZoneOffset, int timeZoneOffset);
 
 private:
+    friend class Forwarding;
+    friend class JT_Message;
+    friend class JT_PushMessage;
+
+    Stanza toStanza(Stream *stream, Jingle::Manager *jingleManager) const;
+    bool fromStanza(const Stanza &s, bool useTimeZoneOffset, int timeZoneOffset, Jingle::Manager *jingleManager);
+
     class Private;
     QExplicitlySharedDataPointer<Private> d;
 };

@@ -24,6 +24,7 @@
 
 #include <iris/xmpp-core/xmpp_stanza.h>
 #include <iris/xmpp-im/jingle-pub.h>
+#include <iris/xmpp-im/xmpp_jinglemessage.h>
 
 #include <QObject>
 #include <QSharedDataPointer>
@@ -37,13 +38,13 @@ class QDomElement;
 
 namespace XMPP {
 class Client;
+class Message;
 class Task;
 
 namespace Jingle {
     extern IRIS_EXPORT const QString NS;
 
     class Manager;
-    class MessageInitiationManager;
     class Session;
     class TieBreaker;
     namespace RTP {
@@ -389,9 +390,12 @@ namespace Jingle {
         QString                                   registerSession(Session *session);
         const std::optional<XMPP::Stanza::Error> &lastError() const;
 
-        PublicationManager        *publicationManager() const;
-        RTP::Manager              *rtpManager() const;
-        MessageInitiationManager  *messageInitiationManager() const;
+        PublicationManager *publicationManager() const;
+        RTP::Manager       *rtpManager() const;
+
+        bool messageInitiationEnabled() const;
+        void setMessageInitiationEnabled(bool enabled);
+        bool sendMessageInitiation(const Jid &to, const MessageInitiation &initiation);
 
         // Source-compatible shortcuts for the original local-only XEP-0358 API.
         // Durable/PubSub publications should use publicationManager() directly.
@@ -405,10 +409,17 @@ namespace Jingle {
         void detachSession(Session *s); // disconnect the session from manager
     signals:
         void incomingSession(Session *);
+        void incomingMessageInitiation(const XMPP::Message &message,
+                                       const XMPP::Jingle::MessageInitiation &initiation);
 
     private:
         friend class JTPush;
         friend class XMPP::Client;
+        friend class XMPP::Message;
+
+        std::optional<std::any> parseMessageInitiationDescription(const QDomElement &element) const;
+        QDomElement serializeMessageInitiationDescription(const QString &applicationNamespace, const std::any &data,
+                                                          QDomDocument *document) const;
         void     clientPresenceAvailable();
         Session *incomingSessionInitiate(const Jid &from, const Jingle &jingle, const QDomElement &jingleEl);
 

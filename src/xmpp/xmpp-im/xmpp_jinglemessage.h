@@ -18,6 +18,10 @@
 #include <QSharedDataPointer>
 #include <QString>
 
+#include <any>
+#include <functional>
+#include <optional>
+
 class QDomDocument;
 
 namespace XMPP { namespace Jingle {
@@ -26,6 +30,18 @@ class IRIS_EXPORT MessageInitiation {
 public:
     enum class Action { None, Propose, Ringing, Proceed, Reject, Retract, Finish };
 
+    struct Description {
+        QString  applicationNamespace;
+        std::any data;
+
+        bool isValid() const;
+        bool isSupported() const { return data.has_value(); }
+    };
+
+    using DescriptionParser = std::function<std::optional<std::any>(const QDomElement &)>;
+    using DescriptionSerializer
+        = std::function<QDomElement(const QString &, const std::any &, QDomDocument *)>;
+
     MessageInitiation();
     MessageInitiation(Action action, const QString &id);
     MessageInitiation(const MessageInitiation &);
@@ -33,18 +49,18 @@ public:
     ~MessageInitiation();
 
     static const QString &ns();
-    static MessageInitiation fromXml(const QDomElement &element);
+    static MessageInitiation fromXml(const QDomElement &element, const DescriptionParser &parser = {});
 
     bool    isValid() const;
     Action  action() const;
     QString id() const;
 
-    // JMI is application-agnostic. Each description is preserved as the
-    // original foreign-namespace XML and owned by this value object.
-    QList<QDomElement> descriptions() const;
-    void setDescriptions(const QList<QDomElement> &descriptions);
-    void addDescription(const QDomElement &description);
-    void addDescription(const QString &applicationNamespace);
+    // The JMI envelope only retains the application namespace and a payload
+    // produced by the matching ApplicationManager. Unknown applications remain
+    // visible as unsupported descriptions with an empty std::any.
+    QList<Description> descriptions() const;
+    void setDescriptions(const QList<Description> &descriptions);
+    void addDescription(const QString &applicationNamespace, std::any data = {});
 
     QString reasonCondition() const;
     QString reasonText() const;
@@ -56,10 +72,7 @@ public:
     QString migratedTo() const;
     void setMigratedTo(const QString &id);
 
-    QList<QDomElement> extensions() const;
-    void addExtension(const QDomElement &element);
-
-    QDomElement toXml(QDomDocument *doc) const;
+    QDomElement toXml(QDomDocument *doc, const DescriptionSerializer &serializer = {}) const;
 
 private:
     class Private;
