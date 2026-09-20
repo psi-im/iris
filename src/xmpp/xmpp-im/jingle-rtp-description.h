@@ -56,7 +56,8 @@ struct PayloadType {
     // XEP-0293 allows zero even though an older XML schema revision used positiveInteger.
     std::optional<quint32> feedbackTrrInt;
     // Unknown payload extensions remain opaque and round-trip unchanged.
-    QList<QDomElement> extensions;
+    // Serialized XML keeps this value object independent of a QDomDocument lifetime.
+    QList<QByteArray> extensions;
 };
 
 // Wire description only. Codec/extension selection belongs to the media-provider
@@ -75,7 +76,8 @@ struct IRIS_EXPORT Description {
     QList<SourceGroup>     sourceGroups;
 
     // Unknown description extensions remain opaque and round-trip unchanged.
-    QList<QDomElement> extensions;
+    // Never retain QDomElement handles from a parser-owned document here.
+    QList<QByteArray> extensions;
 
     static QString ns();
     // Advisory description-info can omit payloads or carry incomplete payloads.
