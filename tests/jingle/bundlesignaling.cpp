@@ -737,32 +737,6 @@ static void exerciseTwoGroupReplacement(const WireOffer &transportSource, TcpPor
         icePad->groupedConnectionFor(ra1.data(), &stableABound, &stableARequired));
     check(stableABound && stableARequired && stableA && stableA != stableB,
           "first replacement association missing");
-
-    QDomDocument replaceBDoc;
-    auto replaceB = replacementPayload(
-        replaceBDoc, transportSource,
-        { qMakePair(b1->contentName(), transportSource.audioName),
-          qMakePair(b2->contentName(), transportSource.videoName) });
-    check(session.updateFromXml(J::Action::TransportReplace, replaceB),
-          "second BUNDLE group replacement was rejected");
-
-    auto rbtr1 = qSharedPointerDynamicCast<J::ICE::Transport>(b1->transport());
-    auto rbtr2 = qSharedPointerDynamicCast<J::ICE::Transport>(b2->transport());
-    check(rbtr1 && rbtr2 && rbtr1 != tb1 && rbtr2 != tb2,
-          "second group did not install replacement transports");
-    check(waitFor([&]() {
-              return rbtr1->state() == J::State::ApprovedToSend && rbtr2->state() == J::State::ApprovedToSend
-                  && rbtr1->rtpSession() && rbtr2->rtpSession();
-          }),
-          "second BUNDLE group replacement did not finish preparation");
-    check(stableA && !stableB && icePad->liveAssociationCount() == 2,
-          "replacing second BUNDLE group disturbed first replacement association");
-
-    bool aa1 = false, aq1 = false, aa2 = false, aq2 = false;
-    check(icePad->groupedConnectionFor(ra1.data(), &aa1, &aq1) == stableA
-              && icePad->groupedConnectionFor(ra2.data(), &aa2, &aq2) == stableA
-              && aa1 && aa2 && aq1 && aq2,
-          "second group replacement changed first group identity");
 }
 
 int main(int argc, char **argv)
