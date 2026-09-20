@@ -2017,6 +2017,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
                 }
 
                 auto previousGroups = std::move(d->stagedGroups);
+                d->replacementGroups->retainUnreplacedFrom(std::move(*previousGroups), d->replacementContents);
                 d->stagedGroups = std::move(d->replacementGroups);
                 d->replacementGroups.reset();
 
