@@ -135,10 +135,18 @@ static QDomElement firstContent(const J::OutgoingUpdate &update)
 // stanza parser puts an unprefixed <content/> under the Jingle default namespace
 // into urn:xmpp:jingle:1. Recreate that parsed shape here instead of merely
 // importing the DOM node, which would preserve its empty namespaceURI().
-static QDomElement payload(std::initializer_list<const J::OutgoingUpdate *> updates)
-{
+struct OwnedXml {
     QDomDocument doc;
-    auto         jingle = doc.createElementNS(J::NS, QStringLiteral("jingle"));
+    QDomElement  root;
+
+    operator QDomElement() const { return root; }
+};
+
+static OwnedXml payload(std::initializer_list<const J::OutgoingUpdate *> updates)
+{
+    OwnedXml xml;
+    auto    &doc    = xml.doc;
+    auto     jingle = doc.createElementNS(J::NS, QStringLiteral("jingle"));
     for (const auto *update : updates) {
         check(update, "null outgoing update");
         for (const auto &element : std::get<0>(*update)) {
@@ -153,10 +161,11 @@ static QDomElement payload(std::initializer_list<const J::OutgoingUpdate *> upda
         }
     }
     doc.appendChild(jingle);
-    return jingle;
+    xml.root = jingle;
+    return xml;
 }
 
-static QDomElement payload(const J::OutgoingUpdate &update) { return payload({ &update }); }
+static OwnedXml payload(const J::OutgoingUpdate &update) { return payload({ &update }); }
 
 static void acknowledge(const J::OutgoingUpdate &update, Task *result)
 {
