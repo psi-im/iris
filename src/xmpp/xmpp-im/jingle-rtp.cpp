@@ -107,9 +107,8 @@ bool Pad::bindPacketRoute(Application *application, SrtpSession *security, const
                 // A compound RTCP packet spanning multiple BUNDLE contents needs
                 // one group-level media ingress. The current psimedia API has no
                 // such endpoint, so never duplicate it across per-content inputs.
-                // This path is unreachable while every content has an independent
-                // security association and must be implemented before live
-                // multi-content BUNDLE is enabled.
+                // Negotiated RTP BUNDLE can reach this path; fail closed until the
+                // media API exposes a group-level RTCP ingress.
                 qWarning("jingle-rtp: dropping shared RTCP until group media ingress is wired");
             });
         ingress->destroyedConnection = connect(security, &QObject::destroyed, this, [this, security]() {
