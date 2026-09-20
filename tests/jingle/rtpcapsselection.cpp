@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #include <QCoreApplication>
+#include <QtCrypto>
 
 #include <iris/xmpp-im/jingle-ibb.h>
 #include <iris/xmpp-im/jingle-s5b.h>
@@ -90,8 +91,98 @@ static QStringList rtpFeatures(J::RTP::Manager *rtp)
     return features;
 }
 
+static QStringList secureAudioProfile(J::RTP::Manager *rtp)
+{
+    QStringList features { J::NS, J::ICE::NS_DTLS };
+    features += rtpFeatures(rtp);
+    features.removeDuplicates();
+    return features;
+}
+
+static void localAdvertisement()
+{
+    TcpPortReserver reserver;
+    Client          client;
+    client.setTcpPortReserver(&reserver);
+
+    auto rtp = client.jingleManager()->rtpManager();
+    check(rtp->discoFeatures().isEmpty(), "RTP was advertised without a media provider");
+
+    rtp->setMediaProvider(std::make_shared<Provider>());
+    check(rtp->discoFeatures().isEmpty(), "RTP was advertised without an enabled transport");
+
+    rtp->setTransportNamespaces({ J::IBB::NS });
+    check(rtp->discoFeatures().isEmpty(), "RTP was advertised over a byte-stream-only transport");
+
+    rtp->setTransportNamespaces({ J::ICE::NS });
+    if (J::RTP::supportedSecureRtpProfiles().isEmpty()) {
+        check(rtp->discoFeatures().isEmpty(), "RTP was advertised without a usable DTLS-SRTP profile");
+        return;
+    }
+
+    const auto features = rtpFeatures(rtp);
+    check(client.jingleICEManager()->discoFeatures().contains(J::ICE::NS_DTLS),
+          "secure RTP was advertised while the ICE manager omitted DTLS");
+    check(client.jingleManager()->discoFeatures().contains(QStringLiteral("urn:ietf:rfc:5888")),
+          "grouping capability was not advertised");
+}
+
+static void peerProfileRequirements()
+{
+    if (J::RTP::supportedSecureRtpProfiles().isEmpty())
+        return;
+
+    TcpPortReserver reserver;
+    Client          client;
+    client.setTcpPortReserver(&reserver);
+
+    auto rtp = client.jingleManager()->rtpManager();
+    rtp->setMediaProvider(std::make_shared<Provider>());
+    rtp->setTransportNamespaces({ J::ICE::NS });
+
+    const Jid peer(QStringLiteral("profile-peer@example.test/device"));
+    auto full = secureAudioProfile(rtp);
+    full += J::ICE::NS;
+
+    auto canCreate = [&](QStringList features, bool expectGrouping = false) {
+        setPeerFeatures(client, peer, std::move(features));
+        J::Session session(client.jingleManager(), peer, J::Origin::Initiator);
+        auto app = dynamic_cast<J::RTP::Application *>(
+            rtp->createOutgoing(&session, QStringLiteral("audio"), J::Origin::Both));
+        if (app)
+            check(session.isGroupingAllowed() == expectGrouping,
+                  "peer grouping capability did not control BUNDLE eligibility");
+        return app != nullptr;
+    };
+
+    check(canCreate(full), "complete secure RTP peer profile was rejected");
+
+    auto withGrouping = full;
+    withGrouping += QStringLiteral("urn:ietf:rfc:5888");
+    check(canCreate(withGrouping, true), "grouping-capable secure RTP peer was rejected");
+
+    auto missing = full;
+    missing.removeAll(J::NS);
+    check(!canCreate(missing), "RTP application accepted peer without Jingle capability");
+
+    missing = full;
+    missing.removeAll(J::RTP::Description::ns());
+    check(!canCreate(missing), "RTP application accepted peer without RTP description capability");
+
+    missing = full;
+    missing.removeAll(QStringLiteral("urn:xmpp:jingle:apps:rtp:audio"));
+    check(!canCreate(missing), "RTP application accepted peer without audio RTP capability");
+
+    missing = full;
+    missing.removeAll(J::ICE::NS_DTLS);
+    check(!canCreate(missing), "RTP application accepted peer without DTLS capability");
+}
+
 static void validIceSelection()
 {
+    if (J::RTP::supportedSecureRtpProfiles().isEmpty())
+        return;
+
     TcpPortReserver reserver;
     Client          client;
     client.setTcpPortReserver(&reserver);
@@ -101,10 +192,8 @@ static void validIceSelection()
     rtp->setTransportNamespaces({ J::ICE::NS });
 
     const Jid peer(QStringLiteral("ice-peer@example.test/device"));
-    QStringList caps = rtpFeatures(rtp);
+    QStringList caps = secureAudioProfile(rtp);
     caps += client.jingleICEManager()->discoFeatures();
-    check(client.jingleManager()->discoFeatures().contains(QStringLiteral("urn:ietf:rfc:5888")),
-          "feature branch did not advertise grouping capability");
     setPeerFeatures(client, peer, caps);
 
     J::Session session(client.jingleManager(), peer, J::Origin::Initiator);
@@ -118,6 +207,9 @@ static void validIceSelection()
 
 static void incompatibleTransportCaps(const QStringList &extraCaps, const char *message)
 {
+    if (J::RTP::supportedSecureRtpProfiles().isEmpty())
+        return;
+
     TcpPortReserver reserver;
     Client          client;
     client.setTcpPortReserver(&reserver);
@@ -130,14 +222,14 @@ static void incompatibleTransportCaps(const QStringList &extraCaps, const char *
     rtp->setTransportNamespaces({ J::ICE::NS });
 
     const Jid peer(QStringLiteral("non-ice-peer@example.test/device"));
-    QStringList caps = rtpFeatures(rtp);
+    QStringList caps = secureAudioProfile(rtp);
     caps += extraCaps;
     setPeerFeatures(client, peer, caps);
 
     J::Session session(client.jingleManager(), peer, J::Origin::Initiator);
     auto app = dynamic_cast<J::RTP::Application *>(
         rtp->createOutgoing(&session, QStringLiteral("audio"), J::Origin::Both));
-    check(app, "failed to create RTP application for incompatible caps");
+    check(app, "failed to create RTP application for incompatible transport caps");
     check(!app->selectNextTransport(), message);
     check(!app->transport(), "RTP application installed an incompatible transport");
     check(app->state() == J::State::Finished,
@@ -147,13 +239,10 @@ static void incompatibleTransportCaps(const QStringList &extraCaps, const char *
 int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
+    QCA::Initializer qca;
 
-    {
-        Client bare;
-        check(bare.jingleManager()->rtpManager()->discoFeatures().isEmpty(),
-              "RTP was advertised without a media provider");
-    }
-
+    localAdvertisement();
+    peerProfileRequirements();
     validIceSelection();
 
     {
