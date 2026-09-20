@@ -1,4 +1,5 @@
 #include "../../src/xmpp/xmpp-im/jingle-rtp-router_p.h"
+#include "../../src/xmpp/xmpp-im/jingle-rtp-description.h"
 
 #include <QCoreApplication>
 
