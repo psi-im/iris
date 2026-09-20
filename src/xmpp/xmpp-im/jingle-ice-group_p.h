@@ -163,7 +163,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
 
         bool rollbackReplacement(ConnectionRegistry &registry)
         {
-            if (!isReplacement_ || !replacementActive_)
+            if (!isReplacement_ || !replacementActive_ || replacementFinalized_)
                 return false;
 
             for (const auto &replacement : replacements_) {
@@ -180,8 +180,30 @@ namespace XMPP { namespace Jingle { namespace ICE {
             return true;
         }
 
+        bool finalizeReplacement(ConnectionRegistry &registry)
+        {
+            if (!isReplacement_ || !replacementActive_ || replacementFinalized_)
+                return false;
+
+            // Finalization is the point of no return: signaling/runtime has
+            // committed the new association generation, so the transaction no
+            // longer owns a rollback reference to the old generation. Existing
+            // old Transport memberships may still keep it alive until retired.
+            for (const auto &replacement : replacements_) {
+                if (registry.associations_.value(replacement.newState->id).toStrongRef()
+                    != replacement.newState)
+                    return false;
+            }
+            for (auto &replacement : replacements_)
+                replacement.oldState.clear();
+
+            replacementFinalized_ = true;
+            return true;
+        }
+
         bool isReplacement() const { return isReplacement_; }
         bool replacementActive() const { return replacementActive_; }
+        bool replacementFinalized() const { return replacementFinalized_; }
 
         qsizetype size() const { return qsizetype(entries_.size()); }
 
@@ -223,8 +245,9 @@ namespace XMPP { namespace Jingle { namespace ICE {
 
         std::vector<Entry>                  entries_;
         std::vector<ReplacementAssociation> replacements_;
-        bool                                isReplacement_    = false;
-        bool                                replacementActive_ = false;
+        bool                                isReplacement_       = false;
+        bool                                replacementActive_    = false;
+        bool                                replacementFinalized_ = false;
     };
 
 }}}

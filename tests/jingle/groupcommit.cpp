@@ -108,6 +108,13 @@ int main(int argc, char **argv)
 
         check(replacement->activateReplacement(replacementRegistry),
               "BUNDLE replacement could not be reactivated after rollback");
+        check(replacement->finalizeReplacement(replacementRegistry)
+                  && replacement->replacementFinalized(),
+              "BUNDLE replacement generation did not finalize");
+        check(!replacement->rollbackReplacement(replacementRegistry),
+              "finalized BUNDLE replacement was still rollback-capable");
+        check(oldGuard && newGuard,
+              "finalizing replacement destroyed a generation still owned by transports");
         current.reset();
         check(!oldGuard && newGuard && replacementRegistry.contains(newId),
               "retiring old BUNDLE memberships destroyed the new generation");
