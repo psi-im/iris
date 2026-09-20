@@ -1022,8 +1022,8 @@ checking authenticated attachment, direction/payload filtering and teardown. The
 documented in [native RTP architecture](jingle-rtp-design.md#media-integration); no psimedia adapter
 or external-client call is exercised by this test.
 
-For the implemented RTP/security interfaces, asynchronous operations and the boundary between
-standalone group/router models and production transports, see [native RTP architecture](jingle-rtp-design.md).
+For the implemented RTP/security interfaces, asynchronous operations and the production
+BUNDLE/group-routing path, see [native RTP architecture](jingle-rtp-design.md).
 
 This document covers ordinary session signaling and data transport. It does **not** validate
 the separate PubSub authority/reconciliation machinery in `PublicationManager` (`jingle-pub.*`).
@@ -1060,7 +1060,7 @@ The main implementation files are:
 - `jingle-rtp.*`, `jingle-rtp-media.cpp` — native RTP application, media interfaces and asynchronous operation scheduler;
 - `jingle-rtp-description.*`, `jingle-rtp-negotiation.*`, `jingle-rtp-info.*` — RTP XML, negotiation and notifications;
 - `jingle-rtp-srtp.*` — authenticated packet interface and SRTP association binding;
-- `jingle-rtp-router_p.*`, `jingle-group-negotiation_p.h`, `jingle-ice-group_p.h` — standalone routing and group models, not live BUNDLE;
+- `jingle-rtp-router_p.*`, `jingle-group-negotiation_p.h`, `jingle-ice-group_p.h` — authenticated RTP routing, session-local group membership and transactional BUNDLE association management;
 - `jingle-ice-udp.*` — standard ICE-UDP wire codec;
 - `jingle-s5b.*`, `jingle-ibb.*`, `jingle-ice.*` — built-in transport implementations;
 - `jingle-pub.*` — Jingle session publication support, adjacent to the ordinary XEP-0166 session
