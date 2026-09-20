@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #include "jingle-rtp.h"
+#include "dtls.h"
 #include "jingle-nstransportslist.h"
 #include "jingle-rtp-router_p.h"
 #include "jingle-session.h"
@@ -665,6 +666,35 @@ Manager::Manager(QObject *parent) : ApplicationManager(parent)
     qRegisterMetaType<MediaError>();
 }
 Manager::~Manager() { closeAll(); }
+
+QStringList Manager::discoFeatures() const
+{
+    if (!provider_ || !jingle_ || transports_.isEmpty() || supportedSecureRtpProfiles().isEmpty())
+        return {};
+
+    const auto packetTransports = jingle_->availableTransports(
+        TransportFeature::Unreliable | TransportFeature::MessageOriented | TransportFeature::LiveOriented);
+    bool hasUsableTransport = false;
+    for (const auto &ns : transports_) {
+        if (packetTransports.contains(ns)) {
+            hasUsableTransport = true;
+            break;
+        }
+    }
+    if (!hasUsableTransport)
+        return {};
+
+    const auto  media = provider_->mediaTypes();
+    QStringList features;
+    if (media.contains(QStringLiteral("audio")) || media.contains(QStringLiteral("video")))
+        features << Description::ns();
+    if (media.contains(QStringLiteral("audio")))
+        features << QStringLiteral("urn:xmpp:jingle:apps:rtp:audio");
+    if (media.contains(QStringLiteral("video")))
+        features << QStringLiteral("urn:xmpp:jingle:apps:rtp:video");
+    return features;
+}
+
 void Manager::setJingleManager(XMPP::Jingle::Manager *manager)
 {
     if (!manager)
@@ -700,8 +730,22 @@ Application *Manager::startApplication(const ApplicationManagerPad::Ptr &base, c
 }
 Application *Manager::createOutgoing(Session *session, const QString &media, Origin senders)
 {
-    if (!session || session->manager() != jingle_ || session->state() >= State::Finishing)
+    if (!session || session->manager() != jingle_ || session->state() >= State::Finishing
+        || (media != QLatin1String("audio") && media != QLatin1String("video")))
         return nullptr;
+
+    // When XEP-0115/disco information is available, fail before constructing an
+    // offer unless the peer advertises the complete secure RTP profile. Unknown
+    // caps remain a compatibility case; the transport selector will still refuse
+    // to send if no configured transport namespace is advertised.
+    const auto peerFeatures = session->peerFeatures();
+    if (!peerFeatures.isEmpty()) {
+        const auto mediaFeature = QStringLiteral("urn:xmpp:jingle:apps:rtp:") + media;
+        if (!peerFeatures.test(XMPP::Jingle::NS) || !peerFeatures.test(Description::ns())
+            || !peerFeatures.test(mediaFeature) || !peerFeatures.test(Dtls::FingerPrint::ns()))
+            return nullptr;
+    }
+
     auto pad = session->applicationPadFactory(Description::ns());
     if (!pad)
         return nullptr;
