@@ -519,6 +519,11 @@ namespace XMPP { namespace Jingle { namespace ICE {
 
         ~Private()
         {
+            // A Transport may be constructed and discarded before it ever needs
+            // a network association. Lazy allocation lets the Pad choose the
+            // association only after this Transport belongs to a content.
+            if (!network)
+                return;
             // No callback capturing this Private may survive its destruction.
             if (network->ice)
                 network->ice->disconnect(q);
@@ -533,6 +538,23 @@ namespace XMPP { namespace Jingle { namespace ICE {
         }
 
         inline Jid remoteJid() const { return q->_pad->session()->peer(); }
+
+        bool ensureNetwork()
+        {
+            if (network)
+                return true;
+            auto pad = q->pad().staticCast<Pad>();
+            if (!pad)
+                return false;
+            network = pad->connectionFor(q);
+            if (!network)
+                return false;
+            if (network->components.isEmpty()) {
+                network->components.append(Component {});
+                network->components.last().componentIndex = 0;
+            }
+            return true;
+        }
 
         Component &addComponent()
         {
@@ -873,6 +895,10 @@ namespace XMPP { namespace Jingle { namespace ICE {
         {
             if (q->state() == State::Finished)
                 return;
+            if (!ensureNetwork()) {
+                q->onFinish(Reason::FailedTransport, QStringLiteral("Unable to allocate ICE association"));
+                return;
+            }
 
             if (network->ice) {
                 setupRemoteICE(e);
@@ -1040,9 +1066,9 @@ namespace XMPP { namespace Jingle { namespace ICE {
     Transport::Transport(const TransportManagerPad::Ptr &pad, Origin creator) :
         XMPP::Jingle::Transport(pad, creator), d(new Private)
     {
-        d->q       = this;
-        d->network = pad.staticCast<Pad>()->connectionFor(this);
-        d->ensureComponentExist(0);
+        d->q = this;
+        // The association is selected lazily after Application::setTransport()
+        // has made the owning Jingle content observable to the session-local Pad.
         d->remoteState.reset(new Element {});
         connect(this, &XMPP::Jingle::Transport::stateChanged, this, [this]() {
             if (_state >= State::Finishing) {
@@ -1077,6 +1103,8 @@ namespace XMPP { namespace Jingle { namespace ICE {
 
     bool Transport::enableRtpMux()
     {
+        if (!d->ensureNetwork())
+            return false;
         if ((_state != State::Created && !(isRemote() && _state == State::Pending)) || d->network->ice
             || d->network->components.size() != 1 || d->network->components[0].dtls
             || d->network->components[0].rawConnection)
@@ -1091,13 +1119,13 @@ namespace XMPP { namespace Jingle { namespace ICE {
 
     RTP::SrtpSession *Transport::rtpSession() const
     {
-        return d->network->components.isEmpty() ? nullptr : d->network->components[0].srtp;
+        return !d->network || d->network->components.isEmpty() ? nullptr : d->network->components[0].srtp;
     }
 
     bool Transport::sendRtpPacket(QByteArray packet, RTP::SrtpContext::Packet kind, quint64 epoch)
     {
         auto binding = rtpSession();
-        if (!binding || !d->network->ice || _state < State::Connecting || _state >= State::Finishing)
+        if (!binding || !d->network || !d->network->ice || _state < State::Connecting || _state >= State::Finishing)
             return false;
         auto encrypted = binding->protectMuxed(std::move(packet), kind, epoch);
         if (!encrypted)
@@ -1109,6 +1137,10 @@ namespace XMPP { namespace Jingle { namespace ICE {
     void Transport::prepare()
     {
         qDebug("Prepare local offer");
+        if (!d->ensureNetwork()) {
+            onFinish(Reason::FailedTransport, QStringLiteral("Unable to allocate ICE association"));
+            return;
+        }
         if (!d->rtpProfiles.isEmpty() && isRemote() && !d->remoteState->fingerprint.isValid()) {
             onFinish(Reason::SecurityError, QStringLiteral("RTP requires a DTLS fingerprint"));
             return;
@@ -1160,7 +1192,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
         qDebug("Starting connecting");
         if (_state >= State::Finishing)
             return;
-        if (!d->network->ice) {
+        if (!d->network || !d->network->ice) {
             onFinish(Reason::FailedTransport, QStringLiteral("ICE transport has not been prepared"));
             return;
         }
@@ -1214,7 +1246,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
 
     bool Transport::hasUpdates() const
     {
-        return isValid() && d->pendingActions && d->network->ice && _state >= State::ApprovedToSend
+        return isValid() && d->network && d->pendingActions && d->network->ice && _state >= State::ApprovedToSend
             && !(isRemote() && _state == State::Pending)
             && (d->network->ice->isLocalGatheringComplete() || d->pendingLocalCandidates.size());
     }
@@ -1282,6 +1314,8 @@ namespace XMPP { namespace Jingle { namespace ICE {
 
     void Transport::setComponentsCount(int count)
     {
+        if (!d->ensureNetwork())
+            return;
         if (!d->rtpProfiles.isEmpty() && count != 1)
             return; // This mode has explicitly negotiated RTCP multiplexing.
         if (_state >= State::ApprovedToSend) {
@@ -1296,6 +1330,8 @@ namespace XMPP { namespace Jingle { namespace ICE {
     // adding ice channels/components (for rtp, rtcp, datachannel etc)
     Connection::Ptr Transport::addChannel(TransportFeatures features, const QString &id, int componentIndex)
     {
+        if (!d->ensureNetwork())
+            return {};
 #ifdef JINGLE_SCTP
         if (features & TransportFeature::DataOriented)
             return d->addDataChannel(features, id, componentIndex);
