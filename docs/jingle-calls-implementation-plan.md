@@ -86,8 +86,9 @@ psimedia не владеет ICE/BUNDLE topology. Обе public wrapper copies P
   `GroupPlan` и transactional `ConnectionGroupTransaction` с tests; 2026-09-11/12 —
   authenticated `BundleRouter` и hardened routing contract. Эти primitives должны быть
   **подключены**, а не перепроектированы.
-- Live BUNDLE пока не включать в discovery/offer до shared ICE/DTLS ownership, packet routing,
-  removal/restart и mixed RTP+SCTP regressions.
+- На feature branch `jingle/async-media` grouping/BUNDLE capability можно рекламировать для CI/live interop,
+  чтобы тестировать production negotiation path. Перенос advertising в master/release остаётся gated на
+  removal/restart, mixed RTP+SCTP, DataChannel и peer interop regressions.
 - DataChannel/SCTP естественно позволяет нескольким file-transfer streams делить одну association;
   текущий per-Transport IceConnection это не использует. После live BUNDLE одна association должна
   обслуживать несколько DataChannel connections без закрытия соседних streams.
@@ -124,11 +125,12 @@ psimedia не владеет ICE/BUNDLE topology. Обе public wrapper copies P
 ### Текущие обязательные gates
 
 1. P2 production live BUNDLE wiring существующих group/membership/router primitives: shared
-   association ownership, routing и removal/restart fencing; advertising остаётся выключенным до regressions.
+   association ownership, routing и removal/restart fencing; feature-branch advertising разрешён для тестов,
+   но master/release advertising остаётся gated до regressions.
 2. После wiring проверить audio+video на одной association, multiple DataChannels и mixed RTP+SCTP;
    FT matrix обязана оставаться зелёной.
 3. P1c дополнить real audio+video Psi↔Psi gate и pinned Conversations interoperability в обе стороны.
-4. Только после shared-path regressions + peer evidence включать BUNDLE offer/advertising.
+4. Только после shared-path regressions + peer evidence переносить BUNDLE offer/advertising из feature branch в master/release.
 
 ## 3. Архитектурные инварианты при дальнейшей работе
 
@@ -312,7 +314,7 @@ P1b не должен протащить BUNDLE group knowledge в psimedia: gro
 - transactional `ConnectionGroupTransaction` с rollback/refusal/removal tests;
 - `BundleRouter` с MID/SSRC/PT, SharedRtcp, outgoing SSRC registration и revision fencing;
 - current production `ICE::Pad::connectionFor(Transport*)` всё ещё создаёт independent
-  `IceConnection`, поэтому BUNDLE не рекламируется.
+  `IceConnection`. На feature branch BUNDLE/grouping advertising разрешён для CI/interop; master/release gate остаётся закрыт.
 
 Файлы IRIS: `jingle-ice.cpp`, `jingle-ice-connection_p.h`, `jingle-ice-group_p.h`,
 `jingle-group-negotiation_p.h`, `jingle-session.cpp`, `jingle-rtp.cpp`,
@@ -330,7 +332,8 @@ P1b не должен протащить BUNDLE group knowledge в psimedia: gro
   не означает sharing signaling transaction.
 - Owner removal требует явной ownership transition или модели, где network association вообще
   не зависит от lifetime “первого” Transport.
-- Не рекламировать BUNDLE до реального shared ownership.
+- Feature branch может рекламировать BUNDLE после появления реального shared ownership, чтобы прогонять production path;
+  master/release не включать до полного P2 evidence.
 
 #### P2b. Shared ICE/DTLS/SRTP/SCTP lifetime
 
@@ -369,7 +372,7 @@ association + writer/receive endpoint.
    Connection до transport-specific `Finished`, включая delayed peer close/stream close.
 9. Session/content termination в mixed case не уничтожает connection, который ещё обязан drain.
 
-Только после этих regressions включать BUNDLE offer/advertising.
+Только после этих regressions разрешать перенос BUNDLE offer/advertising в master/release; feature branch может рекламировать раньше для тестов.
 
 ### P3. JMI и выбор устройства
 
@@ -612,7 +615,7 @@ Performance измерять отдельно: media encoding CPU, SRTP packet p
 psimedia RTP/RTCP bridge и A3/A4 source lifecycle уже опубликованы; не реализовывать их повторно.
 Live FT matrix/drain semantics и real Psi↔Psi audio gate уже закрыты CI evidence. Следующий
 implementation gate — подключить существующие group/membership/router primitives к production live
-BUNDLE, не перепроектируя их заново; advertising держать выключенным до shared-path regressions.
+BUNDLE, не перепроектируя их заново; feature-branch advertising использовать для CI/interop, а master/release держать gated до shared-path regressions.
 Real A/V Psi↔Psi и pinned Conversations interop остаются peer gates. P3 JMI, P4 feedback/control, P5 recovery и P6 release выполнять
 по зависимостям наблюдённого peer.
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #include <QCoreApplication>
 
-#include <iris/jingle-ibb.h>
+#include <iris/xmpp-im/jingle-ibb.h>
 #include <iris/jingle-ice.h>
 #include <iris/jingle-rtp.h>
 #include <iris/jingle-session.h>
@@ -102,6 +102,8 @@ static void validIceSelection()
     const Jid peer(QStringLiteral("ice-peer@example.test/device"));
     QStringList caps = rtpFeatures(rtp);
     caps += client.jingleICEManager()->discoFeatures();
+    check(client.jingleManager()->discoFeatures().contains(QStringLiteral("urn:ietf:rfc:5888")),
+          "feature branch did not advertise grouping capability");
     setPeerFeatures(client, peer, caps);
 
     J::Session session(client.jingleManager(), peer, J::Origin::Initiator);

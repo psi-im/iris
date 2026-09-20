@@ -107,13 +107,12 @@ static void setPeerFeatures(Client &client, const Jid &peer, QStringList feature
 
 static QStringList rtpIcePeerFeatures(Client &client, J::RTP::Manager *rtp)
 {
-    QStringList features = rtp->discoFeatures();
-    features += client.jingleICEManager()->discoFeatures();
-    // Shared BUNDLE advertising is intentionally still disabled in production.
-    // This synthetic peer opts into grouping solely so this regression can drive
-    // the production group negotiation path before that advertisement gate opens.
-    features += QStringLiteral("urn:ietf:rfc:5888");
-    features.removeDuplicates();
+    const auto features = client.jingleManager()->discoFeatures();
+    check(features.contains(J::RTP::Description::ns()), "production caps omitted RTP description support");
+    check(features.contains(J::ICE::NS), "production caps omitted ICE support");
+    check(features.contains(QStringLiteral("urn:ietf:rfc:5888")),
+          "production caps omitted grouping support on the feature branch");
+    Q_UNUSED(rtp);
     return features;
 }
 
