@@ -82,6 +82,10 @@ target_include_directories(jingle_domlifetime_test PRIVATE ../../src/xmpp/xmpp-i
 target_link_libraries(jingle_domlifetime_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
     Qt${QT_DEFAULT_MAJOR_VERSION}::Network Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
 add_test(NAME jingle_domlifetime COMMAND jingle_domlifetime_test)
+add_executable(jingle_ftlifecycle_test ftlifecycle.cpp)
+target_link_libraries(jingle_ftlifecycle_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
+    Qt${QT_DEFAULT_MAJOR_VERSION}::Network Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
+add_test(NAME jingle_ftlifecycle COMMAND jingle_ftlifecycle_test)
 add_executable(jingle_icereplacestate_test icereplacestate.cpp)
 target_link_libraries(jingle_icereplacestate_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
     Qt${QT_DEFAULT_MAJOR_VERSION}::Network Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
