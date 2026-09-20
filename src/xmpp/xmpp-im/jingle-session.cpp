@@ -1948,10 +1948,10 @@ namespace XMPP { namespace Jingle {
         Q_ASSERT(d->role == Origin::Responder && d->state == State::Created);
         // So we presented a user incoming session in UI, the user modified it somehow and finally accepted.
         d->state = State::ApprovedToSend;
+        d->notifyPads<&SessionManagerPad::onLocalAccepted>();
         for (auto &c : d->contentList) {
             c->prepare();
         }
-        d->notifyPads<&SessionManagerPad::onLocalAccepted>();
         d->planStep();
     }
 
@@ -1960,11 +1960,11 @@ namespace XMPP { namespace Jingle {
         emit initiated();
         if (d->role == Origin::Initiator && d->state == State::Created) {
             d->state = State::ApprovedToSend;
+            d->notifyPads<&SessionManagerPad::onLocalAccepted>();
             for (auto &c : d->contentList) {
                 c->markInitialApplication(true);
                 c->prepare();
             }
-            d->notifyPads<&SessionManagerPad::onLocalAccepted>();
             d->planStep();
         }
     }

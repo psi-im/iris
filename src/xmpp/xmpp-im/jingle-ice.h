@@ -103,6 +103,7 @@ namespace Jingle { namespace ICE {
         IceConnection       *groupedConnectionFor(Transport *transport, bool *contentBound, bool *groupRequired);
         ConnectionMembership membershipFor(Transport *transport, bool *contentBound);
         bool                 groupedConnectionAccepted(Transport *transport) const;
+        bool                 shouldDeferGroupedNetwork(Transport *transport) const;
         qsizetype            liveAssociationCount() const;
 
         class Private;
