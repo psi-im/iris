@@ -19,15 +19,16 @@ Checkout и установка dependencies внутри CI job допустим
 Не утверждать, что workflow запущен/прошёл, по одному созданному commit или зелёному старому PR.
 Не требовать от пользователя клонирования/локальной сборки ради операций, доступных в CI.
 
-| Репозиторий | Рабочая ветка | HEAD snapshot 2026-09-19 |
-| --- | --- | --- |
-| psi-im/psi | ai/jingle-native-calls | `c6b6ac7df1167def8de65ef3c6facb5826d650cb` |
-| psi-im/iris | jingle/async-media | `9985f52d573176a7b3be9c40fdbf6911a3f4e7f1` |
-| psi-im/psimedia | jingle/rtcp-session | `2d067da46a70a74b1ccf91830c97b09a8c58713b` |
-| psi-im/psi | ci/psimedia-integration | `4537a70cd50ed1a9db4d85fbae24ab3458e5f030` |
+Рабочие refs:
 
-HEAD здесь только snapshot, не pin для будущей работы. Перед любым write заново читать все четыре
-ветки. Исторические T0–T5/A3/A4 детали остаются в git history и профильных docs; этот план хранит
+- psi-im/psi: `ai/jingle-native-calls`;
+- psi-im/iris: `jingle/async-media`;
+- psi-im/psimedia: `jingle/rtcp-session`;
+- psi-im/psi staging/live integration: `ci/psimedia-integration`.
+
+Точные HEAD намеренно не закрепляются в этом плане: они устаревают после каждого production/doc commit.
+Перед любым write заново читать актуальные refs и фиксировать exact SHA только в конкретном CI/interop
+evidence. Исторические T0–T5/A3/A4 детали остаются в git history и профильных docs; этот план хранит
 только текущий контракт, незакрытые gates и короткие markers уже завершённого.
 
 ### PR и CI
@@ -85,8 +86,12 @@ psimedia не владеет ICE/BUNDLE topology. Обе public wrapper copies P
 - Replacement preparation идёт через обычный RTP `prepareTransport()`; тест больше не вызывает
   `groupedConnectionFor()` для replacement вручную. SRTP/DTLS callbacks привязаны к transport incarnation,
   поэтому teardown старой association после `setTransport()` не может завершить уже переключённый RTP content.
-- Feature branch рекламирует grouping/BUNDLE для CI. Master/release advertising всё ещё gated на
-  active-call restart/migration, member removal, mixed RTP+SCTP/multiple DataChannels и peer interop.
+- Generic Jingle discovery теперь принадлежит `Jingle::Manager`; RFC5888/grouping capability допустима
+  как protocol capability и не является обязательным условием базового RTP call. Фактический BUNDLE
+  shared path активируется только при согласованной grouping negotiation.
+- RTP discovery fail-closed для известных caps: peer должен объявить generic Jingle, RTP description,
+  media-specific RTP feature и DTLS; grouping optional. Локально RTP рекламируется только при наличии
+  media provider, secure RTP runtime и реально доступного packet/live transport из whitelist.
 - Active RTP migration ещё намеренно не заявлена: `RTP::Application::isTransportReplaceEnabled()`
   запрещает replacement начиная с `Connecting`. Не снимать guard, пока не определены media/SRTP migration
   semantics для уже работающего звонка.
@@ -122,27 +127,30 @@ psimedia не владеет ICE/BUNDLE topology. Обе public wrapper copies P
 - P2 RTP/BUNDLE baseline: real session-initiate/session-accept XML negotiation, one shared ICE/DTLS/SRTP
   association for negotiated audio+video, atomic full-BUNDLE transport replacement, partial-replace rejection
   and stale SRTP callback fencing are covered by Jingle regressions.
-- RTP caps baseline: compatible ICE is selected; IBB-only, S5B-only and no-compatible-transport
-  peers fail closed, and grouping capability does not make IBB a valid packet RTP transport.
+- RTP caps baseline: local discovery requires media provider + secure RTP runtime + usable packet/live
+  transport; known peers require generic Jingle + RTP description + media-specific RTP + DTLS.
+  Grouping/RFC5888 optional для базового call. Compatible ICE выбирается; IBB-only, S5B-only и
+  no-compatible-transport peers fail closed.
+- DOM lifetime baseline: RTP/ICE opaque extensions не хранят parser-owned `QDomElement`; JinglePub
+  держит собственный document; XML, переживающий incoming-handler boundary/queued callback,
+  импортируется в owner с достаточным lifetime. `jingle_domlifetime` выполняется и под sanitizers.
 - FT baseline: feature-driven ICE → S5B → IBB selection regression; real Prosody SCTP/datachannel
   transfer через два процесса. Детали и старые SHA остаются в git/interop docs.
 
 ### Текущие обязательные gates
 
-1. Базовая caps-driven RTP transport matrix закрыта: advertised RTP + совместимый ICE выбирается;
-   RTP + IBB-only/S5B-only/no compatible transport fail closed, включая ложное добавление grouping caps
-   поверх IBB. Подтверждено `Jingle regressions #271` на `b632ff84fbcb6d8cef008c75819fb89dd29cef79`.
-   Открытым остаётся policy для missing RTP media, DTLS и grouping caps — не угадывать Conversations
-   behavior без fixture/interop evidence.
-2. Довести P2 shared path после уже работающего RTP/BUNDLE wiring: active-call ICE restart/migration,
+1. Довести P2 shared path после уже работающего RTP/BUNDLE wiring: active-call ICE restart/migration,
    member removal, multiple DataChannels и mixed RTP+SCTP; FT matrix обязана оставаться зелёной.
    Отдельно реализовать group-level media ingress для `BundleRouter::Delivery::SharedRtcp`:
    сейчас корректно распознанный compound RTCP по нескольким BUNDLE contents fail-closed/drop,
    потому что psimedia API предоставляет только per-content ingress.
-3. Довести `Finishing`/Connection lifetime contract на IBB/S5B/SCTP: application payload completion не
+2. Довести `Finishing`/Connection lifetime contract на IBB/S5B/SCTP: application payload completion не
    уничтожает Connection до transport-specific async tail/peer-close/drain.
-4. P1c дополнить real audio+video Psi↔Psi gate и pinned Conversations interoperability в обе стороны.
-5. Только после shared-path regressions + peer evidence переносить BUNDLE offer/advertising из feature branch в master/release.
+3. P1c дополнить real audio+video Psi↔Psi gate и pinned Conversations interoperability в обе стороны.
+4. Перед merge в master выполнить exact-head cleanup/review: никакой временной diagnostics, stale
+   feature-branch wording или ownership shortcuts; Jingle regressions + sanitizers + downstream
+   Windows BASIC должны быть зелёными. Merge в master сам по себе не означает завершённый
+   Conversations interop или поддержку active-call restart/mixed shared SCTP.
 
 ## 3. Архитектурные инварианты при дальнейшей работе
 
@@ -161,6 +169,10 @@ psimedia не владеет ICE/BUNDLE topology. Обе public wrapper copies P
 8. Никаких nested event loops; queues bounded; worker callbacks не вызывают Jingle API напрямую.
 9. PubSub не менять ради calls. Legacy IBB/S5B FT и existing SCTP FT не ломать.
 10. Fingerprint over signaling не равен OMEMO identity confirmation; crypto failure не downgrade.
+11. `QDomElement` не является самостоятельным value object. Входящий DOM допустим только в пределах
+    синхронного handler-а, если owner lifetime не закреплён явно. Любой XML, сохраняемый в state,
+    queued callback/timer или value object, должен либо иметь собственный `QDomDocument`, либо быть
+    импортирован в документ с явно достаточным lifetime, либо храниться в сериализованном/value виде.
 
 ### BUNDLE: зафиксированная архитектура, которую надо довести до production
 
@@ -192,10 +204,15 @@ fail closed, а не подбирать generic byte-stream transport. Это о
 audio codecs будут иметь достаточно малый bitrate для IBB: такой transport должен появиться только как
 явно реализованный RTP backend/profile, а не как побочный эффект generic selector.
 
-Negative matrix расширять независимо от BUNDLE. Missing DTLS, grouping и media-specific caps требуют
-отдельного policy/interop решения: сначала зафиксировать ожидаемый profile по Conversations/спецификации,
-потом кодировать fail/accept behavior. Не использовать отсутствие одного optional feature как повод
-ослабить security или молча downgrade-нуть транспорт.
+Для peer с известными/non-empty caps исходящий RTP создаётся только при наличии generic Jingle,
+RTP description, media-specific RTP feature и DTLS. RFC5888/grouping для базового RTP не требуется:
+его отсутствие лишь запрещает grouping serialization. Пустые/неизвестные caps остаются compatibility
+path; это не security downgrade — transport selector всё равно обязан найти реально совместимый
+configured transport и fail closed в противном случае.
+
+Локальная RTP реклама также runtime-gated: media provider, secure RTP profiles и хотя бы один
+configured transport должны быть реально доступны. ICE manager рекламирует DTLS/SCTP только когда
+DTLS runtime поддерживается. Не возвращать unconditional capability advertising ради удобства тестов.
 
 ### `Finishing`: drain boundary, а не универсальный смысл
 
@@ -337,36 +354,35 @@ P1b не должен протащить BUNDLE group knowledge в psimedia: gro
 
 Приёмка: воспроизводимая работа native media через сервер либо точный peer-level blocker, не предположение. Успешный build/packaging не заменяет этот этап.
 
-### P2. Подключить существующие group/membership/router к live BUNDLE
+### P2. Довести live BUNDLE shared-path semantics
 
-Это **integration этап уже реализованной BUNDLE foundation**, не новая архитектура.
+Production baseline уже подключён; это не новая архитектура.
 
 Текущая база:
 - `GroupPlan` + validation shared transport parameters;
 - session-local `ConnectionRegistry` и move-only `ConnectionMembership`;
 - transactional `ConnectionGroupTransaction` с rollback/refusal/removal tests;
-- `BundleRouter` с MID/SSRC/PT, SharedRtcp, outgoing SSRC registration и revision fencing;
-- current production `ICE::Pad::connectionFor(Transport*)` всё ещё создаёт independent
-  `IceConnection`. На feature branch BUNDLE/grouping advertising разрешён для CI/interop; master/release gate остаётся закрыт.
+- negotiated BUNDLE members реально получают одну shared `IceConnection`/DTLS/SRTP association;
+- full-group transport replacement staging/commit атомарен, partial replacement fail-closed;
+- `BundleRouter` production-wired к shared `SrtpSession` с MID/SSRC/PT routing,
+  outgoing SSRC registration и revision fencing;
+- per-content `Transport` остаются отдельными signaling/generation identities.
 
 Файлы IRIS: `jingle-ice.cpp`, `jingle-ice-connection_p.h`, `jingle-ice-group_p.h`,
 `jingle-group-negotiation_p.h`, `jingle-session.cpp`, `jingle-rtp.cpp`,
 `jingle-rtp-router_p.*`. Не создавать параллельный GroupManager.
 
-#### P2a. Commit negotiated membership в production ICE
+#### P2a. Production membership baseline — закрыто
 
-- Full answer validation → immutable GroupPlan → staged/transactional commit → memberships.
-- ICE Pad хранит session-local association registry; Transport не создаёт connection “по себе”
-  после согласованного BUNDLE.
-- Несгруппированные contents и BUNDLE refusal остаются independent associations.
-- Общие credentials/fingerprint/setup проверяются до commit. Invalid last member не оставляет
-  частично живую группу.
+- Full answer validation → immutable GroupPlan → staged/transactional commit → memberships уже работает.
+- ICE Pad хранит session-local association registry; grouped Transport получает shared association,
+  а несгруппированные contents/BUNDLE refusal остаются independent.
+- Общие credentials/fingerprint/setup проверяются до commit; partial/full replacement имеют
+  отдельные regressions и stale transport/SRTP callbacks fenced по incarnation/generation.
 - Per-content Transport сохраняет собственные signaling cursor/ACK/action state. Sharing network path
   не означает sharing signaling transaction.
-- Owner removal требует явной ownership transition или модели, где network association вообще
-  не зависит от lifetime “первого” Transport.
-- Feature branch может рекламировать BUNDLE после появления реального shared ownership, чтобы прогонять production path;
-  master/release не включать до полного P2 evidence.
+- Следующие изменения должны расширять этот baseline, а не возвращать connection ownership к
+  “первому” Transport или создавать второй BUNDLE manager.
 
 #### P2b. Shared ICE/DTLS/SRTP/SCTP lifetime
 
@@ -405,7 +421,9 @@ association + writer/receive endpoint.
    Connection до transport-specific `Finished`, включая delayed peer close/stream close.
 9. Session/content termination в mixed case не уничтожает connection, который ещё обязан drain.
 
-Только после этих regressions разрешать перенос BUNDLE offer/advertising в master/release; feature branch может рекламировать раньше для тестов.
+Эти regressions являются gates для соответствующих shared-path возможностей и interoperability claims.
+Само наличие RFC5888/grouping discovery в master не означает, что active-call restart, mixed RTP+SCTP
+или multiple DataChannels уже поддержаны.
 
 ### P3. JMI и выбор устройства
 
@@ -512,7 +530,9 @@ flowchart TD
     BR --> CV[Video packet channel]
 ~~~
 
-Это целевое владение, не заявление о текущей интеграции. Освобождение audio membership не уничтожает C, пока жив video membership.
+Это текущий базовый production ownership для negotiated RTP BUNDLE. Открыты active-call migration,
+member-removal/mixed SCTP semantics и group-level SharedRtcp ingress. Освобождение audio membership
+не должно уничтожать C, пока жив video membership или другой обязанный drain member.
 
 ### Finishing/drain и завершение Session
 
