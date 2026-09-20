@@ -199,7 +199,10 @@ static WireOffer makeOffer(Client &client, TcpPortReserver *reserver)
     auto appendContent = [&](J::RTP::Application *application, const QDomElement &transportXml) {
         J::ContentBase content(J::Origin::Initiator, application->contentName());
         content.senders = J::Origin::Both;
-        auto contentXml = content.toXml(&offer.doc, QStringLiteral("content"));
+        auto contentXml = content.toXml(&offer.doc, QStringLiteral("content"),
+                                        QStringLiteral("urn:xmpp:jingle:1"));
+        check(contentXml.namespaceURI() == QLatin1String("urn:xmpp:jingle:1"),
+              "wire offer content lost the Jingle namespace");
         contentXml.appendChild(offer.doc.importNode(application->makeLocalOffer(), true));
         contentXml.appendChild(offer.doc.importNode(transportXml, true));
         offer.root.appendChild(contentXml);
