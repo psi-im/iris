@@ -588,6 +588,180 @@ static void exerciseInitiatorReplacement(const WireOffer &transportSource, TcpPo
           "replacement BUNDLE members did not share one SRTP session");
 }
 
+
+static void exerciseTwoGroupReplacement(const WireOffer &transportSource, TcpPortReserver *reserver)
+{
+    Client client;
+    client.setTcpPortReserver(reserver);
+    client.jingleICEManager()->setSelfAddress(QHostAddress::LocalHost);
+    auto rtp = client.jingleManager()->rtpManager();
+    rtp->setMediaProvider(std::make_shared<Provider>());
+    rtp->setTransportNamespaces({ J::ICE::NS });
+
+    const Jid peer(QStringLiteral("responder@example.test/device"));
+    setPeerFeatures(client, peer, rtpIcePeerFeatures(client, rtp));
+
+    J::Session session(client.jingleManager(), peer, J::Origin::Initiator);
+    auto a1 = dynamic_cast<J::RTP::Application *>(
+        rtp->createOutgoing(&session, QStringLiteral("audio"), J::Origin::Both));
+    auto a2 = dynamic_cast<J::RTP::Application *>(
+        rtp->createOutgoing(&session, QStringLiteral("video"), J::Origin::Both));
+    auto b1 = dynamic_cast<J::RTP::Application *>(
+        rtp->createOutgoing(&session, QStringLiteral("audio"), J::Origin::Both));
+    auto b2 = dynamic_cast<J::RTP::Application *>(
+        rtp->createOutgoing(&session, QStringLiteral("video"), J::Origin::Both));
+    check(a1 && a2 && b1 && b2, "two-group fixture could not create RTP applications");
+
+    const QList<J::ContentGroup> groups {
+        { QStringLiteral("BUNDLE"), { a1->contentName(), a2->contentName() } },
+        { QStringLiteral("BUNDLE"), { b1->contentName(), b2->contentName() } }
+    };
+    check(session.setGroupings(groups), "two-group BUNDLE proposal rejected");
+
+    RootTaskKeeper pendingInitiate(client.rootTask());
+    session.initiate();
+
+    auto ta1 = qSharedPointerDynamicCast<J::ICE::Transport>(a1->transport());
+    auto ta2 = qSharedPointerDynamicCast<J::ICE::Transport>(a2->transport());
+    auto tb1 = qSharedPointerDynamicCast<J::ICE::Transport>(b1->transport());
+    auto tb2 = qSharedPointerDynamicCast<J::ICE::Transport>(b2->transport());
+    check(ta1 && ta2 && tb1 && tb2, "two-group fixture did not select ICE");
+    auto icePad = ta1->pad().staticCast<J::ICE::Pad>();
+
+    check(waitFor([&]() { return session.state() == J::State::Unacked; }),
+          "two-group fixture did not serialize session-initiate");
+    acknowledgeJingleTask(pendingInitiate, peer);
+    check(session.state() == J::State::Pending, "two-group initiate acknowledgement failed");
+    check(icePad->liveAssociationCount() == 2, "two BUNDLE groups did not stage two associations");
+
+    QDomDocument acceptDoc;
+    J::Jingle acceptJingle(J::Action::SessionAccept, session.sid());
+    acceptJingle.setResponder(peer);
+    auto accept = acceptJingle.toXml(&acceptDoc);
+    acceptDoc.appendChild(accept);
+
+    auto appendAnswer = [&](J::RTP::Application *application, const QString &sourceName,
+                            quint32 ssrc, const QString &ufrag, const QString &pwd) {
+        const auto local = application->localDescription();
+        check(local.has_value(), "two-group local RTP offer disappeared");
+        auto answer = *local;
+        answer.ssrc = ssrc;
+
+        const auto source = sourceContent(transportSource, sourceName);
+        check(!source.isNull(), "two-group accept source content missing");
+        auto sourceTransport = source.firstChildElement(QStringLiteral("transport"));
+        check(!sourceTransport.isNull(), "two-group accept source transport missing");
+
+        J::ContentBase cb(J::Origin::Initiator, application->contentName());
+        cb.senders = J::Origin::Both;
+        auto content = cb.toXml(&acceptDoc, QStringLiteral("content"), J::NS);
+        content.appendChild(answer.toXml(acceptDoc));
+
+        auto transport = acceptDoc.importNode(sourceTransport, true).toElement();
+        transport.setAttribute(QStringLiteral("ufrag"), ufrag);
+        transport.setAttribute(QStringLiteral("pwd"), pwd);
+        auto fingerprint = transport.firstChildElement(QStringLiteral("fingerprint"));
+        if (!fingerprint.isNull())
+            fingerprint.setAttribute(QStringLiteral("setup"), QStringLiteral("passive"));
+        content.appendChild(transport);
+        accept.appendChild(content);
+    };
+
+    appendAnswer(a1, transportSource.audioName, 0x51000001u,
+                 QStringLiteral("group-a-answer"), QStringLiteral("group-a-password"));
+    appendAnswer(a2, transportSource.videoName, 0x51000002u,
+                 QStringLiteral("group-a-answer"), QStringLiteral("group-a-password"));
+    appendAnswer(b1, transportSource.audioName, 0x52000001u,
+                 QStringLiteral("group-b-answer"), QStringLiteral("group-b-password"));
+    appendAnswer(b2, transportSource.videoName, 0x52000002u,
+                 QStringLiteral("group-b-answer"), QStringLiteral("group-b-password"));
+
+    for (const auto &groupSpec : groups) {
+        auto group = acceptDoc.createElementNS(QStringLiteral("urn:xmpp:jingle:apps:grouping:0"),
+                                               QStringLiteral("group"));
+        group.setAttribute(QStringLiteral("semantics"), QStringLiteral("BUNDLE"));
+        for (const auto &name : groupSpec.contents) {
+            auto member = acceptDoc.createElementNS(QStringLiteral("urn:xmpp:jingle:apps:grouping:0"),
+                                                    QStringLiteral("content"));
+            member.setAttribute(QStringLiteral("name"), name);
+            group.appendChild(member);
+        }
+        accept.appendChild(group);
+    }
+
+    check(session.updateFromXml(J::Action::SessionAccept, accept),
+          "two-group session-accept was rejected");
+    check(session.state() == J::State::Active, "two-group session did not become active");
+
+    bool a1Bound = false, a1Required = false, a2Bound = false, a2Required = false;
+    bool b1Bound = false, b1Required = false, b2Bound = false, b2Required = false;
+    auto *networkA = icePad->groupedConnectionFor(ta1.data(), &a1Bound, &a1Required);
+    auto *networkA2 = icePad->groupedConnectionFor(ta2.data(), &a2Bound, &a2Required);
+    auto *networkB = icePad->groupedConnectionFor(tb1.data(), &b1Bound, &b1Required);
+    auto *networkB2 = icePad->groupedConnectionFor(tb2.data(), &b2Bound, &b2Required);
+    check(a1Bound && a2Bound && b1Bound && b2Bound && a1Required && a2Required && b1Required && b2Required
+              && networkA && networkA == networkA2 && networkB && networkB == networkB2 && networkA != networkB
+              && icePad->liveAssociationCount() == 2,
+          "two-group negotiated topology was not two independent shared associations");
+
+    QPointer<J::ICE::IceConnection> oldA(networkA);
+    QPointer<J::ICE::IceConnection> stableB(networkB);
+
+    QDomDocument replaceADoc;
+    auto replaceA = replacementPayload(
+        replaceADoc, transportSource,
+        { qMakePair(a1->contentName(), transportSource.audioName),
+          qMakePair(a2->contentName(), transportSource.videoName) });
+    check(session.updateFromXml(J::Action::TransportReplace, replaceA),
+          "first BUNDLE group replacement was rejected");
+
+    auto ra1 = qSharedPointerDynamicCast<J::ICE::Transport>(a1->transport());
+    auto ra2 = qSharedPointerDynamicCast<J::ICE::Transport>(a2->transport());
+    check(ra1 && ra2 && ra1 != ta1 && ra2 != ta2, "first group did not install replacement transports");
+    check(waitFor([&]() {
+              return ra1->state() == J::State::ApprovedToSend && ra2->state() == J::State::ApprovedToSend
+                  && ra1->rtpSession() && ra2->rtpSession();
+          }),
+          "first BUNDLE group replacement did not finish preparation");
+    check(!oldA && stableB && icePad->liveAssociationCount() == 2,
+          "replacing first BUNDLE group destroyed or duplicated sibling association");
+
+    bool rb1 = false, rq1 = false, rb2 = false, rq2 = false;
+    check(icePad->groupedConnectionFor(tb1.data(), &rb1, &rq1) == stableB
+              && icePad->groupedConnectionFor(tb2.data(), &rb2, &rq2) == stableB
+              && rb1 && rb2 && rq1 && rq2,
+          "first group replacement changed second group identity");
+
+    QPointer<J::ICE::IceConnection> stableA(icePad->groupedConnectionFor(ra1.data()));
+    check(stableA && stableA != stableB, "first replacement association missing");
+
+    QDomDocument replaceBDoc;
+    auto replaceB = replacementPayload(
+        replaceBDoc, transportSource,
+        { qMakePair(b1->contentName(), transportSource.audioName),
+          qMakePair(b2->contentName(), transportSource.videoName) });
+    check(session.updateFromXml(J::Action::TransportReplace, replaceB),
+          "second BUNDLE group replacement was rejected");
+
+    auto rbtr1 = qSharedPointerDynamicCast<J::ICE::Transport>(b1->transport());
+    auto rbtr2 = qSharedPointerDynamicCast<J::ICE::Transport>(b2->transport());
+    check(rbtr1 && rbtr2 && rbtr1 != tb1 && rbtr2 != tb2,
+          "second group did not install replacement transports");
+    check(waitFor([&]() {
+              return rbtr1->state() == J::State::ApprovedToSend && rbtr2->state() == J::State::ApprovedToSend
+                  && rbtr1->rtpSession() && rbtr2->rtpSession();
+          }),
+          "second BUNDLE group replacement did not finish preparation");
+    check(stableA && !stableB && icePad->liveAssociationCount() == 2,
+          "replacing second BUNDLE group disturbed first replacement association");
+
+    bool aa1 = false, aq1 = false, aa2 = false, aq2 = false;
+    check(icePad->groupedConnectionFor(ra1.data(), &aa1, &aq1) == stableA
+              && icePad->groupedConnectionFor(ra2.data(), &aa2, &aq2) == stableA
+              && aa1 && aa2 && aq1 && aq2,
+          "second group replacement changed first group identity");
+}
+
 int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
@@ -599,6 +773,7 @@ int main(int argc, char **argv)
     exerciseResponder(offer, &reserver, true);
     exerciseResponder(offer, &reserver, false);
     exerciseInitiatorReplacement(offer, &reserver);
+    exerciseTwoGroupReplacement(offer, &reserver);
 
     qInfo("BUNDLE signaling-to-runtime regressions passed");
     return 0;
