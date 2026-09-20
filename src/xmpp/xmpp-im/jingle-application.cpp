@@ -667,12 +667,9 @@ namespace XMPP { namespace Jingle {
             return guard && _state < State::Finishing && _transport == expected
                 && _transportReplaceGeneration == generation;
         };
-        if (!current())
-            return false;
-        const bool hasMore = _transportSelector->hasMoreTransports();
-        if (!current())
-            return false;
-        if (!hasMore) {
+        auto failNoTransport = [this, &current]() {
+            if (!current())
+                return false;
             if (_transport) {
                 qDebug("Application::selectNextTransport: stopping %s transport", qPrintable(_transport->pad()->ns()));
                 _transport->disconnect(this);
@@ -684,7 +681,15 @@ namespace XMPP { namespace Jingle {
             _terminationReason = Reason(Reason::FailedTransport);
             emit updated(); // will be evaluated to content-remove
             return false;
-        }
+        };
+
+        if (!current())
+            return false;
+        const bool hasMore = _transportSelector->hasMoreTransports();
+        if (!current())
+            return false;
+        if (!hasMore)
+            return failNoTransport();
 
         if (alikeTransport) {
             auto tr = _transportSelector->getAlikeTransport(alikeTransport);
@@ -708,7 +713,10 @@ namespace XMPP { namespace Jingle {
 
         if (!current())
             return false;
-        emit updated(); // will be evaluated to content-remove
+        if (!_transportSelector->hasMoreTransports())
+            return failNoTransport();
+
+        emit updated(); // selector may have a transiently unavailable candidate
         return false;
     }
 

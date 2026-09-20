@@ -3,6 +3,7 @@
 #include <QElapsedTimer>
 #include <QEventLoop>
 #include <QTimer>
+#include <QThread>
 #include <qca.h>
 
 #define private public
@@ -11,6 +12,7 @@
 #undef private
 
 #include <iris/jingle-rtp.h>
+#include <iris/xmpp_caps.h>
 #include <iris/xmpp_client.h>
 #include <iris/xmpp_task.h>
 
@@ -90,6 +92,31 @@ public:
     QStringList mediaTypes() const override { return { QStringLiteral("audio"), QStringLiteral("video") }; }
 };
 
+static void setPeerFeatures(Client &client, const Jid &peer, QStringList features)
+{
+    features.removeDuplicates();
+    DiscoItem disco;
+    disco.setJid(peer);
+    disco.setNode(QStringLiteral("urn:iris:test:jingle-bundle-signaling"));
+    disco.setFeatures(Features(features));
+
+    const CapsSpec caps(disco);
+    CapsRegistry::instance()->registerCaps(caps, disco);
+    client.capsManager()->updateCaps(peer, caps);
+}
+
+static QStringList rtpIcePeerFeatures(Client &client, J::RTP::Manager *rtp)
+{
+    QStringList features = rtp->discoFeatures();
+    features += client.jingleICEManager()->discoFeatures();
+    // Shared BUNDLE advertising is intentionally still disabled in production.
+    // This synthetic peer opts into grouping solely so this regression can drive
+    // the production group negotiation path before that advertisement gate opens.
+    features += QStringLiteral("urn:ietf:rfc:5888");
+    features.removeDuplicates();
+    return features;
+}
+
 static bool waitFor(const std::function<bool()> &condition, int timeoutMs = 5000)
 {
     QElapsedTimer timer;
@@ -116,22 +143,15 @@ static WireOffer makeOffer(Client &client, TcpPortReserver *reserver)
     rtp->setMediaProvider(std::make_shared<Provider>());
     rtp->setTransportNamespaces({ J::ICE::NS });
 
-    J::Session session(client.jingleManager(), Jid(QStringLiteral("responder@example.test/device")),
-                       J::Origin::Initiator);
+    const Jid peer(QStringLiteral("responder@example.test/device"));
+    setPeerFeatures(client, peer, rtpIcePeerFeatures(client, rtp));
+
+    J::Session session(client.jingleManager(), peer, J::Origin::Initiator);
     auto audio = dynamic_cast<J::RTP::Application *>(
         rtp->createOutgoing(&session, QStringLiteral("audio"), J::Origin::Both));
     auto video = dynamic_cast<J::RTP::Application *>(
         rtp->createOutgoing(&session, QStringLiteral("video"), J::Origin::Both));
     check(audio && video, "failed to create outgoing RTP applications");
-
-    // This isolated peer has no disco/caps task, so NSTransportsList would
-    // correctly reject every namespace at checkPeerCaps(). Bind the production
-    // ICE transports explicitly, exactly as the existing icertp regression does;
-    // the responder half below remains fully parser-driven.
-    auto audioTransport = qSharedPointerDynamicCast<J::ICE::Transport>(session.newOutgoingTransport(J::ICE::NS));
-    auto videoTransport = qSharedPointerDynamicCast<J::ICE::Transport>(session.newOutgoingTransport(J::ICE::NS));
-    check(audioTransport && videoTransport && audio->setTransport(audioTransport) && video->setTransport(videoTransport),
-          "failed to bind production ICE transports for wire offer");
 
     const QString audioName = audio->contentName();
     const QString videoName = video->contentName();
@@ -142,6 +162,9 @@ static WireOffer makeOffer(Client &client, TcpPortReserver *reserver)
     audio->prepare();
     video->prepare();
 
+    auto audioTransport = qSharedPointerDynamicCast<J::ICE::Transport>(audio->transport());
+    auto videoTransport = qSharedPointerDynamicCast<J::ICE::Transport>(video->transport());
+    check(audioTransport && videoTransport, "caps-driven RTP selection did not choose ICE");
     auto icePad = audioTransport->pad().staticCast<J::ICE::Pad>();
 
     check(waitFor([&]() {
@@ -208,8 +231,10 @@ static void exerciseResponder(const WireOffer &offer, TcpPortReserver *reserver,
     rtp->setMediaProvider(std::make_shared<Provider>());
     rtp->setTransportNamespaces({ J::ICE::NS });
 
-    J::Session session(client.jingleManager(), Jid(QStringLiteral("initiator@example.test/device")),
-                       J::Origin::Responder);
+    const Jid peer(QStringLiteral("initiator@example.test/device"));
+    setPeerFeatures(client, peer, rtpIcePeerFeatures(client, rtp));
+
+    J::Session session(client.jingleManager(), peer, J::Origin::Responder);
     J::Jingle parsed(offer.root);
     check(parsed.isValid() && parsed.action() == J::Action::SessionInitiate, "wire BUNDLE offer did not parse");
     check(session.incomingInitiate(parsed, offer.root), "responder rejected BUNDLE session-initiate");
