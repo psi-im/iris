@@ -711,9 +711,10 @@ namespace XMPP { namespace Jingle {
     {
         QStringList ret { NS };
         ret += d->publicationManager->discoFeatures();
-        // Experimental feature-branch capability: exercise the real grouping
-        // negotiation path in CI/live interop. Promotion to master/release stays
-        // gated by the remaining P2 BUNDLE regressions and peer evidence.
+        // RFC 5888 grouping is a protocol capability, not a promise that every
+        // Jingle application/transport combination will use a shared association.
+        // Concrete BUNDLE use still depends on negotiated groups and application
+        // compatibility.
         ret += QStringLiteral("urn:ietf:rfc:5888");
         for (auto const &mgr : d->applicationManagers) {
             ret += mgr.second->discoFeatures();
