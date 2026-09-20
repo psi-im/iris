@@ -152,9 +152,11 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
         bool closeDeviceOnFinish = true;
         bool streamingMode       = false;
         // bool                endlessRange        = false; // where range in accepted file doesn't have end
-        bool                               outgoingReceived    = false;
-        bool                               writeLoggingStarted = false;
-        bool                               readLoggingStarted  = false;
+        bool                               outgoingReceived       = false;
+        bool                               writeLoggingStarted    = false;
+        bool                               readLoggingStarted     = false;
+        bool                               readingPayload          = false;
+        bool                               closeObservedWhileRead  = false;
         File                               file;
         File                               acceptFile; // as it comes with "accept" response
         std::optional<XMPP::Stanza::Error> lastError;
@@ -178,6 +180,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
 
         void setState(State s)
         {
+            QPointer<Application> guard(q);
             const auto previous = q->_state;
             q->_state           = s;
             if (s >= State::Finishing && connection)
@@ -187,6 +190,8 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
             if (s == State::Finished) {
                 if (device && closeDeviceOnFinish) {
                     device->close();
+                    if (!guard)
+                        return;
                 }
                 // Successful completion closes through finishTransfer(), which
                 // waits for the transport-specific asynchronous close/drain.
@@ -194,6 +199,8 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
                 if (previous != State::Finishing && connection) {
                     const auto closing = connection;
                     closing->close();
+                    if (!guard)
+                        return;
                     // Application ownership ends at its terminal state. The
                     // transport/association retains the connection until its
                     // own close/drain protocol has completed.
@@ -387,7 +394,10 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
                     return; // we will come back on readyRead
             }
             data.resize(sz);
+            QPointer<Application> guard(q);
             auto readSz = device->read(data.data(), sz);
+            if (!guard)
+                return;
             if (readSz < 0) {
                 handleStreamFail(QString::fromLatin1("source device failed"));
                 return;
@@ -413,21 +423,23 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
                 hasher->addData(data);
             }
 
-            if (connection->features() & TransportFeature::MessageOriented) {
-                if (!connection->writeDatagram(data)) {
-                    handleStreamFail();
-                    return;
-                }
-            } else {
-                if (connection->write(data) == -1) {
-                    handleStreamFail();
-                    return;
-                }
+            bool written = false;
+            if (connection->features() & TransportFeature::MessageOriented)
+                written = connection->writeDatagram(data);
+            else
+                written = connection->write(data) != -1;
+            if (!guard)
+                return;
+            if (!written) {
+                handleStreamFail();
+                return;
             }
-            emit q->progress(device->pos());
-            if (bytesLeft) {
+
+            // Account bytes before notifying user code. progress() is reentrant
+            // and may delete the application.
+            if (bytesLeft)
                 *bytesLeft -= data.size();
-            }
+            emit q->progress(device->pos());
         }
 
         void readNextBlockFromTransport()
@@ -436,6 +448,8 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
             while ((!bytesLeft || *bytesLeft > 0)
                    && ((bytesAvail = connection->bytesAvailable()) || (connection->hasPendingDatagrams()))) {
                 QByteArray data;
+                QPointer<Application> guard(q);
+                readingPayload = true;
                 if (connection->features() & TransportFeature::MessageOriented) {
                     data = connection->readDatagram().data();
                 } else {
@@ -448,6 +462,10 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
                     }
                     data = connection->read(sz);
                 }
+                if (!guard)
+                    return;
+                readingPayload = false;
+
                 // qDebug("JINGLE-FT read %d bytes from connection", data.size());
                 if (data.isEmpty()) {
                     handleStreamFail();
@@ -457,13 +475,30 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
                     hasher->addData(data);
                 }
                 if (device->write(data) == -1) {
+                    if (!guard)
+                        return;
                     handleStreamFail();
                     return;
                 }
-                emit q->progress(device->pos());
-                if (bytesLeft) {
+                if (!guard)
+                    return;
+
+                // The returned payload becomes application-visible before any
+                // close observed during read() is interpreted.
+                if (bytesLeft)
                     *bytesLeft -= data.size();
+
+                const bool deferredClose = closeObservedWhileRead;
+                closeObservedWhileRead = false;
+                if (deferredClose) {
+                    tryFinalizeIncoming();
+                    if (!guard || q->_state >= State::Finishing)
+                        return;
                 }
+
+                emit q->progress(device->pos());
+                if (!guard)
+                    return;
             }
             if (bytesLeft && *bytesLeft == 0) {
                 QPointer<Application> guard(q);
@@ -475,6 +510,21 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
 
         bool amISender() const { return q->senders() == q->pad()->session()->role(); }
         bool amIReceiver() const { return q->senders() != q->pad()->session()->role(); }
+
+        void onConnectionEnded()
+        {
+            if (q->_state >= State::Finishing)
+                return;
+            if (amIReceiver()) {
+                if (readingPayload) {
+                    closeObservedWhileRead = true;
+                    return;
+                }
+                tryFinalizeIncoming();
+            } else {
+                handleStreamFail(QString::fromLatin1("connection closed before transfer completion"));
+            }
+        }
 
         void onConnectionConnected(Connection::Ptr newConnection)
         {
@@ -548,17 +598,9 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
                 },
                 Qt::QueuedConnection);
 
-            connect(connection.data(), &ByteStream::connectionClosed, q, [this]() {
-                if (q->_state >= State::Finishing)
-                    return;
-                if (amIReceiver())
-                    tryFinalizeIncoming();
-                else
-                    handleStreamFail(QString::fromLatin1("connection closed before transfer completion"));
-            });
-            if (amIReceiver()) {
-                connect(connection.data(), &Connection::disconnected, q, [this]() { tryFinalizeIncoming(); });
-            }
+            connect(connection.data(), &ByteStream::connectionClosed, q, [this]() { onConnectionEnded(); });
+            if (amIReceiver())
+                connect(connection.data(), &Connection::disconnected, q, [this]() { onConnectionEnded(); });
 
             QPointer<Application> guard(q);
             setState(State::Active);
