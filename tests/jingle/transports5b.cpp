@@ -16,14 +16,23 @@ static void check(bool condition, const char *message)
         qFatal("%s", message);
 }
 
-static QDomElement payload(const QString &children)
-{
+struct OwnedXml {
     QDomDocument doc;
-    check(bool(doc.setContent(QStringLiteral("<transport xmlns='urn:xmpp:jingle:transports:s5b:1' sid='test'>")
-                                  + children + QStringLiteral("</transport>"),
-                              true)),
+    QDomElement  root;
+
+    operator QDomElement() const { return root; }
+    QDomElement firstChildElement() const { return root.firstChildElement(); }
+};
+
+static OwnedXml payload(const QString &children)
+{
+    OwnedXml xml;
+    check(bool(xml.doc.setContent(QStringLiteral("<transport xmlns='urn:xmpp:jingle:transports:s5b:1' sid='test'>")
+                                      + children + QStringLiteral("</transport>"),
+                                  true)),
           "Invalid test XML");
-    return doc.documentElement();
+    xml.root = xml.doc.documentElement();
+    return xml;
 }
 
 namespace XMPP { namespace Jingle { namespace S5B {
