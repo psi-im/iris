@@ -29,6 +29,63 @@ static void check(bool value, const char *message)
         qFatal("%s", message);
 }
 
+class TestApplicationPad : public Jingle::ApplicationManagerPad {
+public:
+    explicit TestApplicationPad(Jingle::Session *session) : session_(session) { }
+    QString ns() const override { return QStringLiteral("urn:iris:test:ice-ownership"); }
+    Jingle::Session *session() const override { return session_; }
+    Jingle::ApplicationManager *manager() const override { return nullptr; }
+    QString generateContentName(Jingle::Origin) override { return {}; }
+
+private:
+    Jingle::Session *session_ = nullptr;
+};
+
+class TestTransportSelector : public Jingle::TransportSelector {
+public:
+    QSharedPointer<Jingle::Transport> getNextTransport() override { return {}; }
+    QSharedPointer<Jingle::Transport> getAlikeTransport(QSharedPointer<Jingle::Transport>) override { return {}; }
+    bool replace(QSharedPointer<Jingle::Transport>, QSharedPointer<Jingle::Transport> newer) override
+    {
+        return bool(newer);
+    }
+    void backupTransport(QSharedPointer<Jingle::Transport>) override { }
+    bool hasMoreTransports() const override { return false; }
+    bool hasTransport(QSharedPointer<Jingle::Transport>) const override { return false; }
+    int compare(QSharedPointer<Jingle::Transport>, QSharedPointer<Jingle::Transport>) const override { return 0; }
+};
+
+class TestApplication : public Jingle::Application {
+public:
+    TestApplication(const Jingle::ApplicationManagerPad::Ptr &pad, QString name, Jingle::Origin creator)
+    {
+        _pad               = pad;
+        _contentName       = std::move(name);
+        _creator           = creator;
+        _senders           = Jingle::Origin::Both;
+        _transportSelector = std::make_unique<TestTransportSelector>();
+    }
+
+    void setState(Jingle::State state) override { _state = state; }
+    const std::optional<XMPP::Stanza::Error> &lastError() const override { return error_; }
+    Jingle::Reason lastReason() const override { return reason_; }
+    SetDescError setRemoteOffer(const QDomElement &) override { return Ok; }
+    SetDescError setRemoteAnswer(const QDomElement &) override { return Ok; }
+    QDomElement makeLocalOffer() override { return {}; }
+    QDomElement makeLocalAnswer() override { return {}; }
+    void prepare() override { }
+    void start() override { }
+    void remove(Jingle::Reason::Condition = Jingle::Reason::Success, const QString & = QString()) override { }
+    void incomingRemove(const Jingle::Reason &) override { }
+
+protected:
+    void prepareTransport() override { }
+
+private:
+    std::optional<XMPP::Stanza::Error> error_;
+    Jingle::Reason                     reason_;
+};
+
 int main(int argc, char **argv)
 {
     QCoreApplication        app(argc, argv);
@@ -124,41 +181,88 @@ int main(int argc, char **argv)
           "unsupported transport namespace created a transport");
 
     Manager manager;
-    auto    padA            = Pad::Ptr::create(&manager, &sessionA);
-    auto    padB            = Pad::Ptr::create(&manager, &sessionB);
-    auto    first           = QSharedPointer<Transport>::create(padA, Jingle::Origin::Initiator);
-    auto    sibling         = QSharedPointer<Transport>::create(padA, Jingle::Origin::Initiator);
-    auto    separate        = QSharedPointer<Transport>::create(padB, Jingle::Origin::Initiator);
-    auto    firstNetwork    = padA->connectionFor(first.data());
-    auto    siblingNetwork  = padA->connectionFor(sibling.data());
-    auto    separateNetwork = padB->connectionFor(separate.data());
-    check(firstNetwork == padA->connectionFor(first.data()), "registry lost transport identity");
-    check(firstNetwork != siblingNetwork, "unbundled contents shared a connection");
-    check(firstNetwork != separateNetwork, "sessions to the same peer shared a connection");
-    check(!padA->connectionFor(separate.data()), "registry accepted another session's transport");
-    check(!padA->connectionFor(nullptr), "registry accepted a null transport");
+    auto    padA = Pad::Ptr::create(&manager, &sessionA);
+    auto    padB = Pad::Ptr::create(&manager, &sessionB);
+
+    // Bind three logical contents to ICE transports. Pad::membershipFor() is the
+    // private production seam used by Transport::ensureNetwork(); exercising it
+    // here keeps the test about session/content ownership rather than the removed
+    // transport-addressed connection cache.
+    auto appPadA = Jingle::ApplicationManagerPad::Ptr(new TestApplicationPad(&sessionA));
+    auto appPadB = Jingle::ApplicationManagerPad::Ptr(new TestApplicationPad(&sessionB));
+
+    auto firstApp   = new TestApplication(appPadA, QStringLiteral("first"), Jingle::Origin::Initiator);
+    auto siblingApp = new TestApplication(appPadA, QStringLiteral("sibling"), Jingle::Origin::Initiator);
+    auto separateApp = new TestApplication(appPadB, QStringLiteral("separate"), Jingle::Origin::Initiator);
+    sessionA.addContent(firstApp);
+    sessionA.addContent(siblingApp);
+    sessionB.addContent(separateApp);
+
+    auto first    = QSharedPointer<Transport>::create(padA, Jingle::Origin::Initiator);
+    auto sibling  = QSharedPointer<Transport>::create(padA, Jingle::Origin::Initiator);
+    auto separate = QSharedPointer<Transport>::create(padB, Jingle::Origin::Initiator);
+    check(firstApp->setTransport(first) && siblingApp->setTransport(sibling) && separateApp->setTransport(separate),
+          "test contents did not bind their ICE transports");
+
+    bool firstBound = false, siblingBound = false, separateBound = false;
+    auto firstMembership    = padA->membershipFor(first.data(), &firstBound);
+    auto siblingMembership  = padA->membershipFor(sibling.data(), &siblingBound);
+    auto separateMembership = padB->membershipFor(separate.data(), &separateBound);
+    check(firstBound && siblingBound && separateBound && firstMembership && siblingMembership && separateMembership,
+          "content-bound ICE membership was not created");
+    check(firstMembership.connection() != siblingMembership.connection(), "unbundled contents shared a connection");
+    check(firstMembership.connection() != separateMembership.connection(),
+          "sessions to the same peer shared a connection");
+    check(padA->liveAssociationCount() == 2 && padB->liveAssociationCount() == 1,
+          "session-local association accounting is wrong");
+
+    bool foreignBound = true;
+    check(!padA->membershipFor(separate.data(), &foreignBound) && !foreignBound,
+          "registry accepted another session's transport");
+    bool nullBound = true;
+    check(!padA->membershipFor(nullptr, &nullBound) && !nullBound, "registry accepted a null transport");
+
     if (!Jingle::RTP::SrtpContext::supportedProfiles().isEmpty() && !Dtls::supportedSRTPProfiles().isEmpty()) {
+        // A transport used directly without a Jingle Application remains on the
+        // explicit standalone compatibility path and must not consume a content
+        // association in the Pad registry.
+        const auto beforeStandalone = padB->liveAssociationCount();
         auto media = QSharedPointer<Transport>::create(padB, Jingle::Origin::Initiator);
         check(media->enableRtpMux(), "explicit secure RTP mode rejected");
+        check(padB->liveAssociationCount() == beforeStandalone,
+              "standalone secure RTP transport polluted the content registry");
         check(!media->rtpSession(), "SRTP binding created before DTLS configuration");
         check(!media->sendRtpPacket({}, Jingle::RTP::SrtpContext::Packet::Rtp, 0), "unprepared media sent");
         check(!media->addChannel(Jingle::TransportFeature::MessageOriented, "raw", 0),
               "secure RTP exposed raw channel");
         media->setComponentsCount(2);
-        check(padB->connectionFor(media.data())->components.size() == 1, "mux mode acquired a second component");
         media->stop();
         check(!media->enableRtpMux(), "stopped transport reconfigured");
+
         auto insecure = QSharedPointer<Transport>::create(padB, Jingle::Origin::Responder);
         check(insecure->enableRtpMux(), "incoming secure RTP mode rejected");
         insecure->prepare();
         check(insecure->state() >= Jingle::State::Finishing, "incoming RTP without fingerprint accepted");
-        check(!padB->connectionFor(insecure.data())->ice, "insecure offer started ICE negotiation");
+        check(!insecure->hasUpdates(), "insecure RTP transport exposed ICE signaling after security failure");
+        check(padB->liveAssociationCount() == beforeStandalone,
+              "failed standalone RTP transport polluted the content registry");
     }
-    QPointer<IceConnection> released(firstNetwork.data());
-    firstNetwork.reset();
+
+    QPointer<IceConnection> released(firstMembership.connection());
+    QPointer<IceConnection> surviving(siblingMembership.connection());
+    firstMembership.reset();
+    check(!released, "released unbundled membership retained its ICE association");
+    check(surviving && padA->liveAssociationCount() == 1,
+          "releasing one unbundled member changed the sibling association");
+
     first.reset();
-    check(!released, "pad retained a dead transport's connection");
-    check(padA->_connections.size() == 1, "pad retained a dead membership");
-    check(padA->connectionFor(sibling.data()) == siblingNetwork, "removal changed sibling's connection");
+    check(surviving && siblingMembership.connection() == surviving,
+          "destroying a released transport changed the sibling association");
+
+    siblingMembership.reset();
+    check(!surviving && padA->liveAssociationCount() == 0,
+          "last session-A membership retained its association");
+    separateMembership.reset();
+    check(padB->liveAssociationCount() == 0, "session-B membership retained its association");
     qInfo("ICE resource ownership regressions passed");
 }
