@@ -36,7 +36,7 @@ bool MessageInitiationManager::send(const Jid &to, const MessageInitiation &init
 
     Message message(to);
     message.setType(Message::Type::Chat);
-    message.setProcessingHints(Message::Store);
+    message.setProcessingHints(Message::ProcessingHints(Message::Store));
     message.addJingleMessageInitiation(initiation);
     manager_->client()->sendMessage(message);
     return true;
