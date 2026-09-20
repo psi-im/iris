@@ -613,7 +613,11 @@ namespace XMPP { namespace Jingle {
                     }
 
                     if (it == addSet.end()) {
-                        rejectSet.insert(contentName, std::make_pair(ce, cond));
+                        // OutgoingUpdate outlives this incoming stanza. Import the
+                        // rejected content into the client-owned document instead
+                        // of retaining a handle into the parser-owned document.
+                        auto owned = manager->client()->doc()->importNode(ce, true).toElement();
+                        rejectSet.insert(contentName, std::make_pair(owned, cond));
                     } // else it was invalid alternative
                     continue;
                 }
@@ -728,9 +732,13 @@ namespace XMPP { namespace Jingle {
                 if (err != Private::AddContentError::Ok) {
                     app->setState(State::Finished); // we can't keep working with this content for whatever reason. if
                                                     // "accept" failed there is no fallback
+                    // This set is captured by a queued callback. Keep the XML
+                    // in the client-owned document so the incoming stanza may die
+                    // immediately after this handler returns.
+                    auto owned = manager->client()->doc()->importNode(ce, true).toElement();
                     rejectSet.insert(
                         contentName,
-                        std::make_pair(ce,
+                        std::make_pair(owned,
                                        cond)); // NOTE, probably instead of ce we have to generate original description
                     continue;
                 }
