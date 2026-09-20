@@ -762,7 +762,7 @@ void Manager::setTransportNamespaces(const QStringList &transports) { transports
 
 QString Manager::propose(const Jid &peer, MediaSet media)
 {
-    if (!jingle_ || !jingle_->messageInitiationEnabled() || !peer.isValid() || !media)
+    if (!jingle_ || !jingle_->messageInitiationEnabled() || !peer.isValid() || media == MediaSet())
         return {};
 
     const auto features = discoFeatures();

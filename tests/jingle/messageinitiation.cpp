@@ -165,9 +165,19 @@ int main(int argc, char **argv)
         check(manager && !manager->messageInitiationEnabled(), "JMI must be opt-in");
         check(!manager->discoFeatures().contains(J::MessageInitiation::ns()),
               "disabled JMI was advertised");
+        check(manager->rtpManager()
+                  ->propose(Jid(QStringLiteral("peer@example.test")),
+                            J::RTP::Media::Audio | J::RTP::Media::Video)
+                  .isEmpty(),
+              "disabled JMI allowed a new RTP proposal");
         manager->setMessageInitiationEnabled(true);
         check(manager->discoFeatures().contains(J::MessageInitiation::ns()),
               "enabled JMI was not advertised");
+        check(manager->rtpManager()
+                  ->propose(Jid(QStringLiteral("peer@example.test")),
+                            J::RTP::Media::Audio | J::RTP::Media::Video)
+                  .isEmpty(),
+              "RTP proposal ignored unavailable local media/transport capability");
         manager->setMessageInitiationEnabled(false);
         check(!manager->discoFeatures().contains(J::MessageInitiation::ns()),
               "disabled JMI remained advertised");
