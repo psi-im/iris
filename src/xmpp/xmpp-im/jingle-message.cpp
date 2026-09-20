@@ -17,9 +17,6 @@ MessageInitiationManager::MessageInitiationManager(Manager *manager) : QObject(m
     Q_ASSERT(manager_->client());
 
     connect(manager_->client(), &Client::messageReceived, this, [this](const Message &message) {
-        if (!enabled_)
-            return;
-
         // Carbons wrap the protocol message in a forwarding envelope. JMI state
         // is defined by the inner chat message, and sibling resources rely on
         // those carbon copies to stop ringing after proceed/reject.
@@ -38,7 +35,10 @@ void MessageInitiationManager::setEnabled(bool enabled) { enabled_ = enabled; }
 
 bool MessageInitiationManager::send(const Jid &to, const MessageInitiation &initiation)
 {
-    if (!enabled_ || !to.isValid() || !initiation.isValid())
+    // enabled_ controls discovery/new-proposal policy only. Existing JMI
+    // lifecycles must still be able to send reject/finish if local media
+    // capability disappears after the proposal was received.
+    if (!to.isValid() || !initiation.isValid())
         return false;
 
     Message message(to);
