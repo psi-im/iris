@@ -1717,12 +1717,14 @@ namespace XMPP { namespace Jingle { namespace ICE {
     QStringList Manager::ns() const { return { NS, NS_ICE_UDP }; }
     QStringList Manager::discoFeatures() const
     {
-        return { NS, NS_ICE_UDP, NS_DTLS
+        QStringList features { NS, NS_ICE_UDP };
+        if (Dtls::isSupported()) {
+            features += NS_DTLS;
 #ifdef JINGLE_SCTP
-                 ,
-                 SCTP::ns()
+            features += SCTP::ns();
 #endif
-        };
+        }
+        return features;
     }
 
     void Manager::setBasePort(int port) { d->basePort = port; }
