@@ -13,6 +13,8 @@
 
 #include <iris/xmpp-im/jingle.h>
 
+#include <QDomDocument>
+
 #include <memory>
 #include <optional>
 
@@ -87,9 +89,10 @@ namespace XMPP { namespace Jingle {
             // must send this error before attempting ordinary action handling.
             std::optional<Stanza::Error> error;
             // For Break, a detached snapshot of the outgoing action that won
-            // arbitration. Owners may use it to filter post-reply advisory work;
-            // it is not a live transaction or an instruction to replay it.
-            QDomElement localData;
+            // arbitration. Keep the owner document beside the public element:
+            // QDomElement alone does not own the underlying DOM tree.
+            QDomDocument localDocument;
+            QDomElement  localData;
         };
 
         TieBreaker();
