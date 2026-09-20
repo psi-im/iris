@@ -21,24 +21,12 @@ using Result = Negotiation::Result;
 class MockCodecs : public CodecNegotiator {
 public:
     mutable int                validations = 0;
-    bool                       accept      = true;
-    bool                       mutateInput = false;
+    bool                       accept = true;
     std::optional<Description> response;
-    std::optional<Description> makeAnswer(const Description &offer) const override
-    {
-        if (mutateInput && !offer.extensions.isEmpty()) {
-            auto extension = offer.extensions.first();
-            extension.setAttribute("value", "mutated-by-adapter");
-        }
-        return response;
-    }
-    bool acceptsAnswer(const Description &offer, const Description &) const override
+    std::optional<Description> makeAnswer(const Description &) const override { return response; }
+    bool acceptsAnswer(const Description &, const Description &) const override
     {
         ++validations;
-        if (mutateInput && !offer.extensions.isEmpty()) {
-            auto extension = offer.extensions.first();
-            extension.setAttribute("value", "mutated-by-adapter");
-        }
         return accept;
     }
 };
@@ -57,10 +45,7 @@ static Description makeOffer()
     PayloadType pcmu;
     pcmu.id         = 0;
     result.payloads = { opus, pcmu };
-    QDomDocument doc;
-    auto         extension = doc.createElementNS("urn:iris:test", "test");
-    extension.setAttribute("value", "original");
-    result.extensions.append(extension);
+    result.extensions.append(QByteArrayLiteral("<test xmlns=\"urn:iris:test\" value=\"original\"/>"));
     return result;
 }
 
@@ -117,13 +102,13 @@ int main(int argc, char **argv)
     check(initiator.setRemoteAnswer(answer, codecs) == Result::WrongState, "unsolicited answer accepted");
     check(initiator.setLocalOffer(offer) == Result::Ok, "local offer rejected");
     check(initiator.setLocalOffer(offer) == Result::WrongState, "outstanding offer replaced");
-    offer.extensions.first().setAttribute("value", "changed-by-caller");
-    check(initiator.localDescription()->extensions.first().attribute("value") == "original",
+    offer.extensions.first() = QByteArrayLiteral("<test xmlns=\"urn:iris:test\" value=\"changed-by-caller\"/>");
+    check(initiator.localDescription()->extensions.first().contains("value=\"original\""),
           "caller changed stored offer");
     auto copy = initiator.localDescription();
-    copy->extensions.first().setAttribute("value", "changed-by-getter");
-    check(initiator.localDescription()->extensions.first().attribute("value") == "original",
-          "getter leaked mutable DOM");
+    copy->extensions.first() = QByteArrayLiteral("<test xmlns=\"urn:iris:test\" value=\"changed-by-getter\"/>");
+    check(initiator.localDescription()->extensions.first().contains("value=\"original\""),
+          "getter leaked mutable opaque XML");
 
     for (int kind = 0; kind < 7; ++kind) {
         auto invalid = answer;
@@ -151,11 +136,10 @@ int main(int argc, char **argv)
     codecs.accept = false;
     check(initiator.setRemoteAnswer(answer, codecs) == Result::UnsupportedMedia, "media veto ignored");
     check(initiator.state() == Negotiation::State::Offered, "media veto consumed offer");
-    codecs.accept      = true;
-    codecs.mutateInput = true;
+    codecs.accept = true;
     check(initiator.setRemoteAnswer(answer, codecs) == Result::Ok, "valid codec-specific answer rejected");
-    check(initiator.localDescription()->extensions.first().attribute("value") == "original",
-          "adapter changed stored offer");
+    check(initiator.localDescription()->extensions.first().contains("value=\"original\""),
+          "stored offer extension changed during adapter validation");
     check(initiator.remoteDescription()->payloads.first().parameters.value("minptime") == "10",
           "codec-specific answer parameters discarded");
     check(initiator.setRemoteAnswer(answer, codecs) == Result::WrongState, "second answer accepted");
@@ -171,8 +155,8 @@ int main(int argc, char **argv)
     check(!responder.localDescription() && !responder.remoteDescription(), "invalid local answer committed");
     codecs.response = answer;
     check(responder.setRemoteOffer(makeOffer(), codecs) == Result::Ok, "responder negotiation failed");
-    check(responder.remoteDescription()->extensions.first().attribute("value") == "original",
-          "answer factory mutated stored remote offer");
+    check(responder.remoteDescription()->extensions.first().contains("value=\"original\""),
+          "answer factory changed stored remote offer");
     check(responder.localDescription()->ssrc == 42, "local answer not stored separately");
 
     stage("rtcp mux policy");
