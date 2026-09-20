@@ -145,7 +145,8 @@ jobs:
             jingle_transportreplacecorrectness_test \
             jingle_transportreplaceprotocol_test \
             jingle_rtpnegotiation_test \
-            jingle_domlifetime_test
+            jingle_domlifetime_test \
+            jingle_ftlifecycle_test
 
       - name: Save sanitizer compiler cache
         if: success()
@@ -166,4 +167,5 @@ jobs:
           ctest --test-dir build-jingle-sanitize --output-on-failure -j1 \
             -R '^jingle_transport(accept|reject|replace|s5b|sctp)'
           ctest --test-dir build-jingle-sanitize --output-on-failure -j1 -R jingle_domlifetime
+          ctest --test-dir build-jingle-sanitize --output-on-failure -j1 -R jingle_ftlifecycle
           ctest --test-dir build-jingle-sanitize --output-on-failure -j1 -R jingle_rtpnegotiation
