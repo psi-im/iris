@@ -75,13 +75,23 @@ private:
     std::optional<Stanza::Error> error;
 };
 
-static QDomElement payload(const QString &contents)
-{
+struct OwnedXml {
     QDomDocument doc;
-    check(doc.setContent(QStringLiteral("<jingle xmlns='urn:xmpp:jingle:1'>") + contents + QStringLiteral("</jingle>"),
-                         true),
+    QDomElement  root;
+
+    operator QDomElement() const { return root; }
+    QDomElement firstChildElement() const { return root.firstChildElement(); }
+};
+
+static OwnedXml payload(const QString &contents)
+{
+    OwnedXml xml;
+    check(xml.doc.setContent(QStringLiteral("<jingle xmlns='urn:xmpp:jingle:1'>") + contents
+                                 + QStringLiteral("</jingle>"),
+                             true),
           "invalid test XML");
-    return doc.documentElement();
+    xml.root = xml.doc.documentElement();
+    return xml;
 }
 
 int main(int argc, char **argv)
