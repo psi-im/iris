@@ -160,16 +160,28 @@ private:
     Reason                       reason_;
 };
 
-static QDomElement emptyAnswer()
-{
+struct OwnedXml {
     QDomDocument doc;
-    return doc.createElementNS(NS, QStringLiteral("jingle"));
+    QDomElement  root;
+
+    operator QDomElement() const { return root; }
+    QDomElement firstChildElement() const { return root.firstChildElement(); }
+    QDomDocument ownerDocument() const { return root.ownerDocument(); }
+    QDomNode appendChild(const QDomNode &node) { return root.appendChild(node); }
+};
+
+static OwnedXml emptyAnswer()
+{
+    OwnedXml xml;
+    xml.root = xml.doc.createElementNS(NS, QStringLiteral("jingle"));
+    return xml;
 }
 
-static QDomElement answer(Application *accepted, bool malformed = false)
+static OwnedXml answer(Application *accepted, bool malformed = false)
 {
-    QDomDocument doc;
-    auto         jingle  = doc.createElementNS(NS, QStringLiteral("jingle"));
+    OwnedXml xml;
+    auto    &doc     = xml.doc;
+    auto     jingle  = doc.createElementNS(NS, QStringLiteral("jingle"));
     auto         content = doc.createElementNS(NS, QStringLiteral("content"));
     content.setAttribute(QStringLiteral("creator"), QStringLiteral("initiator"));
     content.setAttribute(QStringLiteral("name"), accepted->contentName());
@@ -183,7 +195,8 @@ static QDomElement answer(Application *accepted, bool malformed = false)
         missing.setAttribute(QStringLiteral("name"), QStringLiteral("missing"));
         jingle.appendChild(missing);
     }
-    return jingle;
+    xml.root = jingle;
+    return xml;
 }
 
 static void addInitialPair(Session &session, const QSharedPointer<Stats> &stats, TestApplication **audio,
