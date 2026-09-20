@@ -5,6 +5,7 @@
 #include "jingle-rtp-router_p.h"
 #include "jingle-session.h"
 #include <QDomDocument>
+#include <QDebug>
 #include <QUuid>
 #include <algorithm>
 
@@ -773,20 +774,46 @@ void Manager::setJingleManager(XMPP::Jingle::Manager *manager)
             if (initiation.action() != MessageInitiation::Action::Propose)
                 return;
 
+            qInfo().noquote() << "RTP JMI: proposal id=" << initiation.id()
+                               << "from=" << message.from().full()
+                               << "descriptions=" << initiation.descriptions().size();
+
             MediaSet media;
             for (const auto &description : initiation.descriptions()) {
-                if (description.applicationNamespace != Description::ns() || !description.isSupported()
-                    || description.data.type() != typeid(Proposal))
+                if (description.applicationNamespace != Description::ns()) {
+                    qInfo().noquote() << "RTP JMI: skip mixed proposal namespace="
+                                       << description.applicationNamespace;
                     return;
+                }
+                if (!description.isSupported()) {
+                    qWarning().noquote() << "RTP JMI: RTP description was not parsed id=" << initiation.id();
+                    return;
+                }
+                if (description.data.type() != typeid(Proposal)) {
+                    qWarning().noquote() << "RTP JMI: unexpected proposal payload type id=" << initiation.id();
+                    return;
+                }
 
                 const auto &proposal = std::any_cast<const Proposal &>(description.data);
-                if (!proposal.isValid() || media.testFlag(proposal.media))
+                if (!proposal.isValid()) {
+                    qWarning().noquote() << "RTP JMI: invalid RTP media id=" << initiation.id();
                     return;
+                }
+                if (media.testFlag(proposal.media)) {
+                    qWarning().noquote() << "RTP JMI: duplicate RTP media id=" << initiation.id();
+                    return;
+                }
                 media |= proposal.media;
             }
 
-            if (media != MediaSet())
-                emit incomingProposal(message, initiation.id(), media);
+            if (media == MediaSet()) {
+                qWarning().noquote() << "RTP JMI: empty RTP proposal id=" << initiation.id();
+                return;
+            }
+
+            qInfo().noquote() << "RTP JMI: emit typed proposal id=" << initiation.id()
+                               << "media=" << static_cast<int>(media);
+            emit incomingProposal(message, initiation.id(), media);
         });
 }
 void Manager::setMediaProvider(std::shared_ptr<MediaProvider> provider) { provider_ = std::move(provider); }

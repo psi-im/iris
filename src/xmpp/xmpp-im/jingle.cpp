@@ -608,8 +608,13 @@ namespace XMPP { namespace Jingle {
             if (effective.type() != Message::Type::Chat)
                 return;
             const auto initiation = effective.jingleMessageInitiation();
-            if (initiation.isValid())
+            if (initiation.isValid()) {
+                qInfo().noquote() << "Jingle JMI: incoming action=" << static_cast<int>(initiation.action())
+                                   << "id=" << initiation.id()
+                                   << "from=" << effective.from().full()
+                                   << "descriptions=" << initiation.descriptions().size();
                 emit incomingMessageInitiation(effective, initiation);
+            }
         });
         /*
         static bool mtReg = false;
