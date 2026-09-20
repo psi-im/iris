@@ -123,9 +123,10 @@ int main(int argc, char **argv)
     Client client;
     J::Session session(client.jingleManager(), Jid(QStringLiteral("peer@example.test/device")), J::Origin::Initiator);
 
-    FT::Manager manager;
-    manager.setJingleManager(client.jingleManager());
-    auto appPad = QSharedPointer<FT::Pad>::create(&manager, &session);
+    auto *rawPad = client.jingleManager()->applicationPad(&session, FT::NS);
+    auto *ftPad = dynamic_cast<FT::Pad *>(rawPad);
+    check(ftPad, "client did not provide registered FT pad");
+    QSharedPointer<FT::Pad> appPad(ftPad);
 
     // Fatal integrity errors remain actionable after payload completion entered
     // Finishing. They must schedule ContentRemove, never be overwritten by the
