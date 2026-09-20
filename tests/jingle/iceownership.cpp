@@ -75,6 +75,7 @@ public:
     QDomElement makeLocalAnswer() override { return {}; }
     void prepare() override { }
     void start() override { }
+    bool supportsSharedTransport() const override { return true; }
     void remove(Jingle::Reason::Condition = Jingle::Reason::Success, const QString & = QString()) override { }
     void incomingRemove(const Jingle::Reason &) override { }
 
@@ -264,5 +265,35 @@ int main(int argc, char **argv)
           "last session-A membership retained its association");
     separateMembership.reset();
     check(padB->liveAssociationCount() == 0, "session-B membership retained its association");
+
+    Jingle::Session bundleSession(client.jingleManager(), Jid(QStringLiteral("bundle@example.org/device")));
+    auto bundlePad = Pad::Ptr::create(&manager, &bundleSession);
+    auto bundleAppPad = Jingle::ApplicationManagerPad::Ptr(new TestApplicationPad(&bundleSession));
+    auto audioApp = new TestApplication(bundleAppPad, QStringLiteral("audio"), Jingle::Origin::Initiator);
+    auto videoApp = new TestApplication(bundleAppPad, QStringLiteral("video"), Jingle::Origin::Initiator);
+    bundleSession.addContent(audioApp);
+    bundleSession.addContent(videoApp);
+    auto audioTransport = QSharedPointer<Transport>::create(bundlePad, Jingle::Origin::Initiator);
+    auto videoTransport = QSharedPointer<Transport>::create(bundlePad, Jingle::Origin::Initiator);
+    check(audioApp->setTransport(audioTransport) && videoApp->setTransport(videoTransport),
+          "BUNDLE ownership fixture rejected transports");
+    check(bundleSession.setGroupings({ Jingle::ContentGroup { QStringLiteral("BUNDLE"),
+                                                              { QStringLiteral("audio"), QStringLiteral("video") } } }),
+          "BUNDLE ownership fixture rejected grouping");
+
+    bool audioBound = false, audioGrouped = false, videoBound = false, videoGrouped = false;
+    auto sharedAudio = bundlePad->groupedConnectionFor(audioTransport.data(), &audioBound, &audioGrouped);
+    auto sharedVideo = bundlePad->groupedConnectionFor(videoTransport.data(), &videoBound, &videoGrouped);
+    check(audioBound && videoBound && audioGrouped && videoGrouped && sharedAudio && sharedAudio == sharedVideo,
+          "explicit BUNDLE group did not stage one shared association");
+    check(bundlePad->liveAssociationCount() == 1, "staged BUNDLE created more than one association");
+    QPointer<IceConnection> stagedGuard(sharedAudio);
+    delete audioApp;
+    check(stagedGuard && bundlePad->liveAssociationCount() == 1,
+          "removing one staged BUNDLE member destroyed the surviving association");
+    delete videoApp;
+    check(!stagedGuard && bundlePad->liveAssociationCount() == 0,
+          "last staged BUNDLE member retained its association");
+
     qInfo("ICE resource ownership regressions passed");
 }

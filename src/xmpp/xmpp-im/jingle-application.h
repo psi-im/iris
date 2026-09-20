@@ -201,6 +201,7 @@ namespace XMPP { namespace Jingle {
          * should behave as a capability/state query and avoid unrelated side effects.
          */
         virtual bool isTransportReplaceEnabled() const;
+        virtual bool supportsSharedTransport() const { return false; }
 
         /**
          * @brief wantBetterTransport checks if the transport is a better match for the application

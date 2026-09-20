@@ -24,6 +24,35 @@ namespace XMPP { namespace Jingle { namespace ICE {
         ConnectionGroupTransaction(ConnectionGroupTransaction &&)                 = default;
         ConnectionGroupTransaction &operator=(ConnectionGroupTransaction &&)      = default;
 
+        static std::optional<ConnectionGroupTransaction> stageBundled(const GroupPlan &plan,
+                                                                                   ConnectionRegistry &registry,
+                                                                                   const QString &transportNamespace)
+        {
+            ConnectionGroupTransaction result;
+            for (const auto &association : plan.associations()) {
+                if (!association.bundled || association.members.size() < 2
+                    || association.transportNamespace != transportNamespace)
+                    continue;
+                if (association.owner != association.members.first())
+                    return std::nullopt;
+
+                auto ownerMembership = registry.create(association.owner);
+                if (!ownerMembership)
+                    return std::nullopt;
+                const auto liveAssociationId = ownerMembership.associationId();
+                result.entries_.push_back(Entry { association.id, association.owner, std::move(ownerMembership) });
+
+                for (qsizetype index = 1; index < association.members.size(); ++index) {
+                    const auto &content    = association.members.at(index);
+                    auto        membership = registry.attach(liveAssociationId, content);
+                    if (!membership)
+                        return std::nullopt;
+                    result.entries_.push_back(Entry { association.id, content, std::move(membership) });
+                }
+            }
+            return result;
+        }
+
         static std::optional<ConnectionGroupTransaction> commit(const GroupPlan &plan, ConnectionRegistry &registry)
         {
             if (!plan.readyToCommit())

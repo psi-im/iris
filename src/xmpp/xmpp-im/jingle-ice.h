@@ -100,8 +100,10 @@ namespace Jingle { namespace ICE {
 
     private:
         friend class Transport;
+        IceConnection       *groupedConnectionFor(Transport *transport, bool *contentBound, bool *groupRequired);
         ConnectionMembership membershipFor(Transport *transport, bool *contentBound);
-        qsizetype             liveAssociationCount() const;
+        bool                 groupedConnectionAccepted(Transport *transport) const;
+        qsizetype            liveAssociationCount() const;
 
         class Private;
         std::unique_ptr<Private> d;
