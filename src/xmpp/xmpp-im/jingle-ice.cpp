@@ -495,6 +495,15 @@ namespace XMPP { namespace Jingle { namespace ICE {
             return -1;
         }
 
+        // RawConnection is an implementation-local endpoint. Packet ingress is
+        // association-owned, so the shared ICE runtime must be able to deliver
+        // datagrams without routing them through one logical Transport owner.
+        void enqueueIncomingUDP(const QByteArray &data)
+        {
+            datagrams.append(QNetworkDatagram { data });
+            emit readyRead();
+        }
+
     private:
         friend class Transport;
 
@@ -515,11 +524,6 @@ namespace XMPP { namespace Jingle { namespace ICE {
             emit disconnected();
         }
 
-        void enqueueIncomingUDP(const QByteArray &data)
-        {
-            datagrams.append(QNetworkDatagram { data });
-            emit readyRead();
-        }
     };
 
     IceConnection::IceConnection() = default;
