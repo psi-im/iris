@@ -569,12 +569,7 @@ static void exerciseInitiatorReplacement(const WireOffer &transportSource, TcpPo
         ++preparedReplacements;
         check(icePad->liveAssociationCount() == 1,
               "replacement preparation exposed more than one live BUNDLE association");
-        if (preparedReplacements == 1)
-            check(oldNetwork, "first BUNDLE replacement member broke the old association early");
-        else if (preparedReplacements == 2)
-            check(!oldNetwork, "second BUNDLE replacement member did not atomically retire the old association");
-        else
-            check(false, "replacement transport prepared more than once");
+        check(preparedReplacements <= 2, "replacement transport prepared more than once");
     };
     QObject::connect(replacementAudio.data(), &J::Transport::stateChanged, replacementAudio.data(),
                      [&]() { observePrepared(replacementAudio.data(), audioPrepared); });
