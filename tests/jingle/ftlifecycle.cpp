@@ -51,7 +51,10 @@ protected:
         incoming_.remove(0, int(size));
         if (closeDuringRead_) {
             closeDuringRead_ = false;
-            setOpenMode(QIODevice::NotOpen);
+            // Model a transport that reports peer close synchronously while
+            // returning its final payload. Do not close QIODevice itself from
+            // inside readDataInternal(): Qt's QIODevice implementation cannot
+            // safely tear down its private read buffer before read() returns.
             emit connectionClosed();
         }
         return size;
