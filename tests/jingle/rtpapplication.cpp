@@ -139,11 +139,20 @@ public:
     std::function<void()>  onStop;
 };
 
-static QDomElement infoXml(const QString &body)
-{
+struct OwnedXml {
     QDomDocument doc;
-    check(doc.setContent("<jingle xmlns='urn:xmpp:jingle:1'>" + body + "</jingle>", true), "invalid test XML");
-    return doc.documentElement();
+    QDomElement  root;
+
+    operator QDomElement() const { return root; }
+    QDomElement firstChildElement() const { return root.firstChildElement(); }
+};
+
+static OwnedXml infoXml(const QString &body)
+{
+    OwnedXml xml;
+    check(xml.doc.setContent("<jingle xmlns='urn:xmpp:jingle:1'>" + body + "</jingle>", true), "invalid test XML");
+    xml.root = xml.doc.documentElement();
+    return xml;
 }
 
 int main(int argc, char **argv)
