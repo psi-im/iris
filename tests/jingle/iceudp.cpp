@@ -13,17 +13,24 @@ static void check(bool value, const char *message)
         qFatal("%s", message);
 }
 
-static QDomElement xml(const QString &body)
+static std::optional<XMPP::Jingle::ICE::UdpTransportDescription> parseXml(const QString &xml)
 {
     QDomDocument doc;
-    check(doc.setContent(body, true), "invalid test XML");
-    return doc.documentElement();
+    check(doc.setContent(xml, true), "invalid test XML");
+    return UdpTransportCodec::fromXml(doc.documentElement());
 }
 
 static std::optional<XMPP::Jingle::ICE::UdpTransportDescription> parse(const QString &body)
 {
-    return UdpTransportCodec::fromXml(xml(
-        "<transport xmlns='urn:xmpp:jingle:transports:ice-udp:1' pwd='secret' ufrag='frag'>" + body + "</transport>"));
+    return parseXml(
+        "<transport xmlns='urn:xmpp:jingle:transports:ice-udp:1' pwd='secret' ufrag='frag'>" + body + "</transport>");
+}
+
+static QString opaqueNamespace(const QByteArray &xml)
+{
+    QDomDocument doc;
+    check(doc.setContent(xml, true), "invalid opaque ICE-UDP extension");
+    return doc.documentElement().namespaceURI();
 }
 
 int main(int argc, char **argv)
@@ -40,14 +47,14 @@ int main(int argc, char **argv)
     check(description->candidates.first().network == 0 && description->candidates.last().network == -1,
           "optional network attribute changed");
     check(description->extensions.size() == 1
-              && description->extensions.first().namespaceURI() == QStringLiteral("urn:xmpp:jingle:apps:dtls:0"),
+              && opaqueNamespace(description->extensions.first()) == QStringLiteral("urn:xmpp:jingle:apps:dtls:0"),
           "foreign transport extension lost");
 
     QDomDocument doc;
     const auto   transport = UdpTransportCodec::toXml(doc, *description);
     check(!transport.isNull() && transport.namespaceURI() == NS_ICE_UDP, "ICE-UDP serialization failed");
     doc.appendChild(transport);
-    const auto roundtrip = UdpTransportCodec::fromXml(xml(doc.toString()));
+    const auto roundtrip = parseXml(doc.toString());
     check(roundtrip && roundtrip->candidates.size() == 2 && roundtrip->extensions.size() == 1,
           "ICE-UDP roundtrip failed");
 
@@ -79,9 +86,9 @@ int main(int argc, char **argv)
 
     check(parse("").has_value(), "empty ICE-UDP transport rejected");
     check(
-        !UdpTransportCodec::fromXml(xml(
+        !parseXml(
             "<transport xmlns='urn:xmpp:jingle:transports:ice-udp:1'><candidate component='1' foundation='1' "
-            "generation='0' id='x' ip='192.0.2.1' port='5000' priority='1' protocol='udp' type='host'/></transport>")),
+            "generation='0' id='x' ip='192.0.2.1' port='5000' priority='1' protocol='udp' type='host'/></transport>"),
         "candidate without credentials accepted");
     check(!parse("<candidate component='0' foundation='1' generation='0' id='x' ip='192.0.2.1' port='5000' "
                  "priority='1' protocol='udp' type='host'/>")
@@ -111,7 +118,7 @@ int main(int argc, char **argv)
                  "<remote-candidate component='1' ip='192.0.2.2' port='5001'/>"),
           "candidate and remote-candidate mixture accepted");
     check(!parse("<gathering-complete/>"), "XEP-0371 gathering-complete leaked into XEP-0176");
-    check(!UdpTransportCodec::fromXml(xml("<transport xmlns='urn:xmpp:jingle:transports:ice:0'/>")).has_value(),
+    check(!parseXml("<transport xmlns='urn:xmpp:jingle:transports:ice:0'/>").has_value(),
           "wrong ICE namespace accepted");
 
     qInfo("ICE-UDP codec regressions passed");
