@@ -20,6 +20,7 @@
 #include "jingle-session.h"
 
 #include "jingle-application.h"
+#include "jingle-group-negotiation_p.h"
 #include "xmpp/jid/jid.h"
 #include "xmpp_caps.h"
 #include "xmpp_client.h"
@@ -1142,6 +1143,14 @@ namespace XMPP { namespace Jingle {
                 return false;
             }
 
+            const auto &negotiatedGroups = role == Origin::Initiator ? remoteGroups : groups;
+            if (!GroupNegotiation::replacementBatchPreservesBundles(negotiatedGroups, seen)) {
+                lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,
+                                                XMPP::Stanza::Error::ErrorCond::UnexpectedRequest);
+                ErrorUtil::fill(jingleEl.ownerDocument(), *lastError, ErrorUtil::OutOfOrder);
+                return false;
+            }
+
             // Instantiate only detached incoming transports. update() is still a
             // provider callback, not a pure parse: never retain raw owner pointers
             // across it, and do not mutate current transports during this pass.
@@ -1200,6 +1209,16 @@ namespace XMPP { namespace Jingle {
                     continue;
                 }
                 eligible.append(entry);
+            }
+
+            QSet<ContentKey> eligibleKeys;
+            for (const auto &entry : std::as_const(eligible))
+                eligibleKeys.insert(entry.key);
+            if (!GroupNegotiation::replacementBatchPreservesBundles(negotiatedGroups, eligibleKeys)) {
+                lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,
+                                                XMPP::Stanza::Error::ErrorCond::UnexpectedRequest);
+                ErrorUtil::fill(jingleEl.ownerDocument(), *lastError, ErrorUtil::OutOfOrder);
+                return false;
             }
 
             // No remote installation on Break. Keep only validated sibling hints

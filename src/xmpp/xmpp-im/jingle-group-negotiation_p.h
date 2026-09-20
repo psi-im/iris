@@ -89,6 +89,32 @@ namespace XMPP { namespace Jingle {
             ConflictingTransportParameters
         };
 
+        // A negotiated multi-content BUNDLE association is one transport
+        // replacement unit. Replacing only some of its members would split one
+        // live association into multiple signaling incarnations.
+        static bool replacementBatchPreservesBundles(const QList<ContentGroup> &negotiated,
+                                                     const QSet<ContentKey> &replacements)
+        {
+            QHash<QString, int> replacedNames;
+            for (const auto &key : replacements)
+                ++replacedNames[key.first];
+
+            for (const auto &group : negotiated) {
+                if (group.semantics != QLatin1String("BUNDLE") || group.contents.size() < 2)
+                    continue;
+                int present = 0;
+                for (const auto &name : group.contents) {
+                    const int count = replacedNames.value(name);
+                    if (count > 1)
+                        return false;
+                    present += count ? 1 : 0;
+                }
+                if (present != 0 && present != group.contents.size())
+                    return false;
+            }
+            return true;
+        }
+
         // Build an immutable initial membership plan. This validates the whole
         // answer before producing actions and never starts ICE or mutates transports.
         // A multi-member association with no parameter snapshots is a preflight

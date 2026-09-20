@@ -72,6 +72,30 @@ int main(int argc, char **argv)
               && subset->associations().first().owner == members.at(1).content,
           "valid subset answer was not represented without merging rejected members");
 
+    const QSet<ContentKey> fullBundleReplace { members.at(0).content, members.at(1).content };
+    check(GroupNegotiation::replacementBatchPreservesBundles(acceptedBundle, fullBundleReplace),
+          "full BUNDLE replacement batch was rejected");
+    check(!GroupNegotiation::replacementBatchPreservesBundles(
+              acceptedBundle, QSet<ContentKey> { members.at(0).content }),
+          "partial BUNDLE replacement batch was accepted");
+    check(GroupNegotiation::replacementBatchPreservesBundles(
+              acceptedBundle, QSet<ContentKey> { members.at(2).content }),
+          "independent replacement was coupled to BUNDLE");
+    check(GroupNegotiation::replacementBatchPreservesBundles(
+              acceptedBundle,
+              QSet<ContentKey> { members.at(0).content, members.at(1).content, members.at(2).content }),
+          "full BUNDLE plus independent replacement was rejected");
+    check(GroupNegotiation::replacementBatchPreservesBundles(
+              { { QStringLiteral("BUNDLE"), { QStringLiteral("video") } } },
+              QSet<ContentKey> { members.at(0).content }),
+          "single-member negotiated subset incorrectly imposed shared replacement atomicity");
+    check(!GroupNegotiation::replacementBatchPreservesBundles(
+              acceptedBundle,
+              QSet<ContentKey> { members.at(0).content,
+                                 ContentKey { QStringLiteral("audio"), Origin::Responder },
+                                 members.at(1).content }),
+          "ambiguous replacement names were accepted for one BUNDLE association");
+
     const QList<ContentGroup> twoOffers { { QStringLiteral("BUNDLE"),
                                             { QStringLiteral("audio"), QStringLiteral("video") } },
                                           { QStringLiteral("BUNDLE"), { QStringLiteral("screen") } } };
