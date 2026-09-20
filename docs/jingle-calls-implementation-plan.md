@@ -134,6 +134,14 @@ psimedia не владеет ICE/BUNDLE topology. Обе public wrapper copies P
 - DOM lifetime baseline: RTP/ICE opaque extensions не хранят parser-owned `QDomElement`; JinglePub
   держит собственный document; XML, переживающий incoming-handler boundary/queued callback,
   импортируется в owner с достаточным lifetime. `jingle_domlifetime` выполняется и под sanitizers.
+- Astra lifecycle audit hardening: fatal FT integrity error остаётся terminal даже после входа в
+  `Finishing` и отменяет success finalize timer; FT state/close boundaries защищены от synchronous
+  deletion; close/disconnect во время final `read()/readDatagram()` не обгоняет учёт возвращённых
+  bytes; SCTP DataChannel также откладывает close notification до возврата final payload.
+  Отдельный `jingle_ftlifecycle` regression выполняется под ASan/UBSan.
+- Multi-group BUNDLE replacement: replacement одной negotiated group сохраняет memberships и
+  association identity всех незатронутых групп; regression покрывает rollback, commit первой группы
+  и последовательный replacement второй.
 - FT baseline: feature-driven ICE → S5B → IBB selection regression; real Prosody SCTP/datachannel
   transfer через два процесса. Детали и старые SHA остаются в git/interop docs.
 
@@ -173,6 +181,13 @@ psimedia не владеет ICE/BUNDLE topology. Обе public wrapper copies P
     синхронного handler-а, если owner lifetime не закреплён явно. Любой XML, сохраняемый в state,
     queued callback/timer или value object, должен либо иметь собственный `QDomDocument`, либо быть
     импортирован в документ с явно достаточным lifetime, либо храниться в сериализованном/value виде.
+12. Любой вызов, способный синхронно вызвать внешний Qt/user/provider callback
+    (`stateChanged`, `progress`, device/connection `read/write/close`, transport stop), является
+    lifetime boundary. До продолжения доступа к Application/Private проверять guard; payload counters
+    обновлять до внешнего notification. Close, пришедший изнутри read, не может интерпретироваться
+    раньше учёта bytes, которые этот read возвращает.
+13. Replacement transaction scoped к конкретной BUNDLE association/group. Commit одной группы не
+    заменяет целиком session-local membership snapshot и не освобождает unrelated associations.
 
 ### BUNDLE: зафиксированная архитектура, которую надо довести до production
 
@@ -232,6 +247,13 @@ DTLS runtime поддерживается. Не возвращать uncondition
   позже transport EOF; RTP Application обычно не имеет обязательства drain media после hangup.
 - IBB уже содержит явную legacy модель `Active → Finishing → Finished`: remote close оставляет
   connection readable до `bytesAvailable()==0`. Сохранять эту семантику.
+- Known-size FT receiver обязан сначала учесть bytes, возвращённые текущим `read`, и только
+  затем обрабатывать синхронно наблюдённый transport close. Это правило теперь фиксируется на generic
+  FT boundary и отдельным SCTP regression; аналогичные IBB/S5B сценарии не должны зависеть от порядка
+  emission конкретного transport implementation.
+- Integrity failure (например checksum mismatch) может возникнуть после payload completion, когда
+  Application уже в `Finishing`. Такой failure необратим: success timer/received tail отменяется,
+  terminal reason сохраняется и планируется `content-remove`; `Finishing` не блокирует fatal error.
 - S5B и SCTP/DataChannel сначала охарактеризовать regression tests; не “унифицировать” методом
   преждевременного `close()/delete`, который сломает их существующий buffering.
 - Нужен единый observable contract (no-more-input / draining / finished), но transport-specific
