@@ -291,8 +291,14 @@ public:
     QStringList             ns() const override { return { Description::ns() }; }
     QStringList             discoFeatures() const override;
 
+signals:
+    // Convenience view for ordinary RTP call proposals. Mixed/application-
+    // composite JMI proposals remain available only through Jingle::Manager.
+    void incomingProposal(const XMPP::Message &message, const QString &id, XMPP::Jingle::RTP::MediaSet media);
+
 private:
     QPointer<XMPP::Jingle::Manager> jingle_;
+    QMetaObject::Connection         jmiConnection_;
     std::shared_ptr<MediaProvider>  provider_;
     QStringList                     transports_;
     QList<QPointer<Application>>    applications_;
@@ -300,4 +306,5 @@ private:
 
 }
 Q_DECLARE_METATYPE(XMPP::Jingle::RTP::MediaError)
+Q_DECLARE_METATYPE(XMPP::Jingle::RTP::MediaSet)
 #endif
