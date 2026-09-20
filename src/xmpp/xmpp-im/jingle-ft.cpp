@@ -339,6 +339,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
             finalizeTimer->setSingleShot(true);
             finalizeTimer->setInterval(FINALIZE_TIMEOUT);
             q->connect(finalizeTimer, &QTimer::timeout, q, timeoutCallback);
+            finalizeTimer->start();
         }
 
         void setDevice(QIODevice *dev, bool closeOnFinish)
