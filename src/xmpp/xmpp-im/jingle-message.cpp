@@ -17,11 +17,18 @@ MessageInitiationManager::MessageInitiationManager(Manager *manager) : QObject(m
     Q_ASSERT(manager_->client());
 
     connect(manager_->client(), &Client::messageReceived, this, [this](const Message &message) {
-        if (!enabled_ || message.type() != Message::Type::Chat)
+        if (!enabled_)
             return;
 
-        for (const auto &initiation : message.jingleMessageInitiations())
-            emit incoming(message, initiation);
+        // Carbons wrap the protocol message in a forwarding envelope. JMI state
+        // is defined by the inner chat message, and sibling resources rely on
+        // those carbon copies to stop ringing after proceed/reject.
+        const auto effective = message.displayMessage();
+        if (effective.type() != Message::Type::Chat)
+            return;
+
+        for (const auto &initiation : effective.jingleMessageInitiations())
+            emit incoming(effective, initiation);
     });
 }
 
