@@ -44,6 +44,10 @@ namespace Jingle {
 
     class Manager;
     class Session;
+    class TieBreaker;
+    namespace RTP {
+        class Manager;
+    }
 
     enum class Origin { None, Both, Initiator, Responder };
 
@@ -284,7 +288,10 @@ namespace Jingle {
         ContentBase(Origin creator, const QString &name);
         ContentBase(const QDomElement &el);
 
-        inline bool isValid() const { return creator != Origin::None && !name.isEmpty(); }
+        inline bool isValid() const
+        {
+            return (creator == Origin::Initiator || creator == Origin::Responder) && !name.isEmpty() && validSenders;
+        }
 
         inline QDomElement toXml(QDomDocument *doc, const char *tagName, const QString &ns = QString()) const
         {
@@ -298,6 +305,8 @@ namespace Jingle {
         QString name;
         Origin  senders = Origin::Both;
         QString disposition; // default "session"
+    private:
+        bool validSenders = true;
     };
 
     class Security { };
@@ -324,6 +333,7 @@ namespace Jingle {
         virtual QDomElement takeOutgoingSessionInfoUpdate();
         virtual QString     ns() const      = 0;
         virtual Session    *session() const = 0;
+        TieBreaker         *tieBreaker() const;
 
         virtual void onLocalAccepted(); // changing to prepare state
         virtual void onSend();          // local stuff is prepared we are going to send it to remote
@@ -345,15 +355,11 @@ namespace Jingle {
 
         XMPP::Client *client() const;
 
-        // if we have another jingle manager we can add its contents' namespaces here.
-        void addExternalManager(const QString &ns);
-        // on outgoing session destroy an external manager should call this function.
-        void registerExternalSession(const QString &sid);
-        void forgetExternalSession(const QString &sid);
-
         void       setRedirection(const Jid &to);
         const Jid &redirectionJid() const;
 
+        // Application implementations may live outside Iris, but all signaling
+        // remains owned and dispatched by this single Jingle manager.
         void                   registerApplication(ApplicationManager *app);
         void                   unregisterApp(const QString &ns);
         bool                   isRegisteredApplication(const QString &ns);
@@ -383,6 +389,7 @@ namespace Jingle {
         const std::optional<XMPP::Stanza::Error> &lastError() const;
 
         PublicationManager *publicationManager() const;
+        RTP::Manager       *rtpManager() const;
 
         // Source-compatible shortcuts for the original local-only XEP-0358 API.
         // Durable/PubSub publications should use publicationManager() directly.

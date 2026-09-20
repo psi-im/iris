@@ -1,0 +1,171 @@
+name: Jingle regressions
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: iris-jingle-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  QCA_TAG: v3.0.7
+
+jobs:
+  qca3-srtp:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build ccache gdb qt6-base-dev libssl-dev libusrsctp-dev libsrtp2-dev
+
+      - name: Cache compiler objects
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/ccache
+          key: iris-jingle-qca3-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            iris-jingle-qca3-${{ runner.os }}-
+
+      - name: Install QCA3 release packages
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir qca-release
+          gh release download "$QCA_TAG" --repo psi-im/qca \
+            -p 'qca3-deb-ubuntu-24.04.zip' -O qca3.zip
+          (cd qca-release && cmake -E tar xvf ../qca3.zip)
+          test -n "$(find qca-release -type f -name '*.deb' -print -quit)"
+          sudo apt-get install -y ./qca-release/*.deb
+
+      - name: Configure
+        shell: bash
+        run: |
+          cmake -S tests/jingle -B build-jingle -G Ninja \
+            -DUSE_QT6=ON \
+            -DIRIS_SYSTEM_QCA=3 \
+            -DIRIS_BUNDLED_QCA=OFF \
+            -DIRIS_BUNDLED_USRSCTP=OFF \
+            -DIRIS_ENABLE_SRTP=ON \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+      - name: Build
+        run: cmake --build build-jingle --parallel 4
+
+      - name: Save compiler cache
+        if: success()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/ccache
+          key: iris-jingle-qca3-${{ runner.os }}-${{ github.sha }}
+
+      - name: Show ccache statistics
+        if: always()
+        run: ccache --show-stats
+
+      - name: Test
+        run: ctest --test-dir build-jingle --output-on-failure -j1
+
+
+  transport-sanitizers:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache sanitizer compiler objects
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/ccache
+          key: iris-jingle-sanitize-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            iris-jingle-sanitize-${{ runner.os }}-
+
+      - name: Install build dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build ccache qt6-base-dev libssl-dev libusrsctp-dev libsrtp2-dev
+
+      - name: Install QCA3 release packages
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir qca-release
+          gh release download "$QCA_TAG" --repo psi-im/qca \
+            -p 'qca3-deb-ubuntu-24.04.zip' -O qca3.zip
+          (cd qca-release && cmake -E tar xvf ../qca3.zip)
+          test -n "$(find qca-release -type f -name '*.deb' -print -quit)"
+          sudo apt-get install -y ./qca-release/*.deb
+
+      - name: Configure ASan and UBSan
+        shell: bash
+        run: |
+          cmake -S tests/jingle -B build-jingle-sanitize -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_FLAGS="-fsanitize=address,undefined -fno-sanitize=enum -fno-omit-frame-pointer" \
+            -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-sanitize=enum -fno-omit-frame-pointer" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined -fno-sanitize=enum" \
+            -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=address,undefined -fno-sanitize=enum" \
+            -DUSE_QT6=ON \
+            -DIRIS_SYSTEM_QCA=3 \
+            -DIRIS_BUNDLED_QCA=OFF \
+            -DIRIS_BUNDLED_USRSCTP=OFF \
+            -DIRIS_ENABLE_SRTP=ON \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+      - name: Build transport lifetime regressions
+        run: |
+          cmake --build build-jingle-sanitize --parallel 4 --target \
+            jingle_transports5b_test \
+            jingle_transportsctp_test \
+            jingle_transportacceptatomicity_test \
+            jingle_transportacceptackreentrancy_test \
+            jingle_transportacceptselfreentrancy_test \
+            jingle_transportrejectatomicity_test \
+            jingle_transportrejectreentrancy_test \
+            jingle_transportreplace_test \
+            jingle_transportreplacematrix_test \
+            jingle_transportreplaceackboundary_test \
+            jingle_transportreplacedispatcher_test \
+            jingle_transportreplacecorrectness_test \
+            jingle_transportreplaceprotocol_test \
+            jingle_rtpnegotiation_test \
+            jingle_domlifetime_test \
+            jingle_ftlifecycle_test
+
+      - name: Save sanitizer compiler cache
+        if: success()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/ccache
+          key: iris-jingle-sanitize-${{ runner.os }}-${{ github.sha }}
+
+      - name: Show sanitizer ccache statistics
+        if: always()
+        run: ccache --show-stats
+
+      - name: Test transport lifetime regressions under sanitizers
+        env:
+          ASAN_OPTIONS: detect_leaks=0:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          ctest --test-dir build-jingle-sanitize --output-on-failure -j1 \
+            -R '^jingle_transport(accept|reject|replace|s5b|sctp)'
+          ctest --test-dir build-jingle-sanitize --output-on-failure -j1 -R jingle_domlifetime
+          ctest --test-dir build-jingle-sanitize --output-on-failure -j1 -R jingle_ftlifecycle
+          ctest --test-dir build-jingle-sanitize --output-on-failure -j1 -R jingle_rtpnegotiation

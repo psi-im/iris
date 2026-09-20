@@ -1367,7 +1367,6 @@ DiscoItem Client::makeDiscoResult(const QString &node) const
     features.addFeature("urn:xmpp:ping");
     features.addFeature("urn:xmpp:time");
     features.addFeature("urn:xmpp:message-correct:0");
-    features.addFeature("urn:xmpp:jingle:1");
     features.addFeature("urn:xmpp:extdisco:2");
     features += d->jingleManager->discoFeatures();
     features += d->encryptionManager->features();
