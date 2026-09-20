@@ -55,6 +55,12 @@ public:
     int compare(QSharedPointer<Jingle::Transport>, QSharedPointer<Jingle::Transport>) const override { return 0; }
 };
 
+class TestIceTransport final : public Transport {
+public:
+    using Transport::Transport;
+    void forceState(Jingle::State state) { setState(state); }
+};
+
 class TestApplication : public Jingle::Application {
 public:
     TestApplication(const Jingle::ApplicationManagerPad::Ptr &pad, QString name, Jingle::Origin creator)
@@ -265,6 +271,40 @@ int main(int argc, char **argv)
           "last session-A membership retained its association");
     separateMembership.reset();
     check(padB->liveAssociationCount() == 0, "session-B membership retained its association");
+
+    // A committed ICE payload is intentionally applied on the next event-loop
+    // turn. If transport-replace hands this content to a successor first, the
+    // superseded Transport must not use that late callback to recreate a
+    // standalone association or advance its signaling state.
+    auto lateApp = new TestApplication(appPadA, QStringLiteral("late"), Jingle::Origin::Initiator);
+    sessionA.addContent(lateApp);
+    auto retired = QSharedPointer<TestIceTransport>::create(padA, Jingle::Origin::Initiator);
+    auto current = QSharedPointer<TestIceTransport>::create(padA, Jingle::Origin::Initiator);
+    check(lateApp->setTransport(retired), "late-callback fixture rejected initial ICE transport");
+    retired->setComponentsCount(1); // establish active content ownership in the Pad
+    check(padA->liveAssociationCount() == 1, "late-callback fixture did not allocate initial association");
+    retired->forceState(Jingle::State::Pending);
+
+    QDomDocument staleDoc;
+    auto staleUpdate = staleDoc.createElementNS(NS, QStringLiteral("transport"));
+    staleUpdate.setAttribute(QStringLiteral("ufrag"), QStringLiteral("stale-ufrag"));
+    staleUpdate.setAttribute(QStringLiteral("pwd"), QStringLiteral("stale-password"));
+    auto preparedStale = retired->prepareUpdate(staleUpdate);
+    check(preparedStale && retired->commitPreparedUpdate(std::move(preparedStale.update)),
+          "late-callback fixture could not queue a valid ICE update");
+
+    check(lateApp->setTransport(current), "late-callback fixture rejected replacement ICE transport");
+    current->setComponentsCount(1); // retires the previous transport ownership
+    check(padA->liveAssociationCount() == 1, "transport replacement leaked the retired association");
+    QCoreApplication::processEvents(QEventLoop::AllEvents);
+    check(retired->state() == Jingle::State::Pending,
+          "late ICE update advanced a superseded transport after ownership retirement");
+    check(lateApp->transport() == current, "late ICE update displaced the current transport");
+    delete lateApp;
+    retired.reset();
+    current.reset();
+    QCoreApplication::processEvents(QEventLoop::AllEvents);
+    check(padA->liveAssociationCount() == 0, "late-callback fixture retained an association after cleanup");
 
     Jingle::Session bundleSession(client.jingleManager(), Jid(QStringLiteral("bundle@example.org/device")));
     auto bundlePad = Pad::Ptr::create(&manager, &bundleSession);

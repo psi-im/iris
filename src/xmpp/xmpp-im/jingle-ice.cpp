@@ -603,17 +603,25 @@ namespace XMPP { namespace Jingle { namespace ICE {
                 printf("  %s\n", qPrintable(host));
         }
 
-        network->ice = new Ice176(network);
-        network->ice->setAllowIpExposure(runtime->allowIpExposure);
+        auto *ice = new Ice176(network);
+        network->ice = ice;
+        const auto iceGeneration = ++network->generation.iceGeneration;
+        ice->setAllowIpExposure(runtime->allowIpExposure);
 
-        QObject::connect(network->ice, &Ice176::started, network, [network]() {
+        auto currentIce = [network, ice, iceGeneration]() {
+            return network->ice == ice && network->generation.iceGeneration == iceGeneration;
+        };
+
+        QObject::connect(ice, &Ice176::started, network, [network, ice, currentIce]() {
+            if (!currentIce())
+                return;
             for (const auto &component : std::as_const(network->components)) {
                 if (component.lowOverhead)
-                    network->ice->flagComponentAsLowOverhead(component.componentIndex);
+                    ice->flagComponentAsLowOverhead(component.componentIndex);
             }
         });
-        QObject::connect(network->ice, &Ice176::error, network, [network](Ice176::Error error) {
-            if (!network->runtime)
+        QObject::connect(ice, &Ice176::error, network, [network, currentIce](Ice176::Error error) {
+            if (!currentIce() || !network->runtime)
                 return;
             network->runtime->pruneParticipants();
             const auto participants = network->runtime->participants;
@@ -621,9 +629,9 @@ namespace XMPP { namespace Jingle { namespace ICE {
                 if (participant.onError)
                     participant.onError(error);
         });
-        QObject::connect(network->ice, &Ice176::localCandidatesReady, network,
-                         [network](const QList<Ice176::Candidate> &candidates) {
-                             if (!network->runtime)
+        QObject::connect(ice, &Ice176::localCandidatesReady, network,
+                         [network, currentIce](const QList<Ice176::Candidate> &candidates) {
+                             if (!currentIce() || !network->runtime)
                                  return;
                              network->runtime->localCandidateHistory += candidates;
                              network->runtime->pruneParticipants();
@@ -632,8 +640,8 @@ namespace XMPP { namespace Jingle { namespace ICE {
                                  if (participant.onLocalCandidates)
                                      participant.onLocalCandidates(candidates);
                          });
-        QObject::connect(network->ice, &Ice176::localGatheringComplete, network, [network]() {
-            if (!network->runtime)
+        QObject::connect(ice, &Ice176::localGatheringComplete, network, [network, currentIce]() {
+            if (!currentIce() || !network->runtime)
                 return;
             network->runtime->gatheringComplete = true;
             network->runtime->pruneParticipants();
@@ -642,8 +650,8 @@ namespace XMPP { namespace Jingle { namespace ICE {
                 if (participant.onGatheringComplete)
                     participant.onGatheringComplete();
         });
-        QObject::connect(network->ice, &Ice176::readyToSendMedia, network, [network]() {
-            if (!network->runtime)
+        QObject::connect(ice, &Ice176::readyToSendMedia, network, [network, currentIce]() {
+            if (!currentIce() || !network->runtime)
                 return;
             qDebug("ICE reported ready to send media!");
             if (!network->components.isEmpty() && network->components[0].dtls) {
@@ -656,8 +664,10 @@ namespace XMPP { namespace Jingle { namespace ICE {
                 if (participant.onRawReady)
                     participant.onRawReady();
         }, Qt::QueuedConnection);
-        QObject::connect(network->ice, &Ice176::readyRead, network, [network](int componentIndex) {
-            auto  buffer    = network->ice->readDatagram(componentIndex);
+        QObject::connect(ice, &Ice176::readyRead, network, [network, ice, currentIce](int componentIndex) {
+            if (!currentIce() || componentIndex < 0 || componentIndex >= network->components.size())
+                return;
+            auto  buffer    = ice->readDatagram(componentIndex);
             auto &component = network->components[componentIndex];
             if (component.srtp) {
                 component.srtp->dispatchMuxed(std::move(buffer));
@@ -668,10 +678,10 @@ namespace XMPP { namespace Jingle { namespace ICE {
             }
         });
 
-        network->ice->setProxy(runtime->stunProxy);
+        ice->setProxy(runtime->stunProxy);
         if (network->portReserver)
-            network->ice->setPortReserver(network->portReserver);
-        network->ice->setLocalAddresses(localAddrs);
+            ice->setPortReserver(network->portReserver);
+        ice->setLocalAddresses(localAddrs);
 
         if (!runtime->extAddr.isNull()) {
             QList<Ice176::ExternalAddress> external;
@@ -681,33 +691,33 @@ namespace XMPP { namespace Jingle { namespace ICE {
                 address.addr = runtime->extAddr;
                 external.append(address);
             }
-            network->ice->setExternalAddresses(external);
+            ice->setExternalAddresses(external);
         }
 
         if (!runtime->stunBindAddr.isNull() && runtime->stunBindPort > 0)
-            network->ice->setStunBindService(runtime->stunBindAddr, runtime->stunBindPort);
+            ice->setStunBindService(runtime->stunBindAddr, runtime->stunBindPort);
         if (!runtime->stunRelayUdpAddr.isNull() && !runtime->stunRelayUdpUser.isEmpty())
-            network->ice->setStunRelayUdpService(runtime->stunRelayUdpAddr, runtime->stunRelayUdpPort,
+            ice->setStunRelayUdpService(runtime->stunRelayUdpAddr, runtime->stunRelayUdpPort,
                                                  runtime->stunRelayUdpUser, runtime->stunRelayUdpPass.toUtf8());
         if (!runtime->stunRelayTcpAddr.isNull() && !runtime->stunRelayTcpUser.isEmpty())
-            network->ice->setStunRelayTcpService(runtime->stunRelayTcpAddr, runtime->stunRelayTcpPort,
+            ice->setStunRelayTcpService(runtime->stunRelayTcpAddr, runtime->stunRelayTcpPort,
                                                  runtime->stunRelayTcpUser, runtime->stunRelayTcpPass.toUtf8());
-        network->ice->setStunDiscoverer(
+        ice->setStunDiscoverer(
             pad->session()->manager()->client()->stunDiscoManager()->createMonitor());
 
-        network->ice->setComponentCount(network->components.count());
-        network->ice->setLocalFeatures(Ice176::Trickle);
+        ice->setComponentCount(network->components.count());
+        ice->setLocalFeatures(Ice176::Trickle);
         if (!runtime->remoteCandidates.isEmpty()) {
-            network->ice->setRemoteCredentials(runtime->remoteUfrag, runtime->remotePassword);
-            network->ice->addRemoteCandidates(runtime->remoteCandidates);
+            ice->setRemoteCredentials(runtime->remoteUfrag, runtime->remotePassword);
+            ice->addRemoteCandidates(runtime->remoteCandidates);
         }
         if (runtime->remoteGatheringComplete)
-            network->ice->setRemoteGatheringComplete();
+            ice->setRemoteGatheringComplete();
         if (!runtime->remoteSelectedCandidates.isEmpty())
-            network->ice->setRemoteSelectedCandidadates(runtime->remoteSelectedCandidates);
+            ice->setRemoteSelectedCandidadates(runtime->remoteSelectedCandidates);
 
         const auto mode = runtime->creator == pad->session()->role() ? Ice176::Initiator : Ice176::Responder;
-        network->ice->start(mode);
+        ice->start(mode);
     }
 
     IceConnection::~IceConnection()
@@ -793,7 +803,8 @@ namespace XMPP { namespace Jingle { namespace ICE {
         ConnectionMembership          membership;
         QSharedPointer<IceConnection> standaloneNetwork;
         QPointer<IceConnection>       network;
-        bool                           groupManagedNetwork = false;
+        bool                           groupManagedNetwork       = false;
+        bool                           networkOwnershipRetired   = false;
         QStringList                    rtpProfiles;
 
         ~Private() { releaseNetwork(); }
@@ -833,6 +844,8 @@ namespace XMPP { namespace Jingle { namespace ICE {
 
         bool ensureNetwork()
         {
+            if (networkOwnershipRetired)
+                return false;
             if (network)
                 return true;
             auto pad = q->pad().staticCast<Pad>();
@@ -1353,6 +1366,10 @@ namespace XMPP { namespace Jingle { namespace ICE {
 
     void Transport::releaseNetworkOwnership()
     {
+        // This Transport has been superseded for its logical content. It may
+        // remain alive in selector/signaling bookkeeping, but asynchronous work
+        // owned by the previous incarnation must never reacquire an association.
+        d->networkOwnershipRetired = true;
         if (auto binding = rtpSession()) {
             binding->disconnect(this);
             if (!d->groupManagedNetwork)
@@ -1514,13 +1531,26 @@ namespace XMPP { namespace Jingle { namespace ICE {
     bool Transport::commitPreparedUpdate(PreparedUpdatePtr update)
     {
         auto prepared = dynamic_cast<PreparedIceUpdate *>(update.get());
-        if (!prepared)
+        if (!prepared || d->networkOwnershipRetired)
             return false;
 
         // Preserve the existing deferred ICE application boundary. The caller has
         // already validated the complete signaling batch before this work is queued.
-        const auto element = prepared->element;
-        QTimer::singleShot(0, this, [this, element]() { d->handleRemoteUpdate(element); });
+        // A transport-replace may retire this Transport before the event loop runs;
+        // in that case the old payload belongs to a dead signaling incarnation and
+        // must not recreate a standalone association.
+        const auto element       = prepared->element;
+        const auto network       = QPointer<IceConnection>(d->network);
+        const auto iceGeneration = network ? network->generation.iceGeneration : 0;
+        QTimer::singleShot(0, this, [this, element, network, iceGeneration]() {
+            if (d->networkOwnershipRetired)
+                return;
+            if (network
+                && (!d->network || d->network != network
+                    || network->generation.iceGeneration != iceGeneration))
+                return;
+            d->handleRemoteUpdate(element);
+        });
         return true;
     }
 
