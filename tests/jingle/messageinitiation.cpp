@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #include <iris/xmpp-im/jingle-rtp.h>
+#include <iris/xmpp-im/jingle-session.h>
 #include <iris/xmpp-im/jingle.h>
 #include <iris/xmpp-im/xmpp_client.h>
 #include <iris/xmpp-im/xmpp_jinglemessage.h>
