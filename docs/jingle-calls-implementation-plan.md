@@ -132,6 +132,9 @@ psimedia не владеет ICE/BUNDLE topology. Обе public wrapper copies P
    DTLS и grouping caps — не угадывать Conversations behavior без fixture/interop evidence.
 2. Довести P2 shared path после уже работающего RTP/BUNDLE wiring: active-call ICE restart/migration,
    member removal, multiple DataChannels и mixed RTP+SCTP; FT matrix обязана оставаться зелёной.
+   Отдельно реализовать group-level media ingress для `BundleRouter::Delivery::SharedRtcp`:
+   сейчас корректно распознанный compound RTCP по нескольким BUNDLE contents fail-closed/drop,
+   потому что psimedia API предоставляет только per-content ingress.
 3. Довести `Finishing`/Connection lifetime contract на IBB/S5B/SCTP: application payload completion не
    уничтожает Connection до transport-specific async tail/peer-close/drain.
 4. P1c дополнить real audio+video Psi↔Psi gate и pinned Conversations interoperability в обе стороны.
@@ -166,6 +169,9 @@ psimedia не владеет ICE/BUNDLE topology. Обе public wrapper copies P
   SSRC registration, revision fencing и removal. Production wiring должен использовать эти contracts.
 - Shared ICE/DTLS/SCTP ownership не означает shared `Transport` object: signaling/ACK state остаётся
   per-content/per-action.
+- RTP `BundleRouter` уже production-wired по shared `SrtpSession`, но `SharedRtcp` требует
+  отдельного group-level ingress в media backend. Не дублировать один compound RTCP packet во все
+  per-content endpoints ради прохождения теста.
 - Для DataChannel одна SCTP association может обслуживать много `Connection`/streams. Закрытие или
   draining одного файла не завершает association, если другие streams/members ещё живы.
 
