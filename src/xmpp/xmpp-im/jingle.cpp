@@ -709,7 +709,8 @@ namespace XMPP { namespace Jingle {
 
     QStringList Manager::discoFeatures() const
     {
-        QStringList ret = d->publicationManager->discoFeatures();
+        QStringList ret { NS };
+        ret += d->publicationManager->discoFeatures();
         // Experimental feature-branch capability: exercise the real grouping
         // negotiation path in CI/live interop. Promotion to master/release stays
         // gated by the remaining P2 BUNDLE regressions and peer evidence.
