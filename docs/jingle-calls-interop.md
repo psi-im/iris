@@ -2,75 +2,88 @@
 
 This document records verified call-stack baselines and interoperability results. It intentionally distinguishes source-level support, synthetic tests, real packet-path tests and calls against external peers.
 
+## Current integration snapshot — 2026-09-20
 
-## Current native-media integration snapshot — 2026-09-19
+Two independent evidence tracks are current and must not be conflated:
 
-Verified code and CI inputs:
+1. **Server-mediated native audio is verified.** Psi integration run `35475382811`
+   (`PsiMedia integration #87`), job `105983625438` (`xmpp-prosody-call`) passed on
+   `ci/psimedia-integration` commit `4537a70cd50ed1a9db4d85fbae24ab3458e5f030`.
+   The job explicitly checked out Iris `8af85f489dc1cc196c7b95c1fa58f3f4a09ae4cd`
+   from `jingle/async-media` and psimedia
+   `2d067da46a70a74b1ccf91830c97b09a8c58713b` from `jingle/rtcp-session`.
+2. **Production negotiated BUNDLE wiring is verified by Iris regressions.** Iris
+   `9985f52d573176a7b3be9c40fdbf6911a3f4e7f1` passed `Jingle regressions #269`
+   (run `35515002546`): qca3-srtp **58/58 passed**, including
+   `jingle_bundleice`, `jingle_bundlemedia` and `jingle_bundlesignaling`; the
+   transport sanitizer job also passed.
 
-- Psi `78dee48c396c7815ef78284ea545c0c103e1149a`.
-- Iris `e46ded145d99f4b9b06a22a8adb7b284881a8b9d`, pinned by that Psi commit.
-- psimedia `2d067da46a70a74b1ccf91830c97b09a8c58713b`.
-- Psi integration branch `ci/psimedia-integration` at `8b29d16dd28fe236c57b6dfbf0cc6f1c9fefc460`.
-- `PsiMedia integration` run `35453030643`, rerun job `105923759896`: **12/12 passed**.
-- `AI Windows GCC BASIC CI` run `35453169132`, job `105923753580`: **4/4 avcall tests passed**.
+### Server-mediated Psi ↔ Psi audio
 
-The Linux integration job recorded Qt 6.4.2, QCA 3.0.7 release packages with
-`qca-ossl`, OpenSSL 3.0.13, GStreamer 1.24.2 and libsrtp2 2.5.0
-(Ubuntu package 2.5.0-3build1). The production psimedia plugin was built and
-loaded through Qt plugin loading as `libmediaplugin.so`, IID
-`org.psi-im.PsiMediaPlugin`, class `PsiMediaPlugin`. CMake selected system
-QCA 3 (`Qca3::Qca`).
+The Prosody gate runs two separate real client processes/accounts through a real local XMPP
+server using the production psimedia/GStreamer backend. The observed call used
+`urn:xmpp:jingle:transports:ice-udp:1`, DTLS/SRTP and Opus/48 kHz.
 
-The remote integration gate now verifies the production path rather than only
-constructing interfaces:
+Both caller and callee reported:
 
-- real `GstProvider` prepares without physical input devices;
-- real audio and video endpoints negotiate Opus/48 kHz and VP8/90 kHz and apply
-  backend-produced payload descriptions;
-- semantic RTP and RTCP pass through Iris ICE/DTLS/SRTP to one real psimedia
-  backend and a synthetic media peer;
-- audio and video use independent ICE transports and independent SRTP sessions;
-  stopping the audio transport leaves the video transport and writer usable;
-- explicit consent starts a synthetic live audio source, produces RTP with the
-  negotiated payload type, and `stopPsiMediaJingleTransmit()` reaches
-  quiescence;
-- with no capture device IDs, transmit remains disabled while incoming RTP is
-  still accepted, a fresh RTCP receiver report is produced, and the independent
-  video transport stays authenticated;
-- an invalid real GStreamer capture source produces exactly one backend runtime
-  error, revokes endpoint packet I/O and cannot be used to resume capture after
-  the terminal error;
-- the same job runs the Psi backend-lifecycle test and psimedia RTP
-  sender/bridge/backpressure regressions serially. The Windows BASIC gate runs
-  policy, audio-direction, backend-lifecycle and capability-refresh tests.
+- `CALL_MEDIA_STARTED=1`;
+- one negotiated local and remote payload;
+- `CALL_DECODED_BYTES=622080`;
+- successful terminal call result.
 
-This is **synthetic one-real-backend packet-path evidence**, not a successful
-server-mediated Psi ↔ Psi call. Two real psimedia peers are deliberately not
-instantiated in one process because the current engine has process-global
-sender/receiver ownership. A real Psi ↔ Psi call therefore still requires two
-processes/clients and an XMPP server. Conversations is also still unpinned:
-there is no recorded release/commit, Android device, server/TURN configuration
-or authorized sanitized call capture. No Conversations parity or live BUNDLE
-result is claimed.
+The output PCM files were 664320 bytes on each side. The logs contain real
+`session-initiate`, `session-accept` and successful `session-terminate` signaling.
+This closes the previous “Psi ↔ Psi native audio through a server” blocker for the tested
+headless CI topology. It does not establish WAN/NAT/TURN behavior, device capture behavior or
+Conversations interoperability.
 
-Current P1c result matrix:
+### Negotiated BUNDLE source/runtime regression evidence
 
-| Scenario | Result | Evidence |
+The current Iris RTP path no longer uses one ICE association per content when BUNDLE is
+negotiated. Per-content `Transport` objects retain signaling identity, while the session-local
+ICE Pad commits a shared `IceConnection`/DTLS/SRTP association through
+`ConnectionRegistry` and `ConnectionGroupTransaction`. RTP packet ingress is routed through
+the Pad-owned `BundleRouter`.
+
+The signaling regression exercises the production parser/scheduler boundary rather than a
+test-only group mutator:
+
+- real `session-initiate` serialization and IQ result;
+- real `session-accept` XML with negotiated audio+video BUNDLE;
+- partial BUNDLE `transport-replace` rejection without mutation;
+- full-group replacement with fresh ICE transports;
+- production `prepareTransport()` for both replacements;
+- one live BUNDLE association after atomic switch;
+- one shared replacement SRTP session;
+- stale SRTP callbacks from the retired transport generation cannot terminate the replacement.
+
+This is strong source/local-runtime evidence for negotiated BUNDLE and atomic pre-Connecting
+replacement. It is **not an external live BUNDLE interoperability result**. In particular,
+group-level `SharedRtcp` delivery is recognized by `BundleRouter` but still has no psimedia
+group ingress and is intentionally dropped rather than duplicated across contents. Active-call
+transport replacement remains disabled from `Connecting` onward pending explicit media/SRTP
+migration semantics.
+
+### Current result matrix
+
+| Scenario | Result | Evidence / remaining boundary |
 | --- | --- | --- |
-| Production psimedia plugin load | pass | integration run `35453030643`, job `105923759896` |
-| Device-free real backend audio + video negotiation | pass | Opus + VP8 adapter smoke in the same job |
-| Independent audio/video ICE + DTLS-SRTP packet paths | pass | one real psimedia side + synthetic peer in the same job |
-| Consent → capture/transmit → stop | pass | negotiated-PT RTP and sender quiescence in the peer smoke |
-| No-device receive-only behaviour | pass | incoming RTP + fresh RTCP RR while capture stays disabled |
-| Real backend runtime error | pass | invalid GStreamer source → terminal backend error and endpoint revocation |
-| Psi ↔ Psi native audio through a server | **blocked — not run yet** | requires two real client processes/accounts and server test setup |
+| Production psimedia plugin and RTP bridge | pass | cross-repo integration gates |
+| Psi ↔ Psi native audio through Prosody | **pass** | run `35475382811`, job `105983625438`; 622080 decoded bytes per side |
+| ICE-UDP:1 signaling/packet path | pass | live audio gate plus standalone Jingle ICE-UDP regressions |
+| Negotiated audio+video BUNDLE in Iris | **pass in local regression** | `Jingle regressions #269`; shared ICE/DTLS/SRTP and atomic full-group replacement |
+| External live audio+video BUNDLE | **not claimed** | no pinned external peer/live A/V gate; SharedRtcp group media ingress and active migration remain open |
 | Psi ↔ Conversations audio | **blocked — peer not pinned** | exact peer/device/server/TURN metadata and sanitized fixture still missing |
-| Live audio + video BUNDLE | **not claimed** | P2 is intentionally not started before P1c live-peer acceptance |
+| TURN relay-only call | **not claimed** | no call-level relay-only evidence |
 
-The remaining P1c acceptance blocker is therefore peer-level and reproducible:
-run the current pinned stack as two real Psi clients through a server, then pin
-and test the exact Conversations peer. Successful synthetic CI does not satisfy
-that live-call requirement.
+Conversations remains unpinned: there is no recorded release/commit, Android device,
+server/TURN configuration or authorized sanitized call capture. Do not infer its caps,
+BUNDLE, JMI or transport-replace behavior from Psi/Psi tests.
+
+The capability-selection negative matrix is being expanded separately. Current RTP policy is
+fail-closed: advertising RTP/audio plus only IBB or S5B transport capability does not make those
+byte-stream transports valid for the packet-oriented RTP backend. A future low-bitrate codec
+does not change that contract without an explicitly implemented RTP transport/profile.
 
 ## Earlier audit snapshot — 2026-09-13
 
