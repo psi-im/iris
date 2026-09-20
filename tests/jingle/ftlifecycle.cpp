@@ -7,6 +7,8 @@
 #include <QCoreApplication>
 #include <QPointer>
 
+#include <cstring>
+
 using namespace XMPP;
 namespace J = XMPP::Jingle;
 namespace FT = XMPP::Jingle::FileTransfer;
