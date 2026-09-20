@@ -445,5 +445,48 @@ int main(int argc, char **argv)
               && bounded.lastError() == BundleRouter::Error::UnknownRoute,
           "reset retained a stale RTP route");
 
+
+    // Accepted descriptions become directional route metadata. Peer sources
+    // are incoming, local sources are RTCP feedback targets, and the accepted
+    // answer controls the usable PT/MID set.
+    Description localDescription;
+    localDescription.media   = QStringLiteral("audio");
+    localDescription.rtcpMux = true;
+    localDescription.ssrc    = AudioLocal;
+    localDescription.sources.append(Source { AudioLocal + 1, {} });
+    localDescription.payloads.append(PayloadType { AudioPt, QStringLiteral("opus"), 48000, 2 });
+    localDescription.headerExtensions.append(
+        HeaderExtension { 3, QStringLiteral("urn:ietf:params:rtp-hdrext:sdes:mid"), Origin::Both, {} });
+
+    Description remoteDescription = localDescription;
+    remoteDescription.ssrc        = AudioRemote;
+    remoteDescription.sources     = { Source { AudioRemote + 1, {} } };
+    remoteDescription.payloads.first().id = 109;
+
+    const ContentKey describedContent { QStringLiteral("voice"), Origin::Initiator };
+    auto describedRoute
+        = bundleRouteForDescriptions(describedContent, true, localDescription, remoteDescription);
+    check(describedRoute && describedRoute->content == describedContent
+              && describedRoute->incomingPayloadTypes == QSet<quint8> { 109 }
+              && describedRoute->incomingSsrcs.contains(AudioRemote)
+              && describedRoute->incomingSsrcs.contains(AudioRemote + 1)
+              && describedRoute->localSsrcs.contains(AudioLocal)
+              && describedRoute->localSsrcs.contains(AudioLocal + 1)
+              && describedRoute->mid == QByteArrayLiteral("voice") && describedRoute->midExtensionId == 3,
+          "locally-created negotiated descriptions produced the wrong BUNDLE route");
+
+    auto responderRoute
+        = bundleRouteForDescriptions(ContentKey { QStringLiteral("voice"), Origin::Initiator }, false,
+                                     remoteDescription, localDescription);
+    check(responderRoute && responderRoute->incomingPayloadTypes == QSet<quint8> { 109 }
+              && responderRoute->incomingSsrcs.contains(AudioLocal)
+              && responderRoute->localSsrcs.contains(AudioRemote),
+          "remotely-created negotiated descriptions reversed route direction");
+
+    auto noMuxDescription = localDescription;
+    noMuxDescription.rtcpMux = false;
+    check(!bundleRouteForDescriptions(describedContent, true, noMuxDescription, remoteDescription),
+          "non-muxed RTP was accepted as a BUNDLE route");
+
     qInfo("RTP BUNDLE router regressions passed");
 }

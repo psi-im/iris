@@ -137,6 +137,12 @@ int main(int argc, char **argv)
     auto firstPad  = first->pad().staticCast<J::ICE::Pad>();
     auto secondPad = second->pad().staticCast<J::ICE::Pad>();
 
+    // Transport construction itself must not allocate an ICE association.
+    // Association selection is delayed until the Transport is already bound to
+    // a Jingle content (or otherwise first used), which is required for BUNDLE.
+    check(firstPad->_connections.isEmpty() && secondPad->_connections.isEmpty(),
+          "ICE association was allocated before content binding");
+
     std::unique_ptr<J::RTP::Application> firstApp, secondApp;
     auto firstMedia = std::make_shared<MediaState>(), secondMedia = std::make_shared<MediaState>();
     if (applicationMode) {
