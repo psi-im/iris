@@ -11,11 +11,6 @@ static void check(bool value, const char *message)
     if (!value)
         qFatal("%s", message);
 }
-
-static void stage(const char *name)
-{
-    qInfo("rtpnegotiation stage: %s", name);
-}
 using Result = Negotiation::Result;
 
 class MockCodecs : public CodecNegotiator {
@@ -80,7 +75,6 @@ static HeaderExtension headerExtension(quint16 id, const char *uri, Origin sende
 int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
-    stage("mux validation");
     auto             offer = makeOffer();
     for (int pt : { 64, 72, 95 }) {
         auto conflict                = makeOffer();
@@ -91,7 +85,6 @@ int main(int argc, char **argv)
         Negotiation separate;
         check(separate.setLocalOffer(conflict) == Result::Ok, "mux restriction leaked into separate components");
     }
-    stage("initiator validation");
     auto answer = makeOffer();
     answer.payloads.removeLast();
     answer.payloads.first().parameters.insert("minptime", "10");
@@ -143,8 +136,6 @@ int main(int argc, char **argv)
     check(initiator.remoteDescription()->payloads.first().parameters.value("minptime") == "10",
           "codec-specific answer parameters discarded");
     check(initiator.setRemoteAnswer(answer, codecs) == Result::WrongState, "second answer accepted");
-
-    stage("responder validation");
     Negotiation responder;
     check(responder.setRemoteOffer(makeOffer(), codecs) == Result::UnsupportedMedia, "missing codec accepted");
     check(responder.state() == Negotiation::State::Empty, "failed offer committed");
@@ -158,8 +149,6 @@ int main(int argc, char **argv)
     check(responder.remoteDescription()->extensions.first().contains("value=\"original\""),
           "answer factory changed stored remote offer");
     check(responder.localDescription()->ssrc == 42, "local answer not stored separately");
-
-    stage("rtcp mux policy");
     auto noMux    = makeOffer();
     noMux.rtcpMux = false;
     Negotiation unsolicitedMux;
@@ -169,16 +158,12 @@ int main(int argc, char **argv)
     check(declinedMux.setLocalOffer(makeOffer()) == Result::Ok, "mux offer rejected");
     answer.rtcpMux = false;
     check(declinedMux.setRemoteAnswer(answer, codecs) == Result::Ok, "mux refusal rejected");
-
-    stage("payload ordering");
     Negotiation reordered;
     check(reordered.setLocalOffer(makeOffer()) == Result::Ok, "offer rejected");
     auto reorderedAnswer = makeOffer();
     reorderedAnswer.payloads.swapItemsAt(0, 1);
     check(reordered.setRemoteAnswer(reorderedAnswer, codecs) == Result::Ok, "peer codec preferences rejected");
     check(reordered.remoteDescription()->payloads.first().id == 0, "peer codec preference order lost");
-
-    stage("rtcp feedback");
     // XEP-0293: accepted feedback is an unchanged subset at the same scope.
     auto feedbackOffer = makeOffer();
     feedbackOffer.feedback.append(feedback("nack", "pli"));
@@ -222,8 +207,6 @@ int main(int argc, char **argv)
     offeredTrr.feedbackTrrInt = 100;
     check(answerResult(offeredTrr, avpfOnly) == Result::IncompatibleAnswer,
           "offered trr-int was replaced by synthetic zero");
-
-    stage("header extensions");
     // XEP-0294 / RFC 8285: ordinary ids remain stable while extended offer ids
     // may represent alternatives and are remapped to a free usable answer id.
     auto headerOffer = makeOffer();
@@ -289,8 +272,6 @@ int main(int argc, char **argv)
     Negotiation extendedAlternatives;
     check(extendedAlternatives.setLocalOffer(extendedOffer) == Result::Ok,
           "duplicate extended alternative ids rejected");
-
-    stage("sources");
     // SSRC/source information is endpoint state, not an offer capability: peers
     // are free to describe different local sources in the answer.
     auto sourceOffer = makeOffer();
@@ -298,13 +279,10 @@ int main(int argc, char **argv)
     auto sourceAnswer    = sourceOffer;
     sourceAnswer.sources = { Source { 222, {} } };
     check(answerResult(sourceOffer, sourceAnswer) == Result::Ok, "independent peer SSRC source rejected");
-
-    stage("final invalid offer");
     Negotiation invalidOffer;
     auto        empty = makeOffer();
     empty.payloads.clear();
     check(invalidOffer.setLocalOffer(empty) == Result::InvalidDescription, "empty offer accepted");
     check(invalidOffer.state() == Negotiation::State::Empty, "invalid offer changed state");
-    stage("completed");
     qInfo("RTP negotiation regressions passed");
 }
