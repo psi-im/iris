@@ -237,7 +237,10 @@ Negotiation::Result Negotiation::setRemoteOffer(const Description &offer, const 
     if (!value)
         return Result::InvalidDescription;
     // Give the adapter its own DOM copy, not the snapshot being committed.
-    auto proposed = codecs.makeAnswer(*snapshot(*value));
+    auto adapterOffer = snapshot(*value);
+    if (!adapterOffer)
+        return Result::InvalidDescription;
+    auto proposed = codecs.makeAnswer(*adapterOffer);
     if (!proposed)
         return Result::UnsupportedMedia;
     return setRemoteOffer(*value, *proposed);
@@ -270,7 +273,11 @@ Negotiation::Result Negotiation::setRemoteAnswer(const Description &description,
         return Result::InvalidDescription;
     if (!compatible(*local_, *answer))
         return Result::IncompatibleAnswer;
-    if (!codecs.acceptsAnswer(*snapshot(*local_), *snapshot(*answer)))
+    auto adapterOffer  = snapshot(*local_);
+    auto adapterAnswer = snapshot(*answer);
+    if (!adapterOffer || !adapterAnswer)
+        return Result::InvalidDescription;
+    if (!codecs.acceptsAnswer(*adapterOffer, *adapterAnswer))
         return Result::UnsupportedMedia;
     remote_ = std::move(answer);
     state_  = State::Accepted;
