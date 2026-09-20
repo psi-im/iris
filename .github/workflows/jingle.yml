@@ -89,7 +89,7 @@ jobs:
         shell: bash
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build qt6-base-dev libssl-dev libusrsctp-dev libsrtp2-dev
+          sudo apt-get install -y cmake ninja-build ccache qt6-base-dev libssl-dev libusrsctp-dev libsrtp2-dev
 
       - name: Install QCA3 release packages
         shell: bash
