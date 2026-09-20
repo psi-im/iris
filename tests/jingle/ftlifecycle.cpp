@@ -39,6 +39,8 @@ public:
         emit readyRead();
     }
 
+    void closeDuringNextRead() { closeDuringRead_ = true; }
+
 protected:
     qint64 readDataInternal(char *data, qint64 maxSize) override
     {
@@ -47,11 +49,17 @@ protected:
             return 0;
         memcpy(data, incoming_.constData(), size_t(size));
         incoming_.remove(0, int(size));
+        if (closeDuringRead_) {
+            closeDuringRead_ = false;
+            setOpenMode(QIODevice::NotOpen);
+            emit connectionClosed();
+        }
         return size;
     }
 
 private:
     QByteArray incoming_;
+    bool       closeDuringRead_ = false;
 };
 
 class TestTransportPad final : public J::TransportManagerPad {
@@ -164,6 +172,7 @@ int main(int argc, char **argv)
 
         transfer->prepare();
         check(guard && transfer->state() == J::State::Active, "FT receiver did not become active");
+        transport->connection()->closeDuringNextRead();
         transport->connection()->feed(QByteArrayLiteral("tail"));
         check(!guard, "FT application was not deleted from Finishing callback");
         check(sink.data() == QByteArrayLiteral("tail"), "FT receiver lost the final payload before reentrant deletion");
