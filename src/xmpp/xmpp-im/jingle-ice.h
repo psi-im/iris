@@ -37,6 +37,7 @@ namespace Jingle { namespace ICE {
     extern const QString NS_ICE_UDP;
 
     class Transport;
+    class ConnectionMembership;
 
     class Manager;
     class IceConnection;
@@ -74,6 +75,8 @@ namespace Jingle { namespace ICE {
 
     private:
         friend class Manager;
+        friend class Pad;
+        void releaseNetworkOwnership();
 
         class Private;
         std::unique_ptr<Private> d;
@@ -86,6 +89,7 @@ namespace Jingle { namespace ICE {
         typedef QSharedPointer<Pad> Ptr;
 
         Pad(Manager *manager, Session *session);
+        ~Pad() override;
         QString           ns() const override;
         Session          *session() const override;
         TransportManager *manager() const override;
@@ -95,9 +99,11 @@ namespace Jingle { namespace ICE {
 
     private:
         friend class Transport;
-        QSharedPointer<IceConnection>                   connectionFor(Transport *transport);
-        QHash<Transport *, QWeakPointer<IceConnection>> _connections;
+        ConnectionMembership membershipFor(Transport *transport);
+        qsizetype             liveAssociationCount() const;
 
+        class Private;
+        std::unique_ptr<Private> d;
         Manager      *_manager;
         Session      *_session;
         TcpPortScope *_discoScope = nullptr;

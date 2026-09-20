@@ -49,6 +49,12 @@ namespace XMPP { namespace Jingle { namespace ICE {
     const QString NS(QStringLiteral("urn:xmpp:jingle:transports:ice:0"));
     const QString NS_DTLS(QStringLiteral("urn:xmpp:jingle:apps:dtls:0"));
 
+    class Pad::Private {
+    public:
+        ConnectionRegistry                 registry;
+        QMap<ContentKey, QPointer<Transport>> contentOwners;
+    };
+
     static XMPP::Ice176::Candidate elementToCandidate(const QDomElement &e)
     {
         if (e.tagName() != "candidate")
@@ -512,29 +518,32 @@ namespace XMPP { namespace Jingle { namespace ICE {
         quint16      udpPort;
         QHostAddress udpAddress;
 
-        // One membership for now. Group sharing is enabled only after signaling and
-        // callbacks no longer depend on a single content's Transport.
-        QSharedPointer<IceConnection> network;
-        QStringList                   rtpProfiles;
+        ConnectionMembership          membership;
+        QSharedPointer<IceConnection> standaloneNetwork;
+        IceConnection                 *network = nullptr;
+        QStringList                    rtpProfiles;
 
-        ~Private()
+        ~Private() { releaseNetwork(); }
+
+        void releaseNetwork()
         {
-            // A Transport may be constructed and discarded before it ever needs
-            // a network association. Lazy allocation lets the Pad choose the
-            // association only after this Transport belongs to a content.
             if (!network)
                 return;
-            // No callback capturing this Private may survive its destruction.
+            // No callback capturing this Transport::Private may survive the
+            // logical content releasing its association membership.
             if (network->ice)
                 network->ice->disconnect(q);
-            for (const auto &c : network->components) {
-                if (c.dtls)
-                    c.dtls->disconnect(q);
+            for (const auto &component : network->components) {
+                if (component.dtls)
+                    component.dtls->disconnect(q);
 #ifdef JINGLE_SCTP
-                if (c.sctp)
-                    c.sctp->disconnect(q);
+                if (component.sctp)
+                    component.sctp->disconnect(q);
 #endif
             }
+            network = nullptr;
+            membership.reset();
+            standaloneNetwork.reset();
         }
 
         inline Jid remoteJid() const { return q->_pad->session()->peer(); }
@@ -546,7 +555,17 @@ namespace XMPP { namespace Jingle { namespace ICE {
             auto pad = q->pad().staticCast<Pad>();
             if (!pad)
                 return false;
-            network = pad->connectionFor(q);
+
+            membership = pad->membershipFor(q);
+            if (membership) {
+                network = membership.connection();
+            } else {
+                // Low-level callers may use ICE Transport without attaching it
+                // to a Jingle Application. Keep that compatibility path isolated
+                // from the session content registry.
+                standaloneNetwork = QSharedPointer<IceConnection>::create();
+                network           = standaloneNetwork.data();
+            }
             if (!network)
                 return false;
             if (network->components.isEmpty()) {
@@ -571,14 +590,14 @@ namespace XMPP { namespace Jingle { namespace ICE {
             if (network->components[componentIndex].dtls)
                 return true;
             network->components[componentIndex].dtls
-                = new Dtls(network.data(), q->pad()->session()->me().full(), q->pad()->session()->peer().full());
+                = new Dtls(network, q->pad()->session()->me().full(), q->pad()->session()->peer().full());
 
             auto dtls = network->components[componentIndex].dtls;
             if (!rtpProfiles.isEmpty()) {
                 if (!dtls->setSRTPProfiles(rtpProfiles)) {
                     return false;
                 }
-                network->components[componentIndex].srtp = new RTP::SrtpSession(dtls, network.data());
+                network->components[componentIndex].srtp = new RTP::SrtpSession(dtls, network);
             }
             if (q->isLocal()) {
                 dtls->initOutgoing();
@@ -598,7 +617,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
                     Qt::QueuedConnection);
                 pendingActions |= NewFingerprint;
             }
-            dtls->connect(dtls, &Dtls::readyRead, network.data(), [net = network.data(), componentIndex]() {
+            dtls->connect(dtls, &Dtls::readyRead, network, [net = network, componentIndex]() {
                 auto &component = net->components[componentIndex];
                 auto  d         = component.dtls->readDatagram();
 #ifdef JINGLE_SCTP
@@ -608,10 +627,10 @@ namespace XMPP { namespace Jingle { namespace ICE {
                 }
 #endif
             });
-            dtls->connect(dtls, &Dtls::readyReadOutgoing, network.data(), [net = network.data(), componentIndex]() {
+            dtls->connect(dtls, &Dtls::readyReadOutgoing, network, [net = network, componentIndex]() {
                 net->ice->writeDatagram(componentIndex, net->components[componentIndex].dtls->readOutgoingDatagram());
             });
-            dtls->connect(dtls, &Dtls::connected, network.data(), [net = network.data(), componentIndex, dtls]() {
+            dtls->connect(dtls, &Dtls::connected, network, [net = network, componentIndex, dtls]() {
                 qDebug("Dtls::connected");
                 auto &c = net->components[componentIndex];
 #ifdef JINGLE_SCTP
@@ -625,8 +644,8 @@ namespace XMPP { namespace Jingle { namespace ICE {
                 if (c.rawConnection)
                     c.rawConnection->onConnected();
             });
-            dtls->connect(dtls, &Dtls::errorOccurred, network.data(),
-                          [net = network.data(), componentIndex](QAbstractSocket::SocketError error) {
+            dtls->connect(dtls, &Dtls::errorOccurred, network,
+                          [net = network, componentIndex](QAbstractSocket::SocketError error) {
                               qDebug("dtls failed for component %d", componentIndex);
                               auto &c = net->components[componentIndex];
 #ifdef JINGLE_SCTP
@@ -636,7 +655,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
                               if (c.rawConnection)
                                   c.rawConnection->onError(error);
                           });
-            dtls->connect(dtls, &Dtls::closed, network.data(), [net = network.data(), componentIndex]() {
+            dtls->connect(dtls, &Dtls::closed, network, [net = network, componentIndex]() {
                 qDebug("dtls closed for component %d", componentIndex);
                 auto &c = net->components[componentIndex];
                 if (c.rawConnection)
@@ -750,7 +769,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
             }
 
             if (manager->basePort != -1) {
-                network->portReserver = new XMPP::UdpPortReserver(network.data());
+                network->portReserver = new XMPP::UdpPortReserver(network);
                 network->portReserver->setAddresses(listenAddrs);
                 network->portReserver->setPorts(manager->basePort, 4);
             }
@@ -761,7 +780,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
                     printf("  %s\n", qPrintable(s));
             }
 
-            network->ice = new Ice176(network.data());
+            network->ice = new Ice176(network);
             network->ice->setAllowIpExposure(manager->allowIpExposure);
 
             q->connect(network->ice, &XMPP::Ice176::started, q, [this]() {
@@ -800,8 +819,8 @@ namespace XMPP { namespace Jingle { namespace ICE {
                             c.dtls->onRemoteAcceptedFingerprint();
                 },
                 Qt::QueuedConnection); // signal is not DOR-SS
-            QObject::connect(network->ice, &Ice176::readyRead, network.data(),
-                             [net = network.data()](int componentIndex) {
+            QObject::connect(network->ice, &Ice176::readyRead, network,
+                             [net = network](int componentIndex) {
                                  auto  buf       = net->ice->readDatagram(componentIndex);
                                  auto &component = net->components[componentIndex];
                                  if (component.srtp) {
@@ -1011,15 +1030,15 @@ namespace XMPP { namespace Jingle { namespace ICE {
         {
             auto &c = network->components[componentIndex];
             Q_ASSERT(c.sctp == nullptr);
-            c.sctp = new SCTP::Association(network.data());
+            c.sctp = new SCTP::Association(network);
             pendingActions |= NewSctpAssociation;
             if (q->wasAccepted() && q->state() != State::ApprovedToSend) // like we already sent our decision
                 emit q->updated();
             if (remoteState->sctpMap.isValid()) {
                 // TODO if we already have associations params try to ruse them instead of making new one
             }
-            QObject::connect(c.sctp, &SCTP::Association::readyReadOutgoing, network.data(),
-                             [net = network.data(), componentIndex]() {
+            QObject::connect(c.sctp, &SCTP::Association::readyReadOutgoing, network,
+                             [net = network, componentIndex]() {
                                  auto &c   = net->components[componentIndex];
                                  auto  buf = c.sctp->readOutgoing();
                                  c.dtls->writeDatagram(buf);
@@ -1092,6 +1111,15 @@ namespace XMPP { namespace Jingle { namespace ICE {
             binding->disconnect();
             binding->close();
         }
+    }
+
+    void Transport::releaseNetworkOwnership()
+    {
+        if (auto binding = rtpSession()) {
+            binding->disconnect(this);
+            binding->close();
+        }
+        d->releaseNetwork();
     }
 
     void Transport::stop()
@@ -1452,7 +1480,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
     //----------------------------------------------------------------
     // Pad
     //----------------------------------------------------------------
-    Pad::Pad(Manager *manager, Session *session) : _manager(manager), _session(session)
+    Pad::Pad(Manager *manager, Session *session) : d(std::make_unique<Private>()), _manager(manager), _session(session)
     {
         // TcpPortReserver is an optional client facility. ICE currently keeps
         // the legacy TCP discovery scope only as an integration hook, so a
@@ -1461,26 +1489,55 @@ namespace XMPP { namespace Jingle { namespace ICE {
             _discoScope = reserver->scope(QString::fromLatin1("ice"));
     }
 
+    Pad::~Pad() = default;
+
     QString Pad::ns() const
     {
         const auto requested = requestedNamespace();
         return requested.isEmpty() ? NS : requested;
     }
 
-    QSharedPointer<IceConnection> Pad::connectionFor(Transport *transport)
+    ConnectionMembership Pad::membershipFor(Transport *transport)
     {
-        // Scoped by this session's pad, never by peer JID. Only this pad's
-        // transports can acquire a connection here.
-        if (!transport || transport->pad().data() != this)
+        if (!transport || transport->pad().data() != this || !_session)
             return {};
-        auto it = _connections.find(transport);
-        if (it != _connections.end())
-            return it.value().toStrongRef();
 
-        auto connection = QSharedPointer<IceConnection>::create();
-        _connections.insert(transport, connection.toWeakRef());
-        connect(transport, &QObject::destroyed, this, [this, transport]() { _connections.remove(transport); });
-        return connection;
+        std::optional<ContentKey> content;
+        for (auto it = _session->contentList().cbegin(); it != _session->contentList().cend(); ++it) {
+            if (it.value() && it.value()->transport().data() == transport) {
+                if (content)
+                    return {}; // one Transport cannot own two logical contents
+                content = it.key();
+            }
+        }
+        if (!content)
+            return {}; // compatibility path for direct low-level Transport users
+
+        // A transport-replace is an ownership transition for this logical
+        // content. The replaced Transport may survive in a selector backup, but
+        // it must no longer retain the active association.
+        auto previous = d->contentOwners.value(*content);
+        if (previous && previous != transport)
+            previous->releaseNetworkOwnership();
+        d->contentOwners.remove(*content);
+        d->registry.prune();
+
+        auto membership = d->registry.create(*content);
+        if (!membership)
+            return {};
+
+        d->contentOwners.insert(*content, transport);
+        connect(transport, &QObject::destroyed, this, [this, content = *content, transport]() {
+            if (d->contentOwners.value(content) == transport)
+                d->contentOwners.remove(content);
+            d->registry.prune();
+        });
+        return membership;
+    }
+
+    qsizetype Pad::liveAssociationCount() const
+    {
+        return d ? d->registry.liveAssociationCount() : 0;
     }
 
     Session *Pad::session() const { return _session; }

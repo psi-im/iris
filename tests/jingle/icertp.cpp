@@ -140,7 +140,7 @@ int main(int argc, char **argv)
     // Transport construction itself must not allocate an ICE association.
     // Association selection is delayed until the Transport is already bound to
     // a Jingle content (or otherwise first used), which is required for BUNDLE.
-    check(firstPad->_connections.isEmpty() && secondPad->_connections.isEmpty(),
+    check(firstPad->liveAssociationCount() == 0 && secondPad->liveAssociationCount() == 0,
           "ICE association was allocated before content binding");
 
     std::unique_ptr<J::RTP::Application> firstApp, secondApp;
