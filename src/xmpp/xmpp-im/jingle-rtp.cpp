@@ -4,6 +4,7 @@
 #include "jingle-nstransportslist.h"
 #include "jingle-rtp-router_p.h"
 #include "jingle-session.h"
+#include "xmpp_message.h"
 #include <QDomDocument>
 #include <QDebug>
 #include <QUuid>
