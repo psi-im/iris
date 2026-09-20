@@ -52,14 +52,19 @@ namespace XMPP { namespace Jingle { namespace ICE {
 
     class Pad::Private {
     public:
-        ConnectionRegistry                       registry;
-        QMap<ContentKey, QPointer<Transport>>    contentOwners;
+        ConnectionRegistry                        registry;
+        QMap<ContentKey, QPointer<Transport>>     contentOwners;
+        QSet<ContentKey>                          establishedContents;
         std::optional<ConnectionGroupTransaction> stagedGroups;
-        QList<ContentGroup>                      stagedOfferGroups;
-        QSet<ContentKey>                         stagedContents;
-        bool                                     groupStageAttempted = false;
-        bool                                     groupStageFailed    = false;
-        bool                                     localAcceptanceKnown = false;
+        std::optional<ConnectionGroupTransaction> replacementGroups;
+        QSet<ContentKey>                          replacementContents;
+        QSet<ContentKey>                          replacementBound;
+        QMap<ContentKey, QPointer<Transport>>     replacementTransports;
+        QList<ContentGroup>                       stagedOfferGroups;
+        QSet<ContentKey>                          stagedContents;
+        bool                                      groupStageAttempted = false;
+        bool                                      groupStageFailed    = false;
+        bool                                      localAcceptanceKnown = false;
     };
 
     static XMPP::Ice176::Candidate elementToCandidate(const QDomElement &e)
@@ -1867,9 +1872,16 @@ namespace XMPP { namespace Jingle { namespace ICE {
                                 auto app = _session->content(key.first, key.second);
                                 if (app) {
                                     connect(app, &QObject::destroyed, this, [this, key]() {
+                                        if (d->replacementContents.contains(key)) {
+                                            d->replacementGroups.reset();
+                                            d->replacementContents.clear();
+                                            d->replacementBound.clear();
+                                            d->replacementTransports.clear();
+                                        }
                                         if (d->stagedGroups)
                                             d->stagedGroups->release(key);
                                         d->contentOwners.remove(key);
+                                        d->establishedContents.remove(key);
                                         d->registry.prune();
                                     });
                                 }
@@ -1895,6 +1907,142 @@ namespace XMPP { namespace Jingle { namespace ICE {
         if (!requiresShared || d->groupStageFailed || !d->stagedGroups)
             return nullptr;
 
+        const bool replacingEstablished = d->establishedContents.contains(*content)
+            && d->contentOwners.value(*content) != transport;
+
+        if (replacingEstablished) {
+            const auto &negotiatedGroups
+                = _session->role() == Origin::Initiator ? _session->remoteGroupings() : _session->groupings();
+            std::optional<ContentGroup> negotiatedBundle;
+            for (const auto &group : negotiatedGroups) {
+                if (group.semantics == QLatin1String("BUNDLE") && group.contents.size() > 1
+                    && group.contents.contains(content->first)) {
+                    if (negotiatedBundle)
+                        return nullptr;
+                    negotiatedBundle = group;
+                }
+            }
+            if (!negotiatedBundle)
+                return nullptr;
+
+            if (!d->replacementGroups) {
+                const auto oldAssociationId = d->stagedGroups->associationIdFor(*content);
+                if (!oldAssociationId)
+                    return nullptr;
+
+                QList<GroupNegotiation::Member> members;
+                QSet<ContentKey>                 replacementKeys;
+                for (const auto &name : negotiatedBundle->contents) {
+                    std::optional<ContentKey> key;
+                    Application                *app = nullptr;
+                    for (auto it = _session->contentList().cbegin(); it != _session->contentList().cend(); ++it) {
+                        if (it.key().first != name)
+                            continue;
+                        if (key)
+                            return nullptr;
+                        key = it.key();
+                        app = it.value();
+                    }
+                    if (!key || !app || !d->stagedContents.contains(*key)
+                        || d->stagedGroups->associationIdFor(*key) != oldAssociationId)
+                        return nullptr;
+                    auto current = app->transport();
+                    if (!current || current->pad().data() != this || d->contentOwners.value(*key) == current.data())
+                        return nullptr; // never split one live BUNDLE generation
+                    members.append(GroupNegotiation::Member { *key, current->pad()->ns(),
+                                                               app->supportsSharedTransport(), std::nullopt });
+                    replacementKeys.insert(*key);
+                }
+
+                GroupNegotiation::Error error = GroupNegotiation::Error::None;
+                auto plan = GroupNegotiation::initialPlan(
+                    members, QList<ContentGroup> { *negotiatedBundle },
+                    QList<ContentGroup> { *negotiatedBundle }, &error);
+                if (!plan)
+                    return nullptr;
+                auto replacement = ConnectionGroupTransaction::stageBundledReplacement(
+                    *plan, d->registry, *d->stagedGroups, ns());
+                if (!replacement)
+                    return nullptr;
+
+                d->replacementGroups   = std::move(*replacement);
+                d->replacementContents = replacementKeys;
+                for (const auto &key : std::as_const(d->replacementContents)) {
+                    auto app = _session->content(key.first, key.second);
+                    auto tr  = app ? qSharedPointerDynamicCast<Transport>(app->transport()) : QSharedPointer<Transport>();
+                    if (!tr) {
+                        d->replacementGroups.reset();
+                        d->replacementContents.clear();
+                        return nullptr;
+                    }
+                    d->replacementTransports.insert(key, tr.data());
+                    connect(tr.data(), &QObject::destroyed, this, [this, key, raw = tr.data()]() {
+                        if (d->replacementTransports.value(key) != raw)
+                            return;
+                        d->replacementGroups.reset();
+                        d->replacementContents.clear();
+                        d->replacementBound.clear();
+                        d->replacementTransports.clear();
+                        d->registry.prune();
+                    });
+                }
+            }
+
+            if (!d->replacementContents.contains(*content)
+                || d->replacementTransports.value(*content) != transport)
+                return nullptr;
+
+            auto replacementConnection = d->replacementGroups->connectionFor(*content);
+            if (!replacementConnection)
+                return nullptr;
+            d->replacementBound.insert(*content);
+
+            if (d->replacementBound == d->replacementContents) {
+                if (!d->replacementGroups->activateReplacement(d->registry)) {
+                    d->replacementGroups.reset();
+                    d->replacementContents.clear();
+                    d->replacementBound.clear();
+                    d->replacementTransports.clear();
+                    return nullptr;
+                }
+                if (!d->replacementGroups->finalizeReplacement(d->registry)) {
+                    d->replacementGroups->rollbackReplacement(d->registry);
+                    d->replacementGroups.reset();
+                    d->replacementContents.clear();
+                    d->replacementBound.clear();
+                    d->replacementTransports.clear();
+                    return nullptr;
+                }
+
+                auto previousGroups = std::move(d->stagedGroups);
+                d->stagedGroups = std::move(d->replacementGroups);
+                d->replacementGroups.reset();
+
+                for (const auto &key : std::as_const(d->replacementContents)) {
+                    auto next = d->replacementTransports.value(key);
+                    auto previous = d->contentOwners.value(key);
+                    if (previous && previous != next)
+                        previous->releaseNetworkOwnership();
+                    d->contentOwners.insert(key, next);
+                    d->establishedContents.insert(key);
+                    if (next) {
+                        connect(next, &QObject::destroyed, this, [this, key, raw = next.data()]() {
+                            if (d->contentOwners.value(key) == raw)
+                                d->contentOwners.remove(key);
+                            d->registry.prune();
+                        });
+                    }
+                }
+
+                d->replacementContents.clear();
+                d->replacementBound.clear();
+                d->replacementTransports.clear();
+                previousGroups.reset();
+                d->registry.prune();
+            }
+            return replacementConnection;
+        }
+
         auto connection = d->stagedGroups->connectionFor(*content);
         if (!connection)
             return nullptr;
@@ -1903,6 +2051,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
         if (previous && previous != transport)
             previous->releaseNetworkOwnership();
         d->contentOwners.insert(*content, transport);
+        d->establishedContents.insert(*content);
         connect(transport, &QObject::destroyed, this, [this, content = *content, transport]() {
             if (d->contentOwners.value(content) == transport)
                 d->contentOwners.remove(content);

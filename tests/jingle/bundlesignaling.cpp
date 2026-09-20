@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
+#include "../../src/xmpp/xmpp-im/jingle-ice-connection_p.h"
 #include <QCoreApplication>
 #include <QElapsedTimer>
 #include <QEventLoop>
@@ -224,6 +225,36 @@ static WireOffer makeOffer(Client &client, TcpPortReserver *reserver)
     return offer;
 }
 
+static QDomElement replacementPayload(QDomDocument &doc, const WireOffer &offer, const QStringList &names)
+{
+    auto root = doc.createElementNS(J::NS, QStringLiteral("jingle"));
+    doc.appendChild(root);
+
+    for (const auto &name : names) {
+        QDomElement source;
+        for (auto content = offer.root.firstChildElement(QStringLiteral("content")); !content.isNull();
+             content = content.nextSiblingElement(QStringLiteral("content"))) {
+            if (content.attribute(QStringLiteral("name")) == name) {
+                source = content;
+                break;
+            }
+        }
+        check(!source.isNull(), "replacement fixture could not find offered content");
+        auto sourceTransport = source.firstChildElement(QStringLiteral("transport"));
+        check(!sourceTransport.isNull(), "replacement fixture could not find offered ICE transport");
+
+        J::ContentBase cb(J::Origin::Initiator, name);
+        cb.senders = J::Origin::Both;
+        auto content = cb.toXml(&doc, QStringLiteral("content"), J::NS);
+        auto transport = doc.importNode(sourceTransport, true).toElement();
+        transport.setAttribute(QStringLiteral("ufrag"), QStringLiteral("bundle-restart-ufrag"));
+        transport.setAttribute(QStringLiteral("pwd"), QStringLiteral("bundle-restart-password"));
+        content.appendChild(transport);
+        root.appendChild(content);
+    }
+    return root;
+}
+
 static void exerciseResponder(const WireOffer &offer, TcpPortReserver *reserver, bool acceptBundle)
 {
     Client client;
@@ -293,6 +324,47 @@ static void exerciseResponder(const WireOffer &offer, TcpPortReserver *reserver,
               "accepted BUNDLE did not bind both contents to one staged association");
         check(audioTransport->rtpSession() && audioTransport->rtpSession() == videoTransport->rtpSession(),
               "accepted BUNDLE did not share responder SRTP");
+
+        QPointer<J::ICE::IceConnection> oldNetwork(audioNetwork);
+
+        QDomDocument partialDoc;
+        auto partial = replacementPayload(partialDoc, offer, { offer.audioName });
+        check(!session.updateFromXml(J::Action::TransportReplace, partial),
+              "partial negotiated BUNDLE transport-replace was accepted");
+        check(audio->transport() == audioTransport && video->transport() == videoTransport
+                  && oldNetwork && icePad->liveAssociationCount() == 1,
+              "partial BUNDLE transport-replace mutated the live association");
+
+        QDomDocument fullDoc;
+        auto full = replacementPayload(fullDoc, offer, { offer.audioName, offer.videoName });
+        check(session.updateFromXml(J::Action::TransportReplace, full),
+              "full negotiated BUNDLE transport-replace was rejected");
+
+        auto replacementAudio = qSharedPointerDynamicCast<J::ICE::Transport>(audio->transport());
+        auto replacementVideo = qSharedPointerDynamicCast<J::ICE::Transport>(video->transport());
+        check(replacementAudio && replacementVideo && replacementAudio != audioTransport
+                  && replacementVideo != videoTransport,
+              "full BUNDLE transport-replace did not install fresh ICE transports");
+
+        bool replacementAudioBound = false, replacementAudioRequired = false;
+        bool replacementVideoBound = false, replacementVideoRequired = false;
+        auto *newAudioNetwork = icePad->groupedConnectionFor(
+            replacementAudio.data(), &replacementAudioBound, &replacementAudioRequired);
+        check(replacementAudioBound && replacementAudioRequired && newAudioNetwork
+                  && newAudioNetwork != oldNetwork && oldNetwork
+                  && icePad->liveAssociationCount() == 1,
+              "first BUNDLE replacement member did not stage make-before-break");
+
+        QPointer<J::ICE::IceConnection> newNetwork(newAudioNetwork);
+        auto *newVideoNetwork = icePad->groupedConnectionFor(
+            replacementVideo.data(), &replacementVideoBound, &replacementVideoRequired);
+        check(replacementVideoBound && replacementVideoRequired && newVideoNetwork == newNetwork
+                  && newNetwork && !oldNetwork && icePad->liveAssociationCount() == 1,
+              "full BUNDLE replacement did not atomically switch one shared association");
+
+        check(replacementAudio->enableRtpMux() && replacementVideo->enableRtpMux()
+                  && replacementAudio->rtpSession() == replacementVideo->rtpSession(),
+              "replacement BUNDLE transports did not bind one shared SRTP generation");
     } else {
         check(!audioRequired && !videoRequired && !audioNetwork && !videoNetwork,
               "BUNDLE refusal retained staged shared membership");
