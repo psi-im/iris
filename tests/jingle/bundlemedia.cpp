@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #include "../../src/xmpp/xmpp-im/jingle-ice-connection_p.h"
+#include <iris/ice176.h>
 #include <iris/dtls.h>
 #include <iris/jingle-rtp-srtp.h>
 #include <iris/jingle-rtp.h>
