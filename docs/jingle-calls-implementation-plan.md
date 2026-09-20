@@ -666,14 +666,16 @@ Performance измерять отдельно: media encoding CPU, SRTP packet p
 
 Начать с remote heads и CI evidence через connector. Checkpoints T0–T5, Psi audio adapter,
 psimedia RTP/RTCP bridge и A3/A4 source lifecycle уже опубликованы; не реализовывать их повторно.
-Live FT matrix/drain semantics и real Psi↔Psi audio gate уже закрыты CI evidence. RTP production
-BUNDLE wiring и atomic pre-Connecting replacement также закрыты regression evidence; не возвращаться к
-per-content ICE association и не строить replacement fixture через ручные internal mutators.
-Следующий implementation gate — caps-driven RTP/transport negative matrix, затем remaining P2
-active-call restart/removal/mixed RTP+SCTP/DataChannel и Connection finishing ownership.
-Feature-branch advertising использовать для CI/interop, а master/release держать gated до shared-path regressions.
-Real A/V Psi↔Psi и pinned Conversations interop остаются peer gates. P3 JMI, P4 feedback/control, P5 recovery и P6 release выполнять
-по зависимостям наблюдённого peer.
+Live FT transport matrix и real Psi↔Psi audio gate закрыты CI evidence; generic Connection finishing
+ownership/drain contract всё ещё отдельный lifecycle gate. RTP production BUNDLE wiring, atomic
+pre-Connecting replacement, secure caps/discovery policy и DOM ownership hardening также закрыты
+regression evidence; не возвращаться к per-content ICE association, unconditional RTP advertising,
+parser-owned DOM в long-lived state или replacement fixtures через ручные internal mutators.
+Следующие implementation gates — remaining P2 active-call restart/removal/mixed RTP+SCTP/DataChannel,
+Connection finishing ownership и group-level SharedRtcp ingress. RFC5888/grouping discovery может
+оставаться в master; это не claim о поддержке каждого shared-path сценария.
+Real A/V Psi↔Psi и pinned Conversations interop остаются peer gates. P3 JMI, P4 feedback/control,
+P5 recovery и P6 release выполнять по зависимостям наблюдённого peer.
 
 Каждый завершённый подпункт сопровождать:
 
