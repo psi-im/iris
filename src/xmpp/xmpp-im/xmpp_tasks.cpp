@@ -807,8 +807,11 @@ JT_Message::~JT_Message() { }
 
 void JT_Message::onGo()
 {
-
-    Stanza      s = m.toStanza(&(client()->stream()), client()->jingleManager());
+    Stanza s = m.toStanza(&(client()->stream()), client()->jingleManager());
+    if (s.isNull()) {
+        setError(ErrDisc, tr("Unable to serialize message stanza"));
+        return;
+    }
     QDomElement e = s.element();
 
     // See: XEP-0380: Explicit Message Encryption

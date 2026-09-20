@@ -549,7 +549,7 @@ Stanza::~Stanza() { delete d; }
 
 bool Stanza::isNull() const { return d == nullptr; }
 
-QDomElement Stanza::element() const { return d->e; }
+QDomElement Stanza::element() const { return d ? d->e : QDomElement(); }
 
 QString Stanza::toString() const { return Stream::xmlToString(d->e); }
 

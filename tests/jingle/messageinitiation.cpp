@@ -33,6 +33,14 @@ int main(int argc, char **argv)
     J::RTP::Manager rtp;
 
     {
+        Stanza nullStanza;
+        check(nullStanza.isNull(), "default Stanza must be null");
+        check(nullStanza.element().isNull(), "element() on a null Stanza must be safe");
+        Message message;
+        check(!message.fromStanza(nullStanza), "Message accepted a null Stanza");
+    }
+
+    {
         QDomDocument source;
         const auto root = parseRoot(
             QStringLiteral(

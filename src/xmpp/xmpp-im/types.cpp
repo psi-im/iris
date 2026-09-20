@@ -1676,7 +1676,7 @@ bool Message::fromStanza(const Stanza &s, bool useTimeZoneOffset, int timeZoneOf
 bool Message::fromStanza(const Stanza &s, bool useTimeZoneOffset, int timeZoneOffset,
                          Jingle::Manager *jingleManager)
 {
-    if (s.kind() != Stanza::Message)
+    if (s.isNull() || s.kind() != Stanza::Message)
         return false;
 
     d = new Private;
