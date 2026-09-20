@@ -478,11 +478,26 @@ void Application::prepareTransport()
         remove(Reason::SecurityError, QStringLiteral("RTP security binding unavailable"));
         return;
     }
-    connect(security_, &SrtpSession::ready, this, &Application::activateMedia);
-    connect(security_, &SrtpSession::invalidated, this,
-            [this]() { remove(Reason::SecurityError, QStringLiteral("RTP security association invalidated")); });
-    connect(security_, &QObject::destroyed, this,
-            [this]() { remove(Reason::SecurityError, QStringLiteral("RTP security association destroyed")); });
+
+    // A transport-replace can install the successor while the superseded
+    // association is still alive (make-before-break). Its DTLS/SRTP callbacks
+    // may therefore arrive before the queued prepareTransport() for the new
+    // transport has disconnected security_. Bind every callback to the transport
+    // incarnation that produced this security session so stale readiness or
+    // teardown can never mutate the replacement application.
+    const QPointer<Transport> securityTransport(preparing.data());
+    connect(security_, &SrtpSession::ready, this, [this, securityTransport]() {
+        if (securityTransport && _transport.data() == securityTransport)
+            activateMedia();
+    });
+    connect(security_, &SrtpSession::invalidated, this, [this, securityTransport]() {
+        if (securityTransport && _transport.data() == securityTransport)
+            remove(Reason::SecurityError, QStringLiteral("RTP security association invalidated"));
+    });
+    connect(security_, &QObject::destroyed, this, [this, securityTransport]() {
+        if (securityTransport && _transport.data() == securityTransport)
+            remove(Reason::SecurityError, QStringLiteral("RTP security association destroyed"));
+    });
 }
 void Application::start()
 {
