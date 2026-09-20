@@ -67,6 +67,7 @@ namespace XMPP { namespace Jingle {
         struct Transaction {
             quint64                      id     = 0;
             Action                       action = Action::NoAction;
+            QDomDocument                 localDocument;
             QDomElement                  localData;
             bool                         finished          = false;
             bool                         callbacksFinished = false;
@@ -75,6 +76,7 @@ namespace XMPP { namespace Jingle {
         struct PendingResolution {
             quint64                     id          = 0;
             quint64                     transaction = 0;
+            QDomDocument                remoteDocument;
             QDomElement                 remoteData;
             QList<quint64>              resolvers;
             std::optional<RemoteResult> remoteResult;
@@ -137,9 +139,12 @@ namespace XMPP { namespace Jingle {
             // resolution. retry() may synchronously unregister resolvers or
             // create another outgoing Jingle action.
             const auto transactionId = transaction->id;
-            const auto localData     = transaction->localData;
-            const auto remoteData    = resolution->remoteData;
-            const auto localError    = *transaction->error;
+            // Pin both owner documents across state removal and arbitrary callbacks.
+            const auto localDocument  = transaction->localDocument;
+            const auto localData      = transaction->localData;
+            const auto remoteDocument = resolution->remoteDocument;
+            const auto remoteData     = resolution->remoteData;
+            const auto localError     = *transaction->error;
             const auto remoteResult  = *resolution->remoteResult;
             const auto resolverIds   = resolution->resolvers;
             const auto dispatchEpoch = epoch;
@@ -223,7 +228,11 @@ namespace XMPP { namespace Jingle {
         // Session serializes outgoing IQs. This is not a multi-IQ scheduler.
         Q_ASSERT(!state_->currentOutgoing);
         const auto id = ++state_->nextTransaction;
-        state_->transactions.insert(id, SharedState::Transaction { id, action, localData.cloneNode(true).toElement() });
+        SharedState::Transaction transaction;
+        transaction.id            = id;
+        transaction.action        = action;
+        transaction.localData     = transaction.localDocument.importNode(localData, true).toElement();
+        state_->transactions.insert(id, transaction);
         state_->currentOutgoing = id;
         return id;
     }
@@ -276,10 +285,13 @@ namespace XMPP { namespace Jingle {
             return { Solution::Continue, 0,
                      Stanza::Error(Stanza::Error::ErrorType::Wait, Stanza::Error::ErrorCond::ResourceConstraint) };
         // Never carry a container iterator (or a reference into it) across user code.
-        const auto transactionId  = transaction->id;
-        const auto localData      = transaction->localData;
-        const auto remoteSnapshot = remoteData.cloneNode(true).toElement();
-        const auto epoch          = state->epoch;
+        const auto transactionId = transaction->id;
+        const auto localData     = transaction->localData;
+        QDomDocument remoteDocument;
+        const auto remoteSnapshot = remoteDocument.importNode(remoteData, true).toElement();
+        if (remoteSnapshot.isNull())
+            return {};
+        const auto epoch = state->epoch;
 
         QList<quint64> resolverIds;
         for (auto it = state->resolvers.cbegin(); it != state->resolvers.cend(); ++it) {
@@ -305,14 +317,23 @@ namespace XMPP { namespace Jingle {
         // Resolve every registered owner even when one already requested Break.
         // The aggregate wire decision is deterministic: Break dominates
         // Postpone, and Postpone dominates Continue.
-        if (shouldBreak)
-            return { Solution::Break, 0, {}, localData.cloneNode(true).toElement() };
+        if (shouldBreak) {
+            Resolution result;
+            result.solution  = Solution::Break;
+            result.localData = result.localDocument.importNode(localData, true).toElement();
+            return result;
+        }
         if (postponed.isEmpty())
             return {};
 
         const auto id = ++state->nextResolution;
-        state->resolutions.insert(id,
-                                  SharedState::PendingResolution { id, transactionId, remoteSnapshot, postponed, {} });
+        SharedState::PendingResolution pending;
+        pending.id             = id;
+        pending.transaction    = transactionId;
+        pending.remoteDocument = remoteDocument;
+        pending.remoteData     = remoteSnapshot;
+        pending.resolvers      = postponed;
+        state->resolutions.insert(id, pending);
         for (auto resolverId : postponed) {
             auto entry = state->resolvers.find(resolverId);
             if (entry != state->resolvers.end())
