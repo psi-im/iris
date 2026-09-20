@@ -554,24 +554,38 @@ static void exerciseInitiatorReplacement(const WireOffer &transportSource, TcpPo
               && replacementVideo != videoTransport,
           "full BUNDLE transport-replace did not install fresh ICE transports");
 
-    bool replacementAudioBound = false, replacementAudioRequired = false;
-    bool replacementVideoBound = false, replacementVideoRequired = false;
-    auto *newAudioNetwork = icePad->groupedConnectionFor(
-        replacementAudio.data(), &replacementAudioBound, &replacementAudioRequired);
-    check(replacementAudioBound && replacementAudioRequired && newAudioNetwork
-              && newAudioNetwork != oldNetwork && oldNetwork
-              && icePad->liveAssociationCount() == 1,
-          "first BUNDLE replacement member did not stage make-before-break");
+    // Do not call groupedConnectionFor() here: Application::setTransport()
+    // has queued the real RTP prepareTransport() path for both replacements.
+    // Observe those production callbacks instead. The first prepared BUNDLE
+    // member must leave the old association live; the second completes the
+    // staged generation and atomically retires it.
+    int preparedReplacements = 0;
+    auto observePrepared = [&](J::State state) {
+        if (state != J::State::ApprovedToSend)
+            return;
+        ++preparedReplacements;
+        check(icePad->liveAssociationCount() == 1,
+              "replacement preparation exposed more than one live BUNDLE association");
+        if (preparedReplacements == 1)
+            check(oldNetwork, "first BUNDLE replacement member broke the old association early");
+        else if (preparedReplacements == 2)
+            check(!oldNetwork, "second BUNDLE replacement member did not atomically retire the old association");
+        else
+            check(false, "replacement transport prepared more than once");
+    };
+    QObject::connect(replacementAudio.data(), &J::Transport::stateChanged, replacementAudio.data(), observePrepared);
+    QObject::connect(replacementVideo.data(), &J::Transport::stateChanged, replacementVideo.data(), observePrepared);
 
-    QPointer<J::ICE::IceConnection> newNetwork(newAudioNetwork);
-    auto *newVideoNetwork = icePad->groupedConnectionFor(
-        replacementVideo.data(), &replacementVideoBound, &replacementVideoRequired);
-    check(replacementVideoBound && replacementVideoRequired && newVideoNetwork == newNetwork
-              && newNetwork && !oldNetwork && icePad->liveAssociationCount() == 1,
-          "full BUNDLE replacement did not atomically switch one shared association");
-
-    check(replacementAudio->enableRtpMux() && replacementVideo->enableRtpMux(),
-          "replacement BUNDLE transports did not retain RTP-mux compatibility");
+    check(waitFor([&]() {
+              return preparedReplacements == 2
+                  && replacementAudio->rtpSession()
+                  && replacementVideo->rtpSession();
+          }),
+          "production replacement preparation did not complete both BUNDLE members");
+    check(!oldNetwork && icePad->liveAssociationCount() == 1,
+          "full BUNDLE replacement did not leave exactly one live association");
+    check(replacementAudio->rtpSession() == replacementVideo->rtpSession(),
+          "replacement BUNDLE members did not share one SRTP session");
 }
 
 int main(int argc, char **argv)
