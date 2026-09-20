@@ -132,8 +132,10 @@ int main(int argc, char **argv)
             invalid.payloads.first().channels = 1;
         if (kind == 5)
             invalid.payloads.clear();
-        if (kind == 6)
-            invalid.payloads.append(invalid.payloads.first());
+        if (kind == 6) {
+            const auto duplicate = invalid.payloads.first();
+            invalid.payloads.append(duplicate);
+        }
         check(initiator.setRemoteAnswer(invalid, codecs) != Result::Ok, "invalid answer accepted");
         check(initiator.state() == Negotiation::State::Offered && !initiator.remoteDescription(),
               "invalid answer changed committed state");
