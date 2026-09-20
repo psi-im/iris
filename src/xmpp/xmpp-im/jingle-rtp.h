@@ -268,20 +268,7 @@ public:
     ApplicationManagerPad *pad(Session *) override;
     void                   closeAll(const QString & = QString()) override;
     QStringList            ns() const override { return { Description::ns() }; }
-    QStringList            discoFeatures() const override
-    {
-        if (!provider_)
-            return {};
-        const auto  media = provider_->mediaTypes();
-        QStringList features;
-        if (media.contains(QStringLiteral("audio")) || media.contains(QStringLiteral("video")))
-            features << Description::ns();
-        if (media.contains(QStringLiteral("audio")))
-            features << QStringLiteral("urn:xmpp:jingle:apps:rtp:audio");
-        if (media.contains(QStringLiteral("video")))
-            features << QStringLiteral("urn:xmpp:jingle:apps:rtp:video");
-        return features;
-    }
+    QStringList            discoFeatures() const override;
 
 private:
     QPointer<XMPP::Jingle::Manager> jingle_;
