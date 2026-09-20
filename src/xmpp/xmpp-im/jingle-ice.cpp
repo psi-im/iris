@@ -333,7 +333,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
                 remoteSelectedCandidates = e.remoteCandidates;
             return true;
         }
-    };    };
+    };
 
     class PreparedIceUpdate final : public XMPP::Jingle::Transport::PreparedUpdate {
     public:
@@ -1757,7 +1757,9 @@ namespace XMPP { namespace Jingle { namespace ICE {
         if (left.semantics != QLatin1String("BUNDLE") || right.semantics != QLatin1String("BUNDLE")
             || left.contents.size() != right.contents.size())
             return false;
-        QSet<QString> names(left.contents.cbegin(), left.contents.cend());
+        QSet<QString> names;
+        for (const auto &name : left.contents)
+            names.insert(name);
         return names.size() == left.contents.size()
             && std::all_of(right.contents.cbegin(), right.contents.cend(),
                            [&names](const QString &name) { return names.contains(name); });
