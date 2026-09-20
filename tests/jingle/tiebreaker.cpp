@@ -21,6 +21,16 @@ static QDomElement jingle(QDomDocument &doc, const QString &name)
     return el;
 }
 
+static void churnDom()
+{
+    for (int i = 0; i < 128; ++i) {
+        QDomDocument doc;
+        auto root = doc.createElement(QStringLiteral("churn"));
+        root.setAttribute(QStringLiteral("n"), i);
+        doc.appendChild(root);
+    }
+}
+
 class Resolver : public J::TieBreaker::Resolver {
 public:
     J::TieBreaker::Solution     solution     = J::TieBreaker::Solution::Continue;
@@ -135,6 +145,60 @@ int main(int argc, char **argv)
         snapshot.setAttribute("name", "caller-mutation");
         const auto again = tieBreaker.resolveIncoming(J::Action::ContentModify, remoteDoc.documentElement());
         check(again.localData.attribute("name") == "local", "Break outcome aliased live transaction data");
+    }
+
+    // Tie-break snapshots must own their DOM independently of the caller's
+    // short-lived parser documents.
+    {
+        J::TieBreaker tieBreaker;
+        Resolver      resolver;
+        resolver.solution         = J::TieBreaker::Solution::Postpone;
+        auto         registration = tieBreaker.registerResolver(J::Action::ContentModify, &resolver);
+        quint64      tx           = 0;
+        {
+            QDomDocument localDoc;
+            tx = tieBreaker.outgoingStarted(J::Action::ContentModify,
+                                            jingle(localDoc, QStringLiteral("owned-local")));
+        }
+        quint64 resolutionId = 0;
+        {
+            QDomDocument remoteDoc;
+            const auto resolution
+                = tieBreaker.resolveIncoming(J::Action::ContentModify,
+                                             jingle(remoteDoc, QStringLiteral("owned-remote")));
+            check(resolution.solution == J::TieBreaker::Solution::Postpone && resolution.id,
+                  "owned snapshot fixture did not postpone");
+            resolutionId = resolution.id;
+        }
+        churnDom();
+        tieBreaker.outgoingFinished(tx, error);
+        tieBreaker.outgoingCallbacksFinished(tx);
+        tieBreaker.incomingFinished(resolutionId, J::TieBreaker::RemoteResult::Rejected);
+        check(resolver.retryCalls == 1 && resolver.localName == QLatin1String("owned-local")
+                  && resolver.retryRemoteName == QLatin1String("owned-remote"),
+              "late retry depended on destroyed caller DOM documents");
+        Q_UNUSED(registration);
+    }
+
+    {
+        J::TieBreaker tieBreaker;
+        Resolver      breaker;
+        breaker.solution         = J::TieBreaker::Solution::Break;
+        auto registration       = tieBreaker.registerResolver(J::Action::ContentModify, &breaker);
+        J::TieBreaker::Resolution result;
+        {
+            QDomDocument localDoc, remoteDoc;
+            tieBreaker.outgoingStarted(J::Action::ContentModify,
+                                       jingle(localDoc, QStringLiteral("break-owned")));
+            result = tieBreaker.resolveIncoming(J::Action::ContentModify,
+                                                jingle(remoteDoc, QStringLiteral("remote")));
+        }
+        tieBreaker.clear();
+        churnDom();
+        check(result.solution == J::TieBreaker::Solution::Break
+                  && result.localData.attribute(QStringLiteral("name")) == QLatin1String("break-owned"),
+              "Break result depended on destroyed tie-break DOM documents");
+        Q_UNUSED(registration);
     }
 
     // Remote processing may finish after our error. retry waits for both facts.
