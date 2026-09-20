@@ -229,10 +229,8 @@ int main(int argc, char **argv)
         }
         auto a = first->rtpSession(), b = second->rtpSession();
         if (delayedAck && a && b) {
-            auto firstIce  = firstPad->connectionFor(first.data())->ice;
-            auto secondIce = secondPad->connectionFor(second.data())->ice;
             check(!a->isReady() && !b->isReady(), "failed fingerprint IQ started DTLS-SRTP");
-            if (firstIce && secondIce && firstIce->canSendMedia() && secondIce->canSendMedia()) {
+            if (first->iceCanSendMedia() && second->iceCanSendMedia()) {
                 if (!rejectionWindow.isValid())
                     rejectionWindow.start();
                 if (rejectionWindow.elapsed() >= 500) {

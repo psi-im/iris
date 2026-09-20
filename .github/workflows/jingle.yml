@@ -26,7 +26,15 @@ jobs:
         shell: bash
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build qt6-base-dev libssl-dev libusrsctp-dev libsrtp2-dev
+          sudo apt-get install -y cmake ninja-build ccache qt6-base-dev libssl-dev libusrsctp-dev libsrtp2-dev
+
+      - name: Cache compiler objects
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: iris-jingle-qca3-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            iris-jingle-qca3-${{ runner.os }}-
 
       - name: Install QCA3 release packages
         shell: bash
@@ -49,10 +57,16 @@ jobs:
             -DIRIS_SYSTEM_QCA=3 \
             -DIRIS_BUNDLED_QCA=OFF \
             -DIRIS_BUNDLED_USRSCTP=OFF \
-            -DIRIS_ENABLE_SRTP=ON
+            -DIRIS_ENABLE_SRTP=ON \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build
-        run: cmake --build build-jingle --parallel 2
+        run: cmake --build build-jingle --parallel 4
+
+      - name: Show ccache statistics
+        if: always()
+        run: ccache --show-stats
 
       - name: Test
         run: ctest --test-dir build-jingle --output-on-failure -j1
@@ -62,6 +76,14 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+
+      - name: Cache sanitizer compiler objects
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: iris-jingle-sanitize-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            iris-jingle-sanitize-${{ runner.os }}-
 
       - name: Install build dependencies
         shell: bash
@@ -95,11 +117,13 @@ jobs:
             -DIRIS_SYSTEM_QCA=3 \
             -DIRIS_BUNDLED_QCA=OFF \
             -DIRIS_BUNDLED_USRSCTP=OFF \
-            -DIRIS_ENABLE_SRTP=ON
+            -DIRIS_ENABLE_SRTP=ON \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build transport lifetime regressions
         run: |
-          cmake --build build-jingle-sanitize --parallel 2 --target \
+          cmake --build build-jingle-sanitize --parallel 4 --target \
             jingle_transports5b_test \
             jingle_transportsctp_test \
             jingle_transportacceptatomicity_test \
@@ -113,6 +137,10 @@ jobs:
             jingle_transportreplacedispatcher_test \
             jingle_transportreplacecorrectness_test \
             jingle_transportreplaceprotocol_test
+
+      - name: Show sanitizer ccache statistics
+        if: always()
+        run: ccache --show-stats
 
       - name: Test transport lifetime regressions under sanitizers
         env:

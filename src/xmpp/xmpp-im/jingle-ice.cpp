@@ -1125,6 +1125,11 @@ namespace XMPP { namespace Jingle { namespace ICE {
         d->releaseNetwork();
     }
 
+    bool Transport::iceCanSendMedia() const
+    {
+        return d->network && d->network->ice && d->network->ice->canSendMedia();
+    }
+
     void Transport::stop()
     {
         XMPP::Jingle::Transport::stop();

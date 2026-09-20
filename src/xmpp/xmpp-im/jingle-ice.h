@@ -77,6 +77,7 @@ namespace Jingle { namespace ICE {
         friend class Manager;
         friend class Pad;
         void releaseNetworkOwnership();
+        bool iceCanSendMedia() const;
 
         class Private;
         std::unique_ptr<Private> d;
