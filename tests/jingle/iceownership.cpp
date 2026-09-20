@@ -287,13 +287,34 @@ int main(int argc, char **argv)
     check(audioBound && videoBound && audioGrouped && videoGrouped && sharedAudio && sharedAudio == sharedVideo,
           "explicit BUNDLE group did not stage one shared association");
     check(bundlePad->liveAssociationCount() == 1, "staged BUNDLE created more than one association");
+    check(audioTransport->enableRtpMux() && videoTransport->enableRtpMux(),
+          "staged BUNDLE transports did not accept shared RTP mux");
+    check(sharedAudio->components.size() == 1, "shared RTP association created duplicate components");
+    auto &sharedComponent = sharedAudio->components[0];
+    sharedComponent.dtls = new Dtls(sharedAudio, QStringLiteral("local"), QStringLiteral("peer"));
+    sharedComponent.srtp = new Jingle::RTP::SrtpSession(sharedComponent.dtls, sharedAudio);
+    QPointer<Jingle::RTP::SrtpSession> sharedSrtp(sharedComponent.srtp);
+    const auto sharedEpoch = sharedSrtp->epoch();
+    int invalidations = 0;
+    QObject::connect(sharedSrtp, &Jingle::RTP::SrtpSession::invalidated, &app, [&invalidations]() {
+        ++invalidations;
+    });
+    check(audioTransport->rtpSession() == sharedSrtp && videoTransport->rtpSession() == sharedSrtp,
+          "BUNDLE members did not expose the same SRTP association");
+
     QPointer<IceConnection> stagedGuard(sharedAudio);
+    audioTransport->stop();
+    check(sharedSrtp && invalidations == 0 && sharedSrtp->epoch() == sharedEpoch
+              && videoTransport->rtpSession() == sharedSrtp,
+          "stopping one BUNDLE member invalidated the shared SRTP association");
     delete audioApp;
-    check(stagedGuard && bundlePad->liveAssociationCount() == 1,
+    check(stagedGuard && sharedSrtp && bundlePad->liveAssociationCount() == 1,
           "removing one staged BUNDLE member destroyed the surviving association");
     delete videoApp;
-    check(!stagedGuard && bundlePad->liveAssociationCount() == 0,
+    check(!stagedGuard && !sharedSrtp && bundlePad->liveAssociationCount() == 0,
           "last staged BUNDLE member retained its association");
+    check(!audioTransport->rtpSession() && !videoTransport->rtpSession(),
+          "live Transport retained a dangling BUNDLE association view");
 
     qInfo("ICE resource ownership regressions passed");
 }

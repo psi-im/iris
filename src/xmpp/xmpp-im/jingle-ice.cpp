@@ -792,7 +792,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
 
         ConnectionMembership          membership;
         QSharedPointer<IceConnection> standaloneNetwork;
-        IceConnection                 *network = nullptr;
+        QPointer<IceConnection>       network;
         bool                           groupManagedNetwork = false;
         QStringList                    rtpProfiles;
 
@@ -800,30 +800,30 @@ namespace XMPP { namespace Jingle { namespace ICE {
 
         void releaseNetwork()
         {
-            if (!network)
-                return;
-            if (network->runtime) {
-                auto &participants = network->runtime->participants;
-                participants.erase(std::remove_if(participants.begin(), participants.end(),
-                                                  [this](const IceConnection::Runtime::Participant &participant) {
-                                                      return participant.transport.isNull()
-                                                          || participant.transport == q;
-                                                  }),
-                                   participants.end());
-            }
-            // No callback capturing this Transport::Private may survive the
-            // logical content releasing its association membership.
-            if (network->ice)
-                network->ice->disconnect(q);
-            for (const auto &component : network->components) {
-                if (component.dtls)
-                    component.dtls->disconnect(q);
+            if (network) {
+                if (network->runtime) {
+                    auto &participants = network->runtime->participants;
+                    participants.erase(std::remove_if(participants.begin(), participants.end(),
+                                                      [this](const IceConnection::Runtime::Participant &participant) {
+                                                          return participant.transport.isNull()
+                                                              || participant.transport == q;
+                                                      }),
+                                       participants.end());
+                }
+                // No callback capturing this Transport::Private may survive the
+                // logical content releasing its association membership.
+                if (network->ice)
+                    network->ice->disconnect(q);
+                for (const auto &component : network->components) {
+                    if (component.dtls)
+                        component.dtls->disconnect(q);
 #ifdef JINGLE_SCTP
-                if (component.sctp)
-                    component.sctp->disconnect(q);
+                    if (component.sctp)
+                        component.sctp->disconnect(q);
 #endif
+                }
             }
-            network = nullptr;
+            network.clear();
             groupManagedNetwork = false;
             membership.reset();
             standaloneNetwork.reset();
@@ -1325,14 +1325,16 @@ namespace XMPP { namespace Jingle { namespace ICE {
         // has made the owning Jingle content observable to the session-local Pad.
         d->remoteState.reset(new Element {});
         connect(this, &XMPP::Jingle::Transport::stateChanged, this, [this]() {
-            if (_state >= State::Finishing) {
+            if (!d->groupManagedNetwork && _state >= State::Finishing) {
                 if (auto binding = rtpSession())
                     binding->close();
             }
         });
         connect(this, &XMPP::Jingle::Transport::failed, this, [this]() {
-            if (auto binding = rtpSession())
-                binding->close();
+            if (!d->groupManagedNetwork) {
+                if (auto binding = rtpSession())
+                    binding->close();
+            }
         });
         connect(_pad->manager(), &TransportManager::abortAllRequested, this, [this]() {
             d->aborted = true;
@@ -1343,8 +1345,9 @@ namespace XMPP { namespace Jingle { namespace ICE {
     Transport::~Transport()
     {
         if (auto binding = rtpSession()) {
-            binding->disconnect();
-            binding->close();
+            binding->disconnect(this);
+            if (!d->groupManagedNetwork)
+                binding->close();
         }
     }
 
@@ -1352,7 +1355,8 @@ namespace XMPP { namespace Jingle { namespace ICE {
     {
         if (auto binding = rtpSession()) {
             binding->disconnect(this);
-            binding->close();
+            if (!d->groupManagedNetwork)
+                binding->close();
         }
         d->releaseNetwork();
     }
@@ -1365,8 +1369,10 @@ namespace XMPP { namespace Jingle { namespace ICE {
     void Transport::stop()
     {
         XMPP::Jingle::Transport::stop();
-        if (auto binding = rtpSession())
-            binding->close();
+        if (!d->groupManagedNetwork) {
+            if (auto binding = rtpSession())
+                binding->close();
+        }
     }
 
     bool Transport::enableRtpMux()
