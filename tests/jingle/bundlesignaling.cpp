@@ -559,10 +559,13 @@ static void exerciseInitiatorReplacement(const WireOffer &transportSource, TcpPo
     // Observe those production callbacks instead. The first prepared BUNDLE
     // member must leave the old association live; the second completes the
     // staged generation and atomically retires it.
-    int preparedReplacements = 0;
-    auto observePrepared = [&](J::State state) {
-        if (state != J::State::ApprovedToSend)
+    int  preparedReplacements = 0;
+    bool audioPrepared = false;
+    bool videoPrepared = false;
+    auto observePrepared = [&](J::ICE::Transport *transport, bool &seen) {
+        if (seen || transport->state() != J::State::ApprovedToSend)
             return;
+        seen = true;
         ++preparedReplacements;
         check(icePad->liveAssociationCount() == 1,
               "replacement preparation exposed more than one live BUNDLE association");
@@ -573,11 +576,13 @@ static void exerciseInitiatorReplacement(const WireOffer &transportSource, TcpPo
         else
             check(false, "replacement transport prepared more than once");
     };
-    QObject::connect(replacementAudio.data(), &J::Transport::stateChanged, replacementAudio.data(), observePrepared);
-    QObject::connect(replacementVideo.data(), &J::Transport::stateChanged, replacementVideo.data(), observePrepared);
+    QObject::connect(replacementAudio.data(), &J::Transport::stateChanged, replacementAudio.data(),
+                     [&]() { observePrepared(replacementAudio.data(), audioPrepared); });
+    QObject::connect(replacementVideo.data(), &J::Transport::stateChanged, replacementVideo.data(),
+                     [&]() { observePrepared(replacementVideo.data(), videoPrepared); });
 
     check(waitFor([&]() {
-              return preparedReplacements == 2
+              return audioPrepared && videoPrepared
                   && replacementAudio->rtpSession()
                   && replacementVideo->rtpSession();
           }),
