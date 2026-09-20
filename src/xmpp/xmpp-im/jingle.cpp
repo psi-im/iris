@@ -783,8 +783,9 @@ namespace XMPP { namespace Jingle {
     {
         QStringList ret { NS };
         ret += d->publicationManager->discoFeatures();
-        if (d->messageInitiationEnabled)
-            ret += MessageInitiation::ns();
+        // XEP-0353 intentionally has no service-discovery feature. The local
+        // enable flag controls policy/handling only and must not be advertised
+        // through disco/caps.
         // RFC 5888 grouping is a protocol capability, not a promise that every
         // Jingle application/transport combination will use a shared association.
         // Concrete BUNDLE use still depends on negotiated groups and application

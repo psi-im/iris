@@ -210,15 +210,15 @@ int main(int argc, char **argv)
 
         check(manager && !manager->messageInitiationEnabled(), "JMI must be opt-in");
         check(!manager->discoFeatures().contains(J::MessageInitiation::ns()),
-              "disabled JMI was advertised");
+              "JMI must not be advertised through disco");
         check(manager->rtpManager()
                   ->propose(Jid(QStringLiteral("peer@example.test")),
                             J::RTP::Media::Audio | J::RTP::Media::Video)
                   .isEmpty(),
               "disabled JMI allowed a new RTP proposal");
         manager->setMessageInitiationEnabled(true);
-        check(manager->discoFeatures().contains(J::MessageInitiation::ns()),
-              "enabled JMI was not advertised");
+        check(!manager->discoFeatures().contains(J::MessageInitiation::ns()),
+              "enabled JMI leaked into disco despite XEP-0353 having no discovery feature");
         check(manager->rtpManager()
                   ->propose(Jid(QStringLiteral("peer@example.test")),
                             J::RTP::Media::Audio | J::RTP::Media::Video)
@@ -226,7 +226,7 @@ int main(int argc, char **argv)
               "RTP proposal ignored unavailable local media/transport capability");
         manager->setMessageInitiationEnabled(false);
         check(!manager->discoFeatures().contains(J::MessageInitiation::ns()),
-              "disabled JMI remained advertised");
+              "JMI unexpectedly appeared in disco");
 
         const Jid sessionPeer(QStringLiteral("peer@example.test/device"));
         auto fixed = manager->newSession(sessionPeer, QStringLiteral("jmi-session-id"));
