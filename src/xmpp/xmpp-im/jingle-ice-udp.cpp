@@ -10,6 +10,25 @@ const QString NS_ICE_UDP = QStringLiteral("urn:xmpp:jingle:transports:ice-udp:1"
 
 namespace {
 
+    QByteArray serializeOpaqueExtension(const QDomElement &element)
+    {
+        QDomDocument owned;
+        const auto   imported = owned.importNode(element, true);
+        if (imported.isNull())
+            return {};
+        owned.appendChild(imported);
+        return owned.toByteArray(-1);
+    }
+
+    QDomElement deserializeOpaqueExtension(QDomDocument &target, const QByteArray &xml)
+    {
+        QDomDocument owned;
+        if (!owned.setContent(xml, true))
+            return {};
+        const auto element = owned.documentElement();
+        return element.isNull() ? QDomElement() : target.importNode(element, true).toElement();
+    }
+
     QString elementName(const QDomElement &element)
     {
         return element.localName().isEmpty() ? element.tagName() : element.localName();
@@ -209,9 +228,11 @@ bool UdpTransportDescription::isValid(QString *error) const
         return false;
 
     for (const auto &extension : extensions) {
-        if (extension.isNull())
-            return fail(error, QStringLiteral("Null ICE-UDP extension"));
-        if (extension.namespaceURI().isEmpty() || extension.namespaceURI() == NS_ICE_UDP)
+        QDomDocument extensionDoc;
+        if (!extensionDoc.setContent(extension, true))
+            return fail(error, QStringLiteral("Malformed ICE-UDP extension"));
+        const auto element = extensionDoc.documentElement();
+        if (element.isNull() || element.namespaceURI().isEmpty() || element.namespaceURI() == NS_ICE_UDP)
             return fail(error, QStringLiteral("Invalid ICE-UDP extension namespace"));
     }
 
@@ -231,7 +252,7 @@ std::optional<UdpTransportDescription> UdpTransportCodec::fromXml(const QDomElem
 
     for (auto element = transport.firstChildElement(); !element.isNull(); element = element.nextSiblingElement()) {
         if (element.namespaceURI() != NS_ICE_UDP) {
-            result.extensions.append(element);
+            result.extensions.append(serializeOpaqueExtension(element));
             continue;
         }
 
@@ -276,8 +297,11 @@ QDomElement UdpTransportCodec::toXml(QDomDocument &doc, const UdpTransportDescri
         element.appendChild(candidateToXml(doc, candidate));
     if (transport.remoteCandidate)
         element.appendChild(remoteCandidateToXml(doc, *transport.remoteCandidate));
-    for (const auto &extension : transport.extensions)
-        element.appendChild(doc.importNode(extension, true));
+    for (const auto &extension : transport.extensions) {
+        const auto child = deserializeOpaqueExtension(doc, extension);
+        if (!child.isNull())
+            element.appendChild(child);
+    }
 
     return element;
 }
@@ -321,8 +345,11 @@ QDomElement iceUdpToInternal(QDomDocument &doc, const QDomElement &transport, co
         element.setAttribute(QStringLiteral("port"), parsed->remoteCandidate->port);
         internal.appendChild(element);
     }
-    for (const auto &extension : parsed->extensions)
-        internal.appendChild(doc.importNode(extension, true));
+    for (const auto &extension : parsed->extensions) {
+        const auto child = deserializeOpaqueExtension(doc, extension);
+        if (!child.isNull())
+            internal.appendChild(child);
+    }
     return internal;
 }
 
@@ -361,7 +388,7 @@ QDomElement internalToIceUdp(QDomDocument &doc, const QDomElement &transport, QS
         } else if (name == QStringLiteral("gathering-complete") && child.namespaceURI().isEmpty()) {
             continue; // XEP-0371-only signal; XEP-0176 has no equivalent.
         } else if (!child.namespaceURI().isEmpty()) {
-            converted.extensions.append(child);
+            converted.extensions.append(serializeOpaqueExtension(child));
         } else {
             fail(error, QStringLiteral("Unsupported internal ICE child for XEP-0176"));
             return {};
