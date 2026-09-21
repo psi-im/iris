@@ -716,6 +716,19 @@ void Application::applied(MediaOperation::Id id, MediaError error)
         activateMedia();
 }
 
+bool Application::allowsRtp(bool sending) const
+{
+    auto pad = _pad.staticCast<Pad>();
+    if (!pad || !pad->session())
+        return false;
+    if (sending && !pad->directionController()->allowsLocalSending(this))
+        return false;
+    const auto localRole = pad->session()->role();
+    const auto role = sending ? localRole
+                              : (localRole == Origin::Initiator ? Origin::Responder : Origin::Initiator);
+    return _senders == Origin::Both || _senders == role;
+}
+
 void Application::activateMedia()
 {
     if (!configured_ || !secureBound_ || _state != State::Connecting || !association_ || !association_->isReady())
