@@ -88,12 +88,6 @@ endif()
 
 option(IRIS_ENABLE_INSTALL "Enable installation" ON)
 option(IRIS_ENABLE_JINGLE_SCTP "Enable SCTP over ICE Jingle transport / data channels" ON)
-option(IRIS_ENABLE_SRTP "Enable libSRTP packet protection for native Jingle RTP" OFF)
-set(IRIS_PC_SRTP_REQUIRES "")
-if(IRIS_ENABLE_SRTP)
-    find_package(SRTP REQUIRED)
-    set(IRIS_PC_SRTP_REQUIRES "libsrtp2")
-endif()
 # note Blake2b is needed only with Qt5. Qt6 has its own implementation
 option(IRIS_BUNDLED_QCA "Adds: DTLS, Blake2b (needed with Qt5) and other useful for XMPP crypto-stuff"
        ${IRIS_DEFAULT_BUNDLED_QCA})
