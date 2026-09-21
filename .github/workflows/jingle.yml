@@ -63,6 +63,30 @@ jobs:
       - name: Build
         run: cmake --build build-jingle --parallel 4
 
+      - name: Verify root test build switch
+        shell: bash
+        run: |
+          set -euo pipefail
+          common=(
+            -G Ninja
+            -DUSE_QT6=ON
+            -DIRIS_ENABLE_OMEMO=OFF
+            -DIRIS_SYSTEM_QCA=3
+            -DIRIS_BUNDLED_QCA=OFF
+            -DIRIS_BUNDLED_USRSCTP=OFF
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          )
+
+          cmake -S . -B build-root-no-tests "${common[@]}" -DIRIS_BUILD_TESTS=OFF
+          if ninja -C build-root-no-tests -t targets all | grep -Eq '^jingle_.*_test:'; then
+            echo "IRIS_BUILD_TESTS=OFF still created Jingle test targets" >&2
+            exit 1
+          fi
+
+          cmake -S . -B build-root-tests "${common[@]}" -DIRIS_BUILD_TESTS=ON
+          cmake --build build-root-tests --parallel 4 --target jingle_dtlssrtp_test
+
       - name: Save compiler cache
         if: success()
         uses: actions/cache/save@v4
