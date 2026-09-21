@@ -175,6 +175,11 @@ public:
             epochs_.remove(associationId);
     }
 
+    bool associationReady(const QByteArray &associationId, quint64 epoch) const
+    {
+        return epochs_.value(associationId) == epoch;
+    }
+
     bool receiveProtectedRtpPacket(const J::RTP::SecureRtpPacket &packet) override
     {
         if (packet.kind != J::RTP::PacketKind::Rtp || epochs_.value(packet.associationId) != packet.epoch
@@ -530,6 +535,30 @@ int main(int argc, char **argv)
           "production RTP backend-routing regression failed or timed out");
     check(first.icePad->liveAssociationCount() == 1 && second.icePad->liveAssociationCount() == 1,
           "removing one RTP BUNDLE member changed association count");
+
+    // An association QObject can disappear without first emitting invalidated
+    // (for example while the ICE connection itself is being torn down). The
+    // media backend must still lose the exported keys immediately rather than
+    // keeping them staged until the whole MediaSession is destroyed.
+    auto *firstBackend = dynamic_cast<MediaSession *>(first.rtpPad->mediaSession());
+    auto *dyingAssociation = first.videoTransport->rtpAssociation();
+    check(firstBackend && dyingAssociation, "secure RTP destruction fixture unavailable");
+    const auto dyingId    = dyingAssociation->associationId();
+    const auto dyingEpoch = dyingAssociation->epoch();
+    check(firstBackend->associationReady(dyingId, dyingEpoch),
+          "backend lost association before destruction regression");
+
+    check(first.network && !first.network->components.isEmpty()
+              && first.network->components[0].secureRtp == dyingAssociation,
+          "unexpected BUNDLE association ownership before destruction");
+    first.network->components[0].secureRtp = nullptr; // prevent IceConnection's later destructor from double deleting
+    delete dyingAssociation;
+    QCoreApplication::processEvents(QEventLoop::AllEvents);
+
+    check(!firstBackend->associationReady(dyingId, dyingEpoch),
+          "destroyed secure RTP association left key material staged in backend");
+    check(first.videoApp->state() >= J::State::Finishing,
+          "destroyed secure RTP association left its application active");
 
     qInfo("Production RTP backend-routing regression passed");
     return 0;
