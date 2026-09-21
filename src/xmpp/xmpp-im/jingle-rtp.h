@@ -242,6 +242,7 @@ private:
     bool sendProtectedPacket(const SecureRtpPacket &);
     bool configureSecureAssociation(SecureRtpAssociation *);
     bool ensureSecurePacketIo();
+    QStringList secureRtpProfiles() const;
 
     QPointer<Manager> manager_;
     QPointer<Session> session_;
