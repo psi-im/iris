@@ -30,8 +30,8 @@ struct IRIS_EXPORT SecureRtpKeyingMaterial {
 
     bool isValid() const
     {
-        return !profile.isEmpty() && !localMasterKey.isEmpty() && !localMasterSalt.isEmpty()
-            && !remoteMasterKey.isEmpty() && !remoteMasterSalt.isEmpty();
+        return !profile.isEmpty() && localMasterKey.size() > 0 && localMasterSalt.size() > 0
+            && remoteMasterKey.size() > 0 && remoteMasterSalt.size() > 0;
     }
 
     void clear()
@@ -52,6 +52,7 @@ class IRIS_EXPORT SecureRtpAssociation : public QObject {
     Q_OBJECT
 public:
     SecureRtpAssociation(XMPP::Dtls *dtls, QByteArray associationId, QObject *parent = nullptr);
+    ~SecureRtpAssociation() override;
 
     void                      close();
     bool                      isReady() const;
