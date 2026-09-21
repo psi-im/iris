@@ -244,10 +244,6 @@ if(IRIS_ENABLE_INSTALL)
     endif()
     install(FILES "${CMAKE_CURRENT_BINARY_DIR}/IrisConfigVersion.cmake" "${CMAKE_CURRENT_BINARY_DIR}/IrisConfig.cmake"
             DESTINATION ${CONFIG_INSTALL_DIR})
-    if(IRIS_ENABLE_SRTP)
-        install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules/FindSRTP.cmake"
-                DESTINATION ${CONFIG_INSTALL_DIR}/modules)
-    endif()
     install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${IRIS_LIB_NAME}.pc DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig)
 
     # Keep the historical flat include facade for source compatibility. Canonical public headers are installed by
