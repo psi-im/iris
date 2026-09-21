@@ -28,6 +28,46 @@ struct IRIS_EXPORT Proposal {
     bool isValid() const { return media == Media::Audio || media == Media::Video; }
 };
 
+enum class SecureRtpPacketKind : quint8 { Rtp, Rtcp };
+
+// Opaque backend-facing identity. Tokens have meaning only inside one Jingle
+// MediaSession and are never serialized on the wire.
+struct IRIS_EXPORT SecureRtpPacket {
+    QByteArray           associationId;
+    quint64              epoch = 0;
+    QByteArray           data;
+    SecureRtpPacketKind  kind = SecureRtpPacketKind::Rtp;
+};
+
+struct IRIS_EXPORT SecureRtpEndpoint {
+    QByteArray      endpointId;
+    QByteArray      associationId;
+    QString         media;
+    QByteArray      mid;
+    quint16         midExtensionId = 0;
+    QSet<quint8>    incomingPayloadTypes;
+    QSet<quint32>   incomingSsrcs;
+    QSet<quint32>   localSsrcs;
+
+    bool isValid() const
+    {
+        return !endpointId.isEmpty() && !associationId.isEmpty()
+            && (media == QLatin1String("audio") || media == QLatin1String("video"));
+    }
+};
+
+struct IRIS_EXPORT SecureRtpParameters {
+    QByteArray       associationId;
+    quint64          epoch = 0;
+    QString          profile;
+    QCA::SecureArray localMasterKey;
+    QCA::SecureArray localMasterSalt;
+    QCA::SecureArray remoteMasterKey;
+    QCA::SecureArray remoteMasterSalt;
+
+    bool isValid() const { return !associationId.isEmpty() && epoch != 0 && !profile.isEmpty(); }
+};
+
 // All calls occur on the Jingle thread. Factories and negotiation must not
 // capture media, start a nested event loop, or initiate network activity.
 // The adapter owns its internal worker threads and must join them on destruction.
@@ -103,6 +143,18 @@ public:
 
     virtual std::unique_ptr<MediaEndpoint> createEndpoint(const QString &contentName, const QString &media) = 0;
 
+    // Optional protected group packet boundary. Per-content MediaEndpoint stays
+    // responsible for codec negotiation; SRTP/SRTCP ownership belongs here so a
+    // BUNDLE group shares one association while unbundled contents remain
+    // independent associations inside the same backend media session.
+    using ProtectedPacketWriter = std::function<bool(const SecureRtpPacket &)>;
+    virtual bool configureSecureRtpEndpoints(const QList<SecureRtpEndpoint> &) { return false; }
+    virtual bool configureSecureRtpAssociation(const SecureRtpParameters &) { return false; }
+    virtual void invalidateSecureRtpAssociation(const QByteArray &, quint64) { }
+    virtual bool receiveProtectedRtpPacket(const SecureRtpPacket &) { return false; }
+    virtual bool attachSecureRtpPacketIo(ProtectedPacketWriter) { return false; }
+    virtual void detachSecureRtpPacketIo() { }
+
     std::unique_ptr<MediaOperation> prepareLocalOffer(MediaEndpoint *, PrepareCallback);
     std::unique_ptr<MediaOperation> prepareAnswer(MediaEndpoint *, const Description &remoteSnapshot, PrepareCallback);
     std::unique_ptr<MediaOperation> applyNegotiation(MediaEndpoint *, const Description &local,
@@ -165,8 +217,9 @@ public:
     virtual ~MediaProvider()                              = default;
     virtual std::unique_ptr<MediaSession> createSession() = 0;
     // Discovery must describe the actual backend, not merely the RTP parser.
-    // Unknown providers advertise no RTP media types by default.
+    // Unknown providers advertise no RTP media types or packet crypto by default.
     virtual QStringList mediaTypes() const { return {}; }
+    virtual QStringList secureRtpProfiles() const { return {}; }
 };
 
 class Manager;
