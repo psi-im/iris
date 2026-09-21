@@ -43,17 +43,7 @@ public:
 
     bool acceptsAnswer(const J::RTP::Description &, const J::RTP::Description &) const override { return true; }
     bool configure(const J::RTP::Description &, const J::RTP::Description &) override { return true; }
-    bool supportsPacketIo() const override { return true; }
-    bool attachPacketIo(PacketWriter writer) override
-    {
-        writer_ = std::move(writer);
-        return true;
-    }
-    void receivePacket(const QByteArray &, J::RTP::SrtpContext::Packet) override { }
-    void stop() override { writer_ = {}; }
-
-private:
-    PacketWriter writer_;
+    void stop() override { }
 };
 
 class MediaSession final : public J::RTP::MediaSession {
@@ -68,6 +58,10 @@ class Provider final : public J::RTP::MediaProvider {
 public:
     std::unique_ptr<J::RTP::MediaSession> createSession() override { return std::make_unique<MediaSession>(); }
     QStringList mediaTypes() const override { return { QStringLiteral("audio") }; }
+    QStringList secureRtpProfiles() const override
+    {
+        return { QStringLiteral("SRTP_AES128_CM_HMAC_SHA1_80") };
+    }
 };
 
 static void setPeerFeatures(Client &client, const Jid &peer, QStringList features)
