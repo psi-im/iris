@@ -737,8 +737,14 @@ namespace XMPP { namespace Jingle { namespace ICE {
         if (ice)
             ice->disconnect(this);
         for (const auto &c : components) {
-            if (c.secureRtp)
+            if (c.secureRtp) {
+                // Backend SRTP state belongs to the Jingle media session, not
+                // to this ICE QObject. Retire the security association while its
+                // Pad listeners are still connected so exported key material is
+                // invalidated before we suppress callbacks during destruction.
+                c.secureRtp->close();
                 c.secureRtp->disconnect();
+            }
             if (c.dtls)
                 c.dtls->disconnect(this);
 #ifdef JINGLE_SCTP
