@@ -28,15 +28,13 @@ struct IRIS_EXPORT Proposal {
     bool isValid() const { return media == Media::Audio || media == Media::Video; }
 };
 
-enum class SecureRtpPacketKind : quint8 { Rtp, Rtcp };
-
 // Opaque backend-facing identity. Tokens have meaning only inside one Jingle
 // MediaSession and are never serialized on the wire.
 struct IRIS_EXPORT SecureRtpPacket {
     QByteArray           associationId;
     quint64              epoch = 0;
     QByteArray           data;
-    SecureRtpPacketKind  kind = SecureRtpPacketKind::Rtp;
+    PacketKind           kind = PacketKind::Rtp;
 };
 
 struct IRIS_EXPORT SecureRtpEndpoint {
@@ -73,15 +71,6 @@ struct IRIS_EXPORT SecureRtpParameters {
 // The adapter owns its internal worker threads and must join them on destruction.
 class IRIS_EXPORT MediaEndpoint : public CodecNegotiator {
 public:
-    using PacketWriter = std::function<bool(QByteArray, SrtpContext::Packet)>;
-    // Stable opt-in capability; all calls, including PacketWriter, stay on the Jingle
-    // thread. Worker-thread engines must use bounded queues in their adapter.
-    virtual bool supportsPacketIo() const { return false; }
-    // Called once after negotiated parameters are applied and authentication is
-    // ready. This does not grant permission to capture media. Writer becomes
-    // usable when the Application is Active. stop() must detach all callbacks.
-    virtual bool        attachPacketIo(PacketWriter) { return false; }
-    virtual void        receivePacket(const QByteArray &, SrtpContext::Packet) { }
     virtual Description localOffer() const = 0;
     // Transitional synchronous fallback for adapters which do not implement the
     // MediaSession async hooks yet. Native media adapters must not block here.
@@ -247,9 +236,12 @@ signals:
 private:
     friend class Application;
     class RoutingPrivate;
-    bool bindPacketRoute(Application *, SrtpSession *, const Description &local, const Description &remote);
-    void unbindPacketRoute(Application *);
-    bool registerOutgoingRtp(Application *, const QByteArray &);
+    bool bindSecureTransport(Application *, SecureRtpAssociation *, const Description &local,
+                             const Description &remote);
+    void unbindSecureTransport(Application *);
+    bool sendProtectedPacket(const SecureRtpPacket &);
+    bool configureSecureAssociation(SecureRtpAssociation *);
+    bool refreshSecureEndpoints();
 
     QPointer<Manager> manager_;
     QPointer<Session> session_;
@@ -298,8 +290,6 @@ private:
     void                            applied(MediaOperation::Id, MediaError);
     void                            failPreparation(Reason::Condition, const QString &);
     void                            activateMedia();
-    bool                            sendPacket(QByteArray, SrtpContext::Packet, quint64 epoch);
-    void                            receiveRoutedPacket(const QByteArray &, SrtpContext::Packet, quint64 epoch);
     bool                            allowsRtp(bool sending) const;
     Negotiation                     negotiation_;
     std::optional<Negotiation>      beforeAnswer_;
@@ -311,11 +301,10 @@ private:
     std::optional<Stanza::Error>    error_;
     Reason                          reason_;
     bool                            configured_        = false;
-    bool                            attached_          = false;
+    bool                            secureBound_        = false;
     bool                            stopping_          = false;
     bool                            preparationFailed_ = false;
-    QPointer<SrtpSession>           security_;
-    QSet<int>                       negotiatedPayloads_;
+    QPointer<SecureRtpAssociation>  association_;
 };
 
 class IRIS_EXPORT Manager : public ApplicationManager {
@@ -343,6 +332,7 @@ public:
     QDomElement             serializeProposal(const std::any &, QDomDocument *) const override;
     QStringList             ns() const override { return { Description::ns() }; }
     QStringList             discoFeatures() const override;
+    QStringList             secureRtpProfiles() const;
 
 signals:
     // Convenience view for ordinary RTP call proposals. Mixed/application-
