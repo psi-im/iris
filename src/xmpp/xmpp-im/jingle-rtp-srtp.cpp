@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #include "jingle-rtp-srtp.h"
+#include <QDebug>
 #include <QSet>
 #include <QtEndian>
 #include <cstring>
@@ -342,9 +343,35 @@ std::optional<SrtpSession::ReceivedPacket> SrtpSession::receiveMuxed(QByteArray 
             return {};
     }
     const auto packet = kind == DatagramKind::Rtp ? SrtpContext::Packet::Rtp : SrtpContext::Packet::Rtcp;
-    auto       plain  = unprotect(std::move(bytes), packet, epoch_);
-    if (!plain)
+    if (!loggedIncomingMedia_) {
+        loggedIncomingMedia_ = true;
+        qInfo().noquote() << "SRTP ingress: first media datagram"
+                          << "kind=" << (packet == SrtpContext::Packet::Rtp ? "RTP" : "RTCP")
+                          << "bytes=" << bytes.size()
+                          << "epoch=" << epoch_;
+    }
+    auto plain = unprotect(std::move(bytes), packet, epoch_);
+    if (!plain) {
+        if (!loggedIncomingFailure_) {
+            loggedIncomingFailure_ = true;
+            qWarning().noquote() << "SRTP ingress: unprotect failed"
+                                 << "kind=" << (packet == SrtpContext::Packet::Rtp ? "RTP" : "RTCP")
+                                 << "error=" << int(context_.lastError())
+                                 << "epoch=" << epoch_;
+        }
         return {};
+    }
+    if (packet == SrtpContext::Packet::Rtp && plain->size() >= 12) {
+        const auto *p = reinterpret_cast<const uchar *>(plain->constData());
+        const quint32 ssrc = (quint32(p[8]) << 24) | (quint32(p[9]) << 16) | (quint32(p[10]) << 8) | quint32(p[11]);
+        qInfo().noquote() << "SRTP ingress: authenticated RTP"
+                          << "pt=" << (quint8((*plain)[1]) & 0x7f)
+                          << "ssrc=" << ssrc
+                          << "bytes=" << plain->size();
+    } else {
+        qInfo().noquote() << "SRTP ingress: authenticated RTCP"
+                          << "bytes=" << plain->size();
+    }
     return ReceivedPacket { std::move(*plain), packet, epoch_ };
 }
 std::optional<QByteArray> SrtpSession::protectMuxed(QByteArray bytes, SrtpContext::Packet packet, quint64 epoch)

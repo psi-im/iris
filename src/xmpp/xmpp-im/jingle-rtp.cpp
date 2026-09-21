@@ -43,6 +43,8 @@ public:
         QMap<ContentKey, QPointer<Application>>       applications;
         QMetaObject::Connection                       packetConnection;
         QMetaObject::Connection                       destroyedConnection;
+        bool                                          loggedRouteFailure = false;
+        bool                                          loggedRouteSuccess = false;
     };
 
     QHash<SrtpSession *, QSharedPointer<SecurityIngress>> ingresses;
@@ -121,8 +123,25 @@ bool Pad::bindPacketRoute(Application *application, SrtpSession *security, const
                 if (!ingress || ingress->security != security)
                     return;
                 auto routed = ingress->router.routeIncoming(bytes, kind);
-                if (!routed || !ingress->router.isCurrent(*routed))
+                if (!routed) {
+                    if (!ingress->loggedRouteFailure) {
+                        ingress->loggedRouteFailure = true;
+                        qWarning().noquote() << "RTP ingress: router rejected packet"
+                                             << "kind=" << (kind == SrtpContext::Packet::Rtp ? "RTP" : "RTCP")
+                                             << "error=" << int(ingress->router.lastError())
+                                             << "bytes=" << bytes.size();
+                    }
                     return;
+                }
+                if (!ingress->router.isCurrent(*routed))
+                    return;
+                if (!ingress->loggedRouteSuccess) {
+                    ingress->loggedRouteSuccess = true;
+                    qInfo().noquote() << "RTP ingress: routed authenticated packet"
+                                      << "kind=" << (kind == SrtpContext::Packet::Rtp ? "RTP" : "RTCP")
+                                      << "content=" << routed->content.first
+                                      << "bytes=" << routed->data.size();
+                }
 
                 if (routed->delivery == BundleRouter::Delivery::Content) {
                     auto application = ingress->applications.value(routed->content);
@@ -642,6 +661,16 @@ void Application::receiveRoutedPacket(const QByteArray &bytes, SrtpContext::Pack
     if (kind == SrtpContext::Packet::Rtp
         && (!allowsRtp(false) || bytes.size() < 12 || !negotiatedPayloads_.contains(quint8(bytes[1]) & 0x7f)))
         return;
+    if (!loggedIncomingPacket_) {
+        loggedIncomingPacket_ = true;
+        qInfo().noquote() << "RTP ingress: delivering packet to media endpoint"
+                          << "media=" << media_
+                          << "kind=" << (kind == SrtpContext::Packet::Rtp ? "RTP" : "RTCP")
+                          << "pt=" << (kind == SrtpContext::Packet::Rtp && bytes.size() >= 2
+                                          ? int(quint8(bytes[1]) & 0x7f)
+                                          : -1)
+                          << "bytes=" << bytes.size();
+    }
     endpoint_->receivePacket(bytes, kind);
 }
 void Application::remove(Reason::Condition condition, const QString &text)
