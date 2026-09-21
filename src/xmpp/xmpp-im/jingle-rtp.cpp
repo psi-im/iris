@@ -120,20 +120,15 @@ Pad::Pad(Manager *manager, Session *session, std::shared_ptr<MediaProvider> prov
     routing_    = std::make_unique<RoutingPrivate>();
     if (provider_)
         media_ = provider_->createSession();
-    if (media_) {
+    if (media_)
         connect(media_.get(), &MediaSession::runtimeError, this, &Pad::mediaError);
-        if (!media_->attachSecureRtpPacketIo([this](const SecureRtpPacket &packet) {
-                return sendProtectedPacket(packet);
-            })) {
-            media_.reset();
-        }
-    }
 }
 
 Pad::~Pad()
 {
     if (media_) {
-        media_->detachSecureRtpPacketIo();
+        if (securePacketIoAttached_)
+            media_->detachSecureRtpPacketIo();
         media_->cancelAll();
     }
 }
@@ -165,15 +160,23 @@ bool Pad::configureSecureAssociation(SecureRtpAssociation *association)
     return parameters.isValid() && media_->configureSecureRtpAssociation(parameters);
 }
 
-bool Pad::refreshSecureEndpoints()
+bool Pad::ensureSecurePacketIo()
 {
-    return media_ && media_->configureSecureRtpEndpoints(secureEndpointList(routing_->endpoints));
+    if (!media_)
+        return false;
+    if (securePacketIoAttached_)
+        return true;
+    securePacketIoAttached_ = media_->attachSecureRtpPacketIo([this](const SecureRtpPacket &packet) {
+        return sendProtectedPacket(packet);
+    });
+    return securePacketIoAttached_;
 }
 
 bool Pad::bindSecureTransport(Application *application, SecureRtpAssociation *association,
                               const Description &local, const Description &remote)
 {
-    if (!application || !association || !media_ || application->pad().data() != this || !session_)
+    if (!application || !association || !media_ || application->pad().data() != this || !session_
+        || !ensureSecurePacketIo())
         return false;
 
     auto endpoint = secureEndpointForDescriptions(application, session_, association->associationId(), local, remote);
@@ -713,25 +716,10 @@ void Application::applied(MediaOperation::Id id, MediaError error)
         activateMedia();
 }
 
-bool Application::allowsRtp(bool sending) const
-{
-    if (sending && !_pad.staticCast<Pad>()->directionController()->allowsLocalSending(this))
-        return false;
-    const auto localRole = _pad->session()->role();
-    const auto role = sending ? localRole : (localRole == Origin::Initiator ? Origin::Responder : Origin::Initiator);
-    return _senders == Origin::Both || _senders == role;
-}
 void Application::activateMedia()
 {
     if (!configured_ || !secureBound_ || _state != State::Connecting || !association_ || !association_->isReady())
         return;
-
-    auto pad = _pad.staticCast<Pad>();
-    if (!pad || !pad->configureSecureAssociation(association_)) {
-        remove(Reason::FailedApplication, QStringLiteral("Secure RTP association activation failed"));
-        return;
-    }
-
     setState(State::Active);
 }
 
