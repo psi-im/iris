@@ -2,7 +2,6 @@
 #include "jingle-rtp.h"
 #include "dtls.h"
 #include "jingle-nstransportslist.h"
-#include "jingle-rtp-router_p.h"
 #include "jingle-session.h"
 #include <QDomDocument>
 #include <QUuid>
@@ -66,6 +65,51 @@ QList<SecureRtpEndpoint> secureEndpointList(const QHash<Application *, SecureRtp
     for (const auto &endpoint : endpoints)
         result.append(endpoint);
     return result;
+}
+
+void appendSecureSources(QSet<quint32> &target, const Description &description)
+{
+    if (description.ssrc && *description.ssrc)
+        target.insert(*description.ssrc);
+    for (const auto &source : description.sources)
+        if (source.ssrc)
+            target.insert(source.ssrc);
+}
+
+std::optional<SecureRtpEndpoint> secureEndpointForDescriptions(Application *application, Session *session,
+                                                               const QByteArray &associationId,
+                                                               const Description &local,
+                                                               const Description &remote)
+{
+    if (!application || !session || associationId.isEmpty() || local.media.isEmpty() || remote.media.isEmpty()
+        || local.media != remote.media || !local.rtcpMux || !remote.rtcpMux)
+        return std::nullopt;
+
+    const bool localContent = application->creator() == session->role();
+    const auto &accepted    = localContent ? remote : local;
+    if (accepted.payloads.isEmpty())
+        return std::nullopt;
+
+    SecureRtpEndpoint endpoint;
+    endpoint.endpointId    = secureEndpointId(application);
+    endpoint.associationId = associationId;
+    endpoint.media         = local.media;
+    for (const auto &payload : accepted.payloads)
+        endpoint.incomingPayloadTypes.insert(payload.id);
+
+    appendSecureSources(endpoint.incomingSsrcs, remote);
+    appendSecureSources(endpoint.localSsrcs, local);
+
+    constexpr auto MidUri = "urn:ietf:params:rtp-hdrext:sdes:mid";
+    for (const auto &extension : accepted.headerExtensions) {
+        if (extension.uri == QLatin1String(MidUri)) {
+            endpoint.midExtensionId = extension.id;
+            endpoint.mid            = application->contentName().toUtf8();
+            break;
+        }
+    }
+
+    return endpoint.isValid() ? std::optional<SecureRtpEndpoint>(std::move(endpoint)) : std::nullopt;
 }
 } // namespace
 
@@ -132,29 +176,15 @@ bool Pad::bindSecureTransport(Application *application, SecureRtpAssociation *as
     if (!application || !association || !media_ || application->pad().data() != this || !session_)
         return false;
 
-    const ContentKey key { application->contentName(), application->creator() };
-    const bool localContent = application->creator() == session_->role();
-    auto route = bundleRouteForDescriptions(key, localContent, local, remote);
-    if (!route)
-        return false;
-
-    SecureRtpEndpoint endpoint;
-    endpoint.endpointId           = secureEndpointId(application);
-    endpoint.associationId        = association->associationId();
-    endpoint.media                = local.media;
-    endpoint.mid                  = route->mid;
-    endpoint.midExtensionId       = route->midExtensionId;
-    endpoint.incomingPayloadTypes = route->incomingPayloadTypes;
-    endpoint.incomingSsrcs        = route->incomingSsrcs;
-    endpoint.localSsrcs           = route->localSsrcs;
-    if (!endpoint.isValid())
+    auto endpoint = secureEndpointForDescriptions(application, session_, association->associationId(), local, remote);
+    if (!endpoint)
         return false;
 
     if (!configureSecureAssociation(association))
         return false;
 
     auto candidate = routing_->endpoints;
-    candidate.insert(application, endpoint);
+    candidate.insert(application, *endpoint);
     if (!media_->configureSecureRtpEndpoints(secureEndpointList(candidate)))
         return false;
 
