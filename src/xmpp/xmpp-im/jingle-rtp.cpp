@@ -52,6 +52,7 @@ class Pad::RoutingPrivate {
 public:
     struct AssociationBinding {
         QPointer<SecureRtpAssociation> association;
+        quint64                        epoch = 0;
         QSet<Application *>            applications;
         QMetaObject::Connection        packetConnection;
         QMetaObject::Connection        readyConnection;
@@ -205,15 +206,24 @@ bool Pad::bindSecureTransport(Application *application, SecureRtpAssociation *as
     if (!endpoint)
         return false;
 
+    const auto newId = association->associationId();
+    const auto associationEpoch = association->epoch();
+    const bool hadBinding = routing_->associations.contains(newId);
     if (!configureSecureAssociation(association))
         return false;
 
     auto candidate = routing_->endpoints;
     candidate.insert(application, *endpoint);
-    if (!media_->configureSecureRtpEndpoints(secureEndpointList(candidate)))
+    if (!media_->configureSecureRtpEndpoints(secureEndpointList(candidate))) {
+        // Key export and route-table update form one logical transaction for a
+        // newly introduced association. Do not leave unreferenced key material
+        // staged in the backend if the route half is rejected. An already bound
+        // BUNDLE association belongs to surviving contents and must stay alive.
+        if (!hadBinding)
+            media_->invalidateSecureRtpAssociation(newId, associationEpoch);
         return false;
+    }
 
-    const auto newId = association->associationId();
     const auto oldId = routing_->applicationAssociations.value(application);
     if (!oldId.isEmpty() && oldId != newId) {
         auto oldBinding = routing_->associations.value(oldId);
@@ -224,8 +234,8 @@ bool Pad::bindSecureTransport(Application *application, SecureRtpAssociation *as
                 QObject::disconnect(oldBinding->readyConnection);
                 QObject::disconnect(oldBinding->invalidatedConnection);
                 QObject::disconnect(oldBinding->destroyedConnection);
-                if (oldBinding->association && oldBinding->association->isReady())
-                    media_->invalidateSecureRtpAssociation(oldId, oldBinding->association->epoch());
+                if (oldBinding->epoch)
+                    media_->invalidateSecureRtpAssociation(oldId, oldBinding->epoch);
                 routing_->associations.remove(oldId);
             }
         }
@@ -238,6 +248,7 @@ bool Pad::bindSecureTransport(Application *application, SecureRtpAssociation *as
     if (!binding) {
         binding = QSharedPointer<RoutingPrivate::AssociationBinding>::create();
         binding->association = association;
+        binding->epoch       = associationEpoch;
         routing_->associations.insert(newId, binding);
 
         binding->packetConnection = connect(
@@ -264,6 +275,7 @@ bool Pad::bindSecureTransport(Application *application, SecureRtpAssociation *as
                 const auto binding = routing_->associations.value(association->associationId());
                 if (!binding)
                     return;
+                binding->epoch = epoch;
                 const auto applications = binding->applications.values();
                 for (auto application : applications)
                     if (application)
@@ -291,6 +303,12 @@ bool Pad::bindSecureTransport(Application *application, SecureRtpAssociation *as
             const auto binding = routing_->associations.take(newId);
             if (!binding)
                 return;
+            // QObject::destroyed may arrive without SecureRtpAssociation::invalidated.
+            // The association object can no longer tell us its epoch here, so keep
+            // the last successfully exported epoch in the binding and explicitly
+            // wipe the media backend before removing the contents.
+            if (media_ && binding->epoch)
+                media_->invalidateSecureRtpAssociation(newId, binding->epoch);
             const auto applications = binding->applications.values();
             for (auto application : applications) {
                 if (application && application->state() < State::Finishing)
@@ -332,8 +350,8 @@ void Pad::unbindSecureTransport(Application *application)
     QObject::disconnect(binding->readyConnection);
     QObject::disconnect(binding->invalidatedConnection);
     QObject::disconnect(binding->destroyedConnection);
-    if (media_ && binding->association && binding->association->isReady())
-        media_->invalidateSecureRtpAssociation(id, binding->association->epoch());
+    if (media_ && binding->epoch)
+        media_->invalidateSecureRtpAssociation(id, binding->epoch);
     routing_->associations.remove(id);
 }
 
