@@ -96,6 +96,7 @@ option(IRIS_BUNDLED_USRSCTP "Compile compatible UsrSCTP lib (required for datach
 option(IRIS_ENABLE_OMEMO "Enable XEP-0384 OMEMO support (requires GPLv3 libomemo-c)" ON)
 option(IRIS_BUNDLED_OMEMO_C "Build libomemo-c and protobuf-c when OMEMO is enabled" ON)
 option(IRIS_BUILD_TOOLS "Build tools and examples" OFF)
+option(IRIS_BUILD_TESTS "Build Iris unit and regression tests" OFF)
 option(IRIS_ENABLE_DEBUG "Enable debugging code paths" OFF)
 option(USE_QT6 "Enable Qt6 support" OFF)
 
@@ -192,6 +193,11 @@ if(IRIS_BUILD_TOOLS)
         message(FATAL_ERROR "Bundled Qca is needed to build tools")
     endif()
     add_subdirectory(tools)
+endif()
+
+if(IRIS_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests/jingle)
 endif()
 
 if(NOT IS_SUBPROJECT)
