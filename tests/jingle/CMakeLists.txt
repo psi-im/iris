@@ -1,15 +1,23 @@
 cmake_minimum_required(VERSION 3.16)
-project(iris_jingle_regressions LANGUAGES C CXX)
-set(CMAKE_CXX_STANDARD 20)
-option(USE_QT6 "Build with Qt 6" OFF)
-if(USE_QT6)
-    set(QT_DEFAULT_MAJOR_VERSION 6)
-else()
-    set(QT_DEFAULT_MAJOR_VERSION 5)
+
+# This file is both a standalone CI project and the root Iris test subdirectory.
+# Keep the historical standalone entry point, but do not recursively add Iris
+# when the root project enabled IRIS_BUILD_TESTS.
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    project(iris_jingle_regressions LANGUAGES C CXX)
+    set(CMAKE_CXX_STANDARD 20)
+    option(USE_QT6 "Build with Qt 6" OFF)
+    if(USE_QT6)
+        set(QT_DEFAULT_MAJOR_VERSION 6)
+    else()
+        set(QT_DEFAULT_MAJOR_VERSION 5)
+    endif()
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    set(IRIS_ENABLE_OMEMO OFF CACHE BOOL "" FORCE)
+    set(IRIS_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    add_subdirectory(../.. iris)
 endif()
-set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
-set(IRIS_ENABLE_OMEMO OFF CACHE BOOL "" FORCE)
-add_subdirectory(../.. iris)
+
 find_package(Qt${QT_DEFAULT_MAJOR_VERSION} REQUIRED COMPONENTS Core Network Xml)
 add_executable(jingle_signaling_test signaling.cpp)
 target_link_libraries(jingle_signaling_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
