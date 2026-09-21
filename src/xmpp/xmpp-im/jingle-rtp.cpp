@@ -208,7 +208,10 @@ bool Pad::bindSecureTransport(Application *application, SecureRtpAssociation *as
 
     const auto newId = association->associationId();
     const auto associationEpoch = association->epoch();
-    const bool hadBinding = routing_->associations.contains(newId);
+    const auto existingBinding = routing_->associations.value(newId);
+    if (existingBinding && existingBinding->association != association)
+        return false;
+    const bool hadBinding = bool(existingBinding);
     if (!configureSecureAssociation(association))
         return false;
 
