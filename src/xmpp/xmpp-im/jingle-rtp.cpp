@@ -34,27 +34,40 @@ Media mediaFromName(const QString &name)
 } // namespace
 class Pad::RoutingPrivate {
 public:
-    struct SecurityIngress {
-        QPointer<SrtpSession>                         security;
-        BundleRouter                                  router;
-        QMap<ContentKey, BundleRouter::Route>         routes;
-        QMap<ContentKey, QPointer<Application>>       applications;
-        QMetaObject::Connection                       packetConnection;
-        QMetaObject::Connection                       destroyedConnection;
+    struct AssociationBinding {
+        QPointer<SecureRtpAssociation> association;
+        QSet<Application *>            applications;
+        QMetaObject::Connection        packetConnection;
+        QMetaObject::Connection        readyConnection;
+        QMetaObject::Connection        invalidatedConnection;
+        QMetaObject::Connection        destroyedConnection;
     };
 
-    QHash<SrtpSession *, QSharedPointer<SecurityIngress>> ingresses;
-    QHash<Application *, SrtpSession *>                   applicationSecurity;
+    QHash<QByteArray, QSharedPointer<AssociationBinding>> associations;
+    QHash<Application *, SecureRtpEndpoint>               endpoints;
+    QHash<Application *, QByteArray>                      applicationAssociations;
 };
 
-static QList<BundleRouter::Route> routeList(const QMap<ContentKey, BundleRouter::Route> &routes)
+namespace {
+QByteArray secureEndpointId(const Application *application)
 {
-    QList<BundleRouter::Route> result;
-    result.reserve(routes.size());
-    for (const auto &route : routes)
-        result.append(route);
+    if (!application)
+        return {};
+    QByteArray result = QByteArray::number(int(application->creator()));
+    result += ':';
+    result += application->contentName().toUtf8();
     return result;
 }
+
+QList<SecureRtpEndpoint> secureEndpointList(const QHash<Application *, SecureRtpEndpoint> &endpoints)
+{
+    QList<SecureRtpEndpoint> result;
+    result.reserve(endpoints.size());
+    for (const auto &endpoint : endpoints)
+        result.append(endpoint);
+    return result;
+}
+} // namespace
 
 Pad::Pad(Manager *manager, Session *session, std::shared_ptr<MediaProvider> provider, QStringList transports) :
     manager_(manager), session_(session), provider_(std::move(provider)), transports_(std::move(transports))
@@ -63,23 +76,60 @@ Pad::Pad(Manager *manager, Session *session, std::shared_ptr<MediaProvider> prov
     routing_    = std::make_unique<RoutingPrivate>();
     if (provider_)
         media_ = provider_->createSession();
-    if (media_)
+    if (media_) {
         connect(media_.get(), &MediaSession::runtimeError, this, &Pad::mediaError);
+        if (!media_->attachSecureRtpPacketIo([this](const SecureRtpPacket &packet) {
+                return sendProtectedPacket(packet);
+            })) {
+            media_.reset();
+        }
+    }
 }
+
 Pad::~Pad()
 {
-    if (media_)
+    if (media_) {
+        media_->detachSecureRtpPacketIo();
         media_->cancelAll();
+    }
 }
+
 QString             Pad::ns() const { return Description::ns(); }
 Session            *Pad::session() const { return session_; }
 ApplicationManager *Pad::manager() const { return manager_; }
 MediaSession       *Pad::mediaSession() const { return media_.get(); }
 
-bool Pad::bindPacketRoute(Application *application, SrtpSession *security, const Description &local,
-                          const Description &remote)
+bool Pad::configureSecureAssociation(SecureRtpAssociation *association)
 {
-    if (!application || !security || application->pad().data() != this || !session_)
+    if (!media_ || !association)
+        return false;
+    if (!association->isReady())
+        return true;
+
+    const auto &material = association->keyingMaterial();
+    if (!material.isValid())
+        return false;
+
+    SecureRtpParameters parameters;
+    parameters.associationId   = association->associationId();
+    parameters.epoch           = association->epoch();
+    parameters.profile         = material.profile;
+    parameters.localMasterKey  = material.localMasterKey;
+    parameters.localMasterSalt = material.localMasterSalt;
+    parameters.remoteMasterKey = material.remoteMasterKey;
+    parameters.remoteMasterSalt = material.remoteMasterSalt;
+    return parameters.isValid() && media_->configureSecureRtpAssociation(parameters);
+}
+
+bool Pad::refreshSecureEndpoints()
+{
+    return media_ && media_->configureSecureRtpEndpoints(secureEndpointList(routing_->endpoints));
+}
+
+bool Pad::bindSecureTransport(Application *application, SecureRtpAssociation *association,
+                              const Description &local, const Description &remote)
+{
+    if (!application || !association || !media_ || application->pad().data() != this || !session_)
         return false;
 
     const ContentKey key { application->contentName(), application->creator() };
@@ -88,124 +138,170 @@ bool Pad::bindPacketRoute(Application *application, SrtpSession *security, const
     if (!route)
         return false;
 
-    auto ingress = routing_->ingresses.value(security);
-    const bool newIngress = !ingress;
-    if (!ingress) {
-        ingress = QSharedPointer<RoutingPrivate::SecurityIngress>::create();
-        ingress->security = security;
-    }
-
-    auto candidate = ingress->routes;
-    candidate.insert(key, *route);
-    if (!ingress->router.configure(routeList(candidate)))
+    SecureRtpEndpoint endpoint;
+    endpoint.endpointId           = secureEndpointId(application);
+    endpoint.associationId        = association->associationId();
+    endpoint.media                = local.media;
+    endpoint.mid                  = route->mid;
+    endpoint.midExtensionId       = route->midExtensionId;
+    endpoint.incomingPayloadTypes = route->incomingPayloadTypes;
+    endpoint.incomingSsrcs        = route->incomingSsrcs;
+    endpoint.localSsrcs           = route->localSsrcs;
+    if (!endpoint.isValid())
         return false;
 
-    // Commit the target route before releasing an older security association so
-    // reconfiguration cannot leave the application unrouted on validation error.
-    auto oldSecurity = routing_->applicationSecurity.value(application, nullptr);
-    if (oldSecurity && oldSecurity != security)
-        unbindPacketRoute(application);
+    if (!configureSecureAssociation(association))
+        return false;
 
-    ingress->routes       = std::move(candidate);
-    ingress->applications.insert(key, application);
-    routing_->applicationSecurity.insert(application, security);
+    auto candidate = routing_->endpoints;
+    candidate.insert(application, endpoint);
+    if (!media_->configureSecureRtpEndpoints(secureEndpointList(candidate)))
+        return false;
 
-    if (newIngress) {
-        routing_->ingresses.insert(security, ingress);
-        ingress->packetConnection = connect(
-            security, &SrtpSession::packetReceived, this,
-            [this, security](const QByteArray &bytes, SrtpContext::Packet kind, quint64 epoch) {
-                auto ingress = routing_->ingresses.value(security);
-                if (!ingress || ingress->security != security)
+    const auto newId = association->associationId();
+    const auto oldId = routing_->applicationAssociations.value(application);
+    if (!oldId.isEmpty() && oldId != newId) {
+        auto oldBinding = routing_->associations.value(oldId);
+        if (oldBinding) {
+            oldBinding->applications.remove(application);
+            if (oldBinding->applications.isEmpty()) {
+                QObject::disconnect(oldBinding->packetConnection);
+                QObject::disconnect(oldBinding->readyConnection);
+                QObject::disconnect(oldBinding->invalidatedConnection);
+                QObject::disconnect(oldBinding->destroyedConnection);
+                if (oldBinding->association && oldBinding->association->isReady())
+                    media_->invalidateSecureRtpAssociation(oldId, oldBinding->association->epoch());
+                routing_->associations.remove(oldId);
+            }
+        }
+    }
+
+    routing_->endpoints               = std::move(candidate);
+    routing_->applicationAssociations.insert(application, newId);
+
+    auto binding = routing_->associations.value(newId);
+    if (!binding) {
+        binding = QSharedPointer<RoutingPrivate::AssociationBinding>::create();
+        binding->association = association;
+        routing_->associations.insert(newId, binding);
+
+        binding->packetConnection = connect(
+            association, &SecureRtpAssociation::protectedPacketReceived, this,
+            [this, association](const QByteArray &data, PacketKind kind, quint64 epoch) {
+                if (!media_ || !association || !association->isReady() || association->epoch() != epoch)
                     return;
-                auto routed = ingress->router.routeIncoming(bytes, kind);
-                if (!routed || !ingress->router.isCurrent(*routed))
-                    return;
+                SecureRtpPacket packet;
+                packet.associationId = association->associationId();
+                packet.epoch         = epoch;
+                packet.data          = data;
+                packet.kind          = kind;
+                media_->receiveProtectedRtpPacket(packet);
+            });
 
-                if (routed->delivery == BundleRouter::Delivery::Content) {
-                    auto application = ingress->applications.value(routed->content);
-                    if (application)
-                        application->receiveRoutedPacket(routed->data, routed->kind, epoch);
+        binding->readyConnection = connect(
+            association, &SecureRtpAssociation::ready, this,
+            [this, association](quint64 epoch) {
+                if (!association || association->epoch() != epoch || !configureSecureAssociation(association)) {
+                    emit mediaError({ MediaError::Code::Backend,
+                                      QStringLiteral("Secure RTP association activation failed") });
                     return;
                 }
-
-                // A compound RTCP packet spanning multiple BUNDLE contents needs
-                // one group-level media ingress. The current psimedia API has no
-                // such endpoint, so never duplicate it across per-content inputs.
-                // Negotiated RTP BUNDLE can reach this path; fail closed until the
-                // media API exposes a group-level RTCP ingress.
-                qWarning("jingle-rtp: dropping shared RTCP until group media ingress is wired");
+                const auto binding = routing_->associations.value(association->associationId());
+                if (!binding)
+                    return;
+                const auto applications = binding->applications.values();
+                for (auto application : applications)
+                    if (application)
+                        application->activateMedia();
             });
-        ingress->destroyedConnection = connect(security, &QObject::destroyed, this, [this, security]() {
-            auto ingress = routing_->ingresses.take(security);
-            if (!ingress)
+
+        binding->invalidatedConnection = connect(
+            association, &SecureRtpAssociation::invalidated, this,
+            [this, association](quint64 epoch) {
+                const auto id = association ? association->associationId() : QByteArray();
+                if (media_ && !id.isEmpty())
+                    media_->invalidateSecureRtpAssociation(id, epoch);
+                const auto binding = routing_->associations.value(id);
+                if (!binding)
+                    return;
+                const auto applications = binding->applications.values();
+                for (auto application : applications) {
+                    if (application && application->state() < State::Finishing)
+                        application->remove(Reason::SecurityError,
+                                            QStringLiteral("RTP security association invalidated"));
+                }
+            });
+
+        binding->destroyedConnection = connect(association, &QObject::destroyed, this, [this, newId]() {
+            const auto binding = routing_->associations.take(newId);
+            if (!binding)
                 return;
-            for (auto application : std::as_const(ingress->applications)) {
-                if (application && routing_->applicationSecurity.value(application) == security)
-                    routing_->applicationSecurity.remove(application);
+            const auto applications = binding->applications.values();
+            for (auto application : applications) {
+                if (application && application->state() < State::Finishing)
+                    application->remove(Reason::SecurityError,
+                                        QStringLiteral("RTP security association destroyed"));
             }
         });
+    } else if (binding->association != association) {
+        return false;
     }
+
+    binding->applications.insert(application);
     return true;
 }
 
-void Pad::unbindPacketRoute(Application *application)
+void Pad::unbindSecureTransport(Application *application)
 {
-    if (!application)
-        return;
-    auto security = routing_->applicationSecurity.take(application);
-    if (!security)
-        return;
-    auto ingress = routing_->ingresses.value(security);
-    if (!ingress)
+    if (!application || !routing_->endpoints.contains(application))
         return;
 
-    const ContentKey key { application->contentName(), application->creator() };
-    auto candidate = ingress->routes;
-    candidate.remove(key);
-    ingress->applications.remove(key);
-
-    if (candidate.isEmpty()) {
-        QObject::disconnect(ingress->packetConnection);
-        QObject::disconnect(ingress->destroyedConnection);
-        routing_->ingresses.remove(security);
-        return;
+    auto candidate = routing_->endpoints;
+    candidate.remove(application);
+    if (media_ && !media_->configureSecureRtpEndpoints(secureEndpointList(candidate))) {
+        emit mediaError({ MediaError::Code::Backend,
+                          QStringLiteral("Secure RTP route teardown failed") });
     }
+    routing_->endpoints = std::move(candidate);
 
-    if (!ingress->router.configure(routeList(candidate))) {
-        // Removing a route from a previously valid table cannot introduce a
-        // collision. Fail closed if that invariant is ever violated.
-        ingress->router.reset();
-        QObject::disconnect(ingress->packetConnection);
-        QObject::disconnect(ingress->destroyedConnection);
-        for (auto survivor : std::as_const(ingress->applications)) {
-            if (survivor && routing_->applicationSecurity.value(survivor) == security)
-                routing_->applicationSecurity.remove(survivor);
-        }
-        routing_->ingresses.remove(security);
+    const auto id = routing_->applicationAssociations.take(application);
+    auto binding = routing_->associations.value(id);
+    if (!binding)
         return;
-    }
-    ingress->routes = std::move(candidate);
+
+    binding->applications.remove(application);
+    if (!binding->applications.isEmpty())
+        return;
+
+    QObject::disconnect(binding->packetConnection);
+    QObject::disconnect(binding->readyConnection);
+    QObject::disconnect(binding->invalidatedConnection);
+    QObject::disconnect(binding->destroyedConnection);
+    if (media_ && binding->association && binding->association->isReady())
+        media_->invalidateSecureRtpAssociation(id, binding->association->epoch());
+    routing_->associations.remove(id);
 }
 
-bool Pad::registerOutgoingRtp(Application *application, const QByteArray &packet)
+bool Pad::sendProtectedPacket(const SecureRtpPacket &packet)
 {
-    if (!application || packet.size() < 12)
-        return false;
-    const auto *bytes = reinterpret_cast<const uchar *>(packet.constData());
-    if ((bytes[0] >> 6) != 2)
-        return false;
-    const quint32 ssrc = (quint32(bytes[8]) << 24) | (quint32(bytes[9]) << 16) | (quint32(bytes[10]) << 8)
-        | quint32(bytes[11]);
-    if (!ssrc)
+    const auto binding = routing_->associations.value(packet.associationId);
+    if (!binding || !binding->association || !binding->association->isReady()
+        || binding->association->epoch() != packet.epoch)
         return false;
 
-    auto security = routing_->applicationSecurity.value(application, nullptr);
-    auto ingress  = security ? routing_->ingresses.value(security) : QSharedPointer<RoutingPrivate::SecurityIngress>();
-    if (!ingress)
-        return false;
-    return ingress->router.registerOutgoingSsrc(ContentKey { application->contentName(), application->creator() }, ssrc);
+    const auto applications = binding->applications.values();
+    for (auto application : applications) {
+        if (!application || application->state() < State::Connecting || application->state() >= State::Finishing)
+            continue;
+        auto packets = dynamic_cast<PacketTransport *>(application->_transport.data());
+        if (!packets || packets->rtpAssociation() != binding->association)
+            continue;
+        if (packets->sendProtectedRtpPacket(packet.data, packet.kind, packet.epoch))
+            return true;
+    }
+    return false;
 }
+
 bool                Pad::incomingSessionInfo(const QDomElement &xml)
 {
     if (!session_ || session_->state() >= State::Finishing)
