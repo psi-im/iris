@@ -45,6 +45,11 @@ SecureRtpAssociation::SecureRtpAssociation(XMPP::Dtls *dtls, QByteArray associat
     activate(); // Supports attaching after the verified handshake completed.
 }
 
+SecureRtpAssociation::~SecureRtpAssociation()
+{
+    close();
+}
+
 bool SecureRtpAssociation::isReady() const
 {
     return active_ && dtls_ && material_.isValid()
