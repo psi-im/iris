@@ -151,8 +151,12 @@ runs:
         CMAKE
         cat > consumer/consumer.cpp <<'CPP'
         #include <iris/jingle-ft.h>
+        #include <iris/jingle-pub.h>
         #include <iris/jid/jid.h>
         #include <iris/tcpportreserver.h>
+        #include <iris/xmpp.h>
+        #include <iris/xmpp_features.h>
+        #include <iris/xmpp_file-sharing.h>
         #include <iris/xmpp_omemo.h>
         #include <iris/xmpp_task.h>
 
@@ -166,9 +170,19 @@ runs:
         {
             XMPP::Jid jid(QStringLiteral("ci@example.org"));
             XMPP::TcpPortReserver reserver;
+            XMPP::AdvancedConnector connector;
+            XMPP::Jingle::JinglePub publication;
+            XMPP::StatelessFileSharing::FileSharing sharing;
+            XMPP::Features features;
+            features.addFeature(QStringLiteral("urn:example:iris-consumer"));
             const bool publicApiAvailable = XMPP::Task::staticMetaObject.className()[0] != '\0'
+                && XMPP::Connector::staticMetaObject.className()[0] != '\0'
                 && reserver.scope(QStringLiteral("ci")) == nullptr
-                && !XMPP::Jingle::FileTransfer::NS.isEmpty();
+                && connector.errorCode() == 0
+                && !XMPP::Jingle::FileTransfer::NS.isEmpty()
+                && !publication.isValid()
+                && !sharing.isValid()
+                && features.test(QStringLiteral("urn:example:iris-consumer"));
             return jid.isValid() && !XMPP::OmemoEncryption::methodId().isEmpty() && publicApiAvailable ? 0 : 1;
         }
         CPP

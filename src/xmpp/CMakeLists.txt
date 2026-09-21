@@ -19,9 +19,12 @@ else()
     add_library(iris)
 endif()
 
+# Iris installs a broad legacy public header surface that is not yet fully
+# annotated with IRIS_EXPORT. Keep default symbol visibility for the shared
+# XMPP library until that export coverage is complete; hiding unannotated
+# symbols makes installed SDK consumers link successfully against headers but
+# fail at final link time.
 set_target_properties(iris PROPERTIES
-    CXX_VISIBILITY_PRESET hidden
-    VISIBILITY_INLINES_HIDDEN YES
     OUTPUT_NAME "${IRIS_LIB_NAME}"
     VERSION "${IRIS_LIB_VERSION_STRING}"
     SOVERSION "${IRIS_LIB_VERSION_MAJOR}"
