@@ -69,8 +69,8 @@ public:
 
 signals:
     void protectedPacketReceived(const QByteArray &, XMPP::Jingle::RTP::PacketKind, quint64 epoch);
-    void ready();
-    void invalidated();
+    void ready(quint64 epoch);
+    void invalidated(quint64 epoch);
 
 private:
     void activate();
