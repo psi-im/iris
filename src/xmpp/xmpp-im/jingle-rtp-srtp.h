@@ -37,10 +37,10 @@ struct IRIS_EXPORT SecureRtpKeyingMaterial {
     void clear()
     {
         profile.clear();
-        localMasterKey  = {};
-        localMasterSalt = {};
-        remoteMasterKey = {};
-        remoteMasterSalt = {};
+        localMasterKey   = QCA::SecureArray();
+        localMasterSalt  = QCA::SecureArray();
+        remoteMasterKey  = QCA::SecureArray();
+        remoteMasterSalt = QCA::SecureArray();
     }
 };
 
