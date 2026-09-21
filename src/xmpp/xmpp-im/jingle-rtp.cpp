@@ -4,9 +4,7 @@
 #include "jingle-nstransportslist.h"
 #include "jingle-rtp-router_p.h"
 #include "jingle-session.h"
-#include "xmpp_message.h"
 #include <QDomDocument>
-#include <QDebug>
 #include <QUuid>
 #include <algorithm>
 
@@ -43,8 +41,6 @@ public:
         QMap<ContentKey, QPointer<Application>>       applications;
         QMetaObject::Connection                       packetConnection;
         QMetaObject::Connection                       destroyedConnection;
-        bool                                          loggedRouteFailure = false;
-        bool                                          loggedRouteSuccess = false;
     };
 
     QHash<SrtpSession *, QSharedPointer<SecurityIngress>> ingresses;
@@ -123,25 +119,8 @@ bool Pad::bindPacketRoute(Application *application, SrtpSession *security, const
                 if (!ingress || ingress->security != security)
                     return;
                 auto routed = ingress->router.routeIncoming(bytes, kind);
-                if (!routed) {
-                    if (!ingress->loggedRouteFailure) {
-                        ingress->loggedRouteFailure = true;
-                        qWarning().noquote() << "RTP ingress: router rejected packet"
-                                             << "kind=" << (kind == SrtpContext::Packet::Rtp ? "RTP" : "RTCP")
-                                             << "error=" << int(ingress->router.lastError())
-                                             << "bytes=" << bytes.size();
-                    }
+                if (!routed || !ingress->router.isCurrent(*routed))
                     return;
-                }
-                if (!ingress->router.isCurrent(*routed))
-                    return;
-                if (!ingress->loggedRouteSuccess) {
-                    ingress->loggedRouteSuccess = true;
-                    qInfo().noquote() << "RTP ingress: routed authenticated packet"
-                                      << "kind=" << (kind == SrtpContext::Packet::Rtp ? "RTP" : "RTCP")
-                                      << "content=" << routed->content.first
-                                      << "bytes=" << routed->data.size();
-                }
 
                 if (routed->delivery == BundleRouter::Delivery::Content) {
                     auto application = ingress->applications.value(routed->content);
@@ -661,16 +640,6 @@ void Application::receiveRoutedPacket(const QByteArray &bytes, SrtpContext::Pack
     if (kind == SrtpContext::Packet::Rtp
         && (!allowsRtp(false) || bytes.size() < 12 || !negotiatedPayloads_.contains(quint8(bytes[1]) & 0x7f)))
         return;
-    if (!loggedIncomingPacket_) {
-        loggedIncomingPacket_ = true;
-        qInfo().noquote() << "RTP ingress: delivering packet to media endpoint"
-                          << "media=" << media_
-                          << "kind=" << (kind == SrtpContext::Packet::Rtp ? "RTP" : "RTCP")
-                          << "pt=" << (kind == SrtpContext::Packet::Rtp && bytes.size() >= 2
-                                          ? int(quint8(bytes[1]) & 0x7f)
-                                          : -1)
-                          << "bytes=" << bytes.size();
-    }
     endpoint_->receivePacket(bytes, kind);
 }
 void Application::remove(Reason::Condition condition, const QString &text)
@@ -804,46 +773,20 @@ void Manager::setJingleManager(XMPP::Jingle::Manager *manager)
             if (initiation.action() != MessageInitiation::Action::Propose)
                 return;
 
-            qInfo().noquote() << "RTP JMI: proposal id=" << initiation.id()
-                               << "from=" << message.from().full()
-                               << "descriptions=" << initiation.descriptions().size();
-
             MediaSet media;
             for (const auto &description : initiation.descriptions()) {
-                if (description.applicationNamespace != Description::ns()) {
-                    qInfo().noquote() << "RTP JMI: skip mixed proposal namespace="
-                                       << description.applicationNamespace;
+                if (description.applicationNamespace != Description::ns() || !description.isSupported()
+                    || description.data.type() != typeid(Proposal))
                     return;
-                }
-                if (!description.isSupported()) {
-                    qWarning().noquote() << "RTP JMI: RTP description was not parsed id=" << initiation.id();
-                    return;
-                }
-                if (description.data.type() != typeid(Proposal)) {
-                    qWarning().noquote() << "RTP JMI: unexpected proposal payload type id=" << initiation.id();
-                    return;
-                }
 
                 const auto &proposal = std::any_cast<const Proposal &>(description.data);
-                if (!proposal.isValid()) {
-                    qWarning().noquote() << "RTP JMI: invalid RTP media id=" << initiation.id();
+                if (!proposal.isValid() || media.testFlag(proposal.media))
                     return;
-                }
-                if (media.testFlag(proposal.media)) {
-                    qWarning().noquote() << "RTP JMI: duplicate RTP media id=" << initiation.id();
-                    return;
-                }
                 media |= proposal.media;
             }
 
-            if (media == MediaSet()) {
-                qWarning().noquote() << "RTP JMI: empty RTP proposal id=" << initiation.id();
-                return;
-            }
-
-            qInfo().noquote() << "RTP JMI: emit typed proposal id=" << initiation.id()
-                               << "media=" << static_cast<int>(media);
-            emit incomingProposal(message, initiation.id(), media);
+            if (media != MediaSet())
+                emit incomingProposal(message, initiation.id(), media);
         });
 }
 void Manager::setMediaProvider(std::shared_ptr<MediaProvider> provider) { provider_ = std::move(provider); }

@@ -257,11 +257,10 @@ private:
     QString                         media_;
     std::optional<Stanza::Error>    error_;
     Reason                          reason_;
-    bool                            configured_          = false;
-    bool                            attached_            = false;
-    bool                            stopping_            = false;
-    bool                            preparationFailed_   = false;
-    bool                            loggedIncomingPacket_ = false;
+    bool                            configured_        = false;
+    bool                            attached_          = false;
+    bool                            stopping_          = false;
+    bool                            preparationFailed_ = false;
     QPointer<SrtpSession>           security_;
     QSet<int>                       negotiatedPayloads_;
 };

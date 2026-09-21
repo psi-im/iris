@@ -95,8 +95,6 @@ private:
     QPointer<XMPP::Dtls> dtls_;
     SrtpContext          context_;
     quint64              epoch_ = 0;
-    bool                 loggedIncomingMedia_ = false;
-    bool                 loggedIncomingFailure_ = false;
 };
 }
 Q_DECLARE_METATYPE(XMPP::Jingle::RTP::SrtpContext::Packet)
