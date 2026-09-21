@@ -291,6 +291,10 @@ private:
     void                            applied(MediaOperation::Id, MediaError);
     void                            failPreparation(Reason::Condition, const QString &);
     void                            activateMedia();
+    // Direction/consent policy query. This is deliberately independent of
+    // packet parsing; media adapters use it to decide whether capture/transmit
+    // or receive paths may be active.
+    bool                            allowsRtp(bool sending) const;
     Negotiation                     negotiation_;
     std::optional<Negotiation>      beforeAnswer_;
     std::optional<Description>      pendingRemoteOffer_;
