@@ -4,6 +4,8 @@
 
 #include <iris/dtls.h>
 
+#include <utility>
+
 namespace XMPP::Jingle::RTP {
 
 DatagramKind classifyDatagram(const QByteArray &data)
@@ -81,7 +83,7 @@ void SecureRtpAssociation::activate()
     ++epoch_;
     if (!epoch_)
         ++epoch_;
-    emit ready();
+    emit ready(epoch_);
 #endif
 }
 
@@ -89,12 +91,13 @@ void SecureRtpAssociation::invalidate()
 {
     if (!active_ && !material_.isValid())
         return;
+    const quint64 invalidatedEpoch = epoch_;
     active_ = false;
     material_.clear();
     ++epoch_;
     if (!epoch_)
         ++epoch_;
-    emit invalidated();
+    emit invalidated(invalidatedEpoch);
 }
 
 bool SecureRtpAssociation::receiveMuxed(QByteArray bytes)
