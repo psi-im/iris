@@ -140,7 +140,6 @@ set(XMPP_IM_HEADERS
 )
 
 set(XMPP_HEADERS_PRIVATE
-    xmpp-im/jingle-rtp-router_p.h
     sasl/digestmd5proplist.h
     sasl/digestmd5response.h
     sasl/plainmessage.h
@@ -216,7 +215,6 @@ target_sources(iris PRIVATE
     xmpp-im/jingle-rtp-media.cpp
     xmpp-im/jingle-rtp-info.cpp
     xmpp-im/jingle-rtp-srtp.cpp
-    xmpp-im/jingle-rtp-router_p.cpp
     xmpp-im/jingle-ice-udp.h
     xmpp-im/jingle-ice-udp.cpp
     xmpp-im/jingle-ice.cpp
