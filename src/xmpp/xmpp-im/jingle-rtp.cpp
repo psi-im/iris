@@ -365,13 +365,12 @@ void Application::stopMedia()
     applyOperation_.reset();
     pendingRemoteOffer_.reset();
     if (auto pad = _pad.staticCast<Pad>())
-        pad->unbindPacketRoute(this);
-    if (security_)
-        security_->disconnect(this);
-    security_.clear();
-    attached_   = false;
-    configured_ = false;
-    negotiatedPayloads_.clear();
+        pad->unbindSecureTransport(this);
+    if (association_)
+        association_->disconnect(this);
+    association_.clear();
+    secureBound_ = false;
+    configured_  = false;
     if (endpoint_)
         endpoint_->stop();
 }
@@ -428,7 +427,7 @@ Application::SetDescError Application::setRemoteOffer(const QDomElement &xml)
     auto endpoint = pad->mediaSession()->createEndpoint(_contentName, offer->media);
     if (!endpoint)
         return IncompatibleParameters;
-    if (endpoint->supportsPacketIo() && !offer->rtcpMux) {
+    if (!offer->rtcpMux) {
         endpoint->stop();
         return IncompatibleParameters;
     }
@@ -450,7 +449,7 @@ Application::SetDescError Application::setRemoteAnswer(const QDomElement &xml)
     auto answer = Description::fromXml(xml);
     if (!answer)
         return Unparsed;
-    if (endpoint_->supportsPacketIo() && !answer->rtcpMux)
+    if (!answer->rtcpMux)
         return IncompatibleParameters;
     auto candidate = negotiation_;
     auto result    = candidate.setRemoteAnswer(*answer, *endpoint_);
@@ -528,7 +527,7 @@ void Application::prepared(MediaOperation::Id id, std::optional<Description> des
                         error.text.isEmpty() ? QStringLiteral("Media preparation failed") : error.text);
         return;
     }
-    if (description->media != media_ || (endpoint_->supportsPacketIo() && !description->rtcpMux)) {
+    if (description->media != media_ || !description->rtcpMux) {
         failPreparation(Reason::FailedApplication, QStringLiteral("Media backend returned incompatible parameters"));
         return;
     }
@@ -575,51 +574,53 @@ void Application::prepareTransport()
 {
     if (!_transport)
         return;
-    if (!endpoint_->supportsPacketIo()) {
-        _transport->prepare();
-        return;
-    }
-    if (security_)
-        security_->disconnect(this);
-    security_.clear();
-    const auto local     = negotiation_.localDescription();
-    const auto remote    = negotiation_.remoteDescription();
+
+    if (association_)
+        association_->disconnect(this);
+    association_.clear();
+
+    const auto local  = negotiation_.localDescription();
+    const auto remote = negotiation_.remoteDescription();
+    auto       pad    = _pad.staticCast<Pad>();
     auto       preparing = _transport;
     auto       packets   = dynamic_cast<PacketTransport *>(preparing.data());
-    if (!local || !local->rtcpMux || (remote && !remote->rtcpMux) || !packets || !packets->enableRtpMux()) {
+    auto       manager   = pad ? dynamic_cast<Manager *>(pad->manager()) : nullptr;
+    const auto profiles  = manager ? manager->secureRtpProfiles() : QStringList {};
+
+    if (!local || !local->rtcpMux || (remote && !remote->rtcpMux) || profiles.isEmpty() || !packets
+        || !packets->enableRtpMux(profiles)) {
         remove(Reason::UnsupportedTransports, QStringLiteral("Authenticated RTP mux transport required"));
         return;
     }
+
     QPointer<Application> guard(this);
     preparing->prepare();
     if (!guard || _state >= State::Finishing || _transport != preparing)
         return;
-    security_ = packets->rtpSession();
-    if (!security_) {
-        remove(Reason::SecurityError, QStringLiteral("RTP security binding unavailable"));
+
+    association_ = packets->rtpAssociation();
+    if (!association_) {
+        remove(Reason::SecurityError, QStringLiteral("RTP security association unavailable"));
         return;
     }
 
-    // A transport-replace can install the successor while the superseded
-    // association is still alive (make-before-break). Its DTLS/SRTP callbacks
-    // may therefore arrive before the queued prepareTransport() for the new
-    // transport has disconnected security_. Bind every callback to the transport
-    // incarnation that produced this security session so stale readiness or
-    // teardown can never mutate the replacement application.
     const QPointer<Transport> securityTransport(preparing.data());
-    connect(security_, &SrtpSession::ready, this, [this, securityTransport]() {
-        if (securityTransport && _transport.data() == securityTransport)
-            activateMedia();
-    });
-    connect(security_, &SrtpSession::invalidated, this, [this, securityTransport]() {
-        if (securityTransport && _transport.data() == securityTransport)
-            remove(Reason::SecurityError, QStringLiteral("RTP security association invalidated"));
-    });
-    connect(security_, &QObject::destroyed, this, [this, securityTransport]() {
+    connect(association_, &SecureRtpAssociation::ready, this,
+            [this, securityTransport](quint64) {
+                if (securityTransport && _transport.data() == securityTransport)
+                    activateMedia();
+            });
+    connect(association_, &SecureRtpAssociation::invalidated, this,
+            [this, securityTransport](quint64) {
+                if (securityTransport && _transport.data() == securityTransport)
+                    remove(Reason::SecurityError, QStringLiteral("RTP security association invalidated"));
+            });
+    connect(association_, &QObject::destroyed, this, [this, securityTransport]() {
         if (securityTransport && _transport.data() == securityTransport)
             remove(Reason::SecurityError, QStringLiteral("RTP security association destroyed"));
     });
 }
+
 void Application::start()
 {
     if (!endpoint_ || !_transport || configured_ || applyOperation_ || _state >= State::Finishing
@@ -655,24 +656,22 @@ void Application::applied(MediaOperation::Id id, MediaError error)
                error.text.isEmpty() ? QStringLiteral("Media configuration failed") : error.text);
         return;
     }
+
     const auto local  = negotiation_.localDescription();
     const auto remote = negotiation_.remoteDescription();
-    if (!local || !remote) {
-        remove(Reason::FailedApplication, QStringLiteral("Negotiated RTP description disappeared"));
+    auto       pad    = _pad.staticCast<Pad>();
+    if (!local || !remote || !pad || !association_) {
+        remove(Reason::FailedApplication, QStringLiteral("Negotiated secure RTP state disappeared"));
         return;
     }
+
     configured_ = true;
-    // Current negotiation retains offered PT identifiers, so the answer is the
-    // accepted payload set in both directions, independent of offer preferences.
-    for (const auto &payload : (isLocal() ? remote : local)->payloads)
-        negotiatedPayloads_.insert(payload.id);
-    if (endpoint_->supportsPacketIo()) {
-        auto pad = _pad.staticCast<Pad>();
-        if (!security_ || !pad || !pad->bindPacketRoute(this, security_, *local, *remote)) {
-            remove(Reason::FailedApplication, QStringLiteral("Authenticated RTP route configuration failed"));
-            return;
-        }
+    if (!pad->bindSecureTransport(this, association_, *local, *remote)) {
+        remove(Reason::FailedApplication, QStringLiteral("Secure RTP route configuration failed"));
+        return;
     }
+    secureBound_ = true;
+
     beforeAnswer_.reset();
     auto                  transport = _transport;
     QPointer<Application> guard(this);
@@ -683,6 +682,7 @@ void Application::applied(MediaOperation::Id id, MediaError error)
     if (guard)
         activateMedia();
 }
+
 bool Application::allowsRtp(bool sending) const
 {
     if (sending && !_pad.staticCast<Pad>()->directionController()->allowsLocalSending(this))
@@ -693,51 +693,18 @@ bool Application::allowsRtp(bool sending) const
 }
 void Application::activateMedia()
 {
-    if (!configured_ || attached_ || _state != State::Connecting || !security_ || !security_->isReady())
+    if (!configured_ || !secureBound_ || _state != State::Connecting || !association_ || !association_->isReady())
         return;
-    const auto            epoch = security_->epoch();
-    QPointer<Application> guard(this);
-    const bool            ok = endpoint_->attachPacketIo([guard, epoch](QByteArray data, SrtpContext::Packet kind) {
-        return guard && guard->sendPacket(std::move(data), kind, epoch);
-    });
-    if (!guard)
-        return;
-    if (!ok) {
-        remove(Reason::FailedApplication, QStringLiteral("Media packet attachment failed"));
+
+    auto pad = _pad.staticCast<Pad>();
+    if (!pad || !pad->configureSecureAssociation(association_)) {
+        remove(Reason::FailedApplication, QStringLiteral("Secure RTP association activation failed"));
         return;
     }
-    if (_state != State::Connecting || !security_ || !security_->isReady() || security_->epoch() != epoch)
-        return;
-    attached_ = true;
+
     setState(State::Active);
 }
-bool Application::sendPacket(QByteArray data, SrtpContext::Packet kind, quint64 epoch)
-{
-    if (_state != State::Active || !attached_ || !security_ || !security_->isReady() || epoch != security_->epoch())
-        return false;
-    if (kind == SrtpContext::Packet::Rtp) {
-        if (!allowsRtp(true) || data.size() < 12 || !negotiatedPayloads_.contains(quint8(data[1]) & 0x7f))
-            return false;
-        auto pad = _pad.staticCast<Pad>();
-        if (!pad || !pad->registerOutgoingRtp(this, data)) {
-            remove(Reason::FailedApplication, QStringLiteral("Outgoing RTP source routing conflict"));
-            return false;
-        }
-    }
-    auto packets = dynamic_cast<PacketTransport *>(_transport.data());
-    return packets && packets->sendRtpPacket(std::move(data), kind, epoch);
-}
 
-void Application::receiveRoutedPacket(const QByteArray &bytes, SrtpContext::Packet kind, quint64 epoch)
-{
-    if (_state != State::Active || !attached_ || !endpoint_ || !security_ || !security_->isReady()
-        || epoch != security_->epoch())
-        return;
-    if (kind == SrtpContext::Packet::Rtp
-        && (!allowsRtp(false) || bytes.size() < 12 || !negotiatedPayloads_.contains(quint8(bytes[1]) & 0x7f)))
-        return;
-    endpoint_->receivePacket(bytes, kind);
-}
 void Application::remove(Reason::Condition condition, const QString &text)
 {
     if (_state >= State::Finishing || stopping_)
@@ -819,9 +786,26 @@ QDomElement Manager::serializeProposal(const std::any &data, QDomDocument *docum
     return element;
 }
 
+QStringList Manager::secureRtpProfiles() const
+{
+    if (!provider_ || !Dtls::isSupported())
+        return {};
+
+    auto       result       = provider_->secureRtpProfiles();
+    const auto dtlsProfiles = Dtls::supportedSRTPProfiles();
+    for (auto it = result.begin(); it != result.end();) {
+        if (!dtlsProfiles.contains(*it))
+            it = result.erase(it);
+        else
+            ++it;
+    }
+    result.removeDuplicates();
+    return result;
+}
+
 QStringList Manager::discoFeatures() const
 {
-    if (!provider_ || !jingle_ || transports_.isEmpty() || supportedSecureRtpProfiles().isEmpty())
+    if (!provider_ || !jingle_ || transports_.isEmpty() || secureRtpProfiles().isEmpty())
         return {};
 
     const auto packetTransports = jingle_->availableTransports(
