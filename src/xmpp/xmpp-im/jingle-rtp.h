@@ -241,7 +241,7 @@ private:
     void unbindSecureTransport(Application *);
     bool sendProtectedPacket(const SecureRtpPacket &);
     bool configureSecureAssociation(SecureRtpAssociation *);
-    bool refreshSecureEndpoints();
+    bool ensureSecurePacketIo();
 
     QPointer<Manager> manager_;
     QPointer<Session> session_;
@@ -250,7 +250,8 @@ private:
     std::unique_ptr<MediaSession>  media_;
     QStringList                    transports_;
     quint64                        nextName_   = 0;
-    DirectionController           *directions_ = nullptr; // QObject child
+    DirectionController            *directions_ = nullptr; // QObject child
+    bool                            securePacketIoAttached_ = false;
     std::unique_ptr<RoutingPrivate> routing_;
 };
 
@@ -290,7 +291,6 @@ private:
     void                            applied(MediaOperation::Id, MediaError);
     void                            failPreparation(Reason::Condition, const QString &);
     void                            activateMedia();
-    bool                            allowsRtp(bool sending) const;
     Negotiation                     negotiation_;
     std::optional<Negotiation>      beforeAnswer_;
     std::optional<Description>      pendingRemoteOffer_;
