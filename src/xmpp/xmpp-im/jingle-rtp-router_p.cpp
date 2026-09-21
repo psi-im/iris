@@ -493,7 +493,7 @@ bool BundleRouter::payloadAllowed(int routeIndex, quint8 payloadType) const
 }
 
 std::optional<BundleRouter::RoutedPacket> BundleRouter::routed(int routeIndex, const QByteArray &packet,
-                                                               SrtpContext::Packet kind)
+                                                               PacketKind kind)
 {
     if (routeIndex < 0 || routeIndex >= routes_.size()) {
         lastError_ = Error::UnknownRoute;
@@ -523,7 +523,7 @@ std::optional<BundleRouter::RoutedPacket> BundleRouter::routedSharedRtcp(const Q
     RoutedPacket result;
     result.delivery = Delivery::SharedRtcp;
     result.data     = packet;
-    result.kind     = SrtpContext::Packet::Rtcp;
+    result.kind     = PacketKind::Rtcp;
     result.revision = revision_;
     for (int routeIndex : ordered) {
         if (routeIndex < 0 || routeIndex >= routes_.size()) {
@@ -537,9 +537,9 @@ std::optional<BundleRouter::RoutedPacket> BundleRouter::routedSharedRtcp(const Q
 }
 
 std::optional<BundleRouter::RoutedPacket> BundleRouter::routeIncoming(const QByteArray   &packet,
-                                                                      SrtpContext::Packet kind)
+                                                                      PacketKind kind)
 {
-    if (kind == SrtpContext::Packet::Rtp) {
+    if (kind == PacketKind::Rtp) {
         auto parsed = parseRtp(packet);
         if (!parsed) {
             lastError_ = Error::MalformedPacket;
