@@ -737,6 +737,8 @@ namespace XMPP { namespace Jingle { namespace ICE {
         if (ice)
             ice->disconnect(this);
         for (const auto &c : components) {
+            if (c.secureRtp)
+                c.secureRtp->disconnect();
             if (c.dtls)
                 c.dtls->disconnect(this);
 #ifdef JINGLE_SCTP
