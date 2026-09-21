@@ -30,6 +30,23 @@ Media mediaFromName(const QString &name)
         return Media::Video;
     return Media::None;
 }
+
+QStringList commonSecureRtpProfiles(const MediaProvider *provider)
+{
+    if (!provider || !Dtls::isSupported())
+        return {};
+
+    auto       result       = provider->secureRtpProfiles();
+    const auto dtlsProfiles = Dtls::supportedSRTPProfiles();
+    for (auto it = result.begin(); it != result.end();) {
+        if (!dtlsProfiles.contains(*it))
+            it = result.erase(it);
+        else
+            ++it;
+    }
+    result.removeDuplicates();
+    return result;
+}
 } // namespace
 class Pad::RoutingPrivate {
 public:
@@ -170,6 +187,11 @@ bool Pad::ensureSecurePacketIo()
         return sendProtectedPacket(packet);
     });
     return securePacketIoAttached_;
+}
+
+QStringList Pad::secureRtpProfiles() const
+{
+    return commonSecureRtpProfiles(provider_.get());
 }
 
 bool Pad::bindSecureTransport(Application *application, SecureRtpAssociation *association,
@@ -614,11 +636,10 @@ void Application::prepareTransport()
 
     const auto local  = negotiation_.localDescription();
     const auto remote = negotiation_.remoteDescription();
-    auto       pad    = _pad.staticCast<Pad>();
+    auto       pad       = _pad.staticCast<Pad>();
     auto       preparing = _transport;
     auto       packets   = dynamic_cast<PacketTransport *>(preparing.data());
-    auto       manager   = pad ? dynamic_cast<Manager *>(pad->manager()) : nullptr;
-    const auto profiles  = manager ? manager->secureRtpProfiles() : QStringList {};
+    const auto profiles  = pad ? pad->secureRtpProfiles() : QStringList {};
 
     if (!local || !local->rtcpMux || (remote && !remote->rtcpMux) || profiles.isEmpty() || !packets
         || !packets->enableRtpMux(profiles)) {
@@ -819,19 +840,7 @@ QDomElement Manager::serializeProposal(const std::any &data, QDomDocument *docum
 
 QStringList Manager::secureRtpProfiles() const
 {
-    if (!provider_ || !Dtls::isSupported())
-        return {};
-
-    auto       result       = provider_->secureRtpProfiles();
-    const auto dtlsProfiles = Dtls::supportedSRTPProfiles();
-    for (auto it = result.begin(); it != result.end();) {
-        if (!dtlsProfiles.contains(*it))
-            it = result.erase(it);
-        else
-            ++it;
-    }
-    result.removeDuplicates();
-    return result;
+    return commonSecureRtpProfiles(provider_.get());
 }
 
 QStringList Manager::discoFeatures() const
