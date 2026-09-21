@@ -41,7 +41,7 @@ public:
         ContentKey          content;
         QList<ContentKey>   relatedContents;
         QByteArray          data;
-        SrtpContext::Packet kind     = SrtpContext::Packet::Rtp;
+        PacketKind kind     = PacketKind::Rtp;
         quint64             revision = 0;
     };
 
@@ -67,7 +67,7 @@ public:
     bool registerOutgoingSsrc(const ContentKey &content, quint32 ssrc);
     bool unregisterOutgoingSsrc(const ContentKey &content, quint32 ssrc);
 
-    std::optional<RoutedPacket> routeIncoming(const QByteArray &packet, SrtpContext::Packet kind);
+    std::optional<RoutedPacket> routeIncoming(const QByteArray &packet, PacketKind kind);
     bool                        isCurrent(const RoutedPacket &packet) const;
 
     quint64 revision() const { return revision_; }
@@ -90,7 +90,7 @@ private:
     bool                        collectRtcpRoutes(const QByteArray &packet, QSet<int> &routes,
                                                   bool &unresolvedTarget) const;
     bool                        payloadAllowed(int routeIndex, quint8 payloadType) const;
-    std::optional<RoutedPacket> routed(int routeIndex, const QByteArray &packet, SrtpContext::Packet kind);
+    std::optional<RoutedPacket> routed(int routeIndex, const QByteArray &packet, PacketKind kind);
     std::optional<RoutedPacket> routedSharedRtcp(const QSet<int> &routeIndexes, const QByteArray &packet);
     void                        advanceRevision();
 
