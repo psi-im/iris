@@ -14,6 +14,8 @@
 #include <memory>
 #include <optional>
 
+Q_MOC_INCLUDE(<iris/xmpp-im/xmpp_message.h>)
+
 namespace XMPP { class Message; }
 
 namespace XMPP::Jingle::RTP {

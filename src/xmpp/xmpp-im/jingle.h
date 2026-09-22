@@ -36,6 +36,8 @@
 class QDomDocument;
 class QDomElement;
 
+Q_MOC_INCLUDE(<iris/xmpp-im/xmpp_message.h>)
+
 namespace XMPP {
 class Client;
 class Message;

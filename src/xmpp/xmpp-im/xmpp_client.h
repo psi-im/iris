@@ -35,6 +35,8 @@ class QDomDocument;
 class QDomElement;
 class QNetworkAccessManager;
 
+Q_MOC_INCLUDE(<iris/xmpp-im/xmpp_message.h>)
+
 namespace XMPP {
 class BSConnection;
 class CapsManager;
