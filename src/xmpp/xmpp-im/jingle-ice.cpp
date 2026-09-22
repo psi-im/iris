@@ -895,6 +895,17 @@ namespace XMPP { namespace Jingle { namespace ICE {
                 network->runtime->pad = pad.data();
             if (network->runtime->creator == Origin::None)
                 network->runtime->creator = q->creator();
+
+            // A responder may receive and validate all per-content ICE/DTLS
+            // signaling before it decides whether to accept an offered BUNDLE.
+            // In that case handleRemoteUpdate() intentionally keeps the parsed
+            // state on the logical Transport and allocates no physical network.
+            // Once the local grouping decision creates the shared association,
+            // seed its association-owned runtime immediately so prepare() can
+            // configure DTLS from the already received fingerprint.
+            if (remoteState && !network->runtime->mergeRemoteIce(*remoteState))
+                return false;
+
             if (!network->runtime->hasParticipant(q)) {
                 QPointer<Transport> guard(q);
                 IceConnection::Runtime::Participant participant;
