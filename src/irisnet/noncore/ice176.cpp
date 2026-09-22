@@ -1118,12 +1118,12 @@ private:
         if (readyToSendMedia) {
             return;
         }
-        // RFC 8445 allows application data on valid pairs before final
-        // selection, but Section 10 requires RFC 8445 compliance to be
-        // signaled to the peer with the ice2 option. Keep the provisional
-        // valid-pair path disabled unless both agents advertised that mode.
-        const bool allowNotNominatedData
-            = (localFeatures & NotNominatedData) && (remoteFeatures & NotNominatedData);
+        // RFC 8445 Section 12.1 allows application data on a valid
+        // pair before final selection. Section 10 requires an RFC 8445
+        // agent to signal its compliance to the peer using ice2, so the
+        // using protocol must only enable NotNominatedData when it has done
+        // that signaling. The peer need not advertise ice2 in return.
+        const bool allowNotNominatedData = localFeatures & NotNominatedData;
         if (!std::all_of(components.begin(), components.end(),
                          [&](auto &c) { return (allowNotNominatedData && c.hasValidPairs) || c.hasNominatedPairs; })) {
             return;
@@ -1677,12 +1677,7 @@ void Ice176::setComponentCount(int count)
 
 void Ice176::setLocalFeatures(const Features &features) { d->localFeatures = features; }
 
-void Ice176::setRemoteFeatures(const Features &features)
-{
-    d->remoteFeatures = features;
-    if (d->state == Private::Started)
-        d->tryReadyToSendMedia();
-}
+void Ice176::setRemoteFeatures(const Features &features) { d->remoteFeatures = features; }
 
 void Ice176::start(Mode mode)
 {
