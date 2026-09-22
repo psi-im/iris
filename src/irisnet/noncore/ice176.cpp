@@ -1118,13 +1118,12 @@ private:
         if (readyToSendMedia) {
             return;
         }
-        // RFC 8445 Section 12.1 permits an agent to send application data
-        // on any valid pair before selected pairs have been produced. This is
-        // a local sending policy, not a peer-negotiated capability: the peer
-        // does not have to advertise the same policy for our valid pair to be
-        // usable. ICE usages that require nomination first can leave
-        // NotNominatedData disabled.
-        const bool allowNotNominatedData = localFeatures & NotNominatedData;
+        // RFC 8445 allows application data on valid pairs before final
+        // selection, but Section 10 requires RFC 8445 compliance to be
+        // signaled to the peer with the ice2 option. Keep the provisional
+        // valid-pair path disabled unless both agents advertised that mode.
+        const bool allowNotNominatedData
+            = (localFeatures & NotNominatedData) && (remoteFeatures & NotNominatedData);
         if (!std::all_of(components.begin(), components.end(),
                          [&](auto &c) { return (allowNotNominatedData && c.hasValidPairs) || c.hasNominatedPairs; })) {
             return;
