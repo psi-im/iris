@@ -1677,7 +1677,12 @@ void Ice176::setComponentCount(int count)
 
 void Ice176::setLocalFeatures(const Features &features) { d->localFeatures = features; }
 
-void Ice176::setRemoteFeatures(const Features &features) { d->remoteFeatures = features; }
+void Ice176::setRemoteFeatures(const Features &features)
+{
+    d->remoteFeatures = features;
+    if (d->state == Private::Started)
+        d->tryReadyToSendMedia();
+}
 
 void Ice176::start(Mode mode)
 {
