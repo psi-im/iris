@@ -20,12 +20,14 @@
 #include "xmpp_xmlcommon.h"
 
 #include <array>
+#include <utility>
 
 #include <QtCrypto>
 #if QT_VERSION >= QT_VERSION_CHECK(5, 10, 0)
 #include <QRandomGenerator>
 #endif
 #include <QAbstractSocket>
+#include <QList>
 
 #define DTLS_DEBUG(msg, ...) qDebug("dtls: " msg, ##__VA_ARGS__)
 
@@ -107,6 +109,9 @@ public:
     QStringList srtpProfiles;
     bool        authenticated       = false;
     bool        negotiationDeferred = false;
+
+    QList<QByteArray> pendingIncomingDatagrams;
+    int               pendingIncomingBytes = 0;
 
     QAbstractSocket::SocketError lastError = QAbstractSocket::UnknownSocketError;
 
@@ -304,6 +309,13 @@ public:
             DTLS_DEBUG("[%p] starting client", q);
             tls->startClient();
         }
+
+        auto queued = std::move(pendingIncomingDatagrams);
+        pendingIncomingBytes = 0;
+        if (!queued.isEmpty())
+            DTLS_DEBUG("[%p] replay %d pre-start datagram(s)", q, int(queued.size()));
+        for (const auto &datagram : std::as_const(queued))
+            tls->writeIncoming(datagram);
     }
 
     void generateCertificate()
@@ -489,7 +501,22 @@ void Dtls::writeIncomingDatagram(const QByteArray &data)
     DTLS_DEBUG("[%p] incoming datagram bytes=%d started=%d authenticated=%d", this, int(data.size()),
                int(d->tls != nullptr), int(d->authenticated));
     if (!d->tls) {
-        DTLS_DEBUG("[%p] negotiation hasn't started yet. ignore incoming datagram", this);
+        if (data.isEmpty())
+            return;
+
+        constexpr int MaxPendingDatagrams = 16;
+        constexpr int MaxPendingBytes     = 64 * 1024;
+        if (d->pendingIncomingDatagrams.size() >= MaxPendingDatagrams
+            || d->pendingIncomingBytes + data.size() > MaxPendingBytes) {
+            DTLS_DEBUG("[%p] negotiation hasn't started yet. drop excess incoming datagram bytes=%d", this,
+                       int(data.size()));
+            return;
+        }
+
+        d->pendingIncomingDatagrams.append(data);
+        d->pendingIncomingBytes += data.size();
+        DTLS_DEBUG("[%p] negotiation hasn't started yet. queue incoming datagram bytes=%d pending=%d/%d", this,
+                   int(data.size()), int(d->pendingIncomingDatagrams.size()), d->pendingIncomingBytes);
         return;
     }
     d->tls->writeIncoming(data);
