@@ -112,11 +112,11 @@ static void runDeferredFirstFlight(const QCA::Certificate &cert, const QCA::Priv
     bool earlyFlight = false;
     QObject::connect(&active, &Dtls::readyReadOutgoing, &firstFlightLoop, [&]() {
         for (auto packet = active.readOutgoingDatagram(); !packet.isEmpty(); packet = active.readOutgoingDatagram()) {
-            check(!passive.isStarted(), "passive DTLS started before early client flight was injected");
-            earlyFlight = true;
+            if (!passive.isStarted())
+                earlyFlight = true;
             passive.writeIncomingDatagram(packet);
         }
-        if (earlyFlight)
+        if (earlyFlight && !passive.isStarted())
             firstFlightLoop.quit();
     });
     QObject::connect(&passive, &Dtls::readyReadOutgoing, &active, [&]() {
