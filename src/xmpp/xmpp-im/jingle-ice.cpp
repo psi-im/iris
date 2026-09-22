@@ -715,7 +715,11 @@ namespace XMPP { namespace Jingle { namespace ICE {
             pad->session()->manager()->client()->stunDiscoManager()->createMonitor());
 
         ice->setComponentCount(network->components.count());
-        ice->setLocalFeatures(Ice176::Trickle);
+        // RFC 8445 Section 12.1 allows data on a valid pair before final
+        // nomination/selection. This lets DTLS start as soon as connectivity
+        // is proven while writeDatagram() still switches to the selected pair
+        // once ICE nomination completes.
+        ice->setLocalFeatures(Ice176::Trickle | Ice176::NotNominatedData);
         if (!runtime->remoteCandidates.isEmpty()) {
             ice->setRemoteCredentials(runtime->remoteUfrag, runtime->remotePassword);
             ice->addRemoteCandidates(runtime->remoteCandidates);
