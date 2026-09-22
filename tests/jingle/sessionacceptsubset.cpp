@@ -395,9 +395,9 @@ int main(int argc, char **argv)
         check(stats->starts == 0, "accepted content started after incomingRemove deleted Session");
     }
 
-    // Session destruction must tolerate one Application destructor
-    // synchronously deleting a sibling that was present in the destructor's
-    // original content snapshot. A raw qDeleteAll(values()) double-frees it.
+    // contentList is a live-object registry. Application teardown must remove
+    // its raw entry before QObject::destroyed, and Session destruction must
+    // tolerate one Application destructor synchronously deleting a sibling.
     {
         auto stats = QSharedPointer<Stats>::create();
         auto session
@@ -407,10 +407,17 @@ int main(int argc, char **argv)
         QPointer<TestApplication> firstGuard(first), secondGuard(second);
         session->addContent(first);
         session->addContent(second);
+        bool firstUnregisteredAtDestroying = false;
+        QObject::connect(first, &Application::destroying, session, [&]() {
+            firstUnregisteredAtDestroying
+                = session->content(QStringLiteral("audio"), Origin::Initiator) == nullptr;
+        });
         stats->onDestroy = [second]() { delete second; };
 
         delete session;
 
+        check(firstUnregisteredAtDestroying,
+              "Application remained in contentList after teardown began");
         check(!firstGuard && !secondGuard,
               "Session destructor left content alive after reentrant sibling destruction");
     }
