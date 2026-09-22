@@ -364,7 +364,7 @@ static void exerciseMixedRtpFileTransferBundle(TcpPortReserver *reserver)
     // than transport preference ordering.
     features.removeAll(QStringLiteral("urn:xmpp:jingle:transports:s5b:1"));
     features.removeAll(QStringLiteral("urn:xmpp:jingle:transports:ibb:1"));
-    features.removeAll(J::ICE::NS_ICE_UDP);
+    features.removeAll(QStringLiteral("urn:xmpp:jingle:transports:ice-udp:1"));
     setPeerFeatures(client, peer, features);
 
     J::Session session(client.jingleManager(), peer, J::Origin::Initiator);
