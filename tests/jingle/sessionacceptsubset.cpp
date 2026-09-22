@@ -442,6 +442,29 @@ int main(int argc, char **argv)
         check(stats->removes == 1, "content-remove callback did not run exactly once");
     }
 
+    // Removing one ordinary content must not disturb a live sibling. The
+    // Session registry must drop only the removed Application and retain the
+    // surviving content as a valid live entry.
+    {
+        auto    stats = QSharedPointer<Stats>::create();
+        Session session(client.jingleManager(), Jid(QStringLiteral("peer@example.org/device")), Origin::Initiator);
+        TestApplication *audio = nullptr, *video = nullptr;
+        addInitialPair(session, stats, &audio, &video);
+        QPointer<TestApplication> audioGuard(audio), videoGuard(video);
+
+        check(session.updateFromXml(Action::ContentRemove, contentRemove(audio)),
+              "ordinary content-remove was rejected");
+        check(!audioGuard, "content-remove retained the removed application");
+        check(videoGuard && session.content(QStringLiteral("video"), Origin::Initiator) == videoGuard.data(),
+              "content-remove removed or invalidated a neighboring application");
+        check(session.content(QStringLiteral("audio"), Origin::Initiator) == nullptr,
+              "content-remove left a stale application in contentList");
+        check(stats->removes == 1 && stats->stops == 1,
+              "content-remove performed unexpected sibling cleanup");
+        check(session.state() < State::Finishing,
+              "content-remove of one sibling terminated the whole session");
+    }
+
     // Ordinary content-accept must not inherit the initial-session subset rule.
     {
         auto    stats = QSharedPointer<Stats>::create();
