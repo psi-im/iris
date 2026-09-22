@@ -1318,8 +1318,13 @@ namespace XMPP { namespace Jingle {
 
                 Application *app = contentList.value(key);
                 if (!app || !app->transport() || app->transport()->creator() != role
-                    || app->transport()->state() != State::Pending || transportNS != app->transport()->pad()->ns()) {
-                    // Ignore an out-of-order acknowledgement exactly as before.
+                    || app->transport()->state() < State::ApprovedToSend
+                    || app->transport()->state() >= State::Finishing
+                    || transportNS != app->transport()->pad()->ns()) {
+                    // Ignore an acknowledgement that cannot belong to a live,
+                    // locally proposed transport. Transport::State is not the
+                    // transport-replace IQ lifetime: ICE may remain
+                    // ApprovedToSend after the replacement IQ is acknowledged.
                     qInfo("ignore out of order transport-accept");
                     continue;
                 }
