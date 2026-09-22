@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  QCA_TAG: v3.0.7
+  QCA_TAG: v3.0.8
 
 jobs:
   qca3-srtp:
@@ -26,7 +26,7 @@ jobs:
         shell: bash
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build ccache gdb qt6-base-dev libssl-dev libusrsctp-dev libsrtp2-dev
+          sudo apt-get install -y cmake ninja-build ccache gdb qt6-base-dev libssl-dev libusrsctp-dev
 
       - name: Cache compiler objects
         uses: actions/cache/restore@v4
@@ -57,12 +57,37 @@ jobs:
             -DIRIS_SYSTEM_QCA=3 \
             -DIRIS_BUNDLED_QCA=OFF \
             -DIRIS_BUNDLED_USRSCTP=OFF \
-            -DIRIS_ENABLE_SRTP=ON \
+            -DIRIS_ENABLE_JINGLE_SCTP=ON \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build
         run: cmake --build build-jingle --parallel 4
+
+      - name: Verify root test build switch
+        shell: bash
+        run: |
+          set -euo pipefail
+          common=(
+            -G Ninja
+            -DUSE_QT6=ON
+            -DIRIS_ENABLE_OMEMO=OFF
+            -DIRIS_SYSTEM_QCA=3
+            -DIRIS_BUNDLED_QCA=OFF
+            -DIRIS_BUNDLED_USRSCTP=OFF
+            -DIRIS_ENABLE_JINGLE_SCTP=ON
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          )
+
+          cmake -S . -B build-root-no-tests "${common[@]}" -DIRIS_BUILD_TESTS=OFF
+          if ninja -C build-root-no-tests -t targets all | grep -Eq '^jingle_.*_test:'; then
+            echo "IRIS_BUILD_TESTS=OFF still created Jingle test targets" >&2
+            exit 1
+          fi
+
+          cmake -S . -B build-root-tests "${common[@]}" -DIRIS_BUILD_TESTS=ON
+          cmake --build build-root-tests --parallel 4 --target jingle_dtlssrtp_test
 
       - name: Save compiler cache
         if: success()
@@ -96,7 +121,7 @@ jobs:
         shell: bash
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build ccache qt6-base-dev libssl-dev libusrsctp-dev libsrtp2-dev
+          sudo apt-get install -y cmake ninja-build ccache qt6-base-dev libssl-dev libusrsctp-dev
 
       - name: Install QCA3 release packages
         shell: bash
@@ -124,7 +149,7 @@ jobs:
             -DIRIS_SYSTEM_QCA=3 \
             -DIRIS_BUNDLED_QCA=OFF \
             -DIRIS_BUNDLED_USRSCTP=OFF \
-            -DIRIS_ENABLE_SRTP=ON \
+            -DIRIS_ENABLE_JINGLE_SCTP=ON \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
@@ -145,6 +170,7 @@ jobs:
             jingle_transportreplacecorrectness_test \
             jingle_transportreplaceprotocol_test \
             jingle_rtpnegotiation_test \
+            jingle_dtlssrtp_test \
             jingle_domlifetime_test \
             jingle_ftlifecycle_test
 
@@ -169,3 +195,4 @@ jobs:
           ctest --test-dir build-jingle-sanitize --output-on-failure -j1 -R jingle_domlifetime
           ctest --test-dir build-jingle-sanitize --output-on-failure -j1 -R jingle_ftlifecycle
           ctest --test-dir build-jingle-sanitize --output-on-failure -j1 -R jingle_rtpnegotiation
+          ctest --test-dir build-jingle-sanitize --output-on-failure -j1 -R jingle_dtlssrtp
