@@ -92,6 +92,8 @@ static void runPair(const QCA::Certificate &cert, const QCA::PrivateKey &key, bo
     const QString profile       = QStringLiteral("SRTP_AES128_CM_HMAC_SHA1_80");
     const QStringList profiles { profile };
 
+    offerer.setNegotiationDeferred(true);
+    answerer.setNegotiationDeferred(true);
     check(offerer.setSRTPProfiles(requireSRTP ? profiles : QStringList()), "offer profiles rejected");
     check(answerer.setSRTPProfiles(peerSRTP ? profiles : QStringList()), "answer profiles rejected");
     check(!offerer.setSRTPProfiles({ QStringLiteral("not-an-srtp-profile") }), "unsupported profile accepted");
@@ -163,7 +165,12 @@ static void runPair(const QCA::Certificate &cert, const QCA::PrivateKey &key, bo
     if (wrongFingerprint)
         fingerprint.hash = XMPP::Hash(XMPP::Hash::Sha256, QByteArray(32, '\0'));
     offerer.setRemoteFingerprint(fingerprint);
+    check(!offerer.isStarted() && !answerer.isStarted(),
+          "deferred DTLS started before transport readiness");
+    offerer.onRemoteAcceptedFingerprint();
     answerer.onRemoteAcceptedFingerprint();
+    check(offerer.isStarted() && answerer.isStarted(),
+          "deferred DTLS did not start after transport readiness");
     check(!offerer.setSRTPProfiles({}), "profile configuration changed after start");
 
     timer.start(5000);
