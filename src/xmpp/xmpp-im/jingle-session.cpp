@@ -1945,16 +1945,14 @@ namespace XMPP { namespace Jingle {
 
         QHash<QString, int> nameCounts;
         for (auto app : std::as_const(d->contentList)) {
-            if (app && app->state() < State::Finishing && app->flags().testFlag(Application::InitialApplication)
-                && !excluded.contains(app))
+            if (app && app->state() < State::Finishing && !excluded.contains(app))
                 ++nameCounts[app->contentName()];
         }
 
         QMap<QString, EligibleContent> eligibleByName;
         for (auto app : std::as_const(d->contentList)) {
-            if (!app || app->state() >= State::Finishing || !app->flags().testFlag(Application::InitialApplication)
-                || excluded.contains(app) || nameCounts.value(app->contentName()) != 1
-                || !app->allowsSharedTransport())
+            if (!app || app->state() >= State::Finishing || excluded.contains(app)
+                || nameCounts.value(app->contentName()) != 1 || !app->allowsSharedTransport())
                 continue;
             const auto transport = app->transport();
             if (!transport || !transport->pad() || !transport->supportsSharedTransport())
