@@ -30,6 +30,7 @@
 #include <algorithm>
 #include <functional>
 #include <memory>
+#include <QSet>
 
 namespace XMPP { namespace Jingle {
 
@@ -66,6 +67,11 @@ namespace XMPP { namespace Jingle {
         Features peerFeatures() const;
 
         bool isGroupingAllowed() const;
+        // Capability-driven initial grouping is enabled by default. Explicit
+        // setGroupings()/setGrouping() calls take ownership of local grouping
+        // policy for this session and suppress further automatic changes.
+        void setAutomaticGroupingEnabled(bool enabled);
+        bool automaticGroupingEnabled() const;
 
         std::optional<Stanza::Error> lastError() const;
 
@@ -145,6 +151,7 @@ namespace XMPP { namespace Jingle {
         static std::optional<QList<ContentGroup>> parseGroupings(const QDomElement &jingleEl);
         static bool validBundleAnswer(const QList<ContentGroup> &offer, const QList<ContentGroup> &answer);
         bool        validLocalGroupings() const;
+        void        refreshAutomaticGroupings(const QSet<Application *> &excluded = {});
 
         TieBreaker tieBreaker_;
 
