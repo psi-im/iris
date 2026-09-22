@@ -731,12 +731,13 @@ namespace XMPP { namespace Jingle { namespace ICE {
             pad->session()->manager()->client()->stunDiscoManager()->createMonitor());
 
         ice->setComponentCount(network->components.count());
-        // We implement RFC 8445 valid-pair data and advertise ice2 on
-        // XEP-0371 transports. Ice176 still requires the peer's ice2 signal
-        // before opening this early-data path.
-        ice->setLocalFeatures(Ice176::Trickle | Ice176::NotNominatedData);
-        if (runtime->remoteIce2.value_or(false))
-            ice->setRemoteFeatures(Ice176::NotNominatedData);
+        // XEP-0371 carries the RFC 8445 ice2 option, so it can enable
+        // pre-selection data on valid pairs. XEP-0176 is RFC 5245 based and
+        // has no ice2 signaling; keep it nomination-first.
+        Ice176::Features localFeatures = Ice176::Trickle;
+        if (pad->ns() == NS)
+            localFeatures |= Ice176::NotNominatedData;
+        ice->setLocalFeatures(localFeatures);
         if (!runtime->remoteCandidates.isEmpty()) {
             ice->setRemoteCredentials(runtime->remoteUfrag, runtime->remotePassword);
             ice->addRemoteCandidates(runtime->remoteCandidates);
@@ -1199,8 +1200,6 @@ namespace XMPP { namespace Jingle { namespace ICE {
         void setupRemoteICE(const Element &e)
         {
             Q_ASSERT(network->ice != nullptr);
-            if (network->runtime && network->runtime->remoteIce2.value_or(false))
-                network->ice->setRemoteFeatures(Ice176::NotNominatedData);
             if (!e.candidates.isEmpty()) {
                 network->ice->setRemoteCredentials(e.ufrag, e.pwd);
                 network->ice->addRemoteCandidates(e.candidates);
