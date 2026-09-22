@@ -199,6 +199,19 @@ static OwnedXml answer(Application *accepted, bool malformed = false)
     return xml;
 }
 
+static OwnedXml contentRemove(Application *removed)
+{
+    OwnedXml xml;
+    auto    &doc     = xml.doc;
+    auto     jingle  = doc.createElementNS(NS, QStringLiteral("jingle"));
+    auto     content = doc.createElementNS(NS, QStringLiteral("content"));
+    content.setAttribute(QStringLiteral("creator"), QStringLiteral("initiator"));
+    content.setAttribute(QStringLiteral("name"), removed->contentName());
+    jingle.appendChild(content);
+    xml.root = jingle;
+    return xml;
+}
+
 static void addInitialPair(Session &session, const QSharedPointer<Stats> &stats, TestApplication **audio,
                            TestApplication **video)
 {
@@ -372,6 +385,26 @@ int main(int argc, char **argv)
         check(!sessionGuard, "Session survived its incomingRemove callback deletion");
         check(!videoGuard, "detached omitted content leaked when incomingRemove deleted Session");
         check(stats->starts == 0, "accepted content started after incomingRemove deleted Session");
+    }
+
+    // content-remove itself is a reentrant lifetime boundary. This mirrors
+    // a UI/call owner synchronously deleting Session when the peer removes the
+    // final failed RTP content.
+    {
+        auto stats = QSharedPointer<Stats>::create();
+        auto session
+            = new Session(client.jingleManager(), Jid(QStringLiteral("peer@example.org/device")), Origin::Initiator);
+        QPointer<Session> sessionGuard(session);
+        auto application = new TestApplication(session, QStringLiteral("audio"), stats);
+        QPointer<TestApplication> applicationGuard(application);
+        session->addContent(application);
+        stats->onRemove = [session]() { delete session; };
+
+        check(session->updateFromXml(Action::ContentRemove, contentRemove(application)),
+              "content-remove did not survive Session deletion from incomingRemove callback");
+        check(!sessionGuard, "Session survived content-remove callback deletion");
+        check(!applicationGuard, "detached content leaked after content-remove deleted Session");
+        check(stats->removes == 1, "content-remove callback did not run exactly once");
     }
 
     // Ordinary content-accept must not inherit the initial-session subset rule.
