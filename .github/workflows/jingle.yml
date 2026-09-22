@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  QCA_TAG: v3.0.7
+  QCA_TAG: v3.0.8
 
 jobs:
   qca3-srtp:
@@ -57,6 +57,8 @@ jobs:
             -DIRIS_SYSTEM_QCA=3 \
             -DIRIS_BUNDLED_QCA=OFF \
             -DIRIS_BUNDLED_USRSCTP=OFF \
+            -DIRIS_ENABLE_JINGLE_SCTP=ON \
+            -DIRIS_ENABLE_SRTP=OFF \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
@@ -74,6 +76,8 @@ jobs:
             -DIRIS_SYSTEM_QCA=3
             -DIRIS_BUNDLED_QCA=OFF
             -DIRIS_BUNDLED_USRSCTP=OFF
+            -DIRIS_ENABLE_JINGLE_SCTP=ON
+            -DIRIS_ENABLE_SRTP=OFF
             -DCMAKE_C_COMPILER_LAUNCHER=ccache
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           )
@@ -147,6 +151,8 @@ jobs:
             -DIRIS_SYSTEM_QCA=3 \
             -DIRIS_BUNDLED_QCA=OFF \
             -DIRIS_BUNDLED_USRSCTP=OFF \
+            -DIRIS_ENABLE_JINGLE_SCTP=ON \
+            -DIRIS_ENABLE_SRTP=OFF \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
@@ -167,6 +173,7 @@ jobs:
             jingle_transportreplacecorrectness_test \
             jingle_transportreplaceprotocol_test \
             jingle_rtpnegotiation_test \
+            jingle_dtlssrtp_test \
             jingle_domlifetime_test \
             jingle_ftlifecycle_test
 
@@ -191,3 +198,4 @@ jobs:
           ctest --test-dir build-jingle-sanitize --output-on-failure -j1 -R jingle_domlifetime
           ctest --test-dir build-jingle-sanitize --output-on-failure -j1 -R jingle_ftlifecycle
           ctest --test-dir build-jingle-sanitize --output-on-failure -j1 -R jingle_rtpnegotiation
+          ctest --test-dir build-jingle-sanitize --output-on-failure -j1 -R jingle_dtlssrtp
