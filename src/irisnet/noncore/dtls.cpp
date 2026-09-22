@@ -20,6 +20,7 @@
 #include "xmpp_xmlcommon.h"
 
 #include <array>
+#include <utility>
 
 #include <QtCrypto>
 #if QT_VERSION >= QT_VERSION_CHECK(5, 10, 0)
