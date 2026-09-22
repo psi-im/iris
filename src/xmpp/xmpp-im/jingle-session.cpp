@@ -1781,11 +1781,21 @@ namespace XMPP { namespace Jingle {
 
     Session::~Session()
     {
-        // Application::destroyed removes entries from contentList. Detach the
-        // list before deletion so those callbacks cannot invalidate iteration.
-        const auto contents = d->contentList.values();
+        // Application teardown is reentrant: destroying one content may
+        // synchronously destroy a sibling through media/UI callbacks. Raw
+        // pointers captured before qDeleteAll() would then double-delete that
+        // sibling. Detach ownership first and keep guarded identities so
+        // reentrantly destroyed contents simply become null.
+        QList<QPointer<Application>> contents;
+        contents.reserve(d->contentList.size());
+        for (auto app : std::as_const(d->contentList))
+            contents.append(QPointer<Application>(app));
         d->contentList.clear();
-        qDeleteAll(contents);
+
+        for (const auto &app : std::as_const(contents)) {
+            if (app)
+                delete app.data();
+        }
         qDebug("session %s destroyed", qPrintable(d->sid));
     }
 
