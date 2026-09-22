@@ -1974,7 +1974,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
                     if (!app || !tr || !tr->pad())
                         continue;
                     members.append(GroupNegotiation::Member { it.key(), tr->pad()->ns(),
-                                                               app->supportsSharedTransport(), std::nullopt });
+                                                               app->allowsSharedTransport() && tr->supportsSharedTransport(), std::nullopt });
                 }
 
                 GroupNegotiation::Error error = GroupNegotiation::Error::None;
@@ -2075,7 +2075,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
                     if (!current || current->pad().data() != this || d->contentOwners.value(*key) == current.data())
                         return nullptr; // never split one live BUNDLE generation
                     members.append(GroupNegotiation::Member { *key, current->pad()->ns(),
-                                                               app->supportsSharedTransport(), std::nullopt });
+                                                               app->allowsSharedTransport() && tr->supportsSharedTransport(), std::nullopt });
                     replacementKeys.insert(*key);
                 }
 
