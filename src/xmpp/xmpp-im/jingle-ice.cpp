@@ -1065,7 +1065,15 @@ namespace XMPP { namespace Jingle { namespace ICE {
 #endif
             });
             dtls->connect(dtls, &Dtls::readyReadOutgoing, network, [net = network, componentIndex]() {
-                net->ice->writeDatagram(componentIndex, net->components[componentIndex].dtls->readOutgoingDatagram());
+                if (!net->ice || componentIndex < 0 || componentIndex >= net->components.size())
+                    return;
+                auto dtls = net->components[componentIndex].dtls;
+                if (!dtls)
+                    return;
+                for (auto datagram = dtls->readOutgoingDatagram(); !datagram.isEmpty();
+                     datagram      = dtls->readOutgoingDatagram()) {
+                    net->ice->writeDatagram(componentIndex, datagram);
+                }
             });
             dtls->connect(dtls, &Dtls::connected, network, [net = network, componentIndex, dtls]() {
                 qDebug("Dtls::connected");
