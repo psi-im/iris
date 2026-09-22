@@ -451,10 +451,13 @@ static void exerciseResponder(const WireOffer &offer, TcpPortReserver *reserver,
     const qsizetype expectedAssociations = acceptBundle ? 1 : 2;
     check(waitFor([&]() {
               return audio->state() >= J::State::ApprovedToSend && video->state() >= J::State::ApprovedToSend
+                  && audio->state() < J::State::Finishing && video->state() < J::State::Finishing
                   && icePad->liveAssociationCount() == expectedAssociations;
           }),
-          acceptBundle ? "accepted BUNDLE did not allocate one shared association"
-                       : "BUNDLE refusal did not allocate independent associations");
+          acceptBundle ? "accepted BUNDLE did not allocate one live shared association"
+                       : "BUNDLE refusal did not allocate live independent associations");
+    check(audio->state() < J::State::Finishing && video->state() < J::State::Finishing,
+          "responder RTP application failed while preparing accepted transports");
 
     bool audioBound = false, audioRequired = false, videoBound = false, videoRequired = false;
     auto *audioNetwork = icePad->groupedConnectionFor(audioTransport.data(), &audioBound, &audioRequired);
