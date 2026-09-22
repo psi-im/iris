@@ -324,10 +324,15 @@ namespace XMPP { namespace Jingle { namespace ICE {
 
         bool mergeRemoteIce(const Element &e)
         {
-            if (!remoteIce2)
-                remoteIce2 = e.ice2.value_or(false);
-            else if (e.ice2 && *remoteIce2 != *e.ice2)
-                return false;
+            // Only an explicit ice2 attribute updates the peer-version state.
+            // Runtime state is also seeded from an empty per-content Element
+            // before the first remote transport arrives, so absence here cannot
+            // be interpreted as an explicit RFC 5245 declaration.
+            if (e.ice2) {
+                if (remoteIce2 && *remoteIce2 != *e.ice2)
+                    return false;
+                remoteIce2 = *e.ice2;
+            }
             if (!e.ufrag.isEmpty() || !e.pwd.isEmpty()) {
                 if ((!remoteUfrag.isEmpty() || !remotePassword.isEmpty())
                     && (remoteUfrag != e.ufrag || remotePassword != e.pwd))
@@ -1224,11 +1229,12 @@ namespace XMPP { namespace Jingle { namespace ICE {
                 remoteState->ufrag = e.ufrag;
                 remoteState->pwd   = e.pwd;
             }
-            if (!remoteState->ice2)
-                remoteState->ice2 = e.ice2.value_or(false);
-            else if (e.ice2 && *remoteState->ice2 != *e.ice2) {
-                q->onFinish(Reason::FailedTransport, QStringLiteral("Remote ICE version changed"));
-                return;
+            if (e.ice2) {
+                if (remoteState->ice2 && *remoteState->ice2 != *e.ice2) {
+                    q->onFinish(Reason::FailedTransport, QStringLiteral("Remote ICE version changed"));
+                    return;
+                }
+                remoteState->ice2 = *e.ice2;
             }
             if (e.gatheringComplete)
                 remoteState->gatheringComplete = true;
