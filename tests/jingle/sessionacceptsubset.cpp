@@ -41,6 +41,7 @@ struct Stats {
     std::function<void()> onStop;
     std::function<void()> onRemove;
     std::function<void()> onStart;
+    std::function<void()> onDestroy;
 };
 
 class TestApplicationPad final : public ApplicationManagerPad {
@@ -112,6 +113,13 @@ public:
         _state       = State::Pending;
         _flags |= InitialApplication;
         _transport = QSharedPointer<TestTransport>::create(session, Origin::Initiator, stats_);
+    }
+
+    ~TestApplication() override
+    {
+        auto callback = std::move(stats_->onDestroy);
+        if (callback)
+            callback();
     }
 
     void                                setState(State state) override { _state = state; }
@@ -385,6 +393,26 @@ int main(int argc, char **argv)
         check(!sessionGuard, "Session survived its incomingRemove callback deletion");
         check(!videoGuard, "detached omitted content leaked when incomingRemove deleted Session");
         check(stats->starts == 0, "accepted content started after incomingRemove deleted Session");
+    }
+
+    // Session destruction must tolerate one Application destructor
+    // synchronously deleting a sibling that was present in the destructor's
+    // original content snapshot. A raw qDeleteAll(values()) double-frees it.
+    {
+        auto stats = QSharedPointer<Stats>::create();
+        auto session
+            = new Session(client.jingleManager(), Jid(QStringLiteral("peer@example.org/device")), Origin::Initiator);
+        auto first  = new TestApplication(session, QStringLiteral("audio"), stats);
+        auto second = new TestApplication(session, QStringLiteral("video"), stats);
+        QPointer<TestApplication> firstGuard(first), secondGuard(second);
+        session->addContent(first);
+        session->addContent(second);
+        stats->onDestroy = [second]() { delete second; };
+
+        delete session;
+
+        check(!firstGuard && !secondGuard,
+              "Session destructor left content alive after reentrant sibling destruction");
     }
 
     // content-remove itself is a reentrant lifetime boundary. This mirrors
