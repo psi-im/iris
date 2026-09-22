@@ -152,6 +152,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
     struct Element {
         QString           pwd;
         QString           ufrag;
+        std::optional<bool> ice2;
         Dtls::FingerPrint fingerprint;
 #ifdef JINGLE_SCTP
         SCTP::MapElement            sctpMap;
@@ -175,6 +176,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
                 tel.setAttribute(QLatin1String("pwd"), pwd);
             if (!ufrag.isEmpty())
                 tel.setAttribute(QLatin1String("ufrag"), ufrag);
+            tel.setAttribute(QLatin1String("ice2"), QLatin1String("true"));
             if (fingerprint.isValid())
                 tel.appendChild(fingerprint.toXml(doc));
 #ifdef JINGLE_SCTP
@@ -196,8 +198,17 @@ namespace XMPP { namespace Jingle { namespace ICE {
 
         void parse(const QDomElement &el)
         {
-            ufrag             = el.attribute(QLatin1String("ufrag"));
-            pwd               = el.attribute(QLatin1String("pwd"));
+            ufrag = el.attribute(QLatin1String("ufrag"));
+            pwd   = el.attribute(QLatin1String("pwd"));
+            if (el.hasAttribute(QLatin1String("ice2"))) {
+                const auto value = el.attribute(QLatin1String("ice2"));
+                if (value == QLatin1String("true") || value == QLatin1String("1"))
+                    ice2 = true;
+                else if (value == QLatin1String("false") || value == QLatin1String("0"))
+                    ice2 = false;
+                else
+                    throw std::runtime_error("invalid ice2 value");
+            }
             auto e            = el.firstChildElement(QLatin1String("gathering-complete"));
             gatheringComplete = !e.isNull();
 
@@ -291,6 +302,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
 
         QString                  remoteUfrag;
         QString                  remotePassword;
+        std::optional<bool>      remoteIce2;
         std::optional<Dtls::FingerPrint> remoteFingerprint;
         QList<Ice176::Candidate> remoteCandidates;
         QList<Ice176::SelectedCandidate> remoteSelectedCandidates;
@@ -312,6 +324,11 @@ namespace XMPP { namespace Jingle { namespace ICE {
 
         bool mergeRemoteIce(const Element &e)
         {
+            if (e.ice2) {
+                if (remoteIce2 && *remoteIce2 != *e.ice2)
+                    return false;
+                remoteIce2 = *e.ice2;
+            }
             if (!e.ufrag.isEmpty() || !e.pwd.isEmpty()) {
                 if ((!remoteUfrag.isEmpty() || !remotePassword.isEmpty())
                     && (remoteUfrag != e.ufrag || remotePassword != e.pwd))
@@ -715,10 +732,9 @@ namespace XMPP { namespace Jingle { namespace ICE {
             pad->session()->manager()->client()->stunDiscoManager()->createMonitor());
 
         ice->setComponentCount(network->components.count());
-        // RFC 8445 Section 12.1 allows data on a valid pair before final
-        // nomination/selection. This lets DTLS start as soon as connectivity
-        // is proven while writeDatagram() still switches to the selected pair
-        // once ICE nomination completes.
+        // We implement RFC 8445 valid-pair data and advertise ice2 on
+        // XEP-0371 transports. Ice176 still requires the peer's ice2 signal
+        // before opening this early-data path.
         ice->setLocalFeatures(Ice176::Trickle | Ice176::NotNominatedData);
         if (!runtime->remoteCandidates.isEmpty()) {
             ice->setRemoteCredentials(runtime->remoteUfrag, runtime->remotePassword);
@@ -1182,6 +1198,8 @@ namespace XMPP { namespace Jingle { namespace ICE {
         void setupRemoteICE(const Element &e)
         {
             Q_ASSERT(network->ice != nullptr);
+            if (network->runtime && network->runtime->remoteIce2.value_or(false))
+                network->ice->setRemoteFeatures(Ice176::NotNominatedData);
             if (!e.candidates.isEmpty()) {
                 network->ice->setRemoteCredentials(e.ufrag, e.pwd);
                 network->ice->addRemoteCandidates(e.candidates);
@@ -1205,6 +1223,13 @@ namespace XMPP { namespace Jingle { namespace ICE {
             if (!e.candidates.isEmpty() || !e.ufrag.isEmpty()) {
                 remoteState->ufrag = e.ufrag;
                 remoteState->pwd   = e.pwd;
+            }
+            if (e.ice2) {
+                if (remoteState->ice2 && *remoteState->ice2 != *e.ice2) {
+                    q->onFinish(Reason::FailedTransport, QStringLiteral("Remote ICE version changed"));
+                    return;
+                }
+                remoteState->ice2 = *e.ice2;
             }
             if (e.gatheringComplete)
                 remoteState->gatheringComplete = true;
