@@ -2147,9 +2147,24 @@ namespace XMPP { namespace Jingle {
         // So we presented a user incoming session in UI, the user modified it somehow and finally accepted.
         d->state = State::ApprovedToSend;
         d->notifyPads<&SessionManagerPad::onLocalAccepted>();
-        for (auto &c : d->contentList) {
-            c->prepare();
+
+        // Grouping must be decided before the first concrete transport starts
+        // preparing. Some applications (notably file transfer over SCTP) prepare
+        // their transport synchronously, while RTP first waits for its media
+        // backend. Preselect every local transport up front so a mixed BUNDLE
+        // never allocates an independent association merely due to callback order.
+        if (d->groupingAllowed && (d->automaticGroupingEnabled || !d->groups.isEmpty())) {
+            const auto contents = d->contentList.values();
+            for (auto content : contents) {
+                if (content && content->creator() == d->role && !content->transport()
+                    && content->state() < State::Finishing)
+                    content->selectNextTransport();
+            }
+            refreshAutomaticGroupings();
         }
+
+        for (auto &c : d->contentList)
+            c->prepare();
         d->planStep();
     }
 
@@ -2159,10 +2174,22 @@ namespace XMPP { namespace Jingle {
         if (d->role == Origin::Initiator && d->state == State::Created) {
             d->state = State::ApprovedToSend;
             d->notifyPads<&SessionManagerPad::onLocalAccepted>();
-            for (auto &c : d->contentList) {
+
+            for (auto &c : d->contentList)
                 c->markInitialApplication(true);
-                c->prepare();
+
+            if (d->groupingAllowed && (d->automaticGroupingEnabled || !d->groups.isEmpty())) {
+                const auto contents = d->contentList.values();
+                for (auto content : contents) {
+                    if (content && content->creator() == d->role && !content->transport()
+                        && content->state() < State::Finishing)
+                        content->selectNextTransport();
+                }
+                refreshAutomaticGroupings();
             }
+
+            for (auto &c : d->contentList)
+                c->prepare();
             d->planStep();
         }
     }
