@@ -139,7 +139,7 @@ namespace XMPP { namespace Jingle {
         QPointer<Application> application_;
     };
 
-    Application::~Application() = default;
+    Application::~Application() { emit destroying(); }
 
     void Application::ensureTransportReplaceTieBreakResolver()
     {
