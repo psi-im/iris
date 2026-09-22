@@ -58,7 +58,6 @@ jobs:
             -DIRIS_BUNDLED_QCA=OFF \
             -DIRIS_BUNDLED_USRSCTP=OFF \
             -DIRIS_ENABLE_JINGLE_SCTP=ON \
-            -DIRIS_ENABLE_SRTP=OFF \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
@@ -77,7 +76,6 @@ jobs:
             -DIRIS_BUNDLED_QCA=OFF
             -DIRIS_BUNDLED_USRSCTP=OFF
             -DIRIS_ENABLE_JINGLE_SCTP=ON
-            -DIRIS_ENABLE_SRTP=OFF
             -DCMAKE_C_COMPILER_LAUNCHER=ccache
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           )
@@ -152,7 +150,6 @@ jobs:
             -DIRIS_BUNDLED_QCA=OFF \
             -DIRIS_BUNDLED_USRSCTP=OFF \
             -DIRIS_ENABLE_JINGLE_SCTP=ON \
-            -DIRIS_ENABLE_SRTP=OFF \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
