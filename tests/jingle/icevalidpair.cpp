@@ -16,7 +16,7 @@ static void check(bool ok, const char *message)
         qFatal("%s", message);
 }
 
-static void runPair(bool peerAdvertisesIce2)
+static void runPair(bool usingProtocolSignalsIce2)
 {
     Ice176 first;
     Ice176 second;
@@ -25,7 +25,10 @@ static void runPair(bool peerAdvertisesIce2)
     for (auto *ice : { &first, &second }) {
         ice->setLocalAddresses(localAddresses);
         ice->setComponentCount(1);
-        ice->setLocalFeatures(Ice176::Trickle | Ice176::NotNominatedData);
+        Ice176::Features features = Ice176::Trickle;
+        if (usingProtocolSignalsIce2)
+            features |= Ice176::NotNominatedData;
+        ice->setLocalFeatures(features);
     }
 
     QList<Ice176::Candidate> firstCandidates;
@@ -67,14 +70,6 @@ static void runPair(bool peerAdvertisesIce2)
     first.addRemoteCandidates(secondCandidates);
     second.addRemoteCandidates(firstCandidates);
 
-    if (peerAdvertisesIce2) {
-        // Model the using protocol having received peer ice2=true in both
-        // directions. Without this signal RFC 5245 compatibility requires
-        // nomination/selection before a full agent sends application data.
-        first.setRemoteFeatures(Ice176::NotNominatedData);
-        second.setRemoteFeatures(Ice176::NotNominatedData);
-    }
-
     bool firstSelected = false;
     bool secondSelected = false;
     bool firstReady = false;
@@ -101,7 +96,7 @@ static void runPair(bool peerAdvertisesIce2)
     QObject::connect(&first, &Ice176::readyToSendMedia, [&]() {
         firstReady = true;
         firstReadyBeforeSelection = !firstSelected;
-        if (peerAdvertisesIce2) {
+        if (usingProtocolSignalsIce2) {
             earlySent = true;
             first.writeDatagram(0, early);
         }
@@ -136,7 +131,7 @@ static void runPair(bool peerAdvertisesIce2)
             first.writeDatagram(0, final);
         }
 
-        const bool earlyDone = peerAdvertisesIce2 ? earlyReceived : true;
+        const bool earlyDone = usingProtocolSignalsIce2 ? earlyReceived : true;
         if (firstReady && secondReady && earlyDone && selectedReceived)
             exchangeLoop.quit();
     });
@@ -149,14 +144,14 @@ static void runPair(bool peerAdvertisesIce2)
     check(firstSelected && secondSelected, "ICE nomination did not eventually select a pair");
     check(selectedSent && selectedReceived, "data did not cross the selected pair");
 
-    if (peerAdvertisesIce2) {
+    if (usingProtocolSignalsIce2) {
         check(firstReadyBeforeSelection && secondReadyBeforeSelection,
-              "ice2 peers did not expose the valid pair before nomination");
+              "ice2-signaled ICE did not expose the valid pair before nomination");
         check(earlySent && earlyReceived, "data did not cross the pre-nomination valid pair");
     } else {
         check(!firstReadyBeforeSelection && !secondReadyBeforeSelection,
-              "RFC 5245-compatible peer received a premature writable signal");
-        check(!earlySent && !earlyReceived, "application data was sent before nomination without peer ice2");
+              "non-ice2 ICE usage received a premature writable signal");
+        check(!earlySent && !earlyReceived, "application data was sent before nomination without local ice2 signaling");
     }
 }
 
