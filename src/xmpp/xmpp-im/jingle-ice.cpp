@@ -1088,13 +1088,19 @@ namespace XMPP { namespace Jingle { namespace ICE {
 #endif
             });
             dtls->connect(dtls, &Dtls::readyReadOutgoing, network, [net = network, componentIndex]() {
+                if (!net->ice || componentIndex < 0 || componentIndex >= net->components.size())
+                    return;
                 auto *componentDtls = net->components[componentIndex].dtls;
-                auto packet = componentDtls->readOutgoingDatagram();
+                if (!componentDtls)
+                    return;
                 const auto id = associationDebugId(net);
-                qInfo("jingle-ice[%s] DTLS outgoing component=%d dtls=%p bytes=%d ice-can-send=%d", id.constData(),
-                      componentIndex, componentDtls, int(packet.size()), int(net->ice && net->ice->canSendMedia()));
-                if (net->ice)
+                for (auto packet = componentDtls->readOutgoingDatagram(); !packet.isEmpty();
+                     packet      = componentDtls->readOutgoingDatagram()) {
+                    qInfo("jingle-ice[%s] DTLS outgoing component=%d dtls=%p bytes=%d ice-can-send=%d",
+                          id.constData(), componentIndex, componentDtls, int(packet.size()),
+                          int(net->ice->canSendMedia()));
                     net->ice->writeDatagram(componentIndex, packet);
+                }
             });
             dtls->connect(dtls, &Dtls::connected, network, [net = network, componentIndex, dtls]() {
                 const auto id = associationDebugId(net);
