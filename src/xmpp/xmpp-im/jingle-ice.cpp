@@ -736,6 +736,8 @@ namespace XMPP { namespace Jingle { namespace ICE {
         // XEP-0371 transports. Ice176 still requires the peer's ice2 signal
         // before opening this early-data path.
         ice->setLocalFeatures(Ice176::Trickle | Ice176::NotNominatedData);
+        if (runtime->remoteIce2.value_or(false))
+            ice->setRemoteFeatures(Ice176::NotNominatedData);
         if (!runtime->remoteCandidates.isEmpty()) {
             ice->setRemoteCredentials(runtime->remoteUfrag, runtime->remotePassword);
             ice->addRemoteCandidates(runtime->remoteCandidates);
