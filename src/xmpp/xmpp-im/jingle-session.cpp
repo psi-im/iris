@@ -2153,7 +2153,8 @@ namespace XMPP { namespace Jingle {
         // their transport synchronously, while RTP first waits for its media
         // backend. Preselect every local transport up front so a mixed BUNDLE
         // never allocates an independent association merely due to callback order.
-        if (d->groupingAllowed && (d->automaticGroupingEnabled || !d->groups.isEmpty())) {
+        if (d->groupingAllowed
+            && ((d->automaticGroupingEnabled && !d->localGroupingsExplicit) || !d->groups.isEmpty())) {
             const auto contents = d->contentList.values();
             for (auto content : contents) {
                 if (content && content->creator() == d->role && !content->transport()
@@ -2178,7 +2179,8 @@ namespace XMPP { namespace Jingle {
             for (auto &c : d->contentList)
                 c->markInitialApplication(true);
 
-            if (d->groupingAllowed && (d->automaticGroupingEnabled || !d->groups.isEmpty())) {
+            if (d->groupingAllowed
+            && ((d->automaticGroupingEnabled && !d->localGroupingsExplicit) || !d->groups.isEmpty())) {
                 const auto contents = d->contentList.values();
                 for (auto content : contents) {
                     if (content && content->creator() == d->role && !content->transport()
