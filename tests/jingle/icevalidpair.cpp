@@ -16,11 +16,8 @@ static void check(bool ok, const char *message)
         qFatal("%s", message);
 }
 
-int main(int argc, char **argv)
+static void runPair(bool peerAdvertisesIce2)
 {
-    QCoreApplication app(argc, argv);
-    QCA::Initializer qca;
-
     Ice176 first;
     Ice176 second;
 
@@ -28,8 +25,6 @@ int main(int argc, char **argv)
     for (auto *ice : { &first, &second }) {
         ice->setLocalAddresses(localAddresses);
         ice->setComponentCount(1);
-        // Intentionally do not set remoteFeatures: RFC 8445 valid-pair
-        // transmission is a local sending policy, not a negotiated capability.
         ice->setLocalFeatures(Ice176::Trickle | Ice176::NotNominatedData);
     }
 
@@ -72,14 +67,24 @@ int main(int argc, char **argv)
     first.addRemoteCandidates(secondCandidates);
     second.addRemoteCandidates(firstCandidates);
 
+    if (peerAdvertisesIce2) {
+        // Model the using protocol having received peer ice2=true in both
+        // directions. Without this signal RFC 5245 compatibility requires
+        // nomination/selection before a full agent sends application data.
+        first.setRemoteFeatures(Ice176::NotNominatedData);
+        second.setRemoteFeatures(Ice176::NotNominatedData);
+    }
+
     bool firstSelected = false;
     bool secondSelected = false;
-    bool firstValidWritable = false;
-    bool secondValidWritable = false;
-    bool sentBeforeNomination = false;
-    bool receivedBeforeNomination = false;
-    bool sentAfterSelection = false;
-    bool receivedAfterSelection = false;
+    bool firstReady = false;
+    bool secondReady = false;
+    bool firstReadyBeforeSelection = false;
+    bool secondReadyBeforeSelection = false;
+    bool earlySent = false;
+    bool earlyReceived = false;
+    bool selectedSent = false;
+    bool selectedReceived = false;
 
     const QByteArray early = QByteArrayLiteral("valid-pair-before-nomination");
     const QByteArray final = QByteArrayLiteral("selected-pair-after-nomination");
@@ -94,14 +99,16 @@ int main(int argc, char **argv)
     });
 
     QObject::connect(&first, &Ice176::readyToSendMedia, [&]() {
-        firstValidWritable = true;
-        check(!firstSelected, "first ICE agent became writable only after nomination");
-        sentBeforeNomination = true;
-        first.writeDatagram(0, early);
+        firstReady = true;
+        firstReadyBeforeSelection = !firstSelected;
+        if (peerAdvertisesIce2) {
+            earlySent = true;
+            first.writeDatagram(0, early);
+        }
     });
     QObject::connect(&second, &Ice176::readyToSendMedia, [&]() {
-        secondValidWritable = true;
-        check(!secondSelected, "second ICE agent became writable only after nomination");
+        secondReady = true;
+        secondReadyBeforeSelection = !secondSelected;
     });
 
     QObject::connect(&second, &Ice176::readyRead, [&](int component) {
@@ -109,9 +116,9 @@ int main(int argc, char **argv)
         while (second.hasPendingDatagrams(component)) {
             const auto datagram = second.readDatagram(component);
             if (datagram == early)
-                receivedBeforeNomination = true;
+                earlyReceived = true;
             else if (datagram == final)
-                receivedAfterSelection = true;
+                selectedReceived = true;
         }
     });
 
@@ -124,11 +131,13 @@ int main(int argc, char **argv)
     exchangeDeadline.setSingleShot(true);
     QObject::connect(&exchangeDeadline, &QTimer::timeout, &exchangeLoop, &QEventLoop::quit);
     QObject::connect(&exchangePoll, &QTimer::timeout, &exchangeLoop, [&]() {
-        if (!sentAfterSelection && receivedBeforeNomination && firstSelected && secondSelected) {
-            sentAfterSelection = true;
+        if (!selectedSent && firstSelected && secondSelected) {
+            selectedSent = true;
             first.writeDatagram(0, final);
         }
-        if (receivedAfterSelection)
+
+        const bool earlyDone = peerAdvertisesIce2 ? earlyReceived : true;
+        if (firstReady && secondReady && earlyDone && selectedReceived)
             exchangeLoop.quit();
     });
     exchangePoll.start(5);
@@ -136,11 +145,29 @@ int main(int argc, char **argv)
     exchangeLoop.exec();
     exchangePoll.stop();
 
-    check(firstValidWritable && secondValidWritable, "ICE did not expose a writable valid pair");
-    check(sentBeforeNomination && receivedBeforeNomination, "data did not cross the pre-nomination valid pair");
+    check(firstReady && secondReady, "ICE never became writable");
     check(firstSelected && secondSelected, "ICE nomination did not eventually select a pair");
-    check(sentAfterSelection && receivedAfterSelection, "data did not cross the selected pair");
+    check(selectedSent && selectedReceived, "data did not cross the selected pair");
 
-    qInfo("RFC 8445 valid-pair data regression passed");
+    if (peerAdvertisesIce2) {
+        check(firstReadyBeforeSelection && secondReadyBeforeSelection,
+              "ice2 peers did not expose the valid pair before nomination");
+        check(earlySent && earlyReceived, "data did not cross the pre-nomination valid pair");
+    } else {
+        check(!firstReadyBeforeSelection && !secondReadyBeforeSelection,
+              "RFC 5245-compatible peer received a premature writable signal");
+        check(!earlySent && !earlyReceived, "application data was sent before nomination without peer ice2");
+    }
+}
+
+int main(int argc, char **argv)
+{
+    QCoreApplication app(argc, argv);
+    QCA::Initializer qca;
+
+    runPair(false);
+    runPair(true);
+
+    qInfo("ICE valid-pair compatibility regressions passed");
     return 0;
 }
