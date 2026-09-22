@@ -530,7 +530,10 @@ namespace XMPP { namespace Jingle {
                 signalingContent.insert(content);
                 planStep();
             });
-            QObject::connect(content, &Application::destroyed, q, [this, content]() {
+            QObject::connect(content, &Application::destroying, q, [this, content]() {
+                // contentList is a live-object registry. Drop the raw pointer as
+                // soon as Application teardown begins, before any QObject-level
+                // destruction notification can expose a stale entry.
                 signalingContent.remove(content);
                 initialIncomingUnacceptedContent.removeOne(content);
                 for (auto it = contentList.begin(); it != contentList.end(); ++it) { // optimize for large lists?
@@ -539,6 +542,12 @@ namespace XMPP { namespace Jingle {
                         break;
                     }
                 }
+            });
+            QObject::connect(content, &Application::destroyed, q, [this, content]() {
+                // Idempotent cleanup for auxiliary registries. contentList was
+                // already pruned by Application::destroying.
+                signalingContent.remove(content);
+                initialIncomingUnacceptedContent.removeOne(content);
             });
         }
 
@@ -1781,21 +1790,12 @@ namespace XMPP { namespace Jingle {
 
     Session::~Session()
     {
-        // Application teardown is reentrant: destroying one content may
-        // synchronously destroy a sibling through media/UI callbacks. Raw
-        // pointers captured before qDeleteAll() would then double-delete that
-        // sibling. Detach ownership first and keep guarded identities so
-        // reentrantly destroyed contents simply become null.
-        QList<QPointer<Application>> contents;
-        contents.reserve(d->contentList.size());
-        for (auto app : std::as_const(d->contentList))
-            contents.append(QPointer<Application>(app));
-        d->contentList.clear();
-
-        for (const auto &app : std::as_const(contents)) {
-            if (app)
-                delete app.data();
-        }
+        // contentList contains only live Applications. Application::~Application
+        // unregisters itself before QObject destruction, so reentrant sibling
+        // deletion simply shrinks this same registry and never leaves a stale
+        // pointer for a later iteration.
+        while (!d->contentList.isEmpty())
+            delete d->contentList.constBegin().value();
         qDebug("session %s destroyed", qPrintable(d->sid));
     }
 
