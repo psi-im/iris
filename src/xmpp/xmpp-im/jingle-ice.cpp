@@ -2075,7 +2075,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
                     if (!current || current->pad().data() != this || d->contentOwners.value(*key) == current.data())
                         return nullptr; // never split one live BUNDLE generation
                     members.append(GroupNegotiation::Member { *key, current->pad()->ns(),
-                                                               app->allowsSharedTransport() && tr->supportsSharedTransport(), std::nullopt });
+                                                               app->allowsSharedTransport() && current->supportsSharedTransport(), std::nullopt });
                     replacementKeys.insert(*key);
                 }
 
