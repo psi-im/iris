@@ -977,6 +977,12 @@ namespace XMPP { namespace Jingle { namespace ICE {
                 = new Dtls(network, q->pad()->session()->me().full(), q->pad()->session()->peer().full());
 
             auto dtls = network->components[componentIndex].dtls;
+            // Fingerprint/role negotiation can complete as soon as signaling
+            // arrives, but the DTLS engine must not emit handshake records until
+            // ICE has a nominated pair. In particular a remote setup=active
+            // answer makes us passive/server and setRemoteFingerprint() would
+            // otherwise start the server while ICE writes still have no route.
+            dtls->setNegotiationDeferred(true);
             if (!rtpProfiles.isEmpty()) {
                 if (!dtls->setSRTPProfiles(rtpProfiles))
                     return false;
