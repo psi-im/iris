@@ -883,8 +883,13 @@ QStringList Manager::discoFeatures() const
 
     const auto  media = provider_->mediaTypes();
     QStringList features;
-    if (media.contains(QStringLiteral("audio")) || media.contains(QStringLiteral("video")))
+    if (media.contains(QStringLiteral("audio")) || media.contains(QStringLiteral("video"))) {
         features << Description::ns();
+        // XEP-0293 requires this disco feature when the RTP implementation can
+        // negotiate AVPF feedback. Individual endpoints still select only the
+        // feedback types they actually support.
+        features << QStringLiteral("urn:xmpp:jingle:apps:rtp:rtcp-fb:0");
+    }
     if (media.contains(QStringLiteral("audio")))
         features << QStringLiteral("urn:xmpp:jingle:apps:rtp:audio");
     if (media.contains(QStringLiteral("video")))
