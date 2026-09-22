@@ -83,6 +83,8 @@ static QStringList rtpFeatures(J::RTP::Manager *rtp)
     check(features.contains(J::RTP::Description::ns()), "RTP description capability was not advertised");
     check(features.contains(QStringLiteral("urn:xmpp:jingle:apps:rtp:audio")),
           "audio RTP capability was not advertised");
+    check(features.contains(QStringLiteral("urn:xmpp:jingle:apps:rtp:rtcp-fb:0")),
+          "RTCP feedback negotiation capability was not advertised");
     return features;
 }
 
