@@ -169,12 +169,13 @@ static WireOffer makeOffer(Client &client, TcpPortReserver *reserver)
 
     const QString audioName = audio->contentName();
     const QString videoName = video->contentName();
-    check(session.setGroupings(
-              { J::ContentGroup { QStringLiteral("BUNDLE"), { audioName, videoName } } }),
-          "initiator BUNDLE proposal rejected");
 
     audio->prepare();
     video->prepare();
+    check(session.groupings().size() == 1
+              && session.groupings().first().semantics == QLatin1String("BUNDLE")
+              && session.groupings().first().contents == QStringList({ audioName, videoName }),
+          "caps-driven initiator did not automatically propose RTP BUNDLE");
 
     auto audioTransport = qSharedPointerDynamicCast<J::ICE::Transport>(audio->transport());
     auto videoTransport = qSharedPointerDynamicCast<J::ICE::Transport>(video->transport());
@@ -439,11 +440,13 @@ static void exerciseResponder(const WireOffer &offer, TcpPortReserver *reserver,
           "responder allocated BUNDLE association before local grouping decision");
 
     if (acceptBundle) {
-        check(session.setGroupings(
-                  { J::ContentGroup { QStringLiteral("BUNDLE"), { offer.audioName, offer.videoName } } }),
-              "responder could not accept offered BUNDLE group");
+        check(session.groupings().size() == 1
+                  && session.groupings().first().semantics == QLatin1String("BUNDLE")
+                  && session.groupings().first().contents == QStringList({ offer.audioName, offer.videoName }),
+              "caps-driven responder did not automatically accept compatible BUNDLE");
     } else {
-        check(session.setGroupings({}), "responder could not refuse BUNDLE");
+        session.setAutomaticGroupingEnabled(false);
+        check(session.groupings().isEmpty(), "disabling automatic grouping retained responder BUNDLE");
     }
 
     session.accept();
