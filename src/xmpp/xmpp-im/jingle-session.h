@@ -103,7 +103,8 @@ namespace XMPP { namespace Jingle {
         // Local signaling proposal, not proof of an established shared transport.
         bool                setGroupings(const QList<ContentGroup> &groups);
         QList<ContentGroup> groupings() const;
-        // Last successfully parsed initial peer offer/answer. Never auto-accepted.
+        // Last successfully parsed initial peer offer/answer. Automatic local
+        // grouping may accept a compatible subset while preserving this peer snapshot.
         QList<ContentGroup> remoteGroupings() const;
 
         ApplicationManagerPad::Ptr applicationPad(const QString &ns);
