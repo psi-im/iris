@@ -83,6 +83,94 @@ static void runDataChannel(Dtls &first, Dtls &second)
 }
 #endif
 
+static void runDeferredFirstFlight(const QCA::Certificate &cert, const QCA::PrivateKey &key)
+{
+    Dtls passive;
+    Dtls active;
+    const QStringList profiles { QStringLiteral("SRTP_AES128_CM_HMAC_SHA1_80") };
+
+    passive.setNegotiationDeferred(true);
+    active.setNegotiationDeferred(true);
+    check(passive.setSRTPProfiles(profiles) && active.setSRTPProfiles(profiles),
+          "pre-start buffering profiles rejected");
+    passive.setLocalCertificate(cert, key);
+    active.setLocalCertificate(cert, key);
+
+    passive.initOutgoing();
+    active.setRemoteFingerprint(passive.localFingerprint());
+    active.acceptIncoming();
+    passive.setRemoteFingerprint(active.localFingerprint());
+
+    check(passive.localFingerprint().setup == Dtls::Passive && active.localFingerprint().setup == Dtls::Active,
+          "unexpected DTLS roles in pre-start buffering regression");
+
+    QEventLoop firstFlightLoop;
+    QTimer     firstFlightTimer;
+    firstFlightTimer.setSingleShot(true);
+    QObject::connect(&firstFlightTimer, &QTimer::timeout, &firstFlightLoop, &QEventLoop::quit);
+
+    bool earlyFlight = false;
+    QObject::connect(&active, &Dtls::readyReadOutgoing, &firstFlightLoop, [&]() {
+        for (auto packet = active.readOutgoingDatagram(); !packet.isEmpty(); packet = active.readOutgoingDatagram()) {
+            check(!passive.isStarted(), "passive DTLS started before early client flight was injected");
+            earlyFlight = true;
+            passive.writeIncomingDatagram(packet);
+        }
+        if (earlyFlight)
+            firstFlightLoop.quit();
+    });
+    QObject::connect(&passive, &Dtls::readyReadOutgoing, &active, [&]() {
+        for (auto packet = passive.readOutgoingDatagram(); !packet.isEmpty(); packet = passive.readOutgoingDatagram())
+            active.writeIncomingDatagram(packet);
+    });
+
+    // Reproduce the RFC 8445 race from the live call: the active endpoint gets
+    // a writable valid pair first and sends ClientHello before the passive side
+    // has started its local DTLS engine.
+    active.onRemoteAcceptedFingerprint();
+    firstFlightTimer.start(1000);
+    if (!earlyFlight)
+        firstFlightLoop.exec();
+    check(earlyFlight && !passive.isStarted(), "no DTLS client flight arrived before passive startup");
+
+    QEventLoop handshakeLoop;
+    QTimer     handshakeTimer;
+    handshakeTimer.setSingleShot(true);
+    QObject::connect(&handshakeTimer, &QTimer::timeout, &handshakeLoop, &QEventLoop::quit);
+
+    bool passiveConnected = false;
+    bool activeConnected  = false;
+    bool failed           = false;
+    auto maybeDone = [&]() {
+        if (passiveConnected && activeConnected)
+            handshakeLoop.quit();
+    };
+    QObject::connect(&passive, &Dtls::connected, &handshakeLoop, [&]() {
+        passiveConnected = true;
+        maybeDone();
+    });
+    QObject::connect(&active, &Dtls::connected, &handshakeLoop, [&]() {
+        activeConnected = true;
+        maybeDone();
+    });
+    QObject::connect(&passive, &Dtls::errorOccurred, &handshakeLoop, [&](QAbstractSocket::SocketError) {
+        failed = true;
+        handshakeLoop.quit();
+    });
+    QObject::connect(&active, &Dtls::errorOccurred, &handshakeLoop, [&](QAbstractSocket::SocketError) {
+        failed = true;
+        handshakeLoop.quit();
+    });
+
+    passive.onRemoteAcceptedFingerprint();
+    handshakeTimer.start(5000);
+    if (!(passiveConnected && activeConnected))
+        handshakeLoop.exec();
+
+    check(!failed && passiveConnected && activeConnected,
+          "queued pre-start DTLS ClientHello did not complete the handshake");
+}
+
 static void runPair(const QCA::Certificate &cert, const QCA::PrivateKey &key, bool wrongFingerprint, bool requireSRTP,
                     bool peerSRTP)
 {
@@ -319,6 +407,7 @@ int main(int argc, char **argv)
     const QCA::Certificate cert(options, key);
     check(!cert.isNull(), "certificate generation failed");
 
+    runDeferredFirstFlight(cert, key);
     runPair(cert, key, false, true, true);
     runPair(cert, key, true, true, true);
     runPair(cert, key, false, true, false);
