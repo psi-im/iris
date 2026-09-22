@@ -26,6 +26,7 @@
 #include <QRandomGenerator>
 #endif
 #include <QAbstractSocket>
+#include <QList>
 
 #define DTLS_DEBUG(msg, ...) qDebug("dtls: " msg, ##__VA_ARGS__)
 
@@ -107,6 +108,9 @@ public:
     QStringList srtpProfiles;
     bool        authenticated       = false;
     bool        negotiationDeferred = false;
+
+    QList<QByteArray> pendingIncomingDatagrams;
+    int               pendingIncomingBytes = 0;
 
     QAbstractSocket::SocketError lastError = QAbstractSocket::UnknownSocketError;
 
@@ -294,6 +298,16 @@ public:
             qDebug("Starting DTLS client");
             tls->startClient();
         }
+
+        // ICE can become writable before local DTLS startup is scheduled. In
+        // particular, an RFC 8445 peer may send its first DTLS flight on the
+        // first valid pair while our passive side is still finishing signaling.
+        // Feed those already-routed datagrams into QCA once the engine exists
+        // instead of dropping the ClientHello and deadlocking the handshake.
+        auto queued = std::move(pendingIncomingDatagrams);
+        pendingIncomingBytes = 0;
+        for (const auto &datagram : std::as_const(queued))
+            tls->writeIncoming(datagram);
     }
 
     void generateCertificate()
@@ -474,7 +488,22 @@ void Dtls::writeIncomingDatagram(const QByteArray &data)
 {
     // DTLS_DEBUG("write incoming %d bytes for decryption\n", data.size());
     if (!d->tls) {
-        DTLS_DEBUG("negotiation hasn't started yet. ignore incoming datagram");
+        if (data.isEmpty())
+            return;
+
+        // Bound pre-start buffering: one DTLS flight is normally only a few
+        // packets, but this API can be reached before authentication.
+        constexpr int MaxPendingDatagrams = 16;
+        constexpr int MaxPendingBytes     = 64 * 1024;
+        if (d->pendingIncomingDatagrams.size() >= MaxPendingDatagrams
+            || d->pendingIncomingBytes + data.size() > MaxPendingBytes) {
+            DTLS_DEBUG("negotiation hasn't started yet. drop excess incoming datagram");
+            return;
+        }
+
+        d->pendingIncomingDatagrams.append(data);
+        d->pendingIncomingBytes += data.size();
+        DTLS_DEBUG("negotiation hasn't started yet. queue incoming datagram");
         return;
     }
     d->tls->writeIncoming(data);
