@@ -1170,14 +1170,46 @@ namespace XMPP { namespace Jingle {
 
         bool handleIncomingContentAccept(const QDomElement &jingleEl)
         {
+            std::optional<QList<ContentGroup>> peerGroups;
+            if (outgoingGroupExtension) {
+                peerGroups = q->parseCurrentGroupings(jingleEl);
+                // Active BUNDLE extension is a separate offer/answer transaction.
+                // The peer may keep the committed topology or accept our exact
+                // extension, but it must not mutate unrelated established groups.
+                if (!peerGroups
+                    || (*peerGroups != outgoingGroupExtension->before
+                        && *peerGroups != outgoingGroupExtension->offer)) {
+                    rollbackOutgoingGroupExtension();
+                    lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,
+                                                    XMPP::Stanza::Error::ErrorCond::BadRequest);
+                    return false;
+                }
+            }
+
             bool                 parsed;
             QList<Application *> apps;
 
             std::tie(parsed, apps) = parseContentAcceptList(jingleEl); // marks valid apps as accepted
             if (!parsed) {
+                rollbackOutgoingGroupExtension();
                 lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,
                                                 XMPP::Stanza::Error::ErrorCond::BadRequest);
                 return false;
+            }
+
+            if (outgoingGroupExtension) {
+                if (*peerGroups == outgoingGroupExtension->offer) {
+                    if (!commitOutgoingGroupExtension(*peerGroups)) {
+                        rollbackOutgoingGroupExtension();
+                        lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,
+                                                        XMPP::Stanza::Error::ErrorCond::BadRequest);
+                        return false;
+                    }
+                } else {
+                    // Content was accepted without the group extension. Keep it
+                    // independent and never publish provisional shared membership.
+                    rollbackOutgoingGroupExtension();
+                }
             }
 
             auto guardedApps = snapshotContents(apps);
