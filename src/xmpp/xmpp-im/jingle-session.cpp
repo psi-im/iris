@@ -550,6 +550,18 @@ namespace XMPP { namespace Jingle {
             return TransportResult { false, Reason::NoReason, QSharedPointer<Transport>() };
         }
 
+        static bool sameGroupings(const QList<ContentGroup> &left, const QList<ContentGroup> &right)
+        {
+            if (left.size() != right.size())
+                return false;
+            for (qsizetype i = 0; i < left.size(); ++i) {
+                if (left.at(i).semantics != right.at(i).semantics
+                    || left.at(i).contents != right.at(i).contents)
+                    return false;
+            }
+            return true;
+        }
+
         std::optional<QList<ContentGroup>> parseCurrentGroupings(const QDomElement &jingleEl) const
         {
             const auto groupingNs = QStringLiteral("urn:xmpp:jingle:apps:grouping:0");
@@ -1220,8 +1232,8 @@ namespace XMPP { namespace Jingle {
                 // The peer may keep the committed topology or accept our exact
                 // extension, but it must not mutate unrelated established groups.
                 if (!peerGroups
-                    || (*peerGroups != outgoingGroupExtension->before
-                        && *peerGroups != outgoingGroupExtension->offer)) {
+                    || (!sameGroupings(*peerGroups, outgoingGroupExtension->before)
+                        && !sameGroupings(*peerGroups, outgoingGroupExtension->offer))) {
                     rollbackOutgoingGroupExtension();
                     lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,
                                                     XMPP::Stanza::Error::ErrorCond::BadRequest);
@@ -1241,7 +1253,7 @@ namespace XMPP { namespace Jingle {
             }
 
             if (outgoingGroupExtension) {
-                if (*peerGroups == outgoingGroupExtension->offer) {
+                if (sameGroupings(*peerGroups, outgoingGroupExtension->offer)) {
                     if (!commitOutgoingGroupExtension(*peerGroups)) {
                         rollbackOutgoingGroupExtension();
                         lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,
