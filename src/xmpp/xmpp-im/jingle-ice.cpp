@@ -275,6 +275,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
         bool initializationStarted       = false;
         bool remoteFingerprintAccepted  = false;
         bool dtlsAcceptanceStarted       = false;
+        bool remoteFingerprintApplied    = false;
         bool gatheringComplete           = false;
         bool checksStarted                = false;
 
@@ -1066,6 +1067,8 @@ namespace XMPP { namespace Jingle { namespace ICE {
                 if (!fingerprint)
                     return false;
                 dtls->setRemoteFingerprint(*fingerprint);
+                if (network->runtime)
+                    network->runtime->remoteFingerprintApplied = true;
                 dtls->acceptIncoming();
             }
 
@@ -1318,11 +1321,17 @@ namespace XMPP { namespace Jingle { namespace ICE {
                 setupRemoteICE(e);
 
             if (e.fingerprint.isValid() && q->isLocal() && network->runtime
-                && network->runtime->remoteFingerprint) {
+                && network->runtime->remoteFingerprint && !network->runtime->remoteFingerprintApplied) {
+                // DTLS negotiation state belongs to the physical BUNDLE association,
+                // not to each logical content. Followers carry the same fingerprint
+                // for signaling consistency, but must not apply it a second time to
+                // the shared Dtls object (which can renegotiate the setup role and
+                // spuriously fail an otherwise healthy association).
                 for (auto &component : network->components) {
                     if (component.dtls)
                         component.dtls->setRemoteFingerprint(*network->runtime->remoteFingerprint);
                 }
+                network->runtime->remoteFingerprintApplied = true;
             }
             if (q->state() == State::Created && q->isRemote()) {
                 // initial incoming transport
