@@ -57,6 +57,9 @@ namespace XMPP { namespace Jingle { namespace ICE {
         QMap<ContentKey, QPointer<Transport>>     contentOwners;
         QSet<ContentKey>                          establishedContents;
         std::optional<ConnectionGroupTransaction> stagedGroups;
+        std::optional<ConnectionGroupTransaction> extensionGroups;
+        std::optional<ContentKey>                  extensionContent;
+        QPointer<Transport>                        extensionTransport;
         std::optional<ConnectionGroupTransaction> replacementGroups;
         QSet<ContentKey>                          replacementContents;
         QSet<ContentKey>                          replacementBound;
@@ -2035,6 +2038,75 @@ namespace XMPP { namespace Jingle { namespace ICE {
             }
         }
 
+        // An Active content-add may provisionally extend an already-negotiated
+        // BUNDLE. The new Transport prepares against the old IceConnection, but
+        // ConnectionAssociationState membership is not published until the
+        // content-accept answer commits the extension.
+        if (d->stagedGroups && !d->stagedContents.contains(*content)) {
+            const auto pendingGroup = _session->pendingGroupExtensionFor(*content);
+            if (pendingGroup) {
+                if (!d->extensionGroups) {
+                    std::optional<ContentKey> anchor;
+                    quint64                   associationId = 0;
+                    bool                      valid = true;
+                    for (const auto &name : pendingGroup->contents) {
+                        if (name == content->first)
+                            continue;
+                        std::optional<ContentKey> key;
+                        for (auto it = _session->contentList().cbegin(); it != _session->contentList().cend(); ++it) {
+                            if (it.key().first != name || it.value()->state() >= State::Finishing)
+                                continue;
+                            if (key) {
+                                valid = false;
+                                break;
+                            }
+                            key = it.key();
+                        }
+                        if (!valid || !key || !d->stagedContents.contains(*key)) {
+                            valid = false;
+                            break;
+                        }
+                        const auto memberAssociation = d->stagedGroups->associationIdFor(*key);
+                        if (!memberAssociation || (associationId && memberAssociation != associationId)) {
+                            valid = false;
+                            break;
+                        }
+                        associationId = memberAssociation;
+                        if (!anchor)
+                            anchor = *key;
+                    }
+
+                    if (!valid || !anchor)
+                        return nullptr;
+                    auto extension = ConnectionGroupTransaction::stageMembershipExtension(
+                        *d->stagedGroups, d->registry, *anchor, QList<ContentKey> { *content });
+                    if (!extension || extension->associationIdFor(*content) != associationId)
+                        return nullptr;
+                    d->extensionGroups    = std::move(*extension);
+                    d->extensionContent   = *content;
+                    d->extensionTransport = transport;
+                    connect(transport, &QObject::destroyed, this, [this, content = *content, transport]() {
+                        if (!d->extensionContent || *d->extensionContent != content
+                            || d->extensionTransport != transport)
+                            return;
+                        if (d->extensionGroups)
+                            d->extensionGroups->rollbackExtension();
+                        d->extensionGroups.reset();
+                        d->extensionContent.reset();
+                        d->extensionTransport.clear();
+                        d->registry.prune();
+                    });
+                }
+
+                if (!d->extensionContent || *d->extensionContent != *content
+                    || d->extensionTransport != transport || !d->extensionGroups)
+                    return nullptr;
+                if (groupRequired)
+                    *groupRequired = true;
+                return d->extensionGroups->connectionFor(*content);
+            }
+        }
+
         const bool offeredAsShared = std::any_of(
             d->stagedOfferGroups.cbegin(), d->stagedOfferGroups.cend(), [content](const ContentGroup &group) {
                 return group.semantics == QLatin1String("BUNDLE") && group.contents.size() > 1
@@ -2054,8 +2126,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
             && d->contentOwners.value(*content) != transport;
 
         if (replacingEstablished) {
-            const auto &negotiatedGroups
-                = _session->role() == Origin::Initiator ? _session->remoteGroupings() : _session->groupings();
+            const auto negotiatedGroups = _session->negotiatedGroupings();
             std::optional<ContentGroup> negotiatedBundle;
             for (const auto &group : negotiatedGroups) {
                 if (group.semantics == QLatin1String("BUNDLE") && group.contents.size() > 1
@@ -2212,6 +2283,19 @@ namespace XMPP { namespace Jingle { namespace ICE {
         if (!content || !d->stagedContents.contains(*content))
             return true;
 
+        // Once the Session is Active, only committed negotiated topology is
+        // authoritative. This covers both initial members and later accepted
+        // content-add extensions without reinterpreting pending local/remote
+        // grouping proposals.
+        if (_session->state() == State::Active) {
+            for (const auto &group : _session->negotiatedGroupings()) {
+                if (group.semantics == QLatin1String("BUNDLE") && group.contents.size() > 1
+                    && group.contents.contains(content->first))
+                    return true;
+            }
+            return false;
+        }
+
         if (_session->role() == Origin::Responder)
             return true; // staged directly from the responder's actual local answer
 
@@ -2224,6 +2308,57 @@ namespace XMPP { namespace Jingle { namespace ICE {
                                [&offered](const ContentGroup &accepted) { return sameGroupMembers(offered, accepted); });
         }
         return false;
+    }
+
+    bool Pad::commitGroupExtension(const ContentKey &content)
+    {
+        if (!d->extensionContent || *d->extensionContent != content)
+            return true;
+        if (!d->extensionGroups || !d->stagedGroups || !d->extensionTransport)
+            return false;
+
+        if (!d->extensionGroups->activateExtension(d->registry))
+            return false;
+        if (!d->extensionGroups->finalizeExtension(*d->stagedGroups, d->registry)) {
+            d->extensionGroups->rollbackExtension();
+            return false;
+        }
+
+        auto transport = d->extensionTransport;
+        d->stagedContents.insert(content);
+        d->contentOwners.insert(content, transport);
+        d->establishedContents.insert(content);
+        if (transport) {
+            connect(transport, &QObject::destroyed, this, [this, content, raw = transport.data()]() {
+                if (d->contentOwners.value(content) == raw)
+                    d->contentOwners.remove(content);
+                if (d->stagedGroups)
+                    d->stagedGroups->release(content);
+                d->stagedContents.remove(content);
+                d->establishedContents.remove(content);
+                d->registry.prune();
+            });
+        }
+
+        d->extensionGroups.reset();
+        d->extensionContent.reset();
+        d->extensionTransport.clear();
+        d->registry.prune();
+        return true;
+    }
+
+    void Pad::rollbackGroupExtension(const ContentKey &content)
+    {
+        if (!d->extensionContent || *d->extensionContent != content)
+            return;
+        if (d->extensionGroups)
+            d->extensionGroups->rollbackExtension();
+        if (d->extensionTransport)
+            d->extensionTransport->releaseNetworkOwnership();
+        d->extensionGroups.reset();
+        d->extensionContent.reset();
+        d->extensionTransport.clear();
+        d->registry.prune();
     }
 
     bool Pad::shouldDeferGroupedNetwork(Transport *transport) const

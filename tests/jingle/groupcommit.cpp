@@ -204,6 +204,73 @@ int main(int argc, char **argv)
               "two-group replacement regression leaked associations");
     }
 
+    // Extending an already-live association is provisional until
+    // signaling accepts it. Preparing a new content may use the same connection,
+    // but staging alone must not change published membership/generation.
+    {
+        ConnectionRegistry extensionRegistry;
+        auto current = ConnectionGroupTransaction::stageBundled(
+            *plan, extensionRegistry, QStringLiteral("urn:xmpp:jingle:transports:ice:0"));
+        check(current && current->size() == 2 && extensionRegistry.liveAssociationCount() == 1,
+              "failed to seed BUNDLE membership extension");
+
+        const auto audioKey = members.at(0).content;
+        const auto videoKey = members.at(1).content;
+        const ContentKey metadataKey { QStringLiteral("metadata"), Origin::Initiator };
+        auto *shared = current->connectionFor(audioKey);
+        QPointer<IceConnection> sharedGuard(shared);
+        check(shared && shared == current->connectionFor(videoKey),
+              "extension seed was not one shared association");
+        const auto associationId = current->associationIdFor(audioKey);
+        const auto revision = shared->generation.membershipRevision;
+
+        {
+            auto staged = ConnectionGroupTransaction::stageMembershipExtension(
+                *current, extensionRegistry, audioKey, { metadataKey });
+            check(staged && staged->isExtension() && !staged->extensionActive()
+                      && staged->connectionFor(metadataKey) == shared
+                      && staged->associationIdFor(metadataKey) == associationId,
+                  "provisional extension did not expose the existing connection");
+            check(shared->generation.membershipRevision == revision,
+                  "provisional extension mutated live membership generation");
+        }
+        check(sharedGuard && shared->generation.membershipRevision == revision
+                  && !current->connectionFor(metadataKey),
+              "discarding provisional extension changed the established group");
+
+        auto staged = ConnectionGroupTransaction::stageMembershipExtension(
+            *current, extensionRegistry, audioKey, { metadataKey });
+        check(staged && staged->activateExtension(extensionRegistry)
+                  && staged->extensionActive()
+                  && shared->generation.membershipRevision == revision + 1,
+              "extension activation did not publish one new membership");
+        check(staged->rollbackExtension() && sharedGuard
+                  && shared->generation.membershipRevision == revision + 2
+                  && !current->connectionFor(metadataKey),
+              "extension rollback disturbed the established association");
+
+        staged = ConnectionGroupTransaction::stageMembershipExtension(
+            *current, extensionRegistry, videoKey, { metadataKey });
+        check(staged && staged->activateExtension(extensionRegistry),
+              "extension could not reactivate after rollback");
+        check(staged->finalizeExtension(*current, extensionRegistry)
+                  && staged->extensionFinalized()
+                  && current->connectionFor(metadataKey) == shared
+                  && current->associationIdFor(metadataKey) == associationId,
+              "accepted extension did not join the current membership snapshot");
+        staged.reset();
+        check(sharedGuard && current->connectionFor(metadataKey) == shared
+                  && extensionRegistry.liveAssociationCount() == 1,
+              "finalized extension lifetime depended on the staging object");
+
+        check(current->release(audioKey) && current->release(videoKey) && sharedGuard,
+              "removing original BUNDLE members destroyed the extended member");
+        check(current->release(metadataKey) && !sharedGuard
+                  && extensionRegistry.liveAssociationCount() == 0,
+              "last extended membership did not release the shared association");
+        extensionRegistry.prune();
+    }
+
     auto refusalPlan = GroupNegotiation::initialPlan(members, offer, {});
     check(refusalPlan && refusalPlan->readyToCommit(), "BUNDLE refusal did not produce a committable fallback plan");
     auto refusal = ConnectionGroupTransaction::commit(*refusalPlan, registry);

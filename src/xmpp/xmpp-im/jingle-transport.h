@@ -38,6 +38,12 @@ namespace XMPP { namespace Jingle {
 
         virtual TransportManager *manager() const = 0;
         QString requestedNamespace() const { return property("_iris_jingle_transport_namespace").toString(); }
+
+        // Dynamic grouping transaction hooks. A transport pad that stages
+        // provisional shared membership may commit/rollback it when the
+        // corresponding content-add/content-accept negotiation completes.
+        virtual bool commitGroupExtension(const ContentKey &) { return true; }
+        virtual void rollbackGroupExtension(const ContentKey &) { }
     };
 
     class Transport : public QObject {
