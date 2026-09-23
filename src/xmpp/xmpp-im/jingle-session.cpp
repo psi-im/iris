@@ -550,6 +550,49 @@ namespace XMPP { namespace Jingle {
             return TransportResult { false, Reason::NoReason, QSharedPointer<Transport>() };
         }
 
+        std::optional<QList<ContentGroup>> parseCurrentGroupings(const QDomElement &jingleEl) const
+        {
+            const auto groupingNs = QStringLiteral("urn:xmpp:jingle:apps:grouping:0");
+            QHash<QString, int> contentNames;
+            for (auto it = contentList.cbegin(); it != contentList.cend(); ++it) {
+                if (it.value() && it.value()->state() < State::Finishing)
+                    ++contentNames[it.key().first];
+            }
+            for (auto el = jingleEl.firstChildElement(); !el.isNull(); el = el.nextSiblingElement()) {
+                if (el.namespaceURI() != QLatin1String("urn:xmpp:jingle:1")
+                    || el.localName() != QLatin1String("content"))
+                    continue;
+                const auto name = el.attribute(QStringLiteral("name"));
+                if (!name.isEmpty())
+                    ++contentNames[name];
+            }
+
+            QList<ContentGroup> result;
+            for (auto el = jingleEl.firstChildElement(); !el.isNull(); el = el.nextSiblingElement()) {
+                if (el.namespaceURI() != groupingNs || el.localName() != QLatin1String("group"))
+                    continue;
+                ContentGroup group { el.attribute(QStringLiteral("semantics")), {} };
+                QSet<QString> seen;
+                if (group.semantics.trimmed().isEmpty())
+                    return std::nullopt;
+                for (auto child = el.firstChildElement(); !child.isNull(); child = child.nextSiblingElement()) {
+                    if (child.namespaceURI() != groupingNs || child.localName() != QLatin1String("content"))
+                        continue;
+                    const auto name = child.attribute(QStringLiteral("name"));
+                    if (name.isEmpty() || seen.contains(name))
+                        return std::nullopt;
+                    seen.insert(name);
+                    group.contents.append(name);
+                }
+                for (const auto &name : group.contents) {
+                    if (contentNames.value(name) != 1)
+                        return std::nullopt;
+                }
+                result.append(std::move(group));
+            }
+            return result;
+        }
+
         void rollbackOutgoingGroupExtension()
         {
             if (!outgoingGroupExtension)
@@ -1172,7 +1215,7 @@ namespace XMPP { namespace Jingle {
         {
             std::optional<QList<ContentGroup>> peerGroups;
             if (outgoingGroupExtension) {
-                peerGroups = q->parseCurrentGroupings(jingleEl);
+                peerGroups = parseCurrentGroupings(jingleEl);
                 // Active BUNDLE extension is a separate offer/answer transaction.
                 // The peer may keep the committed topology or accept our exact
                 // extension, but it must not mutate unrelated established groups.

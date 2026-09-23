@@ -156,62 +156,6 @@ namespace XMPP { namespace Jingle {
         bool updateFromXml(Action action, const QDomElement &jingleEl, std::function<void()> *afterReply = nullptr);
         static std::optional<QList<ContentGroup>> parseGroupings(const QDomElement &jingleEl);
 
-        // Active-session grouping updates may reference both a newly signalled
-        // <content/> and already-established contents that are absent from the
-        // current stanza. Resolve names against the union of both sets, while
-        // still rejecting ambiguity: XEP-0338 group references are names/mids,
-        // not (creator,name) ContentKeys.
-        std::optional<QList<ContentGroup>> parseCurrentGroupings(const QDomElement &jingleEl) const
-        {
-            const auto groupingNs = QStringLiteral("urn:xmpp:jingle:apps:grouping:0");
-            QHash<QString, int> contentNames;
-            for (auto it = contentList().cbegin(); it != contentList().cend(); ++it) {
-                if (it.value() && it.value()->state() < State::Finishing)
-                    ++contentNames[it.key().first];
-            }
-            for (auto el = jingleEl.firstChildElement(); !el.isNull(); el = el.nextSiblingElement()) {
-                if (el.namespaceURI() != QLatin1String("urn:xmpp:jingle:1")
-                    || el.localName() != QLatin1String("content"))
-                    continue;
-                const auto name = el.attribute(QStringLiteral("name"));
-                if (name.isEmpty())
-                    continue;
-                // A content-add is not in contentList yet. If the same key/name
-                // is already live, counting the stanza reference makes the name
-                // deliberately ambiguous rather than silently rebinding it.
-                ++contentNames[name];
-            }
-
-            QList<ContentGroup> result;
-            for (auto el = jingleEl.firstChildElement(); !el.isNull(); el = el.nextSiblingElement()) {
-                if (el.namespaceURI() != groupingNs || el.localName() != QLatin1String("group"))
-                    continue;
-                ContentGroup group { el.attribute(QStringLiteral("semantics")), {} };
-                QSet<QString> seen;
-                if (group.semantics.trimmed().isEmpty())
-                    return std::nullopt;
-                for (auto child = el.firstChildElement(); !child.isNull(); child = child.nextSiblingElement()) {
-                    if (child.namespaceURI() != groupingNs || child.localName() != QLatin1String("content"))
-                        continue;
-                    const auto name = child.attribute(QStringLiteral("name"));
-                    if (name.isEmpty() || seen.contains(name))
-                        return std::nullopt;
-                    seen.insert(name);
-                    group.contents.append(name);
-                }
-                // As with initial grouping parsing, an unresolved reference
-                // invalidates the whole group semantically. For active updates
-                // ambiguity is a protocol error: accepting it could attach the
-                // new transport to the wrong live association.
-                for (const auto &name : group.contents) {
-                    if (contentNames.value(name) != 1)
-                        return std::nullopt;
-                }
-                result.append(std::move(group));
-            }
-            return result;
-        }
-
         static bool validBundleAnswer(const QList<ContentGroup> &offer, const QList<ContentGroup> &answer);
         bool        validLocalGroupings() const;
         void        refreshAutomaticGroupings(const QSet<Application *> &excluded = {});
