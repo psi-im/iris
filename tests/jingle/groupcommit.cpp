@@ -1,3 +1,4 @@
+#include "../../src/xmpp/xmpp-im/jingle-active-group-extension_p.h"
 #include "../../src/xmpp/xmpp-im/jingle-ice-group_p.h"
 
 #include <QCoreApplication>
@@ -269,6 +270,52 @@ int main(int argc, char **argv)
                   && extensionRegistry.liveAssociationCount() == 0,
               "last extended membership did not release the shared association");
         extensionRegistry.prune();
+    }
+
+    // Active-session group updates are topology transactions, not a second
+    // initial negotiation. Existing members are immutable; only one new content
+    // may be appended to one established BUNDLE at a time.
+    {
+        const QList<ContentGroup> committed {
+            { QStringLiteral("BUNDLE"), { QStringLiteral("audio"), QStringLiteral("video") } },
+            { QStringLiteral("BUNDLE"), { QStringLiteral("screen"), QStringLiteral("slides") } }
+        };
+        const QSet<QString> currentStanza { QStringLiteral("file") };
+
+        auto unchanged = ActiveGroupExtension::classify(committed, committed, currentStanza);
+        check(unchanged.kind == ActiveGroupExtension::Kind::Unchanged,
+              "unchanged active grouping was not recognized");
+
+        auto extended = committed;
+        extended[0].contents.append(QStringLiteral("file"));
+        auto extension = ActiveGroupExtension::classify(committed, extended, currentStanza);
+        check(extension.kind == ActiveGroupExtension::Kind::Extension
+                  && extension.groupIndex == 0 && extension.addedName == QLatin1String("file"),
+              "single-member active BUNDLE extension was rejected");
+
+        auto reordered = extended;
+        reordered[0].contents = { QStringLiteral("video"), QStringLiteral("audio"), QStringLiteral("file") };
+        check(ActiveGroupExtension::classify(committed, reordered, currentStanza).kind
+                  == ActiveGroupExtension::Kind::Invalid,
+              "active BUNDLE extension allowed established-member reordering");
+
+        auto removed = committed;
+        removed[0].contents = { QStringLiteral("audio") };
+        check(ActiveGroupExtension::classify(committed, removed, currentStanza).kind
+                  == ActiveGroupExtension::Kind::Invalid,
+              "active BUNDLE extension allowed established-member removal");
+
+        auto twoGroupsChanged = extended;
+        twoGroupsChanged[1].contents.append(QStringLiteral("file"));
+        check(ActiveGroupExtension::classify(committed, twoGroupsChanged, currentStanza).kind
+                  == ActiveGroupExtension::Kind::Invalid,
+              "active BUNDLE extension allowed multiple group mutations");
+
+        auto unknownAdded = committed;
+        unknownAdded[0].contents.append(QStringLiteral("ghost"));
+        check(ActiveGroupExtension::classify(committed, unknownAdded, currentStanza).kind
+                  == ActiveGroupExtension::Kind::Invalid,
+              "active BUNDLE extension accepted a content absent from the stanza");
     }
 
     auto refusalPlan = GroupNegotiation::initialPlan(members, offer, {});
