@@ -8,6 +8,7 @@
 #include <QMap>
 #include <QSet>
 
+#include <algorithm>
 #include <optional>
 
 namespace XMPP { namespace Jingle {
