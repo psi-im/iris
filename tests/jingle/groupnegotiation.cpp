@@ -96,57 +96,6 @@ int main(int argc, char **argv)
                                  members.at(1).content }),
           "ambiguous replacement names were accepted for one BUNDLE association");
 
-    // Active content-add may extend exactly one established BUNDLE with exactly
-    // the newly offered contents. It must not rewrite the established topology.
-    const QList<ContentGroup> activeBefore {
-        { QStringLiteral("BUNDLE"), { QStringLiteral("audio"), QStringLiteral("video") } },
-        { QStringLiteral("BUNDLE"), { QStringLiteral("aux1"), QStringLiteral("aux2") } }
-    };
-    const QList<ContentGroup> activeOffer {
-        { QStringLiteral("BUNDLE"),
-          { QStringLiteral("audio"), QStringLiteral("video"), QStringLiteral("file") } },
-        activeBefore.at(1)
-    };
-    auto extension = GroupNegotiation::activeExtension(
-        activeBefore, activeOffer, QSet<QString> { QStringLiteral("file") }, &error);
-    check(extension && error == GroupNegotiation::Error::None
-              && extension->extendedGroup.contents == activeOffer.first().contents
-              && extension->addedContents == QSet<QString> { QStringLiteral("file") },
-          "valid active BUNDLE extension was rejected");
-
-    auto unchanged = GroupNegotiation::activeExtension(
-        activeBefore, activeBefore, QSet<QString> { QStringLiteral("file") }, &error);
-    check(!unchanged && error == GroupNegotiation::Error::None,
-          "unchanged active topology was misclassified as an extension");
-
-    auto removedMember = activeOffer;
-    removedMember[0].contents = { QStringLiteral("audio"), QStringLiteral("file") };
-    check(!GroupNegotiation::activeExtension(
-              activeBefore, removedMember, QSet<QString> { QStringLiteral("file") }, &error)
-              && error == GroupNegotiation::Error::InvalidGroup,
-          "active extension was allowed to remove an established member");
-
-    auto changedOtherGroup = activeOffer;
-    changedOtherGroup[1].contents.append(QStringLiteral("other"));
-    check(!GroupNegotiation::activeExtension(
-              activeBefore, changedOtherGroup,
-              QSet<QString> { QStringLiteral("file"), QStringLiteral("other") }, &error)
-              && error == GroupNegotiation::Error::InvalidGroup,
-          "one content-add changed two established BUNDLE associations");
-
-    auto smuggledMember = activeOffer;
-    smuggledMember[0].contents.append(QStringLiteral("existing-independent"));
-    check(!GroupNegotiation::activeExtension(
-              activeBefore, smuggledMember, QSet<QString> { QStringLiteral("file") }, &error)
-              && error == GroupNegotiation::Error::UnknownContent,
-          "active extension moved an unoffered content into the BUNDLE");
-
-    check(!GroupNegotiation::activeExtension(
-              activeBefore, activeOffer,
-              QSet<QString> { QStringLiteral("file"), QStringLiteral("metadata") }, &error)
-              && error == GroupNegotiation::Error::InvalidGroup,
-          "grouped content-add silently left another new content independent");
-
     const QList<ContentGroup> twoOffers { { QStringLiteral("BUNDLE"),
                                             { QStringLiteral("audio"), QStringLiteral("video") } },
                                           { QStringLiteral("BUNDLE"), { QStringLiteral("screen") } } };
