@@ -733,7 +733,8 @@ static void exerciseActiveFileTransferBundleExtension(const WireOffer &offer, Tc
               return groups.size() == 1
                   && groups.first().contents
                       == QStringList({ offer.audioName, offer.videoName, fileName })
-                  && icePad->liveAssociationCount() == 1;
+                  && icePad->liveAssociationCount() == 1
+                  && rejectedFt->state() == J::State::Finished;
           }),
           "local rejection changed established BUNDLE topology or lifetime");
 
