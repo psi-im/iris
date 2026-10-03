@@ -20,21 +20,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path('tests/jingle/bundlesignaling.cpp')
-          s = p.read_text()
-          old = '''    file.setName(name + QStringLiteral(".bin"));
-    file.setSize(32);
-'''
-          new = '''    file.setName(name + QStringLiteral(".bin"));
-    file.setSize(32);
-    file.addHash(Hash::from(Hash::Sha256, QByteArray("active-bundle-extension")));
-'''
-          if old not in s:
-              raise SystemExit('fixture marker not found')
-          p.write_text(s.replace(old, new, 1))
-          PY
+          python3 -c 'from pathlib import Path; p=Path("tests/jingle/bundlesignaling.cpp"); s=p.read_text(); old="    file.setName(name + QStringLiteral(\".bin\"));\n    file.setSize(32);\n"; new=old+"    file.addHash(Hash::from(Hash::Sha256, QByteArray(\"active-bundle-extension\")));\n"; assert old in s; p.write_text(s.replace(old,new,1))'
           git diff --check
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
