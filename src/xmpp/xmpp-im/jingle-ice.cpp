@@ -2312,8 +2312,12 @@ namespace XMPP { namespace Jingle { namespace ICE {
 
     bool Pad::commitGroupExtension(const ContentKey &content)
     {
+        // Session calls this only for a negotiated pending extension. Missing
+        // staging is therefore a transaction failure, not an idempotent success:
+        // otherwise negotiatedGroups could publish membership that never joined
+        // the physical association.
         if (!d->extensionContent || *d->extensionContent != content)
-            return true;
+            return false;
         if (!d->extensionGroups || !d->stagedGroups || !d->extensionTransport)
             return false;
 
