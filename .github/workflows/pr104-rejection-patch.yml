@@ -1,0 +1,30 @@
+name: PR 104 rejection patch
+
+on:
+  push:
+    branches:
+      - ai/active-bundle-content-add
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ai/active-bundle-content-add
+      - name: Apply rejection regression patch
+        run: python3 .github/pr104_rejection_patch.py
+      - name: Commit patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add tests/jingle/bundlesignaling.cpp
+          git commit -m 'Test active BUNDLE rejection rollback without task race'
+          git push origin HEAD:ai/active-bundle-content-add
