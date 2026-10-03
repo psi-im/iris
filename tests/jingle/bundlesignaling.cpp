@@ -582,6 +582,7 @@ static QDomElement activeFileAddPayload(QDomDocument &doc, const J::Session &ses
     J::FileTransfer::File file;
     file.setName(name + QStringLiteral(".bin"));
     file.setSize(32);
+    file.addHash(Hash::from(Hash::Sha256, QByteArray("active-bundle-extension")));
     auto description = doc.createElementNS(J::FileTransfer::NS, QStringLiteral("description"));
     description.appendChild(file.toXml(&doc));
     content.appendChild(description);
