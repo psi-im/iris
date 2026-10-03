@@ -75,6 +75,13 @@ namespace XMPP { namespace Jingle {
             std::optional<TransportParameters> transportParameters;
         };
 
+        struct ActiveExtension {
+            QList<ContentGroup> before;
+            QList<ContentGroup> offer;
+            ContentGroup        extendedGroup;
+            QSet<QString>       addedContents;
+        };
+
         enum class Error {
             None,
             InvalidContent,
@@ -88,6 +95,77 @@ namespace XMPP { namespace Jingle {
             IncompleteTransportParameters,
             ConflictingTransportParameters
         };
+
+        // Validate a content-add grouping update against the already committed
+        // topology. Active negotiation may only extend one established BUNDLE;
+        // it may not remove/reorder old members, rewrite another group, or move
+        // an established member between associations. A stanza without a group
+        // change is not an extension and returns nullopt with Error::None.
+        static std::optional<ActiveExtension> activeExtension(const QList<ContentGroup> &before,
+                                                              const QList<ContentGroup> &offer,
+                                                              const QSet<QString> &addedContents,
+                                                              Error *error = nullptr)
+        {
+            auto fail = [error](Error value) -> std::optional<ActiveExtension> {
+                if (error)
+                    *error = value;
+                return std::nullopt;
+            };
+            if (error)
+                *error = Error::None;
+            if (before.size() != offer.size())
+                return fail(Error::InvalidGroup);
+
+            int changed = -1;
+            for (int i = 0; i < before.size(); ++i) {
+                const auto &oldGroup = before.at(i);
+                const auto &newGroup = offer.at(i);
+                if (oldGroup.semantics == newGroup.semantics && oldGroup.contents == newGroup.contents)
+                    continue;
+                if (changed >= 0 || oldGroup.semantics != QLatin1String("BUNDLE")
+                    || newGroup.semantics != oldGroup.semantics || oldGroup.contents.size() < 2
+                    || newGroup.contents.size() <= oldGroup.contents.size())
+                    return fail(Error::InvalidGroup);
+                changed = i;
+            }
+            if (changed < 0)
+                return std::nullopt;
+
+            const auto &oldGroup = before.at(changed);
+            const auto &newGroup = offer.at(changed);
+            QSet<QString> oldNames;
+            for (const auto &name : oldGroup.contents) {
+                if (name.isEmpty() || oldNames.contains(name))
+                    return fail(Error::InvalidGroup);
+                oldNames.insert(name);
+            }
+
+            QSet<QString> newNames;
+            QSet<QString> extensionNames;
+            for (const auto &name : newGroup.contents) {
+                if (name.isEmpty() || newNames.contains(name))
+                    return fail(Error::InvalidGroup);
+                newNames.insert(name);
+                if (!oldNames.contains(name)) {
+                    if (!addedContents.contains(name))
+                        return fail(Error::UnknownContent);
+                    extensionNames.insert(name);
+                }
+            }
+            if (extensionNames.isEmpty() || !std::all_of(oldNames.cbegin(), oldNames.cend(),
+                                                          [&newNames](const QString &name) {
+                                                              return newNames.contains(name);
+                                                          }))
+                return fail(Error::InvalidGroup);
+
+            // A grouped content-add is one atomic membership transaction. Do
+            // not silently leave another newly added content outside the offer;
+            // callers can use an unchanged topology for an independent add.
+            if (extensionNames != addedContents)
+                return fail(Error::InvalidGroup);
+
+            return ActiveExtension { before, offer, newGroup, extensionNames };
+        }
 
         // A negotiated multi-content BUNDLE association is one transport
         // replacement unit. Replacing only some of its members would split one
