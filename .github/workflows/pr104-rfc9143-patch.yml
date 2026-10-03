@@ -1,0 +1,30 @@
+name: PR 104 RFC 9143 patch
+
+on:
+  push:
+    branches:
+      - ai/active-bundle-content-add
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ai/active-bundle-content-add
+      - name: Apply RFC 9143 alignment
+        run: python3 .github/pr104_rfc9143_patch.py
+      - name: Commit source and regression changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/xmpp/xmpp-im/jingle-session.cpp tests/jingle/bundlesignaling.cpp
+          git commit -m 'Align active BUNDLE extension answers with RFC 9143'
+          git push origin HEAD:ai/active-bundle-content-add
