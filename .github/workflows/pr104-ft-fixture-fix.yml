@@ -1,0 +1,43 @@
+name: PR 104 FT fixture fix
+
+on:
+  push:
+    branches:
+      - ai/active-bundle-content-add
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ai/active-bundle-content-add
+      - name: Add required Jingle FT hash
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('tests/jingle/bundlesignaling.cpp')
+          s = p.read_text()
+          old = '''    file.setName(name + QStringLiteral(".bin"));
+    file.setSize(32);
+'''
+          new = '''    file.setName(name + QStringLiteral(".bin"));
+    file.setSize(32);
+    file.addHash(Hash::from(Hash::Sha256, QByteArray("active-bundle-extension")));
+'''
+          if old not in s:
+              raise SystemExit('fixture marker not found')
+          p.write_text(s.replace(old, new, 1))
+          PY
+          git diff --check
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add tests/jingle/bundlesignaling.cpp
+          git commit -m 'Fix active BUNDLE file transfer fixture'
+          git push origin HEAD:ai/active-bundle-content-add
