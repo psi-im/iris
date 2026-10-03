@@ -335,7 +335,14 @@ namespace XMPP { namespace Jingle {
             return _update;
 
         if (_terminationReason.isValid()) {
-            _update = { Action::ContentRemove, _terminationReason };
+            // Reject a remotely added content that has not crossed the local
+            // content-accept IQ boundary yet. Once accepted, removing the same
+            // content is an ordinary content-remove. Initial session contents
+            // are negotiated by session-initiate/session-accept instead.
+            const bool rejectPendingContentAdd = isRemote() && !_flags.testFlag(InitialApplication)
+                && (_state == State::Pending || _state == State::ApprovedToSend);
+            _update = { rejectPendingContentAdd ? Action::ContentReject : Action::ContentRemove,
+                        _terminationReason };
             return _update;
         }
 

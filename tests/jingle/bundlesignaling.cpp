@@ -280,8 +280,6 @@ public:
     explicit RootTaskKeeper(Task *root) : root_(root)
     {
         check(root_, "missing client root task");
-        for (auto child : root_->children())
-            existing_.insert(child);
         root_->installEventFilter(this);
     }
 
@@ -292,16 +290,36 @@ public:
         release();
     }
 
-    Task *task() const { return qobject_cast<Task *>(held_.data()); }
+    QList<Task *> tasks()
+    {
+        QList<Task *> result;
+        for (const auto &candidate : std::as_const(candidates_)) {
+            auto task = qobject_cast<Task *>(candidate.data());
+            if (!isJingleTask(task) || result.contains(task))
+                continue;
+            result.append(task);
+            if (!held_.contains(task))
+                held_.append(task);
+        }
+        return result;
+    }
+
+    Task *task()
+    {
+        const auto pending = tasks();
+        return pending.isEmpty() ? nullptr : pending.constFirst();
+    }
 
     void release()
     {
-        if (!held_)
-            return;
-        auto object = held_.data();
-        object->removeEventFilter(this);
+        const auto held = held_;
         held_.clear();
-        object->deleteLater();
+        for (const auto &task : held) {
+            if (!task)
+                continue;
+            task->removeEventFilter(this);
+            task->deleteLater();
+        }
     }
 
 protected:
@@ -309,41 +327,53 @@ protected:
     {
         if (watched == root_ && event->type() == QEvent::ChildAdded) {
             auto child = static_cast<QChildEvent *>(event)->child();
-            if (child && !existing_.contains(child)) {
-                check(!held_ || held_ == child,
-                      "more than one root task appeared while sending session-initiate");
-                if (!held_) {
-                    held_ = child;
-                    child->installEventFilter(this);
-                }
+            if (child) {
+                candidates_.append(child);
+                child->installEventFilter(this);
             }
-        } else if (held_ && watched == held_ && event->type() == QEvent::DeferredDelete) {
-            // Task::go(true) schedules deletion immediately when no real XMPP
-            // stream is connected. Keep this one serialized Jingle IQ alive
-            // until the fixture feeds its real <iq type='result'/> reply.
-            return true;
+        } else if (watched != root_ && event->type() == QEvent::DeferredDelete) {
+            auto task = qobject_cast<Task *>(watched);
+            if (isJingleTask(task)) {
+                if (!held_.contains(task))
+                    held_.append(task);
+                // With no real XMPP stream, Task::go(true) immediately
+                // schedules deletion. A single logical Jingle step may
+                // emit more than one IQ (for example transport-info next
+                // to content-accept), so retain every Jingle task until
+                // the fixture has acknowledged the whole wire boundary.
+                return true;
+            }
         }
         return QObject::eventFilter(watched, event);
     }
 
 private:
-    QPointer<Task>    root_;
-    QSet<QObject *>   existing_;
-    QPointer<QObject> held_;
+    static bool isJingleTask(Task *task)
+    {
+        return task && QLatin1String(task->metaObject()->className()) == QLatin1String("XMPP::Jingle::JT");
+    }
+
+    QPointer<Task>           root_;
+    QList<QPointer<QObject>> candidates_;
+    QList<QPointer<Task>>    held_;
 };
 
 static void acknowledgeJingleTask(RootTaskKeeper &keeper, const Jid &peer)
 {
-    auto pending = keeper.task();
-    check(pending, "session-initiate did not create a retained Jingle IQ task");
+    const auto pending = keeper.tasks();
+    check(!pending.isEmpty(), "outgoing Jingle action did not create a retained Jingle IQ task");
 
-    QDomDocument replyDoc;
-    auto reply = replyDoc.createElement(QStringLiteral("iq"));
-    replyDoc.appendChild(reply);
-    reply.setAttribute(QStringLiteral("type"), QStringLiteral("result"));
-    reply.setAttribute(QStringLiteral("from"), peer.full());
-    reply.setAttribute(QStringLiteral("id"), pending->id());
-    check(pending->take(reply), "session-initiate IQ result was not consumed");
+    for (auto task : pending) {
+        if (!task)
+            continue;
+        QDomDocument replyDoc;
+        auto reply = replyDoc.createElement(QStringLiteral("iq"));
+        replyDoc.appendChild(reply);
+        reply.setAttribute(QStringLiteral("type"), QStringLiteral("result"));
+        reply.setAttribute(QStringLiteral("from"), peer.full());
+        reply.setAttribute(QStringLiteral("id"), task->id());
+        check(task->take(reply), "outgoing Jingle IQ result was not consumed");
+    }
     keeper.release();
 }
 
@@ -708,9 +738,12 @@ static void exerciseActiveFileTransferBundleExtension(const WireOffer &offer, Tc
     auto unbundledAdd = activeFileAddPayload(
         unbundledDoc, session, offer, unbundledName,
         { offer.audioName, offer.videoName, fileName, unbundledName });
+    RootTaskKeeper pendingPolicyReject(client.rootTask());
     check(session.updateFromXml(J::Action::ContentAdd, unbundledAdd),
           "BUNDLE extension that local policy cannot share was not handled");
-    QCoreApplication::processEvents(QEventLoop::AllEvents);
+    check(waitFor([&]() { return pendingPolicyReject.task() != nullptr; }),
+          "local grouping policy did not serialize content-reject");
+    acknowledgeJingleTask(pendingPolicyReject, peer);
     check(!session.content(unbundledName, J::Origin::Initiator)
               && session.negotiatedGroupings().size() == 1
               && session.negotiatedGroupings().first().contents
@@ -744,7 +777,11 @@ static void exerciseActiveFileTransferBundleExtension(const WireOffer &offer, Tc
               && icePad->liveAssociationCount() == 1,
           "rollback fixture did not stage on the established BUNDLE association");
 
+    RootTaskKeeper pendingReject(client.rootTask());
     rejectedFt->remove(J::Reason::Decline, QStringLiteral("declined by local policy"));
+    check(waitFor([&]() { return pendingReject.task() != nullptr; }),
+          "local rejection did not serialize content removal");
+    acknowledgeJingleTask(pendingReject, peer);
     check(waitFor([&]() {
               const auto groups = session.negotiatedGroupings();
               return groups.size() == 1
@@ -757,8 +794,8 @@ static void exerciseActiveFileTransferBundleExtension(const WireOffer &offer, Tc
 
     bool rejectedStillBound = false, rejectedStillRequired = false;
     check(icePad->groupedConnectionFor(rejectedTransport.data(), &rejectedStillBound, &rejectedStillRequired) == nullptr
-              && !rejectedStillBound && !rejectedStillRequired,
-          "local rejection retained provisional BUNDLE membership");
+              && rejectedStillBound && !rejectedStillRequired,
+          "local rejection retained provisional BUNDLE membership or lost content identity");
     check(shared && audioTransport->state() < J::State::Finishing
               && videoTransport->state() < J::State::Finishing,
           "extension rollback disturbed established RTP members");
@@ -885,8 +922,8 @@ static void exerciseInitiatorRejectsUnbundledContentAccept(const WireOffer &tran
 
     bool stillBound = false, stillRequired = false;
     check(icePad->groupedConnectionFor(ftTransport.data(), &stillBound, &stillRequired) == nullptr
-              && !stillBound && !stillRequired,
-          "invalid unbundled content-accept retained provisional BUNDLE membership");
+              && stillBound && !stillRequired,
+          "invalid unbundled content-accept retained provisional BUNDLE membership or lost content identity");
 }
 #endif
 
