@@ -1134,7 +1134,7 @@ namespace XMPP { namespace Jingle {
                 if (rejected && app
                     && (app->creator() != role || app->flags().testFlag(Application::InitialApplication)
                         || (app->state() != State::Pending && app->state() != State::Unacked))) {
-                    lastError = XMPP::Stanza::Error(XMPP::Stanza::ErrorType::Cancel,
+                    lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,
                                                     XMPP::Stanza::Error::ErrorCond::UnexpectedRequest);
                     ErrorUtil::fill(jingleEl.ownerDocument(), *lastError, ErrorUtil::OutOfOrder);
                     return false;
@@ -1498,7 +1498,7 @@ namespace XMPP { namespace Jingle {
                 }
                 const ContentKey key { cb.name, cb.creator };
                 if (seen.contains(key)) {
-                    lastError = XMPP::Stanza::Error(XMPP::Stanza::ErrorType::Cancel,
+                    lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,
                                                     XMPP::Stanza::Error::ErrorCond::BadRequest);
                     return false;
                 }
@@ -1533,7 +1533,7 @@ namespace XMPP { namespace Jingle {
             }
 
             if (seen.isEmpty()) {
-                lastError = XMPP::Stanza::Error(XMPP::Stanza::ErrorType::Cancel,
+                lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,
                                                 XMPP::Stanza::Error::ErrorCond::BadRequest);
                 return false;
             }
@@ -1897,7 +1897,7 @@ namespace XMPP { namespace Jingle {
                     return false;
                 }
                 if (!app->supportsContentModify()) {
-                    lastError = Stanza::Error(Stanza::ErrorType::Cancel,
+                    lastError = Stanza::Error(Stanza::Error::ErrorType::Cancel,
                                               Stanza::Error::ErrorCond::FeatureNotImplemented);
                     return false;
                 }
@@ -1942,7 +1942,7 @@ namespace XMPP { namespace Jingle {
                     return false;
                 }
                 if (description.namespaceURI() != app->pad()->ns()) {
-                    lastError = XMPP::Stanza::Error(XMPP::Stanza::ErrorType::Cancel,
+                    lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,
                                                     XMPP::Stanza::Error::ErrorCond::FeatureNotImplemented);
                     ErrorUtil::fill(jingleEl.ownerDocument(), *lastError, ErrorUtil::UnsupportedInfo);
                     return false;
@@ -2036,7 +2036,7 @@ namespace XMPP { namespace Jingle {
 
                 auto tel = ce.firstChildElement(QStringLiteral("transport"));
                 if (tel.isNull() || tel.namespaceURI() != app->transport()->pad()->ns()) {
-                    lastError = XMPP::Stanza::Error(XMPP::Stanza::ErrorType::Cancel,
+                    lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,
                                                     XMPP::Stanza::Error::ErrorCond::BadRequest);
                     return false;
                 }
