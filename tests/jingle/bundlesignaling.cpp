@@ -702,6 +702,23 @@ static void exerciseActiveFileTransferBundleExtension(const WireOffer &offer, Tc
               && committedBound && committedRequired,
           "committed file-transfer content did not remain on established association");
 
+    session.setAutomaticGroupingEnabled(false);
+    const QString unbundledName = QStringLiteral("unbundled-file");
+    QDomDocument unbundledDoc;
+    auto unbundledAdd = activeFileAddPayload(
+        unbundledDoc, session, offer, unbundledName,
+        { offer.audioName, offer.videoName, fileName, unbundledName });
+    check(session.updateFromXml(J::Action::ContentAdd, unbundledAdd),
+          "BUNDLE extension that local policy cannot share was not handled");
+    QCoreApplication::processEvents(QEventLoop::AllEvents);
+    check(!session.content(unbundledName, J::Origin::Initiator)
+              && session.negotiatedGroupings().size() == 1
+              && session.negotiatedGroupings().first().contents
+                     == QStringList({ offer.audioName, offer.videoName, fileName })
+              && icePad->liveAssociationCount() == 1,
+          "unacceptable BUNDLE membership was accepted independently or mutated established topology");
+    session.setAutomaticGroupingEnabled(true);
+
     const QString rejectedName = QStringLiteral("rejected-file");
     QDomDocument rejectedDoc;
     auto rejectedAdd = activeFileAddPayload(

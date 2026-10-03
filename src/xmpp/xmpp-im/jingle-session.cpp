@@ -110,7 +110,6 @@ namespace XMPP { namespace Jingle {
         };
         std::optional<PendingGroupExtension> outgoingGroupExtension;
         std::optional<PendingGroupExtension> incomingGroupExtension;
-        bool                                 incomingGroupExtensionShared = false;
 
         // not yet acccepted applications from initial incoming request
         QList<Application *> initialIncomingUnacceptedContent;
@@ -222,8 +221,11 @@ namespace XMPP { namespace Jingle {
                 groupUpdate = outgoingGroupExtension->offer;
             } else if (action == Action::ContentAccept && incomingGroupExtension
                        && updateContainsContent(update, incomingGroupExtension->content)) {
-                groupUpdate = incomingGroupExtensionShared ? incomingGroupExtension->offer
-                                                           : incomingGroupExtension->before;
+                // RFC 9143 section 7.5.1: a newly added content cannot be
+                // accepted while being moved out of the existing BUNDLE in the
+                // answer. A responder that cannot accept this membership must
+                // reject the content-add instead.
+                groupUpdate = incomingGroupExtension->offer;
             } else if (needNotifyGroup
                        && (action == Action::SessionInitiate || action == Action::SessionAccept
                            || action == Action::ContentAdd || action == Action::ContentAccept)) {
@@ -691,10 +693,9 @@ namespace XMPP { namespace Jingle {
             auto app = contentList.value(key);
             auto transport = app ? app->transport() : QSharedPointer<Transport>();
             auto pad = transport ? transport->pad() : TransportManagerPad::Ptr();
-            if (pad && incomingGroupExtensionShared)
+            if (pad)
                 pad->rollbackGroupExtension(key);
             incomingGroupExtension.reset();
-            incomingGroupExtensionShared = false;
         }
 
         bool commitIncomingGroupExtension()
@@ -702,19 +703,15 @@ namespace XMPP { namespace Jingle {
             if (!incomingGroupExtension)
                 return true;
             const auto pending = *incomingGroupExtension;
-            if (incomingGroupExtensionShared) {
-                auto app = contentList.value(pending.content);
-                auto transport = app ? app->transport() : QSharedPointer<Transport>();
-                auto pad = transport ? transport->pad() : TransportManagerPad::Ptr();
-                if (!pad || !pad->commitGroupExtension(pending.content))
-                    return false;
-            }
-            const auto &answer = incomingGroupExtensionShared ? pending.offer : pending.before;
-            groups           = answer;
-            remoteGroups     = answer;
-            negotiatedGroups = answer;
+            auto app = contentList.value(pending.content);
+            auto transport = app ? app->transport() : QSharedPointer<Transport>();
+            auto pad = transport ? transport->pad() : TransportManagerPad::Ptr();
+            if (!pad || !pad->commitGroupExtension(pending.content))
+                return false;
+            groups           = pending.offer;
+            remoteGroups     = pending.offer;
+            negotiatedGroups = pending.offer;
             incomingGroupExtension.reset();
-            incomingGroupExtensionShared = false;
             return true;
         }
 
@@ -1058,10 +1055,12 @@ namespace XMPP { namespace Jingle {
                 }
 
                 // If this specific content was unsupported, ContentReject is
-                // already queued and there is no group answer to commit. A
-                // supported content, however, keeps the offer/answer transaction
-                // even when local policy refuses sharing: content-accept then
-                // carries the committed pre-extension topology explicitly.
+                // already queued and there is no group answer to commit. For a
+                // supported content, RFC 9143 section 7.5.1 does not permit an
+                // answer that accepts the new content while moving it out of the
+                // proposed BUNDLE. If we cannot share the established transport,
+                // reject the content-add rather than inventing an independent
+                // content-accept fallback.
                 if (extensionApp) {
                     bool share = groupingAllowed && automaticGroupingEnabled && !localGroupingsExplicit
                         && extensionApp->allowsSharedTransport();
@@ -1093,10 +1092,48 @@ namespace XMPP { namespace Jingle {
                             }
                         }
                     }
-                    incomingGroupExtension = PendingGroupExtension {
-                        ContentKey { groupChange->addedName, remoteRole }, negotiatedGroups, *peerGroups
-                    };
-                    incomingGroupExtensionShared = share;
+
+                    if (share) {
+                        incomingGroupExtension = PendingGroupExtension {
+                            ContentKey { groupChange->addedName, remoteRole }, negotiatedGroups, *peerGroups
+                        };
+                    } else {
+                        QDomElement rejectedContent;
+                        for (auto ce = jingleEl.firstChildElement(QLatin1String("content")); !ce.isNull();
+                             ce = ce.nextSiblingElement(QLatin1String("content"))) {
+                            ContentBase cb(ce);
+                            if (cb.isValid() && cb.name == groupChange->addedName && cb.creator == remoteRole) {
+                                rejectedContent = manager->client()->doc()->importNode(ce, true).toElement();
+                                break;
+                            }
+                        }
+                        if (rejectedContent.isNull()) {
+                            qDeleteAll(apps);
+                            lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,
+                                                            XMPP::Stanza::Error::ErrorCond::BadRequest);
+                            return false;
+                        }
+
+                        apps.removeOne(extensionApp);
+                        delete extensionApp;
+
+                        auto existing = outgoingUpdates.find(Action::ContentReject);
+                        if (existing == outgoingUpdates.end()) {
+                            QList<QDomElement> extensionRejects { rejectedContent };
+                            extensionRejects += Reason(Reason::IncompatibleParameters).toXml(manager->client()->doc());
+                            outgoingUpdates.insert(Action::ContentReject,
+                                                   OutgoingUpdate { extensionRejects, OutgoingUpdateCB() });
+                        } else {
+                            auto &elements = std::get<0>(existing.value());
+                            qsizetype pos = elements.size();
+                            if (!elements.isEmpty()
+                                && (elements.last().localName().isEmpty() ? elements.last().tagName()
+                                                                         : elements.last().localName())
+                                    == QLatin1String("reason"))
+                                --pos;
+                            elements.insert(pos, rejectedContent);
+                        }
+                    }
                 }
             }
 
@@ -1415,12 +1452,12 @@ namespace XMPP { namespace Jingle {
             std::optional<QList<ContentGroup>> peerGroups;
             if (outgoingGroupExtension) {
                 peerGroups = parseCurrentGroupings(jingleEl);
-                // Active BUNDLE extension is a separate offer/answer transaction.
-                // The peer may keep the committed topology or accept our exact
-                // extension, but it must not mutate unrelated established groups.
-                if (!peerGroups
-                    || (!sameGroupings(*peerGroups, outgoingGroupExtension->before)
-                        && !sameGroupings(*peerGroups, outgoingGroupExtension->offer))) {
+                // Active BUNDLE extension is a separate offer/answer
+                // transaction. RFC 9143 section 7.5.1 requires an answer that
+                // accepts the newly added content to keep it in the proposed
+                // BUNDLE; refusing that membership is a content-reject, not an
+                // unchanged-group content-accept.
+                if (!peerGroups || !sameGroupings(*peerGroups, outgoingGroupExtension->offer)) {
                     rollbackOutgoingGroupExtension();
                     lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,
                                                     XMPP::Stanza::Error::ErrorCond::BadRequest);
@@ -1440,17 +1477,11 @@ namespace XMPP { namespace Jingle {
             }
 
             if (outgoingGroupExtension) {
-                if (sameGroupings(*peerGroups, outgoingGroupExtension->offer)) {
-                    if (!commitOutgoingGroupExtension(*peerGroups)) {
-                        rollbackOutgoingGroupExtension();
-                        lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,
-                                                        XMPP::Stanza::Error::ErrorCond::BadRequest);
-                        return false;
-                    }
-                } else {
-                    // Content was accepted without the group extension. Keep it
-                    // independent and never publish provisional shared membership.
+                if (!commitOutgoingGroupExtension(*peerGroups)) {
                     rollbackOutgoingGroupExtension();
+                    lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,
+                                                    XMPP::Stanza::Error::ErrorCond::BadRequest);
+                    return false;
                 }
             }
 
@@ -2331,8 +2362,7 @@ namespace XMPP { namespace Jingle {
         const Private::PendingGroupExtension *pending = nullptr;
         if (d->outgoingGroupExtension && d->outgoingGroupExtension->content == content)
             pending = &*d->outgoingGroupExtension;
-        else if (d->incomingGroupExtensionShared && d->incomingGroupExtension
-                 && d->incomingGroupExtension->content == content)
+        else if (d->incomingGroupExtension && d->incomingGroupExtension->content == content)
             pending = &*d->incomingGroupExtension;
         if (!pending)
             return std::nullopt;
