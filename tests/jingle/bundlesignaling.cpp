@@ -688,7 +688,7 @@ static void exerciseActiveFileTransferBundleExtension(const WireOffer &offer, Tc
         session.content(fileName, J::Origin::Initiator));
     check(ft, "active BUNDLE extension did not create file-transfer application");
     auto ftTransport = qSharedPointerDynamicCast<J::ICE::Transport>(ft->transport());
-    check(ftTransport, "active BUNDLE extension did not create ICE file-transfer transport");
+    check(bool(ftTransport), "active BUNDLE extension did not create ICE file-transfer transport");
     check(session.negotiatedGroupings().first().contents
               == QStringList({ offer.audioName, offer.videoName }),
           "incoming content-add published BUNDLE membership before content-accept");
