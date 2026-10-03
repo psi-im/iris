@@ -607,26 +607,6 @@ static QDomElement activeFileAddPayload(QDomDocument &doc, const J::Session &ses
     return root;
 }
 
-static void rejectJingleTask(RootTaskKeeper &keeper, const Jid &peer)
-{
-    auto pending = keeper.task();
-    check(pending, "content-accept did not create a retained Jingle IQ task");
-
-    QDomDocument replyDoc;
-    auto reply = replyDoc.createElement(QStringLiteral("iq"));
-    replyDoc.appendChild(reply);
-    reply.setAttribute(QStringLiteral("type"), QStringLiteral("error"));
-    reply.setAttribute(QStringLiteral("from"), peer.full());
-    reply.setAttribute(QStringLiteral("id"), pending->id());
-    auto error = replyDoc.createElement(QStringLiteral("error"));
-    error.setAttribute(QStringLiteral("type"), QStringLiteral("cancel"));
-    error.appendChild(replyDoc.createElementNS(QStringLiteral("urn:ietf:params:xml:ns:xmpp-stanzas"),
-                                               QStringLiteral("service-unavailable")));
-    reply.appendChild(error);
-    check(pending->take(reply), "content-accept IQ error was not consumed");
-    keeper.release();
-}
-
 static void exerciseActiveFileTransferBundleExtension(const WireOffer &offer, TcpPortReserver *reserver)
 {
     Client client;
@@ -734,18 +714,33 @@ static void exerciseActiveFileTransferBundleExtension(const WireOffer &offer, Tc
         session.content(rejectedName, J::Origin::Initiator));
     check(rejectedFt, "rollback fixture did not create second file-transfer application");
 
-    RootTaskKeeper rejectedAccept(client.rootTask());
+    // Stage the second content on the existing association, then reject it
+    // locally before the queued ContentAccept can be serialized. Session must
+    // roll back only the provisional membership before sending ContentRemove.
     rejectedFt->prepare();
-    check(waitFor([&]() { return rejectedAccept.task() != nullptr; }),
-          "rollback fixture did not serialize content-accept");
-    rejectJingleTask(rejectedAccept, peer);
-    QCoreApplication::processEvents(QEventLoop::AllEvents);
-
-    check(session.negotiatedGroupings().size() == 1
-              && session.negotiatedGroupings().first().contents
-                     == QStringList({ offer.audioName, offer.videoName, fileName })
+    auto rejectedTransport = qSharedPointerDynamicCast<J::ICE::Transport>(rejectedFt->transport());
+    check(bool(rejectedTransport), "rollback fixture did not create ICE transport");
+    bool rejectedBound = false, rejectedRequired = false;
+    auto *rejectedProvisional
+        = icePad->groupedConnectionFor(rejectedTransport.data(), &rejectedBound, &rejectedRequired);
+    check(rejectedBound && rejectedRequired && rejectedProvisional == shared
               && icePad->liveAssociationCount() == 1,
-          "failed content-accept changed established BUNDLE topology or lifetime");
+          "rollback fixture did not stage on the established BUNDLE association");
+
+    rejectedFt->remove(J::Reason::Decline, QStringLiteral("declined by local policy"));
+    check(waitFor([&]() {
+              const auto groups = session.negotiatedGroupings();
+              return groups.size() == 1
+                  && groups.first().contents
+                      == QStringList({ offer.audioName, offer.videoName, fileName })
+                  && icePad->liveAssociationCount() == 1;
+          }),
+          "local rejection changed established BUNDLE topology or lifetime");
+
+    bool rejectedStillBound = false, rejectedStillRequired = false;
+    check(icePad->groupedConnectionFor(rejectedTransport.data(), &rejectedStillBound, &rejectedStillRequired) == nullptr
+              && !rejectedStillBound && !rejectedStillRequired,
+          "local rejection retained provisional BUNDLE membership");
     check(shared && audioTransport->state() < J::State::Finishing
               && videoTransport->state() < J::State::Finishing,
           "extension rollback disturbed established RTP members");
