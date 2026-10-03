@@ -96,6 +96,8 @@ namespace Jingle { namespace ICE {
         Session          *session() const override;
         TransportManager *manager() const override;
         void              onLocalAccepted() override;
+        bool              commitGroupExtension(const ContentKey &) override;
+        void              rollbackGroupExtension(const ContentKey &) override;
 
         inline TcpPortScope *discoScope() const { return _discoScope; }
 
