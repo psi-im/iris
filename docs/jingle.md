@@ -214,8 +214,11 @@ published in the committed Session topology. The initiator commits only after a 
 `content-accept`. The responder commits only after its `content-accept` IQ is acknowledged. A
 local rejection, peer rejection/IQ error, content teardown, or failed commit rolls back only the
 new provisional membership, leaving existing RTP members and the shared ICE/DTLS association
-alive. A responder may also accept the new content independently by answering with the previous
-committed grouping rather than the proposed extension.
+alive. Active BUNDLE extension follows RFC 9143 section 7.5.1: accepting the newly added content
+also accepts its membership in the proposed BUNDLE. A responder that cannot use the established
+shared transport rejects that content; it does not accept the content independently by answering
+with the previous committed grouping. Moving an accepted member out of BUNDLE requires a later
+negotiation.
 
 ## Pads in more detail
 
