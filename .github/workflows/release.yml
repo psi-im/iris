@@ -7,6 +7,11 @@ on:
         description: Release tag; leave empty to use the latest v1* tag
         required: false
         type: string
+      rebuild_assets:
+        description: Rebuild packaging and replace assets on an existing release
+        required: false
+        default: false
+        type: boolean
   push:
     tags: [ 'v1*' ]
 
@@ -76,12 +81,12 @@ jobs:
 
       - name: Find or run packaging workflow
         id: packaging
-        if: steps.existing_release.outputs.exists != 'true'
+        if: steps.existing_release.outputs.exists != 'true' || inputs.rebuild_assets
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.release_tag.outputs.tag }}
-          TAG_SHA: ${{ steps.release_tag.outputs.sha }}
+          FORCE_REBUILD: ${{ inputs.rebuild_assets || false }}
         run: |
           set -euo pipefail
 
@@ -99,21 +104,22 @@ jobs:
             iris-qt6-android-x86-symbols
           )
 
+          run_title="Iris packages $TAG"
+
           load_runs() {
-            gh run list --repo "$GITHUB_REPOSITORY" --workflow packages.yml --limit 100 \
-              --json databaseId,headSha,status,conclusion,createdAt > "$RUNNER_TEMP/package-runs.json"
+            gh run list --repo "$GITHUB_REPOSITORY" --workflow packages.yml --limit 100 --json databaseId,displayTitle,status,conclusion,createdAt > "$RUNNER_TEMP/package-runs.json"
           }
 
           latest_successful_run() {
-            jq -r --arg sha "$TAG_SHA" '
-              [.[] | select(.headSha == $sha and .status == "completed" and .conclusion == "success")]
+            jq -r --arg title "$run_title" '
+              [.[] | select(.displayTitle == $title and .status == "completed" and .conclusion == "success")]
               | sort_by(.createdAt) | last | .databaseId // empty
             ' "$RUNNER_TEMP/package-runs.json"
           }
 
           latest_active_run() {
-            jq -r --arg sha "$TAG_SHA" '
-              [.[] | select(.headSha == $sha and .status != "completed")]
+            jq -r --arg title "$run_title" '
+              [.[] | select(.displayTitle == $title and .status != "completed")]
               | sort_by(.createdAt) | last | .databaseId // empty
             ' "$RUNNER_TEMP/package-runs.json"
           }
@@ -150,13 +156,16 @@ jobs:
           }
 
           load_runs
-          run_id=$(latest_successful_run)
+          run_id=""
+          if [[ "${FORCE_REBUILD:-false}" != true ]]; then
+            run_id=$(latest_successful_run)
+          fi
           if [[ -n "$run_id" ]] && ! artifacts_complete "$run_id"; then
             echo "Successful packaging run $run_id has incomplete or expired artifacts; rebuilding"
             run_id=""
           fi
 
-          if [[ -z "$run_id" ]]; then
+          if [[ -z "$run_id" && "${FORCE_REBUILD:-false}" != true ]]; then
             for _ in {1..6}; do
               load_runs
               run_id=$(latest_active_run)
@@ -167,18 +176,16 @@ jobs:
 
           if [[ -z "$run_id" ]]; then
             load_runs
-            baseline=$(jq -r --arg sha "$TAG_SHA" \
-              '[.[] | select(.headSha == $sha) | .databaseId] | max // 0' \
-              "$RUNNER_TEMP/package-runs.json")
+            baseline=$(jq -r '[.[].databaseId] | max // 0' "$RUNNER_TEMP/package-runs.json")
 
-            echo "No reusable packaging run found; dispatching packages.yml for $TAG"
-            gh workflow run packages.yml --repo "$GITHUB_REPOSITORY" --ref "$TAG"
+            echo "No reusable packaging run found; dispatching current packages.yml for source $TAG"
+            gh workflow run packages.yml --repo "$GITHUB_REPOSITORY" --ref master -f source_ref="$TAG"
 
             for _ in {1..24}; do
               sleep 5
               load_runs
-              run_id=$(jq -r --arg sha "$TAG_SHA" --argjson baseline "$baseline" '
-                [.[] | select(.headSha == $sha and .databaseId > $baseline)]
+              run_id=$(jq -r --arg title "$run_title" --argjson baseline "$baseline" '
+                [.[] | select(.displayTitle == $title and .databaseId > $baseline)]
                 | sort_by(.databaseId) | last | .databaseId // empty
               ' "$RUNNER_TEMP/package-runs.json")
               [[ -n "$run_id" ]] && break
@@ -201,7 +208,7 @@ jobs:
           echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
 
       - name: Download packaging artifact archives
-        if: steps.existing_release.outputs.exists != 'true'
+        if: steps.existing_release.outputs.exists != 'true' || inputs.rebuild_assets
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -250,6 +257,16 @@ jobs:
           fi
 
           ls -lh release-assets
+
+      - name: Replace existing release assets
+        if: steps.existing_release.outputs.exists == 'true' && inputs.rebuild_assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release_tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release upload "$TAG" release-assets/*.zip --repo "$GITHUB_REPOSITORY" --clobber
 
       - name: Create GitHub release
         if: steps.existing_release.outputs.exists != 'true'
