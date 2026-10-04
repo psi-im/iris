@@ -1,8 +1,12 @@
 cmake_minimum_required(VERSION 3.11.0)
 
+set(IRIS_VERSION
+    "1.0.0"
+    CACHE STRING "Iris project version")
+
 project(
     iris
-    VERSION 1.0.0
+    VERSION "${IRIS_VERSION}"
     DESCRIPTION "XMPP network library"
     LANGUAGES C CXX)
 
