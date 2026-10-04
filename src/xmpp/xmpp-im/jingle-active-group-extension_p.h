@@ -20,7 +20,7 @@ namespace XMPP { namespace Jingle { namespace ActiveGroupExtension {
     enum class Kind { Unchanged, Extension, Invalid };
 
     struct Result {
-        Kind      kind       = Kind::Invalid;
+        Kind      kind = Kind::Invalid;
         QString   addedName;
         qsizetype groupIndex = -1;
     };
@@ -36,40 +36,55 @@ namespace XMPP { namespace Jingle { namespace ActiveGroupExtension {
         return true;
     }
 
-    // Active content-add grouping is intentionally stricter than initial
-    // offer/answer negotiation. The peer may preserve the committed topology or
-    // append exactly one content to exactly one existing BUNDLE group. Existing
-    // groups and member order are immutable in this transaction; removal,
-    // reordering, cross-group moves and simultaneous multi-group edits belong to
-    // separate negotiations.
+    // Each supplied group describes its complete membership. Unmentioned
+    // groups retain their committed membership; group-list order is not a
+    // transport identity. Only one new content may extend one existing BUNDLE.
     inline Result classify(const QList<ContentGroup> &committed, const QList<ContentGroup> &proposed,
                            const QSet<QString> &stanzaContents)
     {
-        if (same(committed, proposed))
-            return { Kind::Unchanged, {}, -1 };
-        if (committed.size() != proposed.size())
-            return {};
-
-        Result result;
-        for (qsizetype i = 0; i < committed.size(); ++i) {
-            const auto &before = committed.at(i);
-            const auto &after  = proposed.at(i);
-            if (before.semantics == after.semantics && before.contents == after.contents)
-                continue;
-            if (result.kind == Kind::Extension)
-                return {}; // more than one group changed
-            if (before.semantics != QLatin1String("BUNDLE") || after.semantics != QLatin1String("BUNDLE")
-                || before.contents.size() < 2 || after.contents.size() != before.contents.size() + 1)
-                return {};
-            for (qsizetype member = 0; member < before.contents.size(); ++member) {
-                if (before.contents.at(member) != after.contents.at(member))
-                    return {}; // no removal/reorder/rebinding of established members
+        Result          result { Kind::Unchanged, {}, -1 };
+        QSet<qsizetype> updated;
+        for (const auto &after : proposed) {
+            qsizetype index     = -1;
+            bool      extension = false;
+            for (qsizetype i = 0; i < committed.size(); ++i) {
+                const auto &before = committed.at(i);
+                if (before.semantics != after.semantics)
+                    continue;
+                bool sameMembers = before.contents == after.contents;
+                bool append      = before.semantics == QLatin1String("BUNDLE") && !before.contents.isEmpty()
+                    && after.contents.size() == before.contents.size() + 1;
+                for (qsizetype member = 0; append && member < before.contents.size(); ++member)
+                    append = before.contents.at(member) == after.contents.at(member);
+                if (!sameMembers && !append)
+                    continue;
+                if (index >= 0)
+                    return {}; // ambiguous group identity
+                index     = i;
+                extension = append;
             }
-            const auto added = after.contents.last();
-            if (added.isEmpty() || !stanzaContents.contains(added) || before.contents.contains(added))
+            if (index < 0 || updated.contains(index))
                 return {};
-            result = { Kind::Extension, added, i };
+            updated.insert(index);
+            if (!extension)
+                continue;
+            const auto added = after.contents.last();
+            if (result.kind == Kind::Extension || added.isEmpty() || !stanzaContents.contains(added))
+                return {};
+            for (const auto &before : committed) {
+                if (before.semantics == QLatin1String("BUNDLE") && before.contents.contains(added))
+                    return {};
+            }
+            result = { Kind::Extension, added, index };
         }
+        return result;
+    }
+
+    inline QList<ContentGroup> extended(const QList<ContentGroup> &committed, const Result &change)
+    {
+        auto result = committed;
+        if (change.kind == Kind::Extension)
+            result[change.groupIndex].contents.append(change.addedName);
         return result;
     }
 

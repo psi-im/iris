@@ -27,16 +27,15 @@
 #include <iris/xmpp-im/jingle-transport.h>
 #include <iris/xmpp-im/xmpp_features.h>
 
+#include <QSet>
 #include <algorithm>
 #include <functional>
 #include <memory>
-#include <QSet>
 
 namespace XMPP { namespace Jingle {
 
     // class Manager;
     class Application;
-    namespace ICE { class Pad; }
 
     // Ordered XEP-0338 group. Multiple groups may have the same semantics.
     struct ContentGroup {
@@ -146,7 +145,7 @@ namespace XMPP { namespace Jingle {
     private:
         friend class Application;
         friend class Manager;
-        friend class ICE::Pad;
+        friend class TransportManagerPad;
         friend class PublicationManager;
         friend class JTPush;
 
