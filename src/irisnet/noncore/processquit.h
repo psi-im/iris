@@ -107,7 +107,7 @@ signals:
     void quit();
 
 private:
-    class Private;
+    class Q_DECL_HIDDEN Private;
     friend class Private;
     Private *d;
 

@@ -124,7 +124,7 @@ private:
     TcpPortServer::Ptr bind(const QHostAddress &addr, quint16 port);
 
 private:
-    struct Private;
+    struct Q_DECL_HIDDEN     Private;
     std::unique_ptr<Private> d;
 };
 

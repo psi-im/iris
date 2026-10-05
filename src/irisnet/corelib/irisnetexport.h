@@ -19,16 +19,16 @@
 #ifndef IRISNETEXPORT_H
 #define IRISNETEXPORT_H
 
-#include <QtGlobal>
+#include <iris/iris_export.h>
 
 #ifdef IRISNET_STATIC
 #define IRISNET_EXPORT
-#else
-#ifdef IRISNET_MAKEDLL
+#elif defined(IRISNET_MAKEDLL)
 #define IRISNET_EXPORT Q_DECL_EXPORT
 #else
-#define IRISNET_EXPORT Q_DECL_IMPORT
-#endif
+// irisnet is part of the Iris library, so its public API follows the same
+// shared/static and producer/consumer export policy as the XMPP API.
+#define IRISNET_EXPORT IRIS_EXPORT
 #endif
 
 #endif // IRISNETEXPORT_H
