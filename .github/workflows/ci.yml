@@ -56,6 +56,8 @@ jobs:
     name: Linux (${{ matrix.name }})
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install build dependencies
         shell: bash
@@ -133,6 +135,8 @@ jobs:
     name: Desktop (${{ matrix.platform }})
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Build, install and smoke-test Iris
         uses: ./.github/actions/build-iris-desktop
@@ -157,6 +161,8 @@ jobs:
     name: Android (${{ matrix.abi }})
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Build and install Iris
         id: build-iris
