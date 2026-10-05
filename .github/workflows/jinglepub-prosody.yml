@@ -70,10 +70,12 @@ jobs:
           set -euo pipefail
           export PROSODY_DATA_DIR="$RUNNER_TEMP/prosody-data"
           export PROSODY_PID_FILE="$RUNNER_TEMP/prosody.pid"
+          export PROSODY_PLUGIN_PATH="$GITHUB_WORKSPACE/tests/integration/jinglepub-prosody"
           mkdir -p "$PROSODY_DATA_DIR"
           cfg="$GITHUB_WORKSPACE/tests/integration/jinglepub-prosody/prosody.cfg.lua"
           prosodyctl --config "$cfg" check config
           prosodyctl --config "$cfg" register user01 localhost ci-pass-01
+          prosodyctl --config "$cfg" register user02 localhost ci-pass-02
           prosody -F --config "$cfg" >"$RUNNER_TEMP/prosody-jinglepub.log" 2>&1 &
           echo $! >"$RUNNER_TEMP/prosody-jinglepub.pid"
           for i in $(seq 1 100); do
@@ -89,26 +91,36 @@ jobs:
           cat "$RUNNER_TEMP/prosody-jinglepub.log"
           exit 1
 
-      - name: Publish and start durable Jingle session through Prosody
+      - name: Verify synchronized durable publication
         shell: bash
         run: |
           set -euo pipefail
           bin="$GITHUB_WORKSPACE/build-jinglepub-prosody/iris_jinglepub_prosody_client"
-          "$bin" user01@localhost ci-pass-01 2>&1 | tee "$RUNNER_TEMP/jinglepub-client.log"
-          grep -F 'LIVE_JINGLEPUB_RESULT=success' "$RUNNER_TEMP/jinglepub-client.log"
+          "$bin" user01@localhost ci-pass-01 2>&1 | tee "$RUNNER_TEMP/jinglepub-clean.log"
+          grep -F 'LIVE_JINGLEPUB_RESULT=success' "$RUNNER_TEMP/jinglepub-clean.log"
+
+      - name: Reproduce stale authority race
+        shell: bash
+        run: |
+          set -euo pipefail
+          bin="$GITHUB_WORKSPACE/build-jinglepub-prosody/iris_jinglepub_prosody_client"
+          "$bin" user02@localhost ci-pass-02 race 2>&1 | tee "$RUNNER_TEMP/jinglepub-race.log"
+          grep -F 'LIVE_JINGLEPUB_RESULT=success' "$RUNNER_TEMP/jinglepub-race.log"
 
       - name: Show integration logs
         if: always()
         shell: bash
         run: |
-          if [[ -f "$RUNNER_TEMP/jinglepub-client.log" ]]; then
-            echo '--- JinglePub client ---'
-            cat "$RUNNER_TEMP/jinglepub-client.log"
-          fi
+          for file in "$RUNNER_TEMP/jinglepub-clean.log" "$RUNNER_TEMP/jinglepub-race.log"; do
+            if [[ -f "$file" ]]; then
+              echo "--- $(basename "$file") ---"
+              cat "$file"
+            fi
+          done
           if [[ -f "$RUNNER_TEMP/prosody-jinglepub.pid" ]]; then
             kill "$(cat "$RUNNER_TEMP/prosody-jinglepub.pid")" 2>/dev/null || true
           fi
           if [[ -f "$RUNNER_TEMP/prosody-jinglepub.log" ]]; then
             echo '--- Prosody ---'
-            tail -n 300 "$RUNNER_TEMP/prosody-jinglepub.log"
+            tail -n 500 "$RUNNER_TEMP/prosody-jinglepub.log"
           fi
