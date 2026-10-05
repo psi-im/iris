@@ -26,8 +26,10 @@ constexpr auto PublicationId   = "jinglepub-prosody-durable";
 
 class XmppEndpoint final : public QObject {
 public:
-    XmppEndpoint(Jid jid, QString password, QObject *parent = nullptr) :
-        QObject(parent), jid_(std::move(jid)), password_(std::move(password))
+    XmppEndpoint(Jid jid, QString password, bool advertiseJingleFeatures = true, bool automaticPresence = true,
+                 QObject *parent = nullptr) :
+        QObject(parent), jid_(std::move(jid)), password_(std::move(password)),
+        advertiseJingleFeatures_(advertiseJingleFeatures), automaticPresence_(automaticPresence)
     {
     }
 
@@ -41,6 +43,14 @@ public:
     }
 
     Client *client() { return &client_; }
+
+    void sendPresence()
+    {
+        if (presenceSent_)
+            return;
+        presenceSent_ = true;
+        client_.setPresence(Status());
+    }
 
     void start(std::function<void()> ready, std::function<void(const QString &)> failed)
     {
@@ -75,10 +85,12 @@ public:
             const QString resource = bound.resource().isEmpty() ? jid_.resource() : bound.resource();
             client_.start(jid_.domain(), jid_.node(), password_, resource);
 
-            auto features = client_.features();
-            for (const auto &feature : client_.jingleManager()->discoFeatures())
-                features.addFeature(feature);
-            client_.setFeatures(features);
+            if (advertiseJingleFeatures_) {
+                auto features = client_.features();
+                for (const auto &feature : client_.jingleManager()->discoFeatures())
+                    features.addFeature(feature);
+                client_.setFeatures(features);
+            }
             client_.setCaps(CapsSpec(QStringLiteral("https://iris-ci.local/jinglepub"), QCryptographicHash::Sha1));
 
             if (client_.isSessionRequired()) {
@@ -122,7 +134,8 @@ private:
                 qInfo().noquote() << jid_.resource() << "XMPP_OUT=" << xml.trimmed();
             }
         });
-        client_.setPresence(Status());
+        if (automaticPresence_)
+            sendPresence();
         qInfo().noquote() << QStringLiteral("XMPP_READY=%1").arg(client_.jid().full());
         if (ready_)
             ready_();
@@ -139,7 +152,10 @@ private:
     QString                              password_;
     AdvancedConnector                   *connector_  = nullptr;
     ClientStream                        *stream_     = nullptr;
-    bool                                 readyState_ = false;
+    bool                                 advertiseJingleFeatures_ = true;
+    bool                                 automaticPresence_       = true;
+    bool                                 presenceSent_             = false;
+    bool                                 readyState_               = false;
     std::function<void()>                ready_;
     std::function<void(const QString &)> failed_;
 };
@@ -200,12 +216,13 @@ int main(int argc, char **argv)
     QCoreApplication app(argc, argv);
     QCA::Initializer qca;
 
-    if (argc != 3) {
-        qCritical() << "Usage:" << argv[0] << "<bare-jid> <password>";
+    if (argc != 3 && argc != 4) {
+        qCritical() << "Usage:" << argv[0] << "<bare-jid> <password> [race]";
         return 2;
     }
 
-    const Jid     owner(QString::fromLocal8Bit(argv[1]));
+    const bool race = argc == 4 && QByteArray(argv[3]) == QByteArrayLiteral("race");
+    const Jid  owner(QString::fromLocal8Bit(argv[1]));
     const QString password = QString::fromLocal8Bit(argv[2]);
     if (!owner.isValid() || !owner.resource().isEmpty()) {
         qCritical() << "The integration test requires a valid bare JID";
@@ -232,8 +249,11 @@ int main(int argc, char **argv)
             finish(124, QStringLiteral("timeout"));
     });
 
-    XmppEndpoint publisher(publisherJid, password, &app);
-    XmppEndpoint requester(requesterJid, password, &app);
+    // The race mode intentionally mirrors AnyKeep's current behavior: it does
+    // not advertise the durable provider's node+notify feature and it can begin
+    // publication while the provider authority snapshot is still in flight.
+    XmppEndpoint publisher(publisherJid, password, !race, !race, &app);
+    XmppEndpoint requester(requesterJid, password, true, true, &app);
 
     auto *publicationManager = publisher.client()->jingleManager()->publicationManager();
     DurableProvider provider(publisher.client()->jingleManager(), owner, publisherJid, &app);
@@ -246,18 +266,73 @@ int main(int argc, char **argv)
     bool publisherReady      = false;
     bool requesterReady      = false;
     bool nodeCreationStarted = false;
+    bool nodeReady           = false;
     bool publicationStarted  = false;
+    bool publicationAcked    = false;
     bool requestStarted      = false;
 
     std::function<void()> advance;
-    advance = [&]() {
-        if (finishing || !publisherReady || !requesterReady)
+    std::function<void()> startPublication;
+    std::function<void()> startRequest;
+
+    startRequest = [&]() {
+        if (requestStarted || finishing)
             return;
-        if (provider.state() == J::PublishedSessionProvider::State::Failed) {
-            finish(20, QStringLiteral("durable provider synchronization failed"));
+        requestStarted = true;
+        const auto state = publicationManager->publishedSessionState(QString::fromLatin1(PublicationId));
+        qInfo() << "DURABLE_STATE_BEFORE_START=" << int(state)
+                << "publisher-client-jid=" << publisher.client()->jid().full()
+                << "publication-from=" << provider.publication().from().full()
+                << "provider-state=" << int(provider.state()) << "race=" << race;
+
+        auto *remoteManager = requester.client()->jingleManager()->publicationManager();
+        auto *request = remoteManager->requestPublishedSession(provider.publication().from(),
+                                                               QString::fromLatin1(PublicationId), &app);
+        QObject::connect(request, &J::PublishedSessionRequest::finished, &app, [&, request]() {
+            if (request->state() != J::PublishedSessionRequest::State::Succeeded) {
+                qCritical() << "PUBLISHED_START_FAILED condition=" << int(request->error().condition);
+                finish(30, race ? QStringLiteral("race reproduced: published-session start was rejected")
+                                : QStringLiteral("published-session start was rejected"));
+                return;
+            }
+            qInfo().noquote() << "PUBLISHED_START_SID=" << request->sid();
+            finish(0, race ? QStringLiteral("race did not deactivate durable publication")
+                           : QStringLiteral("durable Jingle publication survived Prosody authority reconciliation"));
+        });
+        request->start();
+    };
+
+    startPublication = [&]() {
+        if (publicationStarted || finishing)
+            return;
+        publicationStarted = true;
+        qInfo() << "DURABLE_STATE_AT_PUBLISH="
+                << int(publicationManager->publishedSessionState(QString::fromLatin1(PublicationId)))
+                << "provider-state=" << int(provider.state()) << "race=" << race;
+        auto *task = publicationManager->publishSession(QString::fromLatin1(PublicationId), publishOptions());
+        if (!task) {
+            finish(22, QStringLiteral("publication manager refused durable publish"));
             return;
         }
-        if (provider.state() != J::PublishedSessionProvider::State::Synchronized)
+        QObject::connect(task, &Task::finished, &app, [&, task]() {
+            if (!task->success()) {
+                finish(23, QStringLiteral("Prosody rejected durable Jingle publication"));
+                return;
+            }
+            publicationAcked = true;
+            qInfo() << "DURABLE_PUBLISH_STATE="
+                    << int(publicationManager->publishedSessionState(QString::fromLatin1(PublicationId)))
+                    << "provider-state=" << int(provider.state());
+            if (!race)
+                QTimer::singleShot(750, &app, advance);
+            else
+                QTimer::singleShot(1800, &app, advance);
+        });
+        task->go(true);
+    };
+
+    advance = [&]() {
+        if (finishing || !publisherReady || !requesterReady)
             return;
 
         if (!nodeCreationStarted) {
@@ -269,54 +344,47 @@ int main(int argc, char **argv)
                     finish(21, QStringLiteral("could not create Prosody PEP node"));
                     return;
                 }
-                advance();
-            });
-            task->go(true);
-            return;
-        }
-
-        if (!publicationStarted) {
-            publicationStarted = true;
-            auto *task = publicationManager->publishSession(QString::fromLatin1(PublicationId), publishOptions());
-            if (!task) {
-                finish(22, QStringLiteral("publication manager refused durable publish"));
-                return;
-            }
-            QObject::connect(task, &Task::finished, &app, [&, task]() {
-                if (!task->success()) {
-                    finish(23, QStringLiteral("Prosody rejected durable Jingle publication"));
-                    return;
+                nodeReady = true;
+                if (race) {
+                    publisher.sendPresence();
+                    // setPresence() synchronously starts the durable authority
+                    // snapshot. Publish immediately while its delayed empty
+                    // result is still in flight.
+                    QTimer::singleShot(0, &app, startPublication);
+                } else {
+                    QTimer::singleShot(0, &app, advance);
                 }
-                qInfo() << "DURABLE_PUBLISH_STATE="
-                        << int(publicationManager->publishedSessionState(QString::fromLatin1(PublicationId)));
-                // Give the self-PEP event/reconciliation path a chance to run.
-                QTimer::singleShot(750, &app, advance);
             });
             task->go(true);
             return;
         }
-
-        if (requestStarted)
+        if (!nodeReady)
             return;
-        requestStarted = true;
-        const auto state = publicationManager->publishedSessionState(QString::fromLatin1(PublicationId));
-        qInfo() << "DURABLE_STATE_BEFORE_START=" << int(state)
-                << "publisher-client-jid=" << publisher.client()->jid().full()
-                << "publication-from=" << provider.publication().from().full();
 
-        auto *remoteManager = requester.client()->jingleManager()->publicationManager();
-        auto *request = remoteManager->requestPublishedSession(provider.publication().from(),
-                                                               QString::fromLatin1(PublicationId), &app);
-        QObject::connect(request, &J::PublishedSessionRequest::finished, &app, [&, request]() {
-            if (request->state() != J::PublishedSessionRequest::State::Succeeded) {
-                qCritical() << "PUBLISHED_START_FAILED condition=" << int(request->error().condition);
-                finish(30, QStringLiteral("published-session start was rejected"));
+        if (race) {
+            if (!publicationStarted) {
+                startPublication();
                 return;
             }
-            qInfo().noquote() << "PUBLISHED_START_SID=" << request->sid();
-            finish(0, QStringLiteral("durable Jingle publication survived Prosody authority reconciliation"));
-        });
-        request->start();
+            if (!publicationAcked || provider.state() != J::PublishedSessionProvider::State::Synchronized)
+                return;
+            startRequest();
+            return;
+        }
+
+        if (provider.state() == J::PublishedSessionProvider::State::Failed) {
+            finish(20, QStringLiteral("durable provider synchronization failed"));
+            return;
+        }
+        if (provider.state() != J::PublishedSessionProvider::State::Synchronized)
+            return;
+        if (!publicationStarted) {
+            startPublication();
+            return;
+        }
+        if (!publicationAcked)
+            return;
+        startRequest();
     };
 
     QObject::connect(&provider, &J::PublishedSessionProvider::stateChanged, &app,
