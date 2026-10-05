@@ -1,11 +1,22 @@
 local st = require "util.stanza"
+local filters = require "util.filters"
 
 local target_node = module:get_option_string("delay_pep_snapshot_node", "urn:xmpp:jinglepub:ci")
 local delay = module:get_option_number("delay_pep_snapshot_seconds", 1.5)
 local suppress_user = module:get_option_string("delay_pep_snapshot_suppress_user", "user02")
 local suppress_resource = module:get_option_string("delay_pep_snapshot_suppress_resource", "publisher")
+local suppress_jid = suppress_user .. "@" .. module.host .. "/" .. suppress_resource
 
--- Return an authoritative empty snapshot, but only after a delay.  This models
+local function is_target_pep_event(stanza)
+    if not stanza or stanza.name ~= "message" or stanza.attr.type ~= "headline" or stanza.attr.to ~= suppress_jid then
+        return false
+    end
+    local pubsub_event = stanza:get_child("event", "http://jabber.org/protocol/pubsub#event")
+    local items = pubsub_event and pubsub_event:get_child("items")
+    return items and items.attr.node == target_node
+end
+
+-- Return an authoritative empty snapshot, but only after a delay. This models
 -- a PubSub items query which raced with a subsequent publish: the snapshot was
 -- taken before the item existed, while its IQ result arrives after publish ACK.
 module:hook("pre-iq/bare", function (event)
@@ -34,26 +45,23 @@ module:hook("pre-iq/bare", function (event)
     return true
 end, 1000)
 
--- Prosody normally delivers a self-PEP headline event to the publishing
--- resource. Iris deliberately replays such buffered live events after an
--- in-flight authority snapshot, which heals a stale empty snapshot. Suppress
--- exactly that event for the race account so the test also covers servers
--- which do not send a self notification to the owner resource.
-module:hook("pre-message/full", function (event)
-    local stanza = event.stanza
-    if stanza.attr.type ~= "headline" then
-        return
-    end
-    local to = stanza.attr.to or ""
-    local expected = suppress_user .. "@" .. module.host .. "/" .. suppress_resource
-    if to ~= expected then
-        return
-    end
-    local pubsub_event = stanza:get_child("event", "http://jabber.org/protocol/pubsub#event")
-    local items = pubsub_event and pubsub_event:get_child("items")
-    if not items or items.attr.node ~= target_node then
-        return
-    end
-    module:log("debug", "Suppressing self-PEP event for %s on %s", expected, target_node)
-    return true
-end, 1000)
+-- mod_pep can write the owner's self-notification directly to the c2s session,
+-- bypassing normal message routing hooks. Install an outgoing stanza filter so
+-- the race fixture can model servers which do not deliver that self event.
+local function filter_session(session)
+    filters.add_filter(session, "stanzas/out", function (stanza)
+        if is_target_pep_event(stanza) then
+            module:log("debug", "Suppressing self-PEP event for %s on %s", suppress_jid, target_node)
+            return nil
+        end
+        return stanza
+    end, 1000)
+end
+
+function module.load()
+    filters.add_filter_hook(filter_session)
+end
+
+function module.unload()
+    filters.remove_filter_hook(filter_session)
+end
