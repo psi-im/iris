@@ -119,8 +119,8 @@ signals:
 private:
     void negotiate(); // yep. it's possible to make it public but not really necessary atm
 
-    class Q_DECL_HIDDEN Private;
-    Private            *d;
+    class IRISNET_NO_EXPORT Private;
+    Private                *d;
 };
 
 } // namespace XMPP

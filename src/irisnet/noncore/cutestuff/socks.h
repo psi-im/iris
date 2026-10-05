@@ -46,8 +46,8 @@ private slots:
     void sd_activated();
 
 private:
-    class Q_DECL_HIDDEN Private;
-    Private            *d;
+    class IRISNET_NO_EXPORT Private;
+    Private                *d;
 
     friend class SocksClient;
     SocksUDP(SocksClient *sc, const QString &host, int port, const QHostAddress &routeAddr, int routePort);
@@ -116,8 +116,8 @@ private slots:
     void serve();
 
 private:
-    class Q_DECL_HIDDEN Private;
-    Private            *d;
+    class IRISNET_NO_EXPORT Private;
+    Private                *d;
 
     void init();
     void resetConnection(bool clear = false);
@@ -154,8 +154,8 @@ private slots:
     void sd_activated();
 
 private:
-    class Q_DECL_HIDDEN Private;
-    Private            *d;
+    class IRISNET_NO_EXPORT Private;
+    Private                *d;
 };
 
 // CS_NAMESPACE_END

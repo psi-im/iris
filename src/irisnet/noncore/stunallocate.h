@@ -98,7 +98,7 @@ signals:
 private:
     Q_DISABLE_COPY(StunAllocate)
 
-    class Q_DECL_HIDDEN Private;
+    class IRISNET_NO_EXPORT Private;
     friend class Private;
     Private *d;
 };

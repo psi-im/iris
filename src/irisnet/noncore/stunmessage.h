@@ -87,7 +87,7 @@ public:
     static QByteArray readStun(const quint8 *data, int size);
 
 private:
-    class Q_DECL_HIDDEN         Private;
+    class IRISNET_NO_EXPORT     Private;
     QSharedDataPointer<Private> d;
 };
 } // namespace XMPP

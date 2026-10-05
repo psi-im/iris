@@ -61,8 +61,8 @@ private slots:
     void do_sync();
 
 private:
-    class Q_DECL_HIDDEN Private;
-    Private            *d;
+    class IRISNET_NO_EXPORT Private;
+    Private                *d;
 
     void           resetConnection(bool clear = false);
     QByteArray     makePacket(const QString &ident, const QString &key, const QString &newkey, const QByteArray &block);

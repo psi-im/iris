@@ -72,8 +72,8 @@ private slots:
     void t_timeout();
 
 private:
-    class Q_DECL_HIDDEN Private;
-    Private            *d;
+    class IRISNET_NO_EXPORT Private;
+    Private                *d;
 
     void tryNext();
 };

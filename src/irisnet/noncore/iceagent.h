@@ -28,7 +28,7 @@ private:
 signals:
 
 private:
-    struct Q_DECL_HIDDEN     Private;
+    struct IRISNET_NO_EXPORT Private;
     std::unique_ptr<Private> d;
 };
 

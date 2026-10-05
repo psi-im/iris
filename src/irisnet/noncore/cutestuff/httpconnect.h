@@ -54,8 +54,8 @@ private slots:
     void sock_error(int);
 
 private:
-    class Q_DECL_HIDDEN Private;
-    Private            *d;
+    class IRISNET_NO_EXPORT Private;
+    Private                *d;
 
     void resetConnection(bool clear = false);
 };

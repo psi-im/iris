@@ -171,7 +171,7 @@ signals:
     void debugLine(const QString &line);
 
 private:
-    class Q_DECL_HIDDEN Private;
+    class IRISNET_NO_EXPORT Private;
     friend class Private;
     Private *d;
 };

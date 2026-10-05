@@ -63,8 +63,8 @@ public:
     void returnSockets(const QList<QUdpSocket *> &sockList);
 
 private:
-    class Q_DECL_HIDDEN Private;
-    Private            *d;
+    class IRISNET_NO_EXPORT Private;
+    Private                *d;
 };
 } // namespace XMPP
 

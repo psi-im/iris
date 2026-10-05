@@ -70,8 +70,8 @@ protected:
 
 private:
     //! \if _hide_doc_
-    class Q_DECL_HIDDEN Private;
-    Private            *d;
+    class IRISNET_NO_EXPORT Private;
+    Private                *d;
     //! \endif
 };
 // CS_EXPORT_END
