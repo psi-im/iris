@@ -1,0 +1,114 @@
+name: JinglePub Prosody integration
+
+on:
+  push:
+    branches:
+      - master
+      - ai/jinglepub-prosody-regression
+    paths:
+      - 'src/xmpp/xmpp-im/jingle-pub.*'
+      - 'src/xmpp/xmpp-im/jingle.*'
+      - 'tests/integration/jinglepub-prosody/**'
+      - '.github/workflows/jinglepub-prosody.yml'
+  pull_request:
+    paths:
+      - 'src/xmpp/xmpp-im/jingle-pub.*'
+      - 'src/xmpp/xmpp-im/jingle.*'
+      - 'tests/integration/jinglepub-prosody/**'
+      - '.github/workflows/jinglepub-prosody.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  QCA_TAG: v3.0.8
+
+concurrency:
+  group: iris-jinglepub-prosody-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  durable-jinglepub:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build and Prosody dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build qt6-base-dev libssl-dev prosody
+          sudo systemctl stop prosody.service 2>/dev/null || true
+          sudo service prosody stop 2>/dev/null || true
+
+      - name: Install QCA3 release packages
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf qca-release qca3.zip
+          mkdir qca-release
+          gh release download "$QCA_TAG" --repo psi-im/qca \
+            -p 'qca3-deb-ubuntu-24.04.zip' -O qca3.zip
+          (cd qca-release && cmake -E tar xvf ../qca3.zip)
+          test -n "$(find qca-release -type f -name '*.deb' -print -quit)"
+          sudo apt-get install -y ./qca-release/*.deb
+
+      - name: Build live JinglePub client
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S tests/integration/jinglepub-prosody -B build-jinglepub-prosody -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug
+          cmake --build build-jinglepub-prosody --target iris_jinglepub_prosody_client --parallel 4
+
+      - name: Start local Prosody
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PROSODY_DATA_DIR="$RUNNER_TEMP/prosody-data"
+          export PROSODY_PID_FILE="$RUNNER_TEMP/prosody.pid"
+          mkdir -p "$PROSODY_DATA_DIR"
+          cfg="$GITHUB_WORKSPACE/tests/integration/jinglepub-prosody/prosody.cfg.lua"
+          prosodyctl --config "$cfg" check config
+          prosodyctl --config "$cfg" register user01 localhost ci-pass-01
+          prosody -F --config "$cfg" >"$RUNNER_TEMP/prosody-jinglepub.log" 2>&1 &
+          echo $! >"$RUNNER_TEMP/prosody-jinglepub.pid"
+          for i in $(seq 1 100); do
+            if (echo > /dev/tcp/127.0.0.1/5222) 2>/dev/null; then
+              exit 0
+            fi
+            if ! kill -0 "$(cat "$RUNNER_TEMP/prosody-jinglepub.pid")" 2>/dev/null; then
+              cat "$RUNNER_TEMP/prosody-jinglepub.log"
+              exit 1
+            fi
+            sleep 0.1
+          done
+          cat "$RUNNER_TEMP/prosody-jinglepub.log"
+          exit 1
+
+      - name: Publish and start durable Jingle session through Prosody
+        shell: bash
+        run: |
+          set -euo pipefail
+          bin="$GITHUB_WORKSPACE/build-jinglepub-prosody/iris_jinglepub_prosody_client"
+          "$bin" user01@localhost ci-pass-01 2>&1 | tee "$RUNNER_TEMP/jinglepub-client.log"
+          grep -F 'LIVE_JINGLEPUB_RESULT=success' "$RUNNER_TEMP/jinglepub-client.log"
+
+      - name: Show integration logs
+        if: always()
+        shell: bash
+        run: |
+          if [[ -f "$RUNNER_TEMP/jinglepub-client.log" ]]; then
+            echo '--- JinglePub client ---'
+            cat "$RUNNER_TEMP/jinglepub-client.log"
+          fi
+          if [[ -f "$RUNNER_TEMP/prosody-jinglepub.pid" ]]; then
+            kill "$(cat "$RUNNER_TEMP/prosody-jinglepub.pid")" 2>/dev/null || true
+          fi
+          if [[ -f "$RUNNER_TEMP/prosody-jinglepub.log" ]]; then
+            echo '--- Prosody ---'
+            tail -n 300 "$RUNNER_TEMP/prosody-jinglepub.log"
+          fi
