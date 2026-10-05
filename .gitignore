@@ -20,3 +20,4 @@ object_script.*
 *.user*
 build-*
 3rdparty/qca
+.version
