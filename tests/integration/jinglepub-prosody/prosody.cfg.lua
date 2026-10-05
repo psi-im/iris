@@ -2,6 +2,7 @@
 prosody_user = os.getenv("USER")
 data_path = assert(os.getenv("PROSODY_DATA_DIR"), "PROSODY_DATA_DIR is required")
 pidfile = assert(os.getenv("PROSODY_PID_FILE"), "PROSODY_PID_FILE is required")
+plugin_paths = { assert(os.getenv("PROSODY_PLUGIN_PATH"), "PROSODY_PLUGIN_PATH is required") }
 
 allow_registration = false
 authentication = "internal_hashed"
@@ -18,11 +19,15 @@ modules_enabled = {
     "disco";
     "ping";
     "pep";
+    "delay_pep_snapshot";
 }
 modules_disabled = {
     "tls";
     "s2s";
 }
+
+delay_pep_snapshot_node = "urn:xmpp:jinglepub:ci"
+delay_pep_snapshot_seconds = 1.5
 
 log = {
     debug = "*console";
