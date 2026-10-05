@@ -57,7 +57,7 @@ public:
         stream_->setCompress(false);
         stream_->setNoopTime(0);
 
-        connect(stream_, &ClientStream::needAuthParams, this, [this](bool user, bool pass, bool realm) {
+        QObject::connect(stream_, &ClientStream::needAuthParams, this, [this](bool user, bool pass, bool realm) {
             if (user)
                 stream_->setUsername(jid_.node());
             if (pass)
@@ -66,11 +66,11 @@ public:
                 stream_->setRealm(jid_.domain());
             stream_->continueAfterParams();
         });
-        connect(stream_, &ClientStream::warning, this, [this](int warning) {
+        QObject::connect(stream_, &ClientStream::warning, this, [this](int warning) {
             qInfo() << jid_.resource() << "XMPP warning" << warning << "- continuing in local CI mode";
             stream_->continueAfterWarning();
         });
-        connect(stream_, &ClientStream::authenticated, this, [this]() {
+        QObject::connect(stream_, &ClientStream::authenticated, this, [this]() {
             const Jid     bound    = stream_->jid();
             const QString resource = bound.resource().isEmpty() ? jid_.resource() : bound.resource();
             client_.start(jid_.domain(), jid_.node(), password_, resource);
@@ -83,7 +83,7 @@ public:
 
             if (client_.isSessionRequired()) {
                 auto *task = new JT_Session(client_.rootTask());
-                connect(task, &Task::finished, this, [this, task]() {
+                QObject::connect(task, &Task::finished, this, [this, task]() {
                     if (!task->success()) {
                         fail(QStringLiteral("legacy XMPP session establishment failed"));
                         return;
@@ -95,9 +95,9 @@ public:
                 becomeReady();
             }
         });
-        connect(stream_, &Stream::error, this,
-                [this](int error) { fail(QStringLiteral("XMPP stream error %1").arg(error)); });
-        connect(stream_, &Stream::connectionClosed, this, [this]() {
+        QObject::connect(stream_, &Stream::error, this,
+                         [this](int error) { fail(QStringLiteral("XMPP stream error %1").arg(error)); });
+        QObject::connect(stream_, &Stream::connectionClosed, this, [this]() {
             if (!readyState_)
                 fail(QStringLiteral("XMPP stream closed before authentication"));
         });
@@ -110,13 +110,13 @@ private:
         if (readyState_)
             return;
         readyState_ = true;
-        connect(&client_, &Client::xmlIncoming, this, [this](const QString &xml) {
+        QObject::connect(&client_, &Client::xmlIncoming, this, [this](const QString &xml) {
             if (xml.contains(QStringLiteral("urn:xmpp:jinglepub:1"))
                 || xml.contains(QStringLiteral("urn:xmpp:jingle:1"))) {
                 qInfo().noquote() << jid_.resource() << "XMPP_IN=" << xml.trimmed();
             }
         });
-        connect(&client_, &Client::xmlOutgoing, this, [this](const QString &xml) {
+        QObject::connect(&client_, &Client::xmlOutgoing, this, [this](const QString &xml) {
             if (xml.contains(QStringLiteral("urn:xmpp:jinglepub:1"))
                 || xml.contains(QStringLiteral("urn:xmpp:jingle:1"))) {
                 qInfo().noquote() << jid_.resource() << "XMPP_OUT=" << xml.trimmed();
@@ -134,13 +134,13 @@ private:
             failed_(message);
     }
 
-    Client                    client_;
-    Jid                       jid_;
-    QString                   password_;
-    AdvancedConnector        *connector_  = nullptr;
-    ClientStream             *stream_     = nullptr;
-    bool                      readyState_ = false;
-    std::function<void()>     ready_;
+    Client                               client_;
+    Jid                                  jid_;
+    QString                              password_;
+    AdvancedConnector                   *connector_  = nullptr;
+    ClientStream                        *stream_     = nullptr;
+    bool                                 readyState_ = false;
+    std::function<void()>                ready_;
     std::function<void(const QString &)> failed_;
 };
 
@@ -180,7 +180,7 @@ protected:
     }
 
 private:
-    J::Manager                 *jingleManager_ = nullptr;
+    J::Manager                  *jingleManager_ = nullptr;
     J::PublishedSessionEndpoint endpoint_;
     J::JinglePub                publication_;
     bool                        restored_ = false;
@@ -243,8 +243,8 @@ int main(int argc, char **argv)
         return app.exec();
     }
 
-    bool publisherReady = false;
-    bool requesterReady = false;
+    bool publisherReady      = false;
+    bool requesterReady      = false;
     bool nodeCreationStarted = false;
     bool publicationStarted  = false;
     bool requestStarted      = false;
@@ -264,7 +264,7 @@ int main(int argc, char **argv)
             nodeCreationStarted = true;
             auto *task = publisher.client()->pubSubManager()->createNode(owner, QString::fromLatin1(PublicationNode),
                                                                          publishOptions());
-            connect(task, &Task::finished, &app, [&, task]() {
+            QObject::connect(task, &Task::finished, &app, [&, task]() {
                 if (!task->success()) {
                     finish(21, QStringLiteral("could not create Prosody PEP node"));
                     return;
@@ -282,7 +282,7 @@ int main(int argc, char **argv)
                 finish(22, QStringLiteral("publication manager refused durable publish"));
                 return;
             }
-            connect(task, &Task::finished, &app, [&, task]() {
+            QObject::connect(task, &Task::finished, &app, [&, task]() {
                 if (!task->success()) {
                     finish(23, QStringLiteral("Prosody rejected durable Jingle publication"));
                     return;
@@ -307,9 +307,9 @@ int main(int argc, char **argv)
         auto *remoteManager = requester.client()->jingleManager()->publicationManager();
         auto *request = remoteManager->requestPublishedSession(provider.publication().from(),
                                                                QString::fromLatin1(PublicationId), &app);
-        connect(request, &J::PublishedSessionRequest::finished, &app, [&, request]() {
+        QObject::connect(request, &J::PublishedSessionRequest::finished, &app, [&, request]() {
             if (request->state() != J::PublishedSessionRequest::State::Succeeded) {
-                qCritical() << "PUBLISHED_START_FAILED condition=" << int(request->error().condition());
+                qCritical() << "PUBLISHED_START_FAILED condition=" << int(request->error().condition);
                 finish(30, QStringLiteral("published-session start was rejected"));
                 return;
             }
@@ -319,11 +319,11 @@ int main(int argc, char **argv)
         request->start();
     };
 
-    connect(&provider, &J::PublishedSessionProvider::stateChanged, &app,
-            [&](J::PublishedSessionProvider::State state) {
-                qInfo() << "DURABLE_PROVIDER_STATE=" << int(state);
-                QTimer::singleShot(0, &app, advance);
-            });
+    QObject::connect(&provider, &J::PublishedSessionProvider::stateChanged, &app,
+                     [&](J::PublishedSessionProvider::State state) {
+                         qInfo() << "DURABLE_PROVIDER_STATE=" << int(state);
+                         QTimer::singleShot(0, &app, advance);
+                     });
 
     publisher.start(
         [&]() {
