@@ -52,13 +52,12 @@ jobs:
           sudo systemctl stop prosody.service 2>/dev/null || true
           sudo service prosody stop 2>/dev/null || true
 
-      - name: Restore compiler cache
-        uses: actions/cache/restore@v4
+      - name: Configure compiler cache
+        uses: hendrikmuhs/ccache-action@v1.2.24
         with:
-          path: ~/.cache/ccache
-          key: iris-ft-memory-${{ runner.os }}-${{ github.sha }}
-          restore-keys: |
-            iris-ft-memory-${{ runner.os }}-
+          key: iris-ft-memory-${{ runner.os }}
+          max-size: 1G
+          verbose: 1
 
       - name: Install QCA3 release package
         shell: bash
@@ -172,17 +171,6 @@ jobs:
           grep -F 'FT_ASAN_MEMORY_PROFILE_BEGIN iteration=50' "$log"
           grep -F 'FT_ASAN_MEMORY_PROFILE_END iteration=50' "$log"
           cmp "$input" "$output"
-
-      - name: Save compiler cache
-        if: success()
-        uses: actions/cache/save@v4
-        with:
-          path: ~/.cache/ccache
-          key: iris-ft-memory-${{ runner.os }}-${{ github.sha }}
-
-      - name: Show compiler cache statistics
-        if: always()
-        run: ccache --show-stats
 
       - name: Upload memory diagnostics
         if: always()
