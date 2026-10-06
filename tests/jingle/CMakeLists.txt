@@ -73,6 +73,8 @@ target_link_libraries(jingle_contentmodifydispatcher_test PRIVATE iris Qt${QT_DE
     Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
 add_test(NAME jingle_contentmodify_dispatcher COMMAND jingle_contentmodifydispatcher_test)
 add_executable(jingle_dtlssrtp_test dtlssrtp.cpp)
+# The batch-ingress fixture has Q_OBJECT; standalone CI does not inherit AUTOMOC from Iris.
+set_target_properties(jingle_dtlssrtp_test PROPERTIES AUTOMOC ON)
 # Dtls lives in irisnet but its fingerprint/XML helpers live in iris.
 target_link_libraries(jingle_dtlssrtp_test PRIVATE irisnet iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
     Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
