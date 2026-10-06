@@ -93,21 +93,29 @@ int main(int argc, char **argv)
     if ((remoteOne->channelType & 0x80) || (remoteTwo->channelType & 0x80))
         return fail("ordered data channels were encoded as unordered");
 
-    const QByteArray tail("buffered-tail");
-    if (!leftOne->writeDatagram(QNetworkDatagram(tail)))
-        return fail("failed to queue tail on first channel");
-    if (!pumpUntil(left, right, [&]() { return remoteOne->hasPendingDatagrams(); }))
-        return fail("tail did not arrive before stream close");
+    // Model the FT finishing boundary precisely. The application gets
+    // bytesWritten when a block has entered usrsctp, not when the peer has
+    // received it. Queue a sizeable reliable tail that still fits entirely in
+    // the SCTP send buffer, verify the application-facing queue is empty, and
+    // then request stream close before any of those packets are pumped to the
+    // peer. Stream reset must not discard that accepted tail.
+    QList<QByteArray> tails;
+    for (int i = 0; i < 16; ++i) {
+        QByteArray tail(8192, char(i));
+        tails.append(tail);
+        if (!leftOne->writeDatagram(QNetworkDatagram(tail)))
+            return fail("failed to queue buffered tail on first channel");
+    }
+    if (leftOne->bytesToWrite() != 0)
+        return fail("test tail did not enter the SCTP send buffer");
 
-    int localCloseFinished = 0;
+    int localCloseFinished  = 0;
     int remoteCloseFinished = 0;
     QObject::connect(leftOne.data(), &ByteStream::delayedCloseFinished, &app,
                      [&localCloseFinished]() { ++localCloseFinished; });
     QObject::connect(remoteOne.data(), &ByteStream::connectionClosed, &app,
                      [&remoteCloseFinished]() { ++remoteCloseFinished; });
 
-    // This is the FT finishing boundary: the application asks to close one
-    // completed stream while the association and another FT stream stay live.
     leftOne->close();
 
     if (!pumpUntil(left, right, [&]() {
@@ -117,12 +125,17 @@ int main(int argc, char **argv)
 
     if (remoteCloseFinished != 0)
         return fail("remote close completed before buffered data was drained");
-    if (!remoteOne->hasPendingDatagrams())
-        return fail("stream close discarded buffered peer data");
-    if (remoteOne->readDatagram().data() != tail)
-        return fail("buffered tail changed across stream close");
-    if (remoteCloseFinished != 0)
-        return fail("remote close notification overtook accounting of final datagram");
+
+    for (const auto &tail : std::as_const(tails)) {
+        if (!remoteOne->hasPendingDatagrams())
+            return fail("stream close discarded accepted SCTP tail data");
+        if (remoteOne->readDatagram().data() != tail)
+            return fail("buffered tail changed across stream close");
+        if (remoteCloseFinished != 0)
+            return fail("remote close notification overtook accounting of final datagram");
+    }
+    if (remoteOne->hasPendingDatagrams())
+        return fail("unexpected extra datagram after buffered tail");
     QCoreApplication::processEvents(QEventLoop::AllEvents, 5);
     if (remoteCloseFinished != 1)
         return fail("remote close did not complete after final datagram returned");
