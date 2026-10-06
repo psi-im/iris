@@ -1,0 +1,204 @@
+name: Jingle FT memory stability
+
+on:
+  push:
+    branches: [ master ]
+    paths:
+      - 'src/xmpp/**'
+      - 'include/iris/jingle-*.h'
+      - 'tests/integration/jingle-ft-memory/**'
+      - '.github/workflows/jingle-ft-memory.yml'
+  pull_request:
+    paths:
+      - 'src/xmpp/**'
+      - 'include/iris/jingle-*.h'
+      - 'tests/integration/jingle-ft-memory/**'
+      - '.github/workflows/jingle-ft-memory.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  QCA_TAG: v3.0.8
+
+concurrency:
+  group: iris-ft-memory-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  repeated-ft:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install live-test dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake \
+            ninja-build \
+            ccache \
+            g++ \
+            qt6-base-dev \
+            libssl-dev \
+            libusrsctp-dev \
+            zlib1g-dev \
+            prosody
+          sudo systemctl stop prosody.service 2>/dev/null || true
+          sudo service prosody stop 2>/dev/null || true
+
+      - name: Restore compiler cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/ccache
+          key: iris-ft-memory-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            iris-ft-memory-${{ runner.os }}-
+
+      - name: Install QCA3 release package
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf qca-release qca3.zip
+          mkdir qca-release
+          gh release download "$QCA_TAG" --repo psi-im/qca \
+            -p 'qca3-deb-ubuntu-24.04.zip' -O qca3.zip
+          (cd qca-release && cmake -E tar xvf ../qca3.zip)
+          test -n "$(find qca-release -type f -name '*.deb' -print -quit)"
+          sudo apt-get install -y ./qca-release/*.deb
+
+      - name: Configure and build release probe
+        shell: bash
+        run: |
+          cmake -S tests/integration/jingle-ft-memory -B build-ft-memory -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          cmake --build build-ft-memory --parallel 4 --target iris_jingle_ft_memory_probe
+
+      - name: Start local Prosody
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PROSODY_DATA_DIR="$RUNNER_TEMP/prosody-data"
+          export PROSODY_PID_FILE="$RUNNER_TEMP/prosody.pid"
+          mkdir -p "$PROSODY_DATA_DIR"
+          cfg="$GITHUB_WORKSPACE/tests/integration/jingle-ft-memory/prosody.cfg.lua"
+          mkdir -p "$(dirname "$cfg")/certs"
+          prosodyctl --config "$cfg" check config
+          prosodyctl --config "$cfg" register user01 localhost ci-pass-01
+          prosodyctl --config "$cfg" register user02 localhost ci-pass-02
+          prosody -F --config "$cfg" >"$RUNNER_TEMP/prosody-ft-memory.log" 2>&1 &
+          echo $! >"$RUNNER_TEMP/prosody-ft-memory.pid"
+          for i in $(seq 1 100); do
+            if (echo > /dev/tcp/127.0.0.1/5222) 2>/dev/null; then
+              exit 0
+            fi
+            if ! kill -0 "$(cat "$RUNNER_TEMP/prosody-ft-memory.pid")" 2>/dev/null; then
+              cat "$RUNNER_TEMP/prosody-ft-memory.log"
+              exit 1
+            fi
+            sleep 0.1
+          done
+          cat "$RUNNER_TEMP/prosody-ft-memory.log"
+          exit 1
+
+      - name: Prepare deterministic transfer payload
+        shell: bash
+        run: |
+          python3 - "$RUNNER_TEMP/jingle-ft-memory-input.bin" <<'PY'
+          import sys
+          path = sys.argv[1]
+          data = bytes(((i * 37 + 11) & 0xff) for i in range(256 * 1024))
+          with open(path, 'wb') as f:
+              f.write(data)
+          PY
+
+      - name: Repeat 100 ICE file transfers in one process
+        shell: bash
+        run: |
+          set -euo pipefail
+          input="$RUNNER_TEMP/jingle-ft-memory-input.bin"
+          output="$RUNNER_TEMP/jingle-ft-memory-output.bin"
+          log="$RUNNER_TEMP/jingle-ft-memory-probe.log"
+          bin="$GITHUB_WORKSPACE/build-ft-memory/iris_jingle_ft_memory_probe"
+
+          "$bin" \
+            user01@localhost/ft-memory-sender ci-pass-01 \
+            user02@localhost/ft-memory-receiver ci-pass-02 \
+            "$input" "$output" 100 2>&1 | tee "$log"
+
+          grep -F 'LIVE_FT_MEMORY_RESULT=success' "$log"
+          grep -F 'FT_MEMORY_RESULT iterations=100' "$log"
+          test "$(grep -c '^FT_MEMORY iteration=' "$log")" -eq 101
+          cmp "$input" "$output"
+
+      - name: Configure and build ASan allocation profiler
+        shell: bash
+        run: |
+          cmake -S tests/integration/jingle-ft-memory -B build-ft-memory-asan -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DIRIS_FT_MEMORY_SANITIZE=ON \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          cmake --build build-ft-memory-asan --parallel 4 --target iris_jingle_ft_memory_probe
+
+      - name: Profile live allocations after repeated transfers
+        shell: bash
+        env:
+          ASAN_OPTIONS: detect_leaks=0:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          set -euo pipefail
+          input="$RUNNER_TEMP/jingle-ft-memory-input.bin"
+          output="$RUNNER_TEMP/jingle-ft-memory-asan-output.bin"
+          log="$RUNNER_TEMP/jingle-ft-memory-asan.log"
+          bin="$GITHUB_WORKSPACE/build-ft-memory-asan/iris_jingle_ft_memory_probe"
+
+          "$bin" \
+            user01@localhost/ft-memory-asan-sender ci-pass-01 \
+            user02@localhost/ft-memory-asan-receiver ci-pass-02 \
+            "$input" "$output" 50 2>&1 | tee "$log"
+
+          grep -F 'LIVE_FT_MEMORY_RESULT=success' "$log"
+          grep -F 'FT_ASAN_MEMORY_PROFILE_BEGIN iteration=2' "$log"
+          grep -F 'FT_ASAN_MEMORY_PROFILE_BEGIN iteration=50' "$log"
+          grep -F 'FT_ASAN_MEMORY_PROFILE_END iteration=50' "$log"
+          cmp "$input" "$output"
+
+      - name: Save compiler cache
+        if: success()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/ccache
+          key: iris-ft-memory-${{ runner.os }}-${{ github.sha }}
+
+      - name: Show compiler cache statistics
+        if: always()
+        run: ccache --show-stats
+
+      - name: Upload memory diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: iris-jingle-ft-memory-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/jingle-ft-memory-probe.log
+            ${{ runner.temp }}/jingle-ft-memory-asan.log
+            ${{ runner.temp }}/prosody-ft-memory.log
+          if-no-files-found: ignore
+
+      - name: Stop Prosody
+        if: always()
+        shell: bash
+        run: |
+          if [[ -f "$RUNNER_TEMP/prosody-ft-memory.pid" ]]; then
+            kill "$(cat "$RUNNER_TEMP/prosody-ft-memory.pid")" 2>/dev/null || true
+          fi
