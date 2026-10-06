@@ -6,8 +6,8 @@
 // real network timeout or adding private transport state to the public API.
 #define private public
 #include <iris/ice176.h>
-#undef private
 #include "../../src/irisnet/noncore/ice176.cpp"
+#undef private
 using namespace XMPP;
 static void check(bool ok, const char *message)
 {
@@ -148,17 +148,17 @@ static void usableConnectivityCancelsPacTimeout()
     component.id            = 1;
     component.hasValidPairs = true;
 
-    auto pair              = Ice176::Private::CandidatePair::Ptr::create();
-    pair->local            = IceComponent::CandidateInfo::Ptr::create();
-    pair->remote           = IceComponent::CandidateInfo::Ptr::create();
-    pair->local->addr      = TransportAddress(QHostAddress::LocalHost, 10000);
-    pair->local->base      = pair->local->addr;
+    auto pair                = Ice176::Private::CandidatePair::Ptr::create();
+    pair->local              = IceComponent::CandidateInfo::Ptr::create();
+    pair->remote             = IceComponent::CandidateInfo::Ptr::create();
+    pair->local->addr        = TransportAddress(QHostAddress::LocalHost, 10000);
+    pair->local->base        = pair->local->addr;
     pair->local->componentId = 1;
-    pair->local->type      = IceComponent::HostType;
-    pair->remote->addr     = TransportAddress(QHostAddress::LocalHost, 10001);
+    pair->local->type        = IceComponent::HostType;
+    pair->remote->addr       = TransportAddress(QHostAddress::LocalHost, 10001);
     pair->remote->componentId = 1;
-    pair->remote->type     = IceComponent::HostType;
-    component.highestPair  = pair;
+    pair->remote->type       = IceComponent::HostType;
+    component.highestPair    = pair;
 
     d->pacTimer = std::make_unique<QTimer>(d);
     d->pacTimer->setSingleShot(true);
