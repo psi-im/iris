@@ -155,8 +155,8 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
         bool                               outgoingReceived       = false;
         bool                               writeLoggingStarted    = false;
         bool                               readLoggingStarted     = false;
-        bool                               readingPayload          = false;
-        bool                               closeObservedWhileRead  = false;
+        bool                               readingPayload         = false;
+        bool                               closeObservedWhileRead = false;
         File                               file;
         File                               acceptFile; // as it comes with "accept" response
         std::optional<XMPP::Stanza::Error> lastError;
@@ -181,8 +181,8 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
         void setState(State s)
         {
             QPointer<Application> guard(q);
-            const auto previous = q->_state;
-            q->_state           = s;
+            const auto            previous = q->_state;
+            q->_state                      = s;
             if (s >= State::Finishing && connection)
                 connection->setReadHook({});
             if (s == State::Finished)
@@ -270,9 +270,9 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
 
             // Legacy/unknown-size streams still use connection closure as their
             // EOF boundary, so preserve the transport-drain wait for that case.
-            const auto closing = connection;
-            const auto weak    = closing.toWeakRef();
-            auto completeClose = [this, weak]() {
+            const auto closing       = connection;
+            const auto weak          = closing.toWeakRef();
+            auto       completeClose = [this, weak]() {
                 if (q->_state != State::Finishing)
                     return;
                 const auto closed = weak.lock();
@@ -297,6 +297,8 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
 
         void onReceived()
         {
+            if (!amISender() || q->_state == State::Finished || q->_terminationReason.isValid())
+                return;
             lastReason = Reason(Reason::Condition::Success);
             finishTransfer();
         }
@@ -324,11 +326,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
         void expectReceived()
         {
             qDebug("jingle-ft: waiting for <received> for %s", qUtf8Printable(q->pad()->session()->peer().full()));
-            expectFinalize([this]() {
-                qDebug("jingle-ft: Waiting for <received> timed out. But likely succeeded anyway. %s",
-                       qUtf8Printable(q->pad()->session()->peer().full()));
-                onReceived();
-            });
+            expectFinalize([this]() { handleStreamFail(QStringLiteral("timed out waiting for file receipt")); });
         }
 
         void expectFinalize(std::function<void()> &&timeoutCallback)
@@ -396,7 +394,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
             }
             data.resize(sz);
             QPointer<Application> guard(q);
-            auto readSz = device->read(data.data(), sz);
+            auto                  readSz = device->read(data.data(), sz);
             if (!guard)
                 return;
             if (readSz < 0) {
@@ -448,7 +446,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
             quint64 bytesAvail;
             while ((!bytesLeft || *bytesLeft > 0)
                    && ((bytesAvail = connection->bytesAvailable()) || (connection->hasPendingDatagrams()))) {
-                QByteArray data;
+                QByteArray            data;
                 QPointer<Application> guard(q);
                 readingPayload = true;
                 if (connection->features() & TransportFeature::MessageOriented) {
@@ -490,7 +488,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
                     *bytesLeft -= data.size();
 
                 const bool deferredClose = closeObservedWhileRead;
-                closeObservedWhileRead = false;
+                closeObservedWhileRead   = false;
                 if (deferredClose) {
                     tryFinalizeIncoming();
                     if (!guard || q->_state >= State::Finishing)
@@ -523,7 +521,13 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
                 }
                 tryFinalizeIncoming();
             } else {
-                handleStreamFail(QString::fromLatin1("connection closed before transfer completion"));
+                // The receiver may close after the final payload but before
+                // our queued bytesWritten callback advances the sender. Keep
+                // waiting for receipt; closure alone does not prove success.
+                if (bytesLeft && *bytesLeft == 0)
+                    writeNextBlockToTransport();
+                else
+                    handleStreamFail(QString::fromLatin1("connection closed before transfer completion"));
             }
         }
 
@@ -940,7 +944,15 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
 
     void Application::incomingRemove(const Reason &r)
     {
-        d->lastReason = r;
+        // Session success is an alternative to <received/> (XEP-0234 6.6).
+        // It cannot erase a local integrity/stream failure or complete a
+        // known-size transfer whose advertised payload is still outstanding.
+        if (_terminationReason.isValid())
+            d->lastReason = _terminationReason;
+        else if (r.condition() == Reason::Success && d->bytesLeft && *d->bytesLeft != 0)
+            d->lastReason = Reason(Reason::FailedApplication, QStringLiteral("session ended before file completion"));
+        else
+            d->lastReason = r;
         d->setState(State::Finished);
     }
 

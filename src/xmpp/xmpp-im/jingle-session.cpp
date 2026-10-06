@@ -134,14 +134,27 @@ namespace XMPP { namespace Jingle {
 
         void setSessionFinished()
         {
+            QPointer<Session> guard(q);
             q->tieBreaker()->clear();
             state = State::Finished;
             emit q->terminated();
+            if (!guard)
+                return;
             signalingContent.clear();
-            for (auto &c : contentList) {
-                if (c->state() != State::Finished) {
-                    c->setState(State::Finished);
-                }
+            QList<QPointer<Application>> contents;
+            for (auto app : std::as_const(contentList))
+                contents.append(app);
+            for (const auto &app : std::as_const(contents)) {
+                if (app && app->state() != State::Finished)
+                    app->incomingRemove(terminateReason);
+                if (!guard)
+                    return;
+                // Some applications are already stopping asynchronously.
+                // Session teardown still imposes a terminal state.
+                if (app && app->state() != State::Finished)
+                    app->setState(State::Finished);
+                if (!guard)
+                    return;
             }
             auto vals = contentList.values();
             contentList.clear();
@@ -2955,6 +2968,8 @@ namespace XMPP { namespace Jingle {
 
     void Session::terminate(Reason::Condition cond, const QString &comment)
     {
+        if (d->state == State::Finished)
+            return;
         if (d->role == Origin::Initiator && d->state == State::ApprovedToSend) {
             d->setSessionFinished();
             return;

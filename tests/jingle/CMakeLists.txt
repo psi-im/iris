@@ -103,6 +103,10 @@ add_executable(jingle_ftlifecycle_test ftlifecycle.cpp)
 target_link_libraries(jingle_ftlifecycle_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
     Qt${QT_DEFAULT_MAJOR_VERSION}::Network Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
 add_test(NAME jingle_ftlifecycle COMMAND jingle_ftlifecycle_test)
+add_executable(jingle_ibblifecycle_test ibblifecycle.cpp)
+target_link_libraries(jingle_ibblifecycle_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
+    Qt${QT_DEFAULT_MAJOR_VERSION}::Network Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
+add_test(NAME jingle_ibblifecycle COMMAND jingle_ibblifecycle_test)
 add_executable(jingle_icereplacestate_test icereplacestate.cpp)
 target_link_libraries(jingle_icereplacestate_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
     Qt${QT_DEFAULT_MAJOR_VERSION}::Network Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)

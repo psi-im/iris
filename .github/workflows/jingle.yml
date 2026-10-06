@@ -176,7 +176,9 @@ jobs:
             jingle_rtpnegotiation_test \
             jingle_dtlssrtp_test \
             jingle_domlifetime_test \
-            jingle_ftlifecycle_test
+            jingle_ftlifecycle_test \
+            jingle_ibblifecycle_test \
+            jingle_bundlesignaling_test
 
       - name: Save sanitizer compiler cache
         if: success()
@@ -198,5 +200,6 @@ jobs:
             -R '^jingle_transport(accept|reject|replace|s5b|sctp)'
           ctest --test-dir build-jingle-sanitize --output-on-failure -j1 -R jingle_domlifetime
           ctest --test-dir build-jingle-sanitize --output-on-failure -j1 -R jingle_ftlifecycle
+          ctest --test-dir build-jingle-sanitize --output-on-failure -j1 -R 'jingle_(ibblifecycle|bundlesignaling)'
           ctest --test-dir build-jingle-sanitize --output-on-failure -j1 -R jingle_rtpnegotiation
           ctest --test-dir build-jingle-sanitize --output-on-failure -j1 -R jingle_dtlssrtp
