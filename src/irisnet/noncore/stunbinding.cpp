@@ -72,7 +72,12 @@ public:
             return;
         auto t = trans.release();
         t->disconnect(this);
-        t->cancel(); // will self-delete the transaction either on incoming or timeout
+        t->cancel();
+        // The binding owns this heap transaction.  Do not keep a cancelled
+        // request (and its shared pool) alive until the STUN retransmit timeout.
+        // Defer destruction so cancel remains safe when reached from a signal
+        // handler; StunTransaction's destructor removes itself from the pool.
+        t->deleteLater();
         // just in case those too
         addr = TransportAddress();
         errorString.clear();

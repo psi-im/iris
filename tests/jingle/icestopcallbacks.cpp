@@ -30,20 +30,35 @@ static void stoppedCallbacks()
     // A retained valid pair is deliberately absent from the main checklist.
     d->checkList.validPairs.append(pair);
     d->state   = Ice176::Private::Started;
-    int writes = 0, errors = 0, ready = 0;
+    int         writes = 0, errors = 0, ready = 0;
+    StunMessage request;
     QObject::connect(pair->pool.data(), &StunTransactionPool::outgoingMessage, d,
-                     [&](const QByteArray &, const TransportAddress &) { ++writes; });
+                     [&](const QByteArray &packet, const TransportAddress &) {
+                         ++writes;
+                         request = StunMessage::fromBinary(packet);
+                     });
     StunBinding *binding = pair->binding;
     QObject::connect(binding, &StunBinding::error, d, [&](StunBinding::Error) { ++errors; });
     QObject::connect(&ice, &Ice176::error, [&](Ice176::Error) { ++errors; });
     QObject::connect(&ice, &Ice176::readyToSendMedia, [&] { ++ready; });
     pair->binding->start(pair->remote->addr);
     check(writes > 0, "STUN transaction did not start");
+    check(!request.isNull(), "STUN request was not captured");
     const int before = writes;
     ice.stop();
-    QCoreApplication::sendPostedEvents();
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
     QCoreApplication::processEvents();
     check(ice.isStopped(), "ICE did not finish stopping");
+
+    // A cancelled binding must stop routing its transaction immediately after
+    // deferred teardown, rather than keeping the pool alive until STUN timeout.
+    StunMessage lateResponse;
+    lateResponse.setClass(StunMessage::SuccessResponse);
+    lateResponse.setMethod(StunTypes::Binding);
+    lateResponse.setId(request.id());
+    check(!pair->pool->writeIncomingMessage(lateResponse, pair->remote->addr),
+          "cancelled STUN transaction remained registered in the pool");
+
     const auto stoppedPairState = pair->state;
     // Late signals from a retired transaction must be disconnected;
     // retaining its pair must not keep an outgoing transport callback alive.
@@ -55,6 +70,7 @@ static void stoppedCallbacks()
     // A cancelled binding can start another transaction immediately.
     binding->start(pair->remote->addr);
     binding->cancel();
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
 }
 
 class FakeTransport : public IceTransport {
