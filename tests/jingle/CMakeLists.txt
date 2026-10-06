@@ -87,6 +87,9 @@ target_link_libraries(jingle_icevalidpair_test PRIVATE irisnet iris Qt${QT_DEFAU
     Qt${QT_DEFAULT_MAJOR_VERSION}::Network)
 add_test(NAME jingle_icevalidpair COMMAND jingle_icevalidpair_test)
 set_tests_properties(jingle_icevalidpair PROPERTIES TIMEOUT 12)
+add_executable(jingle_stunbindinglifetime_test stunbindinglifetime.cpp)
+target_link_libraries(jingle_stunbindinglifetime_test PRIVATE irisnet iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core)
+add_test(NAME jingle_stunbindinglifetime COMMAND jingle_stunbindinglifetime_test)
 add_executable(jingle_iceudp_test iceudp.cpp)
 target_include_directories(jingle_iceudp_test PRIVATE ../../src/xmpp/xmpp-im)
 target_link_libraries(jingle_iceudp_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core

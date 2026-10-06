@@ -28,8 +28,8 @@ class StunBinding::Private : public QObject {
     Q_OBJECT
 
 public:
-    StunBinding                     *q;
-    StunTransactionPool::Ptr         pool;
+    StunBinding            *q;
+    StunTransactionPool    *pool = nullptr;
     std::unique_ptr<StunTransaction> trans;
     TransportAddress                 stunAddr;
     TransportAddress                 addr;
@@ -63,7 +63,7 @@ public:
 
         trans->setFingerprintRequired(fpRequired);
 
-        trans->start(pool.data(), stunAddr);
+        trans->start(pool, stunAddr);
     }
 
     void cancel()
@@ -193,7 +193,7 @@ private slots:
 StunBinding::StunBinding(StunTransactionPool *pool) : QObject(pool)
 {
     d       = new Private(this);
-    d->pool = pool->sharedFromThis();
+    d->pool = pool;
 }
 
 StunBinding::~StunBinding() { delete d; }
