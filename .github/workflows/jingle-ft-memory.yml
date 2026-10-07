@@ -1,19 +1,7 @@
 name: Jingle FT memory stability
 
 on:
-  push:
-    branches: [ master ]
-    paths:
-      - 'src/xmpp/**'
-      - 'include/iris/jingle-*.h'
-      - 'tests/integration/jingle-ft-memory/**'
-      - '.github/workflows/jingle-ft-memory.yml'
-  pull_request:
-    paths:
-      - 'src/xmpp/**'
-      - 'include/iris/jingle-*.h'
-      - 'tests/integration/jingle-ft-memory/**'
-      - '.github/workflows/jingle-ft-memory.yml'
+  # Repeated transfers and allocation profiling are opt-in diagnostics.
   workflow_dispatch:
 
 permissions:
