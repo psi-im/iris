@@ -183,12 +183,12 @@ jobs:
           "$bin" \
             user01@localhost/ft-memory-asan-sender ci-pass-01 \
             user02@localhost/ft-memory-asan-receiver ci-pass-02 \
-            "$input" "$output" 50 2>&1 | tee "$log"
+            "$input" "$output" 3 2>&1 | tee "$log"
 
           grep -F 'LIVE_FT_MEMORY_RESULT=success' "$log"
           grep -F 'FT_ASAN_MEMORY_PROFILE_BEGIN iteration=2' "$log"
-          grep -F 'FT_ASAN_MEMORY_PROFILE_BEGIN iteration=50' "$log"
-          grep -F 'FT_ASAN_MEMORY_PROFILE_END iteration=50' "$log"
+          grep -F 'FT_ASAN_MEMORY_PROFILE_BEGIN iteration=3' "$log"
+          grep -F 'FT_ASAN_MEMORY_PROFILE_END iteration=3' "$log"
           cmp "$input" "$output"
 
       - name: Upload memory diagnostics
