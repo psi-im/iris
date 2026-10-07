@@ -178,7 +178,7 @@ static qint64 smapsValueKb(const QByteArray &line, const QByteArray &key)
     return ok ? parsed : -1;
 }
 
-static MemorySample sampleMemory(int iteration)
+static MemorySample captureMemory(int iteration)
 {
 #ifdef __GLIBC__
     malloc_trim(0);
@@ -232,12 +232,28 @@ static MemorySample sampleMemory(int iteration)
     sample.heapBytes = qint64(info.uordblks);
 #endif
 
+    return sample;
+}
+
+static MemorySample sampleMemory(int iteration)
+{
+    const auto sample = captureMemory(iteration);
     qInfo().noquote() << QStringLiteral("FT_MEMORY iteration=%1 rss_kb=%2 private_kb=%3 heap_bytes=%4")
                              .arg(sample.iteration)
                              .arg(sample.rssKb)
                              .arg(sample.privateKb)
                              .arg(sample.heapBytes);
     return sample;
+}
+
+static void sampleDrainMemory(const QString &stage)
+{
+    const auto sample = captureMemory(-1);
+    qInfo().noquote() << QStringLiteral("FT_MEMORY_DRAIN stage=%1 rss_kb=%2 private_kb=%3 heap_bytes=%4")
+                             .arg(stage)
+                             .arg(sample.rssKb)
+                             .arg(sample.privateKb)
+                             .arg(sample.heapBytes);
 }
 
 static void printAsanMemoryProfile(int iteration)
@@ -560,6 +576,13 @@ private:
             return;
 
         settleScheduled_ = true;
+
+        if (iteration_ == iterations_) {
+            sampleDrainMemory(QStringLiteral("immediate"));
+            QTimer::singleShot(30, this, []() { sampleDrainMemory(QStringLiteral("30ms")); });
+            QTimer::singleShot(150, this, []() { sampleDrainMemory(QStringLiteral("150ms")); });
+        }
+
         QTimer::singleShot(250, this, [this]() {
             QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
             QCoreApplication::processEvents(QEventLoop::AllEvents);
