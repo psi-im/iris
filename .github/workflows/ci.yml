@@ -59,6 +59,10 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Test release packaging selection
+        if: matrix.name == 'qt5-qca2'
+        run: python3 -m unittest discover -s tests/workflows -v
+
       - name: Install build dependencies
         shell: bash
         run: |

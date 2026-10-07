@@ -26,6 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       source_ref: ${{ steps.resolve.outputs.source_ref }}
+      source_sha: ${{ steps.resolve.outputs.source_sha }}
       version: ${{ steps.resolve.outputs.version }}
     steps:
       - uses: actions/checkout@v4
@@ -61,9 +62,21 @@ jobs:
           fi
 
           printf '%s\n' "$version" > .version
+          source_sha=$(git rev-parse HEAD)
           echo "source_ref=$source_ref" >> "$GITHUB_OUTPUT"
+          echo "source_sha=$source_sha" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "Packaging $source_ref as Iris $version"
+          jq -n --arg sha "$source_sha" --arg version "$version" \
+            '{source_sha: $sha, version: $version}' > "$RUNNER_TEMP/iris-package-source.json"
+
+      - name: Record package source
+        uses: actions/upload-artifact@v4
+        with:
+          name: iris-package-source
+          overwrite: true
+          path: ${{ runner.temp }}/iris-package-source.json
+          if-no-files-found: error
 
   debian:
     needs: version
@@ -77,7 +90,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.version.outputs.source_ref }}
+          ref: ${{ needs.version.outputs.source_sha }}
           fetch-depth: 0
 
       - name: Materialize package version
@@ -85,10 +98,29 @@ jobs:
         run: |
           printf '%s\n' "${{ needs.version.outputs.version }}" > .version
 
-      - name: Install dependencies
+      - name: Configure APT mirrors and download timeouts
         shell: bash
         run: |
-          sudo apt-get update
+          set -euo pipefail
+          # Avoid spending minutes retrying the Azure mirror before fallback.
+          if [[ -f /etc/apt/apt-mirrors.txt ]]; then
+            printf '%s\n' 'https://archive.ubuntu.com/ubuntu' | sudo tee /etc/apt/apt-mirrors.txt
+          fi
+          if [[ -f /etc/apt/apt-mirrors-security.txt ]]; then
+            printf '%s\n' 'https://security.ubuntu.com/ubuntu' | sudo tee /etc/apt/apt-mirrors-security.txt
+          fi
+          sudo tee /etc/apt/apt.conf.d/99iris-download-timeouts <<'EOF'
+          Acquire::http::Timeout "30";
+          Acquire::https::Timeout "30";
+          Acquire::Retries "2";
+          EOF
+
+      - name: Install dependencies
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get -o APT::Update::Error-Mode=any update
           sudo apt-get install -y cmake ninja-build dpkg-dev qt6-base-dev zlib1g-dev libusrsctp-dev libomemo-c-dev
 
       - name: Install QCA3 release packages
@@ -251,7 +283,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.version.outputs.source_ref }}
+          ref: ${{ needs.version.outputs.source_sha }}
           fetch-depth: 0
 
       - name: Materialize package version
@@ -303,7 +335,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.version.outputs.source_ref }}
+          ref: ${{ needs.version.outputs.source_sha }}
           fetch-depth: 0
 
       - name: Materialize package version

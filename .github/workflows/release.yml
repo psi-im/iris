@@ -86,6 +86,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.release_tag.outputs.tag }}
+          SOURCE_SHA: ${{ steps.release_tag.outputs.sha }}
           FORCE_REBUILD: ${{ inputs.rebuild_assets || false }}
         run: |
           set -euo pipefail
@@ -107,21 +108,64 @@ jobs:
           run_title="Iris packages $TAG"
 
           load_runs() {
-            gh run list --repo "$GITHUB_REPOSITORY" --workflow packages.yml --limit 100 --json databaseId,displayTitle,status,conclusion,createdAt > "$RUNNER_TEMP/package-runs.json"
+            gh run list --repo "$GITHUB_REPOSITORY" --workflow packages.yml --limit 100 --json databaseId,displayTitle,status,conclusion,createdAt,event,headSha > "$RUNNER_TEMP/package-runs.json"
+          }
+
+          source_matches() {
+            local run_id=$1
+            local metadata_dir="$RUNNER_TEMP/package-source-$run_id"
+            local metadata="$metadata_dir/iris-package-source.json"
+            local artifacts manifest_id
+            if [[ ! -f "$metadata" ]]; then
+              artifacts=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/artifacts?per_page=100") || return 1
+              manifest_id=$(jq -r '
+                [.artifacts[] | select(.name == "iris-package-source")] | first
+                | if . == null then empty elif .expired then "expired" else .id end
+              ' <<< "$artifacts")
+              [[ "$manifest_id" != expired ]] || return 1
+              if [[ -n "$manifest_id" ]]; then
+                mkdir -p "$metadata_dir"
+                gh run download "$run_id" --repo "$GITHUB_REPOSITORY" \
+                  --name iris-package-source --dir "$metadata_dir" >&2 || return 1
+              else
+                # For legacy tag-push runs, the event SHA is the source SHA.
+                # A manual run's headSha describes the workflow, not source_ref.
+                jq -e --argjson id "$run_id" --arg sha "$SOURCE_SHA" '
+                  any(.[]; .databaseId == $id and .event == "push" and .headSha == $sha)
+                ' "$RUNNER_TEMP/package-runs.json" >/dev/null
+                return
+              fi
+            fi
+            jq -e --arg sha "$SOURCE_SHA" --arg version "${TAG#v}" '
+              .source_sha == $sha and .version == $version
+            ' "$metadata" >/dev/null
           }
 
           latest_successful_run() {
-            jq -r --arg title "$run_title" '
+            local candidate
+            while read -r candidate; do
+              if source_matches "$candidate" && artifacts_complete "$candidate"; then
+                echo "$candidate"
+                return
+              fi
+              echo "Packaging run $candidate has mismatched source or unavailable artifacts; ignoring" >&2
+            done < <(jq -r --arg title "$run_title" '
               [.[] | select(.displayTitle == $title and .status == "completed" and .conclusion == "success")]
-              | sort_by(.createdAt) | last | .databaseId // empty
-            ' "$RUNNER_TEMP/package-runs.json"
+              | sort_by(.createdAt) | reverse | .[].databaseId
+            ' "$RUNNER_TEMP/package-runs.json")
           }
 
           latest_active_run() {
-            jq -r --arg title "$run_title" '
+            local candidate
+            while read -r candidate; do
+              if source_matches "$candidate"; then
+                echo "$candidate"
+                return
+              fi
+            done < <(jq -r --arg title "$run_title" '
               [.[] | select(.displayTitle == $title and .status != "completed")]
-              | sort_by(.createdAt) | last | .databaseId // empty
-            ' "$RUNNER_TEMP/package-runs.json"
+              | sort_by(.createdAt) | reverse | .[].databaseId
+            ' "$RUNNER_TEMP/package-runs.json")
           }
 
           artifacts_complete() {
@@ -160,10 +204,6 @@ jobs:
           if [[ "${FORCE_REBUILD:-false}" != true ]]; then
             run_id=$(latest_successful_run)
           fi
-          if [[ -n "$run_id" ]] && ! artifacts_complete "$run_id"; then
-            echo "Successful packaging run $run_id has incomplete or expired artifacts; rebuilding"
-            run_id=""
-          fi
 
           if [[ -z "$run_id" && "${FORCE_REBUILD:-false}" != true ]]; then
             for _ in {1..6}; do
@@ -199,6 +239,11 @@ jobs:
 
           echo "Using packaging run $run_id"
           wait_for_run "$run_id"
+
+          if ! source_matches "$run_id"; then
+            echo "::error::Packaging run $run_id does not match source $SOURCE_SHA and version ${TAG#v}"
+            exit 1
+          fi
 
           if ! artifacts_complete "$run_id"; then
             echo "::error::Packaging run $run_id completed without the full artifact set"
