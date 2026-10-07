@@ -16,7 +16,6 @@ concurrency:
 env:
   QT_VERSION: 6.10.2
   ANDROID_QT_VERSION: 6.11.2
-  QCA_TAG: v3.0.1
   ANDROID_NDK_VERSION: r27c
   ANDROID_API: 28
 
@@ -43,6 +42,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - uses: ./.github/actions/load-dependencies
 
       - name: Test release packaging selection
         if: matrix.name == 'qt5-qca2'
@@ -127,6 +128,8 @@ jobs:
         with:
           fetch-depth: 0
 
+      - uses: ./.github/actions/load-dependencies
+
       - name: Build, install and smoke-test Iris
         uses: ./.github/actions/build-iris-desktop
         with:
@@ -150,6 +153,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - uses: ./.github/actions/load-dependencies
 
       - name: Build and install Iris
         id: build-iris

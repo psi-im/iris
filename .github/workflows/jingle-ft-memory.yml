@@ -7,9 +7,6 @@ on:
 permissions:
   contents: read
 
-env:
-  QCA_TAG: v3.0.9
-
 concurrency:
   group: iris-ft-memory-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
@@ -22,6 +19,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - uses: ./.github/actions/load-dependencies
 
       - name: Install live-test dependencies
         shell: bash

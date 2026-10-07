@@ -19,5 +19,6 @@ object_script.*
 /plugins
 *.user*
 build-*
+!/.github/actions/build-iris-deb/
 3rdparty/qca
 .version

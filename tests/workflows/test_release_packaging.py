@@ -135,6 +135,12 @@ class PackagingSelection(unittest.TestCase):
         run["artifacts"].pop(0)
         self.assertEqual(self.select([run]), "")
 
+    def test_previous_ubuntu_only_run_not_reusable(self):
+        run = self.run_fixture()
+        run["artifacts"] = [artifact for artifact in run["artifacts"]
+                            if artifact["name"] != "iris-deb-debian-13"]
+        self.assertEqual(self.select([run]), "")
+
     def test_expired_artifact_rejected(self):
         run = self.run_fixture()
         run["artifacts"][0]["expired"] = True

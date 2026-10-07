@@ -1,0 +1,34 @@
+name: Load dependency versions
+description: Export the repository dependency lock into the current GitHub Actions job
+
+runs:
+  using: composite
+  steps:
+    - name: Export dependency lock
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 - <<'PY'
+        import json
+        import os
+        import re
+        from pathlib import Path
+
+        lock_path = Path(os.environ["GITHUB_WORKSPACE"]) / "dependencies.lock.json"
+        data = json.loads(lock_path.read_text(encoding="utf-8"))
+        values = {
+            "QCA_TAG": data["qca"]["tag"],
+            "QCA_COMMIT": data["qca"]["commit"],
+        }
+
+        for name, value in values.items():
+            if not isinstance(value, str) or not value or "\n" in value or "\r" in value:
+                raise SystemExit(f"Invalid dependency lock value for {name}")
+
+        if not re.fullmatch(r"[0-9a-f]{40}", values["QCA_COMMIT"]):
+            raise SystemExit("QCA_COMMIT must be a full lowercase Git SHA")
+
+        with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env:
+            for name, value in values.items():
+                env.write(f"{name}={value}\n")
+        PY

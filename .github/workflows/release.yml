@@ -94,6 +94,7 @@ jobs:
           expected_artifacts=(
             iris-deb-ubuntu-24.04
             iris-deb-ubuntu-26.04
+            iris-deb-debian-13
             iris-qt6-windows-x64
             iris-qt6-macos-arm64
             iris-qt6-macos-x86_64
@@ -265,6 +266,7 @@ jobs:
           expected_artifacts=(
             iris-deb-ubuntu-24.04
             iris-deb-ubuntu-26.04
+            iris-deb-debian-13
             iris-qt6-windows-x64
             iris-qt6-macos-arm64
             iris-qt6-macos-x86_64
@@ -296,8 +298,8 @@ jobs:
           done
 
           count=$(find release-assets -maxdepth 1 -type f -name '*.zip' | wc -l)
-          if [[ "$count" -ne 11 ]]; then
-            echo "::error::Expected 11 release archives, found $count"
+          if [[ "$count" -ne "${#expected_artifacts[@]}" ]]; then
+            echo "::error::Expected ${#expected_artifacts[@]} release archives, found $count"
             exit 1
           fi
 

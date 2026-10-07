@@ -17,7 +17,6 @@ permissions:
 env:
   QT_VERSION: 6.10.2
   ANDROID_QT_VERSION: 6.11.2
-  QCA_TAG: v3.0.1
   ANDROID_NDK_VERSION: r27c
   ANDROID_API: 28
 
@@ -28,11 +27,14 @@ jobs:
       source_ref: ${{ steps.resolve.outputs.source_ref }}
       source_sha: ${{ steps.resolve.outputs.source_sha }}
       version: ${{ steps.resolve.outputs.version }}
+      qca_tag: ${{ steps.resolve.outputs.qca_tag }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.source_ref || github.ref }}
           fetch-depth: 0
+
+      - uses: ./.github/actions/load-dependencies
 
       - name: Resolve source ref and package version
         id: resolve
@@ -66,6 +68,7 @@ jobs:
           echo "source_ref=$source_ref" >> "$GITHUB_OUTPUT"
           echo "source_sha=$source_sha" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "qca_tag=$QCA_TAG" >> "$GITHUB_OUTPUT"
           echo "Packaging $source_ref as Iris $version"
           jq -n --arg sha "$source_sha" --arg version "$version" \
             '{source_sha: $sha, version: $version}' > "$RUNNER_TEMP/iris-package-source.json"
@@ -78,7 +81,7 @@ jobs:
           path: ${{ runner.temp }}/iris-package-source.json
           if-no-files-found: error
 
-  debian:
+  ubuntu:
     needs: version
     strategy:
       fail-fast: false
@@ -98,174 +101,53 @@ jobs:
         run: |
           printf '%s\n' "${{ needs.version.outputs.version }}" > .version
 
-      - name: Configure APT mirrors and download timeouts
-        shell: bash
-        run: |
-          set -euo pipefail
-          # Avoid spending minutes retrying the Azure mirror before fallback.
-          if [[ -f /etc/apt/apt-mirrors.txt ]]; then
-            printf '%s\n' 'https://archive.ubuntu.com/ubuntu' | sudo tee /etc/apt/apt-mirrors.txt
-          fi
-          if [[ -f /etc/apt/apt-mirrors-security.txt ]]; then
-            printf '%s\n' 'https://security.ubuntu.com/ubuntu' | sudo tee /etc/apt/apt-mirrors-security.txt
-          fi
-          sudo tee /etc/apt/apt.conf.d/99iris-download-timeouts <<'EOF'
-          Acquire::http::Timeout "30";
-          Acquire::https::Timeout "30";
-          Acquire::Retries "2";
-          EOF
-
-      - name: Install dependencies
-        timeout-minutes: 10
-        shell: bash
-        run: |
-          set -euo pipefail
-          sudo apt-get -o APT::Update::Error-Mode=any update
-          sudo apt-get install -y cmake ninja-build dpkg-dev qt6-base-dev zlib1g-dev libusrsctp-dev libomemo-c-dev
-
-      - name: Install QCA3 release packages
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          mkdir qca-release
-          gh release download "$QCA_TAG" --repo psi-im/qca \
-            -p "qca3-deb-ubuntu-${{ matrix.ubuntu-version }}.zip" -O qca3.zip
-          (cd qca-release && cmake -E tar xvf ../qca3.zip)
-          test -n "$(find qca-release -type f -name '*.deb' -print -quit)"
-          sudo apt-get install -y ./qca-release/*.deb
-
-      - name: Build and stage
-        shell: bash
-        run: |
-          cmake -S . -B build -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX=/usr \
-            -DUSE_QT6=ON \
-            -DIRIS_SYSTEM_QCA=3 -DIRIS_BUNDLED_QCA=OFF \
-            -DIRIS_ENABLE_OMEMO=ON -DIRIS_BUNDLED_OMEMO_C=OFF \
-            -DIRIS_BUNDLED_USRSCTP=OFF
-          cmake --build build --parallel
-          DESTDIR="$PWD/stage" cmake --install build
-
-      - name: Build split deb packages
-        shell: bash
-        run: |
-          set -euo pipefail
-          version="${{ needs.version.outputs.version }}"
-          arch=$(dpkg --print-architecture)
-          if ! find stage -type f -name "libiris-qt6.so.$version" -print -quit | grep -q .; then
-            echo "::error::Staged Iris library does not carry release version $version"
-            find stage -type f -name 'libiris-qt6.so*' -print
-            exit 1
-          fi
-          test -n "$version"
-          mkdir -p debs work/{runtime,dev}
-
-          while IFS= read -r -d '' f; do
-            rel=${f#stage/}
-            case "$rel" in
-              usr/include/*|*/cmake/*|*/pkgconfig/*|*/libiris-qt6.so) dst=dev ;;
-              *) dst=runtime ;;
-            esac
-            mkdir -p "work/$dst/$(dirname "$rel")"
-            cp -a "$f" "work/$dst/$rel"
-          done < <(find stage \( -type f -o -type l \) -print0)
-
-          make_deb() {
-            dir=$1 pkg=$2 depends=$3 desc=$4
-            mkdir -p "$dir/DEBIAN"
-            cat > "$dir/DEBIAN/control" <<CTRL
-          Package: $pkg
-          Version: $version
-          Architecture: $arch
-          Maintainer: Psi IM developers
-          Depends: $depends
-          Section: libs
-          Priority: optional
-          Description: $desc
-          CTRL
-            dpkg-deb --build --root-owner-group "$dir" "debs/${pkg}_${version}_${arch}.deb"
-          }
-
-          # Let dpkg resolve distro-specific runtime package names from the
-          # actual linked library. QCA3 is our own package and does not yet
-          # ship Debian shlibs metadata, so append it explicitly.
-          mkdir -p debian
-          cat > debian/control <<CTRL
-          Source: iris
-          Section: libs
-          Priority: optional
-          Maintainer: Psi IM developers
-          Standards-Version: 4.6.2
-
-          Package: libiris-qt6-1
-          Architecture: any
-          Depends: \${shlibs:Depends}
-          Description: Iris Qt6 XMPP runtime library
-           Iris Qt6 XMPP runtime library
-          CTRL
-
-          runtime_so=$(find work/runtime -type f -name 'libiris-qt6.so.*' -print -quit)
-          test -n "$runtime_so"
-          runtime_depends=$(
-            dpkg-shlibdeps --ignore-missing-info -O "$runtime_so" \
-              | sed -n 's/^shlibs:Depends=//p'
-          )
-          test -n "$runtime_depends"
-          runtime_depends="$runtime_depends, libqca3-qt6-3"
-          echo "Runtime dependencies: $runtime_depends"
-
-          make_deb work/runtime libiris-qt6-1 \
-            "$runtime_depends" \
-            'Iris Qt6 XMPP runtime library'
-          make_deb work/dev libiris-qt6-dev \
-            "libiris-qt6-1 (= $version), libqca3-qt6-dev, qt6-base-dev, libusrsctp-dev" \
-            'Iris Qt6 XMPP development files'
-          ls -l debs
-          for deb in debs/*.deb; do
-            actual=$(dpkg-deb -f "$deb" Version)
-            if [[ "$actual" != "$version" ]]; then
-              echo "::error::$deb has version '$actual', expected '$version'"
-              exit 1
-            fi
-          done
-
-      - name: Install package smoke test
-        shell: bash
-        run: |
-          sudo apt-get install -y ./debs/*.deb
-
-      - name: Compile installed CMake consumer
-        shell: bash
-        run: |
-          mkdir consumer
-          cat > consumer/CMakeLists.txt <<'CMAKE'
-          cmake_minimum_required(VERSION 3.16)
-          project(iris_consumer LANGUAGES CXX)
-          find_package(Iris CONFIG REQUIRED)
-          add_executable(iris-consumer main.cpp)
-          target_link_libraries(iris-consumer PRIVATE Iris::Iris)
-          CMAKE
-          cat > consumer/main.cpp <<'CPP'
-          #include <iris/jid/jid.h>
-          #include <iris/xmpp_omemo.h>
-          int main()
-          {
-              XMPP::Jid jid(QStringLiteral("package@example.org"));
-              return jid.isValid() && !XMPP::OmemoEncryption::methodId().isEmpty() ? 0 : 1;
-          }
-          CPP
-          cmake -S consumer -B consumer-build -G Ninja
-          cmake --build consumer-build
-          ./consumer-build/iris-consumer
-
-      - uses: actions/upload-artifact@v4
+      - name: Checkout packaging workflow helpers
+        uses: actions/checkout@v4
         with:
-          name: iris-deb-ubuntu-${{ matrix.ubuntu-version }}
-          path: debs/*.deb
-          if-no-files-found: error
+          ref: ${{ github.sha }}
+          path: packaging-workflow
+
+      - name: Build, package and smoke-test Iris
+        uses: ./packaging-workflow/.github/actions/build-iris-deb
+        with:
+          distribution: ubuntu-${{ matrix.ubuntu-version }}
+          version: ${{ needs.version.outputs.version }}
+          qca-tag: ${{ needs.version.outputs.qca_tag }}
+
+  debian:
+    name: Debian 13 (amd64)
+    needs: version
+    runs-on: ubuntu-24.04
+    container: debian:13-slim
+    steps:
+      - name: Bootstrap Debian build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get -o Acquire::http::Timeout=30 -o Acquire::Retries=2 -o APT::Update::Error-Mode=any update
+          apt-get install -y --no-install-recommends ca-certificates git sudo build-essential gh
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.source_sha }}
+          fetch-depth: 0
+
+      - name: Materialize package version
+        shell: bash
+        run: printf '%s\n' '${{ needs.version.outputs.version }}' > .version
+
+      - name: Checkout packaging workflow helpers
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: packaging-workflow
+
+      - name: Build, package and smoke-test Iris
+        uses: ./packaging-workflow/.github/actions/build-iris-deb
+        with:
+          distribution: debian-13
+          version: ${{ needs.version.outputs.version }}
+          qca-tag: ${{ needs.version.outputs.qca_tag }}
 
   desktop-sdk:
     needs: version
@@ -296,7 +178,7 @@ jobs:
         with:
           qt-version: ${{ env.QT_VERSION }}
           platform: ${{ matrix.platform }}
-          qca-tag: ${{ env.QCA_TAG }}
+          qca-tag: ${{ needs.version.outputs.qca_tag }}
           install-prefix: ${{ github.workspace }}/sdk
 
       - name: Stage SDK licenses
@@ -352,7 +234,7 @@ jobs:
           abi: ${{ matrix.abi }}
           ndk-version: ${{ env.ANDROID_NDK_VERSION }}
           android-api: ${{ env.ANDROID_API }}
-          qca-tag: ${{ env.QCA_TAG }}
+          qca-tag: ${{ needs.version.outputs.qca_tag }}
           install-prefix: ${{ github.workspace }}/sdk
           build-type: RelWithDebInfo
 
