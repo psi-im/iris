@@ -19,7 +19,6 @@ private:
 
     public:
         void Start();
-        void ScheduleStop();
         void Stop();
 
         /* Pure virtual methods inherited from Timer::Listener. */
@@ -28,7 +27,6 @@ private:
 
     private:
         QTimer       *timer { nullptr };
-        QTimer       *stopTimer { nullptr };
         QElapsedTimer elapsedTimer;
     };
 

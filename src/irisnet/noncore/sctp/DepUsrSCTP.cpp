@@ -18,8 +18,7 @@
 
 /* Static. */
 
-static constexpr size_t CheckerInterval { 10u };      // In ms.
-static constexpr size_t CheckerDrainInterval { 100u }; // Keep timers running briefly after the last association.
+static constexpr size_t CheckerInterval { 10u }; // In ms.
 
 /* Static methods for usrsctp global callbacks. */
 
@@ -138,7 +137,7 @@ void DepUsrSCTP::DeregisterSctpAssociation(RTC::SctpAssociation *sctpAssociation
     MS_ASSERT(DepUsrSCTP::numSctpAssociations > 0u, "numSctpAssociations was not higher than 0");
 
     if (--DepUsrSCTP::numSctpAssociations == 0u)
-        DepUsrSCTP::checker->ScheduleStop();
+        DepUsrSCTP::checker->Stop();
 }
 
 RTC::SctpAssociation *DepUsrSCTP::RetrieveSctpAssociation(uintptr_t id)
@@ -161,17 +160,12 @@ DepUsrSCTP::Checker::Checker()
 
     this->timer = new QTimer();
     QObject::connect(this->timer, &QTimer::timeout, qApp, [this]() { OnTimer(); });
-
-    this->stopTimer = new QTimer();
-    this->stopTimer->setSingleShot(true);
-    QObject::connect(this->stopTimer, &QTimer::timeout, qApp, [this]() { Stop(); });
 }
 
 DepUsrSCTP::Checker::~Checker()
 {
     MS_TRACE();
 
-    delete this->stopTimer;
     delete this->timer;
 }
 
@@ -181,24 +175,10 @@ void DepUsrSCTP::Checker::Start()
 
     MS_DEBUG_TAG(sctp, "usrsctp periodic check started");
 
-    this->stopTimer->stop();
-    if (this->timer->isActive())
-        return;
-
     this->elapsedTimer.invalidate();
 
     this->timer->setInterval(CheckerInterval);
     this->timer->start();
-}
-
-void DepUsrSCTP::Checker::ScheduleStop()
-{
-    MS_TRACE();
-
-    if (!this->timer->isActive())
-        return;
-
-    this->stopTimer->start(CheckerDrainInterval);
 }
 
 void DepUsrSCTP::Checker::Stop()
@@ -207,7 +187,6 @@ void DepUsrSCTP::Checker::Stop()
 
     MS_DEBUG_TAG(sctp, "usrsctp periodic check stopped");
 
-    this->stopTimer->stop();
     this->elapsedTimer.invalidate();
 
     this->timer->stop();
