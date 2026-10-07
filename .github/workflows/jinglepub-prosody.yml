@@ -22,7 +22,7 @@ permissions:
   contents: read
 
 env:
-  QCA_TAG: v3.0.8
+  QCA_TAG: v3.0.9
 
 concurrency:
   group: iris-jinglepub-prosody-${{ github.event.pull_request.number || github.ref }}
