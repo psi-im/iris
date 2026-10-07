@@ -268,6 +268,11 @@ namespace XMPP { namespace Jingle {
                 sentInitialGroups = includedGroups;
             }
             auto jt = new JT(manager->client()->rootTask());
+            // The task is rooted at the Client, but its result is meaningful only
+            // while this Jingle session exists. In particular session-terminate
+            // commonly has no peer reply in teardown tests; do not retain the IQ
+            // task until the generic Task timeout after the Session is gone.
+            QObject::connect(q, &QObject::destroyed, jt, [jt]() { jt->safeDelete(); });
             jt->request(otherParty, xml);
             const auto  actionName = xml.attribute(QStringLiteral("action"));
             QStringList contentNames;
