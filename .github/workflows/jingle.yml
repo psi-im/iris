@@ -14,10 +14,15 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  QCA_TAG: v3.0.8
+  QCA_TAG: v3.0.9
 
 jobs:
+  select-tests:
+    uses: ./.github/workflows/jingle-filter.yml
+
   qca3-srtp:
+    needs: select-tests
+    if: needs.select-tests.outputs.run == 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -107,6 +112,8 @@ jobs:
 
 
   transport-sanitizers:
+    needs: select-tests
+    if: needs.select-tests.outputs.run == 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4

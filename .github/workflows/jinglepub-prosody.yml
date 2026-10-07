@@ -5,31 +5,26 @@ on:
     branches:
       - master
       - ai/jinglepub-prosody-regression
-    paths:
-      - 'src/xmpp/xmpp-im/jingle-pub.*'
-      - 'src/xmpp/xmpp-im/jingle.*'
-      - 'tests/integration/jinglepub-prosody/**'
-      - '.github/workflows/jinglepub-prosody.yml'
   pull_request:
-    paths:
-      - 'src/xmpp/xmpp-im/jingle-pub.*'
-      - 'src/xmpp/xmpp-im/jingle.*'
-      - 'tests/integration/jinglepub-prosody/**'
-      - '.github/workflows/jinglepub-prosody.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 env:
-  QCA_TAG: v3.0.8
+  QCA_TAG: v3.0.9
 
 concurrency:
   group: iris-jinglepub-prosody-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
+  select-tests:
+    uses: ./.github/workflows/jingle-filter.yml
+
   durable-jinglepub:
+    needs: select-tests
+    if: needs.select-tests.outputs.run == 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4

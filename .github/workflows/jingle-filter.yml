@@ -1,0 +1,63 @@
+name: Jingle test selection
+
+on:
+  workflow_call:
+    outputs:
+      run:
+        description: Whether the caller should run its Jingle tests
+        value: ${{ jobs.select-tests.outputs.run }}
+
+permissions:
+  contents: read
+
+jobs:
+  select-tests:
+    runs-on: ubuntu-24.04
+    outputs:
+      run: ${{ steps.select.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+        if: github.event_name != 'workflow_dispatch'
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Select Jingle test runs
+        id: select
+        shell: bash
+        run: |
+          python3 - <<'PYTHON'
+          import json
+          import os
+          import subprocess
+
+          def git(*args):
+              return subprocess.check_output(['git', *args]).decode('utf-8', errors='replace')
+
+          event_name = os.environ['GITHUB_EVENT_NAME']
+          with open(os.environ['GITHUB_EVENT_PATH'], encoding='utf-8') as handle:
+              event = json.load(handle)
+
+          run = True
+          if event_name != 'workflow_dispatch':
+              pr = event.get('pull_request')
+              head = pr['head']['sha'] if pr else event['after']
+              message = git('log', '-1', '--format=%B', head)
+              if 'skip ci' in message.lower():
+                  run = False
+                  print('Skipping Jingle tests: head commit contains skip ci')
+              elif pr and 'jingle' in pr['head']['ref'].lower():
+                  print('Running Jingle tests: PR branch contains jingle')
+              else:
+                  if pr:
+                      files = git('diff', '--name-only', '-z', pr['base']['sha'] + '...' + head)
+                  elif event['before'] == '0' * 40:
+                      files = git('show', '--pretty=format:', '--name-only', '-z', head)
+                  else:
+                      files = git('diff', '--name-only', '-z', event['before'], head)
+                  run = any('jingle' in path.lower() for path in files.split('\0') if path)
+                  print(f'Changed path contains jingle: {run}')
+
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as handle:
+              handle.write(f'run={str(run).lower()}\n')
+          PYTHON
