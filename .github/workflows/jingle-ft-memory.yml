@@ -73,6 +73,25 @@ jobs:
           test -n "$(find qca-release -type f -name '*.deb' -print -quit)"
           sudo apt-get install -y ./qca-release/*.deb
 
+      - name: Build patched QCA OpenSSL provider
+        shell: bash
+        env:
+          QCA_LEAK_FIX_SHA: 69af8c511f8e11b81ad0385dad65415ca8ececf0
+        run: |
+          set -euo pipefail
+          src="$RUNNER_TEMP/qca-leak-fix"
+          build="$RUNNER_TEMP/qca-leak-fix-build"
+          git clone --depth 1 --branch ai/fix-openssl-cert-leaks https://github.com/psi-im/qca.git "$src"
+          test "$(git -C "$src" rev-parse HEAD)" = "$QCA_LEAK_FIX_SHA"
+          cmake -S "$src" -B "$build" -G Ninja             -DCMAKE_BUILD_TYPE=RelWithDebInfo             -DBUILD_WITH_QT6=ON             -DBUILD_PLUGINS=ossl             -DBUILD_TESTS=OFF             -DBUILD_TOOLS=OFF             -DCMAKE_C_COMPILER_LAUNCHER=ccache             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          cmake --build "$build" --parallel 4 --target qca-ossl
+          patched="$(find "$build" -type f -name 'libqca-ossl.so' -print -quit)"
+          installed="$(find /usr/lib -type f -path '*/qca3-qt6/crypto/libqca-ossl.so' -print -quit)"
+          test -n "$patched"
+          test -n "$installed"
+          sudo cp "$patched" "$installed"
+          echo "Using patched QCA provider: $installed"
+
       - name: Configure and build release probe
         shell: bash
         run: |
