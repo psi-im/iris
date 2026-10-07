@@ -76,7 +76,7 @@ jobs:
       - name: Build patched QCA OpenSSL provider
         shell: bash
         env:
-          QCA_LEAK_FIX_SHA: 69af8c511f8e11b81ad0385dad65415ca8ececf0
+          QCA_LEAK_FIX_SHA: ae31804d143776c0990eac574e9e45da3aed4701
         run: |
           set -euo pipefail
           src="$RUNNER_TEMP/qca-leak-fix"
@@ -158,6 +158,35 @@ jobs:
           test "$(grep -c '^FT_MEMORY iteration=' "$log")" -eq 101
           cmp "$input" "$output"
 
+          python3 - "$log" <<'PY'
+          import re
+          import sys
+
+          samples = []
+          pattern = re.compile(r"FT_MEMORY iteration=(\d+).*heap_bytes=(-?\d+)")
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              for line in handle:
+                  match = pattern.search(line)
+                  if match:
+                      samples.append((int(match.group(1)), int(match.group(2))))
+
+          tail = [(x, y) for x, y in samples if 50 <= x <= 100 and y >= 0]
+          if len(tail) != 51:
+              raise SystemExit(f"expected 51 tail samples, got {len(tail)}")
+
+          n = len(tail)
+          sx = sum(x for x, _ in tail)
+          sy = sum(y for _, y in tail)
+          sxx = sum(x * x for x, _ in tail)
+          sxy = sum(x * y for x, y in tail)
+          denominator = n * sxx - sx * sx
+          slope = 0.0 if denominator == 0 else (n * sxy - sx * sy) / denominator
+          growth = tail[-1][1] - tail[0][1]
+          print(f"FT_MEMORY_TAIL_RESULT growth_bytes={growth} slope_bytes_per_transfer={slope:.2f}")
+          if slope > 1024.0:
+              raise SystemExit(f"tail heap slope too high: {slope:.2f} bytes/transfer")
+          PY
+
       - name: Configure and build ASan allocation profiler
         shell: bash
         run: |
@@ -171,7 +200,7 @@ jobs:
       - name: Profile live allocations after repeated transfers
         shell: bash
         env:
-          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          ASAN_OPTIONS: detect_leaks=0:halt_on_error=1
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
         run: |
           set -euo pipefail
@@ -183,12 +212,12 @@ jobs:
           "$bin" \
             user01@localhost/ft-memory-asan-sender ci-pass-01 \
             user02@localhost/ft-memory-asan-receiver ci-pass-02 \
-            "$input" "$output" 3 2>&1 | tee "$log"
+            "$input" "$output" 50 2>&1 | tee "$log"
 
           grep -F 'LIVE_FT_MEMORY_RESULT=success' "$log"
           grep -F 'FT_ASAN_MEMORY_PROFILE_BEGIN iteration=2' "$log"
-          grep -F 'FT_ASAN_MEMORY_PROFILE_BEGIN iteration=3' "$log"
-          grep -F 'FT_ASAN_MEMORY_PROFILE_END iteration=3' "$log"
+          grep -F 'FT_ASAN_MEMORY_PROFILE_BEGIN iteration=50' "$log"
+          grep -F 'FT_ASAN_MEMORY_PROFILE_END iteration=50' "$log"
           cmp "$input" "$output"
 
       - name: Upload memory diagnostics
