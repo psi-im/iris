@@ -207,8 +207,7 @@ private:
 
 IRIS_EXPORT std::optional<EncryptedPayload> encrypt(Cipher cipher, const QByteArray &plaintext);
 IRIS_EXPORT std::optional<QByteArray> decrypt(Cipher cipher, const QByteArray &ciphertext, const QByteArray &key,
-                                              const QByteArray &iv,
-                                              std::optional<std::uint64_t> originalSize = {});
+                                              const QByteArray &iv, std::optional<std::uint64_t> originalSize = {});
 /**
  * Authenticated streaming decryption into an already open writable device.
  * GCM input must be seekable because its authentication tag is stored at EOF

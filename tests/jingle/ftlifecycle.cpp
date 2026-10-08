@@ -119,6 +119,7 @@ private:
 class TestApplication final : public FT::Application {
 public:
     using FT::Application::Application;
+    using FT::Application::incomingRemove;
     void installTransport(const QSharedPointer<J::Transport> &transport) { _transport = transport; }
 };
 
@@ -139,6 +140,20 @@ static void receiveReceipt(FT::Pad *pad, const QString &name)
     received.setAttribute(QStringLiteral("name"), name);
     info.appendChild(received);
     check(pad->incomingSessionInfo(info), "file receipt was not handled");
+}
+
+static void receiveChecksum(FT::Pad *pad, const QString &name, const Hash &hash)
+{
+    QDomDocument doc;
+    auto         info     = doc.createElement(QStringLiteral("jingle"));
+    auto         checksum = doc.createElementNS(FT::NS, QStringLiteral("checksum"));
+    checksum.setAttribute(QStringLiteral("creator"), QStringLiteral("initiator"));
+    checksum.setAttribute(QStringLiteral("name"), name);
+    FT::File file;
+    file.addHash(hash);
+    checksum.appendChild(file.toXml(&doc));
+    info.appendChild(checksum);
+    check(pad->incomingSessionInfo(info), "File checksum was not handled");
 }
 
 static void exerciseSessionTermination(Client &client, bool partial, bool localFailure, J::Reason::Condition peerReason,
@@ -295,6 +310,76 @@ int main(int argc, char **argv)
         receiveReceipt(ftPad, transfer.contentName());
         check(transfer.lastReason().condition() == J::Reason::FailedApplication,
               "late receipt overwrote terminal transfer failure");
+    }
+
+    // Negotiating hash-used makes checksum confirmation mandatory. Receiving
+    // the byte count cannot turn a missing checksum into success on timeout.
+    for (bool wrongAlgorithm : { false, true }) {
+        auto            transportPad = J::TransportManagerPad::Ptr(new TestTransportPad(&session));
+        auto            transport    = QSharedPointer<TestTransport>::create(transportPad, J::Origin::Initiator);
+        TestApplication transfer(appPad, QStringLiteral("checksum-timeout"), J::Origin::Initiator,
+                                 J::Origin::Responder);
+        auto            file = testFile(4);
+        file.addHash(Hash(Hash::Sha256));
+        transfer.setFile(file);
+        transfer.setAcceptFile(file);
+        transfer.installTransport(transport);
+        session.addContent(&transfer);
+        QBuffer destination;
+        destination.open(QIODevice::ReadWrite);
+        QObject::connect(&transfer, &FT::Application::deviceRequested, &eventLoop,
+                         [&](quint64, std::optional<quint64>) { transfer.setDevice(&destination, false); });
+        transfer.prepare();
+        transport->connection()->feed(QByteArrayLiteral("tail"));
+        check(transfer.state() == J::State::Finishing, "Receiver did not wait for negotiated checksum");
+        check(transport->connection()->isOpen(), "Receiver closed before checksum confirmation");
+        auto timer = transfer.findChild<QTimer *>();
+        check(timer && timer->isActive(), "Receiver did not arm checksum timeout");
+        if (wrongAlgorithm) {
+            receiveChecksum(
+                ftPad, transfer.contentName(),
+                Hash(Hash::Sha1, QCryptographicHash::hash(QByteArrayLiteral("tail"), QCryptographicHash::Sha1)));
+        } else {
+            check(QMetaObject::invokeMethod(timer, "timeout", Qt::DirectConnection), "Could not fire checksum timeout");
+        }
+        check(transfer.lastReason().condition() == J::Reason::FailedApplication,
+              "Missing or wrong negotiated checksum was reported as success");
+        receiveChecksum(
+            ftPad, transfer.contentName(),
+            Hash(Hash::Sha256, QCryptographicHash::hash(QByteArrayLiteral("tail"), QCryptographicHash::Sha256)));
+        check(transfer.lastReason().condition() == J::Reason::FailedApplication,
+              "Late checksum erased a terminal integrity failure");
+        transfer.incomingRemove(J::Reason(J::Reason::Success));
+        check(transfer.lastReason().condition() == J::Reason::FailedApplication,
+              "Remote success erased the missing-checksum failure");
+        check(!transport->connection()->isOpen() && !transfer.connection(),
+              "Terminal failure retained the transport connection");
+    }
+
+    // A queued write is not delivery: keep the reliable transport alive until
+    // the remote application confirms receipt, then release it immediately.
+    {
+        auto            transportPad = J::TransportManagerPad::Ptr(new TestTransportPad(&session));
+        auto            transport    = QSharedPointer<TestTransport>::create(transportPad, J::Origin::Initiator);
+        TestApplication transfer(appPad, QStringLiteral("retain-until-receipt"), J::Origin::Initiator,
+                                 J::Origin::Initiator);
+        transfer.setFile(testFile(4));
+        transfer.setAcceptFile(testFile(4));
+        transfer.installTransport(transport);
+        session.addContent(&transfer);
+        QBuffer source;
+        source.setData(QByteArrayLiteral("tail"));
+        source.open(QIODevice::ReadOnly);
+        QObject::connect(&transfer, &FT::Application::deviceRequested, &eventLoop,
+                         [&](quint64, std::optional<quint64>) { transfer.setDevice(&source, false); });
+        transfer.prepare();
+        QCoreApplication::processEvents();
+        check(transfer.state() == J::State::Finishing, "Sender did not enter receipt wait");
+        check(transport->connection()->isOpen(), "Sender closed the transport before confirming delivery");
+        receiveReceipt(ftPad, transfer.contentName());
+        check(transfer.state() == J::State::Finished, "Receipt did not finish the transfer");
+        check(!transport->connection()->isOpen(), "Confirmed transfer retained an open transport");
+        check(!transfer.connection(), "Confirmed transfer retained its application connection");
     }
 
     // A matching receipt completes a sender once, but cannot finish a receiver

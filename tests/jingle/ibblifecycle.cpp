@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #include "../../src/xmpp/xmpp-im/xmpp_ibb.h"
 
+#include "../../src/xmpp/xmpp-im/jingle-ibb.h"
+#include <iris/jingle-session.h>
 #include <iris/xmpp.h>
 #include <iris/xmpp_client.h>
 #include <iris/xmpp_clientstream.h>
@@ -51,6 +53,45 @@ static void acknowledgeLast(Client &client, const RecordingStream &stream, const
     flushEvents();
 }
 
+static void testPendingJingleClose(Client &client, const RecordingStream &stream, const Jid &peer)
+{
+    namespace J = XMPP::Jingle;
+    class Success final : public Task {
+    public:
+        Success(Task *parent) : Task(parent) { setSuccess(); }
+    } success(client.rootTask());
+    J::Session session(client.jingleManager(), peer);
+    auto       transport  = session.newOutgoingTransport(J::IBB::NS);
+    auto       connection = transport->addChannel(J::TransportFeature::DataOriented, QStringLiteral("pending-close"));
+    check(bool(connection), "Jingle IBB channel missing");
+    transport->prepare();
+    auto update = transport->takeOutgoingUpdate(false);
+    check(bool(std::get<1>(update)), "Jingle IBB offer has no acknowledgement");
+    std::get<1>(update)(&success);
+    check(transport->update(std::get<0>(update)), "Jingle IBB answer was rejected");
+    transport->start();
+    flushEvents();
+    acknowledgeLast(client, stream, peer);
+    check(connection->isOpen(), "Jingle IBB connection did not open");
+    auto packet = client.doc()->createElement(QStringLiteral("iq"));
+    packet.setAttribute(QStringLiteral("from"), peer.full());
+    packet.setAttribute(QStringLiteral("type"), QStringLiteral("set"));
+    packet.setAttribute(QStringLiteral("id"), QStringLiteral("buffered-tail"));
+    auto data = client.doc()->createElementNS(QStringLiteral("http://jabber.org/protocol/ibb"), QStringLiteral("data"));
+    data.setAttribute(QStringLiteral("sid"), std::get<0>(update).attribute(QStringLiteral("sid")));
+    data.setAttribute(QStringLiteral("seq"), QStringLiteral("0"));
+    data.appendChild(client.doc()->createTextNode(QString::fromLatin1(QByteArray("tail").toBase64())));
+    packet.appendChild(data);
+    check(client.rootTask()->take(packet), "Incoming IBB packet was not consumed");
+    check(connection->bytesAvailable() == 4, "Incoming IBB tail was not buffered");
+    // Graceful close retains unread bytes; shutdown must not busy-loop waiting
+    // for this consumer to resume reading.
+    transport->pad()->manager()->closeAll();
+    check(transport->state() == J::State::Finished, "Pending IBB close prevented manager shutdown");
+    check(!connection->isOpen() && connection->bytesAvailable() == 0,
+          "IBB abort retained an open connection or unread buffered tail");
+}
+
 int main(int argc, char **argv)
 {
     QCoreApplication   app(argc, argv);
@@ -86,6 +127,7 @@ int main(int argc, char **argv)
     acknowledgeLast(client, stream, peer);
     check(!guard && !connection, "IBB close completion did not exercise synchronous destruction");
 
-    qInfo("IBB reentrant close regression passed");
+    testPendingJingleClose(client, stream, peer);
+    qInfo("IBB reentrant/pending close regressions passed");
     return 0;
 }

@@ -32,7 +32,7 @@
 
 namespace XMPP::Jingle::FileTransfer {
 extern IRIS_EXPORT const QString FILE_METADATA_NS;
-struct IRIS_EXPORT Range {
+struct IRIS_EXPORT               Range {
     std::uint64_t offset = 0; // 0 - default value from spec even when not set.
     std::uint64_t length = 0; // 0 - from offset to the end of the file
     QList<Hash>   hashes;

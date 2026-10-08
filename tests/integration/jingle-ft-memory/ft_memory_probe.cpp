@@ -161,10 +161,10 @@ private:
 };
 
 struct MemorySample {
-    int     iteration = 0;
-    qint64  rssKb = -1;
-    qint64  privateKb = -1;
-    qint64  heapBytes = -1;
+    int    iteration = 0;
+    qint64 rssKb     = -1;
+    qint64 privateKb = -1;
+    qint64 heapBytes = -1;
 };
 
 static qint64 smapsValueKb(const QByteArray &line, const QByteArray &key)
@@ -172,8 +172,8 @@ static qint64 smapsValueKb(const QByteArray &line, const QByteArray &key)
     const auto normalized = line.trimmed();
     if (!normalized.startsWith(key))
         return -1;
-    const auto value = normalized.mid(key.size()).simplified().split(' ').value(0);
-    bool       ok    = false;
+    const auto value  = normalized.mid(key.size()).simplified().split(' ').value(0);
+    bool       ok     = false;
     const auto parsed = value.toLongLong(&ok);
     return ok ? parsed : -1;
 }
@@ -228,7 +228,7 @@ static MemorySample sampleMemory(int iteration)
     }
 
 #ifdef __GLIBC__
-    const auto info = mallinfo2();
+    const auto info  = mallinfo2();
     sample.heapBytes = qint64(info.uordblks);
 #endif
 
@@ -277,10 +277,10 @@ static double regressionSlope(const std::vector<MemorySample> &samples, qint64 M
 
     const size_t first = 2;
     const size_t count = samples.size() - first;
-    double       sx = 0.0;
-    double       sy = 0.0;
-    double       sxx = 0.0;
-    double       sxy = 0.0;
+    double       sx    = 0.0;
+    double       sy    = 0.0;
+    double       sxx   = 0.0;
+    double       sxy   = 0.0;
     size_t       valid = 0;
     for (size_t i = first; i < samples.size(); ++i) {
         const qint64 yValue = samples[i].*member;
@@ -391,7 +391,7 @@ private:
         });
         connect(session, &J::Session::terminated, this, [this, session]() {
             senderTerminated_ = true;
-            const auto error = session->lastError();
+            const auto error  = session->lastError();
             if (error) {
                 fail(21, QStringLiteral("sender session terminated with error: %1").arg(error->toString()));
                 return;
@@ -422,7 +422,7 @@ private:
                 || jingle.attribute(QStringLiteral("action")) != QLatin1String("session-info"))
                 return;
             for (auto received = jingle.firstChildElement(); !received.isNull();
-                 received = received.nextSiblingElement()) {
+                 received      = received.nextSiblingElement()) {
                 if (received.tagName() == QLatin1String("received") && received.namespaceURI() == FT::NS
                     && received.attribute(QStringLiteral("name")) == transfer->contentName()) {
                     senderSawReceipt_ = true;
@@ -491,7 +491,7 @@ private:
         });
         connect(session, &J::Session::terminated, this, [this, session]() {
             receiverTerminated_ = true;
-            const auto error = session->lastError();
+            const auto error    = session->lastError();
             if (error) {
                 fail(31, QStringLiteral("receiver session terminated with error: %1").arg(error->toString()));
                 return;
@@ -582,8 +582,8 @@ private:
     void reportAndFinish()
     {
         timeout_.stop();
-        const double privateSlope = regressionSlope(samples_, &MemorySample::privateKb);
-        const double heapSlope    = regressionSlope(samples_, &MemorySample::heapBytes);
+        const double privateSlope  = regressionSlope(samples_, &MemorySample::privateKb);
+        const double heapSlope     = regressionSlope(samples_, &MemorySample::heapBytes);
         qint64       privateGrowth = -1;
         qint64       heapGrowth    = -1;
         if (samples_.size() >= 3) {
@@ -593,14 +593,13 @@ private:
                 heapGrowth = samples_.back().heapBytes - samples_[1].heapBytes;
         }
 
-        qInfo().noquote()
-            << QStringLiteral("FT_MEMORY_RESULT iterations=%1 private_growth_kb=%2 heap_growth_bytes=%3 "
-                              "private_slope_kb_per_transfer=%4 heap_slope_bytes_per_transfer=%5")
-                   .arg(iterations_)
-                   .arg(privateGrowth)
-                   .arg(heapGrowth)
-                   .arg(privateSlope, 0, 'f', 2)
-                   .arg(heapSlope, 0, 'f', 2);
+        qInfo().noquote() << QStringLiteral("FT_MEMORY_RESULT iterations=%1 private_growth_kb=%2 heap_growth_bytes=%3 "
+                                            "private_slope_kb_per_transfer=%4 heap_slope_bytes_per_transfer=%5")
+                                 .arg(iterations_)
+                                 .arg(privateGrowth)
+                                 .arg(heapGrowth)
+                                 .arg(privateSlope, 0, 'f', 2)
+                                 .arg(heapSlope, 0, 'f', 2);
         qInfo("LIVE_FT_MEMORY_RESULT=success");
         app_.exit(0);
     }
@@ -615,29 +614,29 @@ private:
         app_.exit(code);
     }
 
-    QCoreApplication &app_;
-    XmppEndpoint      sender_;
-    XmppEndpoint      receiver_;
-    QString           sourcePath_;
-    QString           destinationPath_;
-    int               iterations_ = 0;
-    int               iteration_  = 0;
-    QTimer            timeout_;
-    bool              senderReady_ = false;
-    bool              receiverReady_ = false;
-    bool              started_ = false;
-    bool              failed_ = false;
-    bool              receiverActive_ = false;
-    bool              senderSawFinishing_ = false;
-    bool              receiverSawFinishing_ = false;
-    bool              senderTransferFinished_ = false;
-    bool              receiverTransferFinished_ = false;
-    bool              senderSawReceipt_ = false;
-    bool              senderTerminated_ = false;
-    bool              receiverTerminated_ = false;
-    bool              senderDestroyed_ = false;
-    bool              receiverDestroyed_ = false;
-    bool              settleScheduled_ = false;
+    QCoreApplication         &app_;
+    XmppEndpoint              sender_;
+    XmppEndpoint              receiver_;
+    QString                   sourcePath_;
+    QString                   destinationPath_;
+    int                       iterations_ = 0;
+    int                       iteration_  = 0;
+    QTimer                    timeout_;
+    bool                      senderReady_              = false;
+    bool                      receiverReady_            = false;
+    bool                      started_                  = false;
+    bool                      failed_                   = false;
+    bool                      receiverActive_           = false;
+    bool                      senderSawFinishing_       = false;
+    bool                      receiverSawFinishing_     = false;
+    bool                      senderTransferFinished_   = false;
+    bool                      receiverTransferFinished_ = false;
+    bool                      senderSawReceipt_         = false;
+    bool                      senderTerminated_         = false;
+    bool                      receiverTerminated_       = false;
+    bool                      senderDestroyed_          = false;
+    bool                      receiverDestroyed_        = false;
+    bool                      settleScheduled_          = false;
     std::vector<MemorySample> samples_;
 };
 
@@ -653,14 +652,14 @@ int main(int argc, char **argv)
         return 2;
     }
 
-    const Jid senderJid(QString::fromLocal8Bit(argv[1]));
+    const Jid     senderJid(QString::fromLocal8Bit(argv[1]));
     const QString senderPassword = QString::fromLocal8Bit(argv[2]);
-    const Jid receiverJid(QString::fromLocal8Bit(argv[3]));
+    const Jid     receiverJid(QString::fromLocal8Bit(argv[3]));
     const QString receiverPassword = QString::fromLocal8Bit(argv[4]);
-    const QString sourcePath = QString::fromLocal8Bit(argv[5]);
-    const QString destinationPath = QString::fromLocal8Bit(argv[6]);
-    bool ok = true;
-    const int iterations = argc == 8 ? QString::fromLocal8Bit(argv[7]).toInt(&ok) : 12;
+    const QString sourcePath       = QString::fromLocal8Bit(argv[5]);
+    const QString destinationPath  = QString::fromLocal8Bit(argv[6]);
+    bool          ok               = true;
+    const int     iterations       = argc == 8 ? QString::fromLocal8Bit(argv[7]).toInt(&ok) : 12;
 
     if (!senderJid.isValid() || senderJid.resource().isEmpty() || !receiverJid.isValid()
         || receiverJid.resource().isEmpty() || !ok || iterations < 3) {

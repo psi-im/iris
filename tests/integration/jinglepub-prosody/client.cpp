@@ -150,12 +150,12 @@ private:
     Client                               client_;
     Jid                                  jid_;
     QString                              password_;
-    AdvancedConnector                   *connector_  = nullptr;
-    ClientStream                        *stream_     = nullptr;
+    AdvancedConnector                   *connector_               = nullptr;
+    ClientStream                        *stream_                  = nullptr;
     bool                                 advertiseJingleFeatures_ = true;
     bool                                 automaticPresence_       = true;
-    bool                                 presenceSent_             = false;
-    bool                                 readyState_               = false;
+    bool                                 presenceSent_            = false;
+    bool                                 readyState_              = false;
     std::function<void()>                ready_;
     std::function<void(const QString &)> failed_;
 };
@@ -180,23 +180,23 @@ protected:
 
     void restoreCachedPublishedSessions() override
     {
-        const auto cached = cachePublishedSession(
-            endpoint_, publication_.id(), publication_, [manager = jingleManager_](const Jid &requester) {
-                return manager ? manager->newSession(requester) : nullptr;
-            });
-        restored_ = cached.isValid();
+        const auto cached = cachePublishedSession(endpoint_, publication_.id(), publication_,
+                                                  [manager = jingleManager_](const Jid &requester) {
+                                                      return manager ? manager->newSession(requester) : nullptr;
+                                                  });
+        restored_         = cached.isValid();
         qInfo() << "DURABLE_PROVIDER_RESTORED=" << restored_ << "publication=" << publication_.id();
     }
 
     void publishedSessionObserved(const J::PublishedSessionEndpoint &, const QString &itemId,
                                   const J::JinglePub &publication) override
     {
-        qInfo().noquote() << "DURABLE_PROVIDER_OBSERVED item=" << itemId
-                          << "from=" << publication.from().full() << "id=" << publication.id();
+        qInfo().noquote() << "DURABLE_PROVIDER_OBSERVED item=" << itemId << "from=" << publication.from().full()
+                          << "id=" << publication.id();
     }
 
 private:
-    J::Manager                  *jingleManager_ = nullptr;
+    J::Manager                 *jingleManager_ = nullptr;
     J::PublishedSessionEndpoint endpoint_;
     J::JinglePub                publication_;
     bool                        restored_ = false;
@@ -221,8 +221,8 @@ int main(int argc, char **argv)
         return 2;
     }
 
-    const bool race = argc == 4 && QByteArray(argv[3]) == QByteArrayLiteral("race");
-    const Jid  owner(QString::fromLocal8Bit(argv[1]));
+    const bool    race = argc == 4 && QByteArray(argv[3]) == QByteArrayLiteral("race");
+    const Jid     owner(QString::fromLocal8Bit(argv[1]));
     const QString password = QString::fromLocal8Bit(argv[2]);
     if (!owner.isValid() || !owner.resource().isEmpty()) {
         qCritical() << "The integration test requires a valid bare JID";
@@ -255,7 +255,7 @@ int main(int argc, char **argv)
     XmppEndpoint publisher(publisherJid, password, !race, !race, &app);
     XmppEndpoint requester(requesterJid, password, true, true, &app);
 
-    auto *publicationManager = publisher.client()->jingleManager()->publicationManager();
+    auto           *publicationManager = publisher.client()->jingleManager()->publicationManager();
     DurableProvider provider(publisher.client()->jingleManager(), owner, publisherJid, &app);
     publicationManager->registerProvider(&provider);
     if (!provider.restored()) {
@@ -278,7 +278,7 @@ int main(int argc, char **argv)
     startRequest = [&]() {
         if (requestStarted || finishing)
             return;
-        requestStarted = true;
+        requestStarted   = true;
         const auto state = publicationManager->publishedSessionState(QString::fromLatin1(PublicationId));
         qInfo() << "DURABLE_STATE_BEFORE_START=" << int(state)
                 << "publisher-client-jid=" << publisher.client()->jid().full()
@@ -286,18 +286,20 @@ int main(int argc, char **argv)
                 << "provider-state=" << int(provider.state()) << "race=" << race;
 
         auto *remoteManager = requester.client()->jingleManager()->publicationManager();
-        auto *request = remoteManager->requestPublishedSession(provider.publication().from(),
-                                                               QString::fromLatin1(PublicationId), &app);
+        auto *request       = remoteManager->requestPublishedSession(provider.publication().from(),
+                                                                     QString::fromLatin1(PublicationId), &app);
         QObject::connect(request, &J::PublishedSessionRequest::finished, &app, [&, request]() {
             if (request->state() != J::PublishedSessionRequest::State::Succeeded) {
                 qCritical() << "PUBLISHED_START_FAILED condition=" << int(request->error().condition);
-                finish(30, race ? QStringLiteral("race reproduced: published-session start was rejected")
-                                : QStringLiteral("published-session start was rejected"));
+                finish(30,
+                       race ? QStringLiteral("race reproduced: published-session start was rejected")
+                            : QStringLiteral("published-session start was rejected"));
                 return;
             }
             qInfo().noquote() << "PUBLISHED_START_SID=" << request->sid();
-            finish(0, race ? QStringLiteral("race did not deactivate durable publication")
-                           : QStringLiteral("durable Jingle publication survived Prosody authority reconciliation"));
+            finish(0,
+                   race ? QStringLiteral("race did not deactivate durable publication")
+                        : QStringLiteral("durable Jingle publication survived Prosody authority reconciliation"));
         });
         request->start();
     };

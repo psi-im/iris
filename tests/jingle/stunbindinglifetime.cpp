@@ -12,7 +12,7 @@ int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
 
-    auto pool = StunTransactionPool::Ptr::create(StunTransaction::Udp);
+    auto                          pool = StunTransactionPool::Ptr::create(StunTransaction::Udp);
     QPointer<StunTransactionPool> poolGuard(pool.data());
 
     // A binding is QObject-owned by its pool. It must not also keep a strong

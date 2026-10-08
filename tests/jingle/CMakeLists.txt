@@ -275,3 +275,13 @@ target_link_libraries(jingle_icestopcallbacks_test PRIVATE irisnet iris Qt${QT_D
     Qt${QT_DEFAULT_MAJOR_VERSION}::Network)
 add_test(NAME jingle_icestopcallbacks COMMAND jingle_icestopcallbacks_test)
 set_tests_properties(jingle_icestopcallbacks PROPERTIES TIMEOUT 5)
+
+add_executable(own_resource_caps_test ownresourcecaps.cpp)
+target_link_libraries(own_resource_caps_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
+add_test(NAME own_resource_caps COMMAND own_resource_caps_test)
+
+add_executable(jingle_managershutdown_test managershutdown.cpp)
+target_link_libraries(jingle_managershutdown_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
+    Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
+add_test(NAME jingle_managershutdown COMMAND jingle_managershutdown_test)
+set_tests_properties(jingle_managershutdown PROPERTIES TIMEOUT 15)

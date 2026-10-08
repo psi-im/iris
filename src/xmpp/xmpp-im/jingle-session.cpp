@@ -97,12 +97,15 @@ namespace XMPP { namespace Jingle {
         QMap<QString, QWeakPointer<ApplicationManagerPad>> applicationPads;
         QMap<QString, QWeakPointer<TransportManagerPad>>   transportPads;
         QMap<ContentKey, Application *>                    contentList;
-        QSet<Application *>                                signalingContent;
-        QList<ContentGroup>                                groups;
-        QList<ContentGroup>                                remoteGroups;
-        QList<ContentGroup>                                sentInitialGroups;
-        QList<ContentGroup>                                negotiatedGroups;
-        QHash<QString, Origin>                             negotiatedCreators;
+        // Lifetime ownership includes contents already removed from signaling
+        // and contents still being configured before addContent().
+        QList<Application *>   ownedApplications;
+        QSet<Application *>    signalingContent;
+        QList<ContentGroup>    groups;
+        QList<ContentGroup>    remoteGroups;
+        QList<ContentGroup>    sentInitialGroups;
+        QList<ContentGroup>    negotiatedGroups;
+        QHash<QString, Origin> negotiatedCreators;
 
         struct PendingGroupExtension {
             ContentKey              content;
@@ -134,15 +137,18 @@ namespace XMPP { namespace Jingle {
 
         void setSessionFinished()
         {
+            if (state == State::Finished)
+                return;
             QPointer<Session> guard(q);
-            q->tieBreaker()->clear();
             state = State::Finished;
-            emit q->terminated();
+            stepTimer.stop();
+            waitingAck = false;
+            q->tieBreaker()->clear();
             if (!guard)
                 return;
             signalingContent.clear();
             QList<QPointer<Application>> contents;
-            for (auto app : std::as_const(contentList))
+            for (auto app : std::as_const(ownedApplications))
                 contents.append(app);
             for (const auto &app : std::as_const(contents)) {
                 if (app && app->state() != State::Finished)
@@ -156,10 +162,13 @@ namespace XMPP { namespace Jingle {
                 if (!guard)
                     return;
             }
-            auto vals = contentList.values();
+            emit q->terminated();
+            if (!guard)
+                return;
             contentList.clear();
-            while (vals.size()) {
-                vals.takeLast()->deleteLater();
+            for (const auto &app : std::as_const(contents)) {
+                if (app)
+                    app->deleteLater();
             }
             q->deleteLater();
         }
@@ -902,8 +911,18 @@ namespace XMPP { namespace Jingle {
             }
         }
 
+        void ownApplication(Application *content)
+        {
+            if (!content || ownedApplications.contains(content))
+                return;
+            ownedApplications.append(content);
+            QObject::connect(content, &Application::destroying, q,
+                             [this, content] { ownedApplications.removeAll(content); });
+        }
+
         void addAndInitContent(Origin creator, Application *content)
         {
+            ownApplication(content);
             const ContentKey key { content->contentName(), creator };
             contentList.insert(key, content);
             if (state != State::Created && content->evaluateOutgoingUpdate().action != Action::NoAction) {
@@ -1493,6 +1512,7 @@ namespace XMPP { namespace Jingle {
                 signalingContent.remove(app.data());
                 initialIncomingUnacceptedContent.removeAll(app.data());
                 contentList.remove(entry.key);
+                ownedApplications.removeAll(entry.application.data());
 
                 const auto transport = app->transport();
                 if (transport) {
@@ -1666,6 +1686,7 @@ namespace XMPP { namespace Jingle {
                 signalingContent.remove(application.data());
                 initialIncomingUnacceptedContent.removeAll(application.data());
                 contentList.remove(entry.key);
+                ownedApplications.removeAll(entry.application.data());
 
                 const auto transport = application->transport();
                 if (transport) {
@@ -2454,7 +2475,7 @@ namespace XMPP { namespace Jingle {
         }
     };
 
-    Session::Session(Manager *manager, const Jid &peer, Origin role) : d(new Private)
+    Session::Session(Manager *manager, const Jid &peer, Origin role) : QObject(manager), d(new Private)
     {
         d->q               = this;
         d->role            = role;
@@ -2464,21 +2485,28 @@ namespace XMPP { namespace Jingle {
         d->stepTimer.setSingleShot(true);
         d->stepTimer.setInterval(0);
         connect(&d->stepTimer, &QTimer::timeout, this, [this]() { d->doStep(); });
-        connect(manager->client(), &Client::disconnected, this, [this]() {
-            d->waitingAck      = false;
-            d->terminateReason = Reason(Reason::ConnectivityError, QLatin1String("local side disconnected"));
-            d->setSessionFinished();
-        });
+        connect(manager->client(), &Client::disconnected, this, &Session::shutdown);
+    }
+
+    void Session::shutdown()
+    {
+        if (d->state == State::Finished)
+            return;
+        d->terminateReason = Reason(Reason::ConnectivityError, QLatin1String("local side disconnected"));
+        d->setSessionFinished();
     }
 
     Session::~Session()
     {
-        // contentList contains only live Applications. Application::~Application
-        // unregisters itself before QObject destruction, so reentrant sibling
-        // deletion simply shrinks this same registry and never leaves a stale
-        // pointer for a later iteration.
+        d->state = State::Finished;
+        d->stepTimer.stop();
+        // Ownership outlives the signaling registry, including deleteLater().
+        // Application::destroying removes entries before reentrant sibling
+        // deletion, while session pads and all infrastructure are still alive.
         while (!d->contentList.isEmpty())
             delete d->contentList.constBegin().value();
+        while (!d->ownedApplications.isEmpty())
+            delete d->ownedApplications.first();
         qDebug("session %s destroyed", qPrintable(d->sid));
     }
 
@@ -2538,9 +2566,13 @@ namespace XMPP { namespace Jingle {
 
     Application *Session::newContent(const QString &ns, Origin senders)
     {
+        if (d->state >= State::Finishing)
+            return nullptr;
         auto pad = applicationPadFactory(ns);
         if (pad) {
-            return pad->manager()->startApplication(pad, pad->generateContentName(senders), d->role, senders);
+            auto content = pad->manager()->startApplication(pad, pad->generateContentName(senders), d->role, senders);
+            d->ownApplication(content);
+            return content;
         }
         return nullptr;
     }
@@ -2885,6 +2917,8 @@ namespace XMPP { namespace Jingle {
 
     QSharedPointer<Transport> Session::newOutgoingTransport(const QString &ns)
     {
+        if (d->state >= State::Finishing)
+            return {};
         auto pad = transportPadFactory(ns);
         if (pad) {
             return pad->manager()->newTransport(pad, d->role); // pad on both side becaue we need shared pointer

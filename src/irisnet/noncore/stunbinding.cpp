@@ -28,8 +28,8 @@ class StunBinding::Private : public QObject {
     Q_OBJECT
 
 public:
-    StunBinding            *q;
-    StunTransactionPool    *pool = nullptr;
+    StunBinding                     *q;
+    StunTransactionPool             *pool = nullptr;
     std::unique_ptr<StunTransaction> trans;
     TransportAddress                 stunAddr;
     TransportAddress                 addr;

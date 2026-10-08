@@ -761,8 +761,7 @@ PubSubPublishTask *PublicationManager::publishSession(const QString &publication
 
         auto       session = d->publishedSessions.find(publicationId);
         const auto context = d->providers.constFind(provider.data());
-        if (session != d->publishedSessions.end() && session->provider == provider
-            && context != d->providers.cend()
+        if (session != d->publishedSessions.end() && session->provider == provider && context != d->providers.cend()
             && context->state == PublishedSessionProvider::State::Synchronizing) {
             session->localMutationGeneration = context->generation;
         }
@@ -779,7 +778,7 @@ PubSubRetractTask *PublicationManager::retractSession(const QString &publication
     const auto provider = it->provider;
     const auto endpoint = resolvedEndpoint(it->endpoint, client());
     const auto itemId   = it->itemId;
-    auto task = retractSessionAnnouncement(endpoint.service, endpoint.node, itemId, notify);
+    auto       task     = retractSessionAnnouncement(endpoint.service, endpoint.node, itemId, notify);
     if (!task)
         return nullptr;
 
@@ -987,11 +986,12 @@ void PublicationManager::providerSynchronizationFinished(PublishedSessionProvide
 
     const auto snapshotPredatesLocalMutation = [this, provider, generation](const Private::AuthorityEvent &event) {
         const auto sessions = d->publishedSessions.values();
-        return std::any_of(sessions.cbegin(), sessions.cend(), [this, provider, generation, &event](const auto &session) {
-            return session.provider == provider && session.itemId == event.itemId
-                && session.localMutationGeneration == generation
-                && endpointMatches(session.endpoint, event.endpoint.service, event.endpoint.node, client());
-        });
+        return std::any_of(
+            sessions.cbegin(), sessions.cend(), [this, provider, generation, &event](const auto &session) {
+                return session.provider == provider && session.itemId == event.itemId
+                    && session.localMutationGeneration == generation
+                    && endpointMatches(session.endpoint, event.endpoint.service, event.endpoint.node, client());
+            });
     };
 
     for (const auto &event : discovery) {
