@@ -26,6 +26,19 @@ available; system QCA selection is unchanged. Existing build trees with a cached
 Git ref keep that ref; use `cmake -U IRIS_BUNDLED_QCA_GIT_TAG ...` once to adopt
 the lock default.
 
+## Source archive versions
+
+CMake obtains the version from `IRIS_VERSION`, a generated `.version` file,
+Git tags, or the `.archive-version` metadata embedded by `git archive`, in
+that order. GitHub source downloads use `git archive` and substitute the
+nearest matching `v[0-9]*` tag through `.gitattributes` `export-subst`.
+The tracked `.archive-version` remains an unexpanded template in Git checkouts;
+it does not pin subsequent releases to an old version.
+
+Archives need a reachable numeric release tag. A plain directory copy or an
+archive made from an untagged repository can instead supply
+`-DIRIS_VERSION=1.1.2` or a `.version` file containing `1.1.2`.
+
 ## What features are supported?
 
 * Full support for draft-ietf-xmpp-core-21, including:
