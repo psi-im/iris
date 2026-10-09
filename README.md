@@ -14,11 +14,16 @@ This library is licensed under the Lesser GNU General Public License. See the CO
 
 Iris depends on Qt and QCA.
 
-`dependencies.lock.json` records the QCA release tag and its full Git commit SHA.
+`dependencies.lock.json` records the QCA release tag, its full Git commit SHA,
+and `qca.minimum_version` for runtime/SDK compatibility. The minimum remains
+independent of the pinned build release.
 CI and package workflows load the release tag through
 `.github/actions/load-dependencies`; bundled CMake builds use the commit SHA.
 To update QCA, change both fields together after the release packages are published.
 Each supported packaging platform needs its corresponding QCA release asset.
+The locked minimum is currently 3.0.10, which fixes DTLS input queue stalls.
+System QCA 3 selection, CMake/pkg-config SDK metadata and deb runtime/development
+dependencies all use this field rather than pinning the exact build version.
 
 Changing the lock reconfigures CMake and clears stale downloaded QCA build state.
 Explicit `IRIS_BUNDLED_QCA_GIT_TAG` and `IRIS_QCA_SOURCE_DIR` overrides remain
