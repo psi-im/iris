@@ -239,6 +239,12 @@ if(IRIS_ENABLE_JINGLE_SCTP)
         Qt${QT_DEFAULT_MAJOR_VERSION}::Network)
     add_test(NAME jingle_transportsctp_lifecycle COMMAND jingle_transportsctp_test)
     set_tests_properties(jingle_transportsctp_lifecycle PROPERTIES TIMEOUT 15)
+    add_executable(jingle_sctpclosure_test sctpclosure.cpp)
+    target_include_directories(jingle_sctpclosure_test PRIVATE ../../src ../../src/xmpp/xmpp-im)
+    target_link_libraries(jingle_sctpclosure_test PRIVATE iris SctpLab::UsrSCTP
+        Qt${QT_DEFAULT_MAJOR_VERSION}::Core Qt${QT_DEFAULT_MAJOR_VERSION}::Network)
+    add_test(NAME jingle_sctpclosure COMMAND jingle_sctpclosure_test)
+    set_tests_properties(jingle_sctpclosure PROPERTIES TIMEOUT 10)
 endif()
 
 add_executable(jingle_transportacks_test transportacks.cpp)

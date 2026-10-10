@@ -136,7 +136,8 @@ namespace XMPP { namespace Jingle { namespace SCTP {
 
     bool WebRTCDataChannel::writeDatagram(const QNetworkDatagram &data)
     {
-        Q_ASSERT(bool(outgoingCallback));
+        if (streamClosed || closeRequested || !outgoingCallback)
+            return false;
         outgoingBufSize += data.data().size();
         outgoingCallback({ quint16(streamId), channelType, PPID_BINARY, reliability, data.data() });
         return true;

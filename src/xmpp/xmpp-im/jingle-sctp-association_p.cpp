@@ -63,6 +63,8 @@ namespace XMPP { namespace Jingle { namespace SCTP {
     void AssociationPrivate::OnSctpAssociationConnected(RTC::SctpAssociation *)
     {
         qDebug("jignle-sctp: on connected");
+        if (associationClosed)
+            return;
         for (auto &channel : channels) {
             auto dc = channel.staticCast<WebRTCDataChannel>();
             if (!dc->openingDeferred)
@@ -70,9 +72,19 @@ namespace XMPP { namespace Jingle { namespace SCTP {
         }
     }
 
-    void AssociationPrivate::OnSctpAssociationFailed(RTC::SctpAssociation *) { qDebug("jignle-sctp: on failed"); }
+    void AssociationPrivate::OnSctpAssociationFailed(RTC::SctpAssociation *)
+    {
+        qWarning("jingle-sctp: association failed");
+        QMetaObject::invokeMethod(this, "onAssociationClosed", Qt::QueuedConnection);
+    }
 
-    void AssociationPrivate::OnSctpAssociationClosed(RTC::SctpAssociation *) { qDebug("jignle-sctp: on closed"); }
+    void AssociationPrivate::OnSctpAssociationClosed(RTC::SctpAssociation *)
+    {
+        qDebug("jingle-sctp: association closed");
+        // A channel observer may destroy the association. Notify it only after
+        // returning from the usrsctp callback (including its timer callback).
+        QMetaObject::invokeMethod(this, "onAssociationClosed", Qt::QueuedConnection);
+    }
 
     void AssociationPrivate::OnSctpAssociationSendData(RTC::SctpAssociation *, const uint8_t *data, size_t len)
     {
@@ -167,8 +179,8 @@ namespace XMPP { namespace Jingle { namespace SCTP {
 
     void AssociationPrivate::procesOutgoingMessageQueue()
     {
-        if (dumpingOutogingBuffer)
-            return; // we don't need recursion here
+        if (associationClosed || dumpingOutogingBuffer)
+            return; // a terminal association cannot accept more writes
 
         dumpingOutogingBuffer = true;
         // keep going while we can fit the buffer
@@ -230,6 +242,8 @@ namespace XMPP { namespace Jingle { namespace SCTP {
                                                    quint16 priority, const QString &label, const QString &protocol,
                                                    bool deferOpening)
     {
+        if (associationClosed)
+            return {};
         SCTP_DEBUG("adding new channel");
         int channelType = int(reliable);
         if (!ordered)
@@ -275,6 +289,8 @@ namespace XMPP { namespace Jingle { namespace SCTP {
 
     void AssociationPrivate::onTransportConnected()
     {
+        if (associationClosed)
+            return;
         SCTP_DEBUG("starting sctp association");
         transportConnected = true;
         while (pendingLocalChannels.size()) {
@@ -293,28 +309,55 @@ namespace XMPP { namespace Jingle { namespace SCTP {
 
     void AssociationPrivate::onTransportError(QAbstractSocket::SocketError error)
     {
-        transportConnected = false;
-        for (auto &c : channels) {
-            c.staticCast<WebRTCDataChannel>()->onError(error);
-        }
+        qWarning("jingle-sctp: transport failed error=%d", int(error));
+        closeChannels(WebRTCDataChannel::TransportClosed);
     }
 
-    void AssociationPrivate::onTransportClosed()
+    void AssociationPrivate::onTransportClosed() { closeChannels(WebRTCDataChannel::TransportClosed); }
+
+    void AssociationPrivate::onAssociationClosed() { closeChannels(WebRTCDataChannel::SctpClosed); }
+
+    void AssociationPrivate::closeChannels(WebRTCDataChannel::DisconnectReason reason)
     {
+        if (associationClosed)
+            return;
+        associationClosed  = true;
         transportConnected = false;
-        for (auto &c : channels) {
-            c.staticCast<WebRTCDataChannel>()->onDisconnected(WebRTCDataChannel::TransportClosed);
+
+        // Retain every channel, including local channels still awaiting DTLS.
+        // Detach all ownership and writes before emitting any signal: an
+        // observer may destroy this association or close a sibling channel.
+        const auto closingChannels = allChannels();
+        channels.clear();
+        pendingChannels.clear();
+        pendingLocalChannels.clear();
+        outgoingMessageQueue.clear();
+        outgoingPacketsQueue.clear();
+        qDebug("jingle-sctp: closing %d channels reason=%d", int(closingChannels.size()), int(reason));
+        for (const auto &channel : closingChannels) {
+            auto dc              = channel.staticCast<WebRTCDataChannel>();
+            dc->association      = nullptr;
+            dc->outgoingCallback = {};
+            dc->outgoingBufSize  = 0;
         }
+        // Use only the retained snapshot after the first notification. Already
+        // received data stays readable; connectionClosed waits for its drain.
+        for (const auto &channel : closingChannels)
+            channel.staticCast<WebRTCDataChannel>()->onDisconnected(reason);
     }
 
     void AssociationPrivate::onOutgoingData(const QByteArray &data)
     {
+        if (associationClosed)
+            return;
         outgoingPacketsQueue.enqueue(data);
         emit q->readyReadOutgoing();
     }
 
     void AssociationPrivate::onIncomingData(const QByteArray &data, quint16 streamId, quint32 ppid)
     {
+        if (associationClosed)
+            return;
         auto it = channels.find(streamId);
         if (it == channels.end()) {
             if (ppid == PPID_DCEP) {
