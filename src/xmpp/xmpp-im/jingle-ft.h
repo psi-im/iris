@@ -20,6 +20,9 @@
 #ifndef JINGLEFT_H
 #define JINGLEFT_H
 
+// Feature marker for clients that support explicit range-receipt handover.
+#define IRIS_FT_DEFERRED_RECEIPTS 1
+
 #include <iris/iris_export.h>
 #include <iris/xmpp-im/jingle-application.h>
 #include <iris/xmpp-im/jingle-file.h>
@@ -92,6 +95,16 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
          */
         void setStreamingMode(bool mode = true);
 
+        // Opt in before starting the payload. Keep this application eligible for
+        // BUNDLE extension while its completed payload awaits the receipt exchange.
+        void setKeepTransportUntilReceipt(bool enabled = true);
+        // Receivers may wait for a successor content-accept before confirming this
+        // range. The integrity check still completes independently of the receipt.
+        void setReceiptDeferred(bool enabled = true);
+        bool acknowledgeReceived();
+        // Pause only the receive pump; already received bytes retain their offsets.
+        void setReceivingPaused(bool paused);
+
         void            setDevice(QIODevice *dev, bool closeOnFinish = true);
         Connection::Ptr connection() const;
 
@@ -112,6 +125,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
 
     signals:
         void connectionReady(); // streaming mode only
+        void payloadVerified(); // receiver: bytes and negotiated checksum are valid
 
         // if size is not set then it's reamaining part of the file (non-streaming mode only)
         void deviceRequested(quint64 offset, std::optional<quint64> size);

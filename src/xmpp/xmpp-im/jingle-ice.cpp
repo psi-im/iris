@@ -19,6 +19,7 @@
 
 #ifdef JINGLE_SCTP
 #include "jingle-sctp.h" //Do not move to avoid warnings with MinGW
+#include "jingle-webrtc-datachannel_p.h"
 #endif
 
 #include "jingle-ice-connection_p.h"
@@ -273,6 +274,9 @@ namespace XMPP { namespace Jingle { namespace ICE {
             std::function<void(Ice176::Error)>                    onError;
             std::function<void()>                                 onRawReady;
             std::function<void()>                                 onFingerprintNeeded;
+#ifdef JINGLE_SCTP
+            std::function<bool(Connection::Ptr)> onIncomingChannel;
+#endif
         };
 
         QPointer<Pad> pad;
@@ -285,7 +289,10 @@ namespace XMPP { namespace Jingle { namespace ICE {
         bool gatheringComplete         = false;
         bool checksStarted             = false;
 
-        QList<Participant>       participants;
+        QList<Participant> participants;
+#ifdef JINGLE_SCTP
+        QList<Connection::Ptr> pendingDataChannels;
+#endif
         QList<Ice176::Candidate> localCandidateHistory;
 
         // Association-owned discovery/startup state. No asynchronous callback
@@ -502,6 +509,50 @@ namespace XMPP { namespace Jingle { namespace ICE {
 
         void t_timeout() { deleteLater(); }
     };
+
+#ifdef JINGLE_SCTP
+    static void dispatchIncomingDataChannels(IceConnection *network)
+    {
+        if (!network || !network->runtime)
+            return;
+        QPointer<IceConnection> guard(network);
+        const auto              pending = std::exchange(network->runtime->pendingDataChannels, {});
+        for (const auto &channel : pending) {
+            if (!guard || !network->runtime)
+                return;
+            auto                                 dc = qSharedPointerDynamicCast<SCTP::WebRTCDataChannel>(channel);
+            QPointer<Transport>                  target;
+            std::function<bool(Connection::Ptr)> accept;
+            bool                                 ambiguous = false;
+            if (dc && network->runtime->pad && network->runtime->pad->session()) {
+                const auto contents     = network->runtime->pad->session()->contentList();
+                const auto participants = network->runtime->participants;
+                for (const auto &participant : participants) {
+                    if (!participant.transport || !participant.transport->isRemote())
+                        continue;
+                    for (auto *app : contents) {
+                        if (app->contentName() != dc->label || app->state() >= State::Finishing
+                            || app->transport().data() != participant.transport)
+                            continue;
+                        if (target && target != participant.transport)
+                            ambiguous = true;
+                        target = participant.transport;
+                        accept = participant.onIncomingChannel;
+                    }
+                }
+            }
+            if (target && !ambiguous && target->state() < State::Connecting) {
+                // DCEP may overtake the content-accept IQ result. Keep the
+                // connection association-owned until membership commits and
+                // Transport::start authorizes application payload processing.
+                network->runtime->pendingDataChannels.append(channel);
+                continue;
+            }
+            if ((!target || ambiguous || target->state() >= State::Finishing || !accept || !accept(channel)) && channel)
+                channel->close();
+        }
+    }
+#endif
 
     class Manager::Private {
     public:
@@ -873,7 +924,8 @@ namespace XMPP { namespace Jingle { namespace ICE {
         Dtls::Setup localDtlsRole  = Dtls::ActPass;
         Dtls::Setup remoteDtlsRole = Dtls::ActPass;
 #ifdef JINGLE_SCTP
-        SCTP::MapElement sctp;
+        SCTP::MapElement                   sctp;
+        QList<QPair<int, Connection::Ptr>> deferredDataChannels;
 #endif
 
         QHostAddress extAddr;
@@ -912,6 +964,9 @@ namespace XMPP { namespace Jingle { namespace ICE {
                                                               || participant.transport == q;
                                                       }),
                                        participants.end());
+#ifdef JINGLE_SCTP
+                    dispatchIncomingDataChannels(network);
+#endif
                 }
                 // No callback capturing this Transport::Private may survive the
                 // logical content releasing its association membership.
@@ -1026,6 +1081,11 @@ namespace XMPP { namespace Jingle { namespace ICE {
                     d->pendingActions |= NewFingerprint;
                     emit guard->updated();
                 };
+#ifdef JINGLE_SCTP
+                participant.onIncomingChannel = [guard](Connection::Ptr channel) {
+                    return guard && guard->notifyIncomingConnection(std::move(channel));
+                };
+#endif
                 network->runtime->participants.append(std::move(participant));
                 if (!network->runtime->localCandidateHistory.isEmpty())
                     network->runtime->participants.last().onLocalCandidates(network->runtime->localCandidateHistory);
@@ -1138,11 +1198,15 @@ namespace XMPP { namespace Jingle { namespace ICE {
                 auto *componentDtls = net->components[componentIndex].dtls;
                 if (!componentDtls)
                     return;
+#ifdef DTLS_PACKET_DEBUG
                 const auto id = associationDebugId(net);
+#endif
                 for (auto packet = componentDtls->readOutgoingDatagram(); !packet.isEmpty();
                      packet      = componentDtls->readOutgoingDatagram()) {
+#ifdef DTLS_PACKET_DEBUG
                     qInfo("jingle-ice[%s] DTLS outgoing component=%d dtls=%p bytes=%d ice-can-send=%d", id.constData(),
                           componentIndex, componentDtls, int(packet.size()), int(net->ice->canSendMedia()));
+#endif
                     net->ice->writeDatagram(componentIndex, packet);
                 }
             });
@@ -1455,14 +1519,18 @@ namespace XMPP { namespace Jingle { namespace ICE {
                 auto  buf = c.sctp->readOutgoing();
                 c.dtls->writeDatagram(buf);
             });
-            q->connect(c.sctp, &SCTP::Association::newIncomingChannel, q, [this, componentIndex]() {
-                qDebug("new incoming sctp channel");
-                auto assoc   = network->components[componentIndex].sctp;
-                auto channel = assoc->nextChannel();
-                if (!q->notifyIncomingConnection(channel)) {
-                    channel->close();
-                }
-            });
+            QObject::connect(c.sctp, &SCTP::Association::newIncomingChannel, network,
+                             [net = network, componentIndex]() {
+                                 qDebug("new incoming sctp channel");
+                                 auto assoc   = net->components[componentIndex].sctp;
+                                 auto channel = assoc->nextChannel();
+                                 if (!net->runtime) {
+                                     channel->close();
+                                     return;
+                                 }
+                                 net->runtime->pendingDataChannels.append(channel);
+                                 dispatchIncomingDataChannels(net);
+                             });
         }
 
         Connection::Ptr addDataChannel(TransportFeatures channelFeatures, const QString &label, int &componentIndex)
@@ -1489,7 +1557,10 @@ namespace XMPP { namespace Jingle { namespace ICE {
                 initSctpAssociation(componentIndex);
             }
             Q_UNUSED(channelFeatures); // TODO
-            return c.sctp->newChannel(SCTP::Reliable, true, 0, 256, label);
+            auto channel = c.sctp->newDeferredChannel(label);
+            if (channel)
+                deferredDataChannels.append({ componentIndex, channel });
+            return channel;
         }
 #endif
     };
@@ -1670,6 +1741,21 @@ namespace XMPP { namespace Jingle { namespace ICE {
         }
         QPointer<Transport> guard(this);
         setState(State::Connecting);
+#ifdef JINGLE_SCTP
+        if (guard)
+            dispatchIncomingDataChannels(d->network);
+        if (guard && d->network && !d->network->components.isEmpty()) {
+            const auto channels = std::exchange(d->deferredDataChannels, {});
+            for (const auto &channel : channels) {
+                if (!guard || !d->network)
+                    return;
+                if (channel.first < 0 || channel.first >= d->network->components.size())
+                    continue;
+                if (auto *assoc = d->network->components[channel.first].sctp)
+                    assoc->activateChannel(channel.second);
+            }
+        }
+#endif
         if (guard && _state == State::Connecting) {
             if (!d->network->runtime || !d->network->runtime->checksStarted) {
                 if (d->network->runtime)

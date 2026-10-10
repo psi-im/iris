@@ -149,8 +149,14 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
 
         Reason updateReason;
         // Action              updateToSend            = Action::NoAction;
-        bool closeDeviceOnFinish = true;
-        bool streamingMode       = false;
+        bool closeDeviceOnFinish       = true;
+        bool streamingMode             = false;
+        bool keepTransportUntilReceipt = false;
+        bool receiptDeferred           = false;
+        bool payloadFinished           = false;
+        bool receivingPaused           = false;
+        bool receiptReady              = false;
+        bool receiptReleased           = false;
         // bool                endlessRange        = false; // where range in accepted file doesn't have end
         bool                               outgoingReceived       = false;
         bool                               writeLoggingStarted    = false;
@@ -217,8 +223,14 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
 
         void beginPayloadFinishing()
         {
-            if (q->_state >= State::Finishing)
+            if (q->_state >= State::Finishing || payloadFinished)
                 return;
+            payloadFinished = true;
+            if (keepTransportUntilReceipt) {
+                if (connection)
+                    connection->setReadHook({});
+                return;
+            }
             // A successful write only queues transport data. Keep the data
             // path alive until the peer confirms receipt; closing SCTP here
             // can reset the channel before its final packets are delivered.
@@ -232,7 +244,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
 
             // Known-size transfers retain their transport through the
             // checksum/receipt exchange. It can now drain/close safely.
-            if (q->_state == State::Finishing) {
+            if (q->_state == State::Finishing || (payloadFinished && bytesLeft && *bytesLeft == 0)) {
                 QPointer<Application> guard(q);
                 const auto            closing = connection;
                 if (closing) {
@@ -355,7 +367,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
 
         void writeNextBlockToTransport()
         {
-            if (q->_state >= State::Finishing || !connection)
+            if (q->_state >= State::Finishing || payloadFinished || !connection)
                 return;
 
             if (bytesLeft && *bytesLeft == 0) {
@@ -435,6 +447,8 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
 
         void readNextBlockFromTransport()
         {
+            if (receivingPaused || payloadFinished || q->_state >= State::Finishing || !connection)
+                return;
             quint64 bytesAvail;
             while ((!bytesLeft || *bytesLeft > 0)
                    && ((bytesAvail = connection->bytesAvailable()) || (connection->hasPendingDatagrams()))) {
@@ -488,7 +502,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
                 }
 
                 emit q->progress(device->pos());
-                if (!guard)
+                if (!guard || receivingPaused)
                     return;
             }
             if (bytesLeft && *bytesLeft == 0) {
@@ -504,7 +518,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
 
         void onConnectionEnded()
         {
-            if (q->_state >= State::Finishing)
+            if (payloadFinished || q->_state >= State::Finishing)
                 return;
             if (amIReceiver()) {
                 if (readingPayload) {
@@ -613,7 +627,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
         void tryFinalizeIncoming()
         {
             const bool moreBytesExpected = bytesLeft && *bytesLeft > 0;
-            if (q->_state == State::Finished || outgoingReceived)
+            if (q->_state == State::Finished || receiptReady || outgoingReceived || q->_terminationReason.isValid())
                 return;
             if (bytesLeft && !moreBytesExpected && q->_state < State::Finishing) {
                 QPointer<Application> guard(q);
@@ -658,6 +672,18 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
                     return;
                 }
             }
+            cancelFinalize();
+            receiptReady = true;
+            QPointer<Application> guard(q);
+            emit                  q->payloadVerified();
+            if (!guard || q->_terminationReason.isValid() || q->_state == State::Finished)
+                return;
+            if (receiptDeferred) {
+                if (!outgoingReceived)
+                    expectFinalize([this]() { handleStreamFail(QStringLiteral("deferred file receipt timed out")); });
+                return;
+            }
+            receiptReleased  = true;
             outgoingReceived = true;
             emit q->updated();
         }
@@ -819,6 +845,42 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
         }
     }
 
+    void Application::setKeepTransportUntilReceipt(bool enabled)
+    {
+        if (_state <= State::Connecting)
+            d->keepTransportUntilReceipt = enabled;
+    }
+
+    void Application::setReceiptDeferred(bool enabled)
+    {
+        if (_state <= State::Connecting)
+            d->receiptDeferred = enabled;
+    }
+
+    void Application::setReceivingPaused(bool paused)
+    {
+        if (!d->amIReceiver() || d->receivingPaused == paused)
+            return;
+        d->receivingPaused = paused;
+        if (!paused)
+            QTimer::singleShot(0, this, [this]() {
+                if (d->device && !d->streamingMode)
+                    d->readNextBlockFromTransport();
+            });
+    }
+
+    bool Application::acknowledgeReceived()
+    {
+        if (!d->amIReceiver() || !d->receiptReady || d->receiptReleased || _state == State::Finished
+            || _terminationReason.isValid())
+            return false;
+        d->cancelFinalize();
+        d->receiptReleased  = true;
+        d->outgoingReceived = true;
+        emit updated();
+        return true;
+    }
+
     XMPP::Jingle::Application::Update Application::evaluateOutgoingUpdate()
     {
         if (_terminationReason.isValid())
@@ -856,10 +918,10 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
                                        } };
             }
             if (!d->outgoingChecksum.isEmpty()) {
-                ContentBase cb(_pad->session()->role(), _contentName);
+                ContentBase cb(creator(), _contentName);
                 File        f;
-                if (d->file.range().isValid()) {
-                    Range r  = d->file.range();
+                if (d->acceptFile.range().isValid()) {
+                    Range r  = d->acceptFile.range();
                     r.hashes = d->outgoingChecksum;
                     f.setRange(r);
                 } else {
@@ -1000,7 +1062,18 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
                 if (app) {
                     qDebug("jignle-ft: got checksum: %s for %s", qPrintable(checksum.file.hashes().value(0).toString()),
                            qUtf8Printable(session()->peer().full()));
-                    static_cast<Application *>(app)->d->onIncomingChecksum(checksum.file.hashes());
+                    auto      *transfer = static_cast<Application *>(app);
+                    const auto range    = checksum.file.range();
+                    if (range.isValid()) {
+                        const auto expected = transfer->acceptFile().range();
+                        if (!expected.isValid() || range.offset != expected.offset || range.length != expected.length) {
+                            transfer->remove(Reason::MediaError, QStringLiteral("checksum describes another range"));
+                            return true;
+                        }
+                        transfer->d->onIncomingChecksum(range.hashes);
+                    } else {
+                        transfer->d->onIncomingChecksum(checksum.file.hashes());
+                    }
                 }
                 return true;
             } else if (el.tagName() == RECEIVED_TAG) {

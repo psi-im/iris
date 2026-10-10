@@ -64,7 +64,9 @@ namespace XMPP { namespace Jingle { namespace SCTP {
     {
         qDebug("jignle-sctp: on connected");
         for (auto &channel : channels) {
-            channel.staticCast<WebRTCDataChannel>()->connect();
+            auto dc = channel.staticCast<WebRTCDataChannel>();
+            if (!dc->openingDeferred)
+                dc->connect();
         }
     }
 
@@ -126,9 +128,8 @@ namespace XMPP { namespace Jingle { namespace SCTP {
         connectChannelSignals(channel);
 
         // acknowledge channel open instantly
-        QByteArray reply(4, 0);
-        reply[0] = DCEP_DATA_CHANNEL_ACK;
-        write(reply, streamId, PPID_DCEP);
+        QByteArray reply(1, DCEP_DATA_CHANNEL_ACK);
+        channel->outgoingCallback({ streamId, 0, PPID_DCEP, 0, reply });
 
         emit q->newIncomingChannel();
     }
@@ -173,26 +174,28 @@ namespace XMPP { namespace Jingle { namespace SCTP {
         // keep going while we can fit the buffer
         while (outgoingMessageQueue.size()) {
 
-            auto const &[connection, message] = outgoingMessageQueue.first();
+            const auto [connection, message] = outgoingMessageQueue.first();
             if (int(MAX_SEND_BUFFER_SIZE - assoc.GetSctpBufferedAmount()) < message.data.size())
                 break;
 
-            bool        ordered  = !(message.channelType & 0x80);
+            bool        ordered  = message.ppid == PPID_DCEP || !(message.channelType & 0x80);
             Reliability reliable = ordered         ? Reliable
                 : (message.channelType & 0x3) == 1 ? PartialRexmit
                 : (message.channelType & 0x3) == 2 ? PartialTimers
                                                    : Reliable;
 
-            if (write(message.data, message.streamId, PPID_BINARY, reliable, ordered, message.reliability)) {
+            if (write(message.data, message.streamId, message.ppid, reliable, ordered, message.reliability)) {
+                outgoingMessageQueue.removeFirst();
                 int sz = message.data.size();
-                connection.staticCast<WebRTCDataChannel>()->onMessageWritten(sz);
+                if (message.ppid != PPID_DCEP)
+                    connection.staticCast<WebRTCDataChannel>()->onMessageWritten(sz);
             } else if (assoc.isSendBufferFull())
                 break;
             else {
+                outgoingMessageQueue.removeFirst();
                 qWarning("unexpected sctp write error");
                 connection.staticCast<WebRTCDataChannel>()->onError(QAbstractSocket::SocketResourceError);
             }
-            outgoingMessageQueue.removeFirst();
         }
         dumpingOutogingBuffer = false;
     }
@@ -200,6 +203,10 @@ namespace XMPP { namespace Jingle { namespace SCTP {
     void AssociationPrivate::close(quint16 streamId)
     {
         qDebug("jignle-sctp: close");
+        // Only bytes already accepted by SCTP belong to its reliable reset
+        // tail. Unaccepted writes must not block surviving channels behind a
+        // stream that is being reset (or get submitted again after reset).
+        discardPendingMessages(streamId);
         RTC::DataProducer producer;
         producer.sctpParameters.streamId = streamId;
         assoc.DataProducerClosed(&producer);
@@ -220,14 +227,16 @@ namespace XMPP { namespace Jingle { namespace SCTP {
     }
 
     Connection::Ptr AssociationPrivate::newChannel(Reliability reliable, bool ordered, quint32 reliability,
-                                                   quint16 priority, const QString &label, const QString &protocol)
+                                                   quint16 priority, const QString &label, const QString &protocol,
+                                                   bool deferOpening)
     {
         SCTP_DEBUG("adding new channel");
         int channelType = int(reliable);
         if (!ordered)
             channelType |= 0x80;
         auto channel
-            = QSharedPointer<WebRTCDataChannel>::create(this, channelType, priority, reliability, label, protocol);
+            = QSharedPointer<WebRTCDataChannel>::create(this, channelType, reliability, priority, label, protocol);
+        channel->openingDeferred = deferOpening;
         if (transportConnected) {
             auto id = takeNextStreamId();
             if (id == 0xffff)
@@ -235,11 +244,15 @@ namespace XMPP { namespace Jingle { namespace SCTP {
             channel->setStreamId(id);
             channels.insert(id, channel);
             channelsLeft--;
-            qWarning("TODO negotiate datachannel itself");
         } else {
             pendingLocalChannels.enqueue(channel);
         }
         connectChannelSignals(channel);
+        // Channels added after the association handshake need their own DCEP
+        // OPEN/ACK exchange. Channels added while SCTP is connecting are opened
+        // by OnSctpAssociationConnected together with the initial channels.
+        if (!deferOpening && assoc.GetState() == RTC::SctpAssociation::SctpState::CONNECTED)
+            channel->connect();
 
         return channel;
     }
@@ -319,6 +332,7 @@ namespace XMPP { namespace Jingle { namespace SCTP {
 
     void AssociationPrivate::onStreamClosed(quint16 streamId)
     {
+        discardPendingMessages(streamId);
         auto it = channels.find(streamId);
         if (it == channels.end()) {
             qDebug("jingle-sctp: closing not existing stream %d", streamId);
@@ -340,11 +354,29 @@ namespace XMPP { namespace Jingle { namespace SCTP {
         channel.staticCast<WebRTCDataChannel>()->onDisconnected(WebRTCDataChannel::ChannelClosed);
     }
 
+    void AssociationPrivate::discardPendingMessages(quint16 streamId)
+    {
+        for (auto it = outgoingMessageQueue.begin(); it != outgoingMessageQueue.end();) {
+            if (it->second.streamId != streamId) {
+                ++it;
+                continue;
+            }
+            if (it->first && it->second.ppid != PPID_DCEP) {
+                auto dc = it->first.staticCast<WebRTCDataChannel>();
+                dc->outgoingBufSize -= size_t(it->second.data.size());
+            }
+            it = outgoingMessageQueue.erase(it);
+        }
+    }
+
     void AssociationPrivate::connectChannelSignals(Connection::Ptr channel)
     {
         auto dc = channel.staticCast<WebRTCDataChannel>();
         dc->setOutgoingCallback([this, weakDc = dc.toWeakRef()](const WebRTCDataChannel::OutgoingDatagram &dg) {
-            outgoingMessageQueue.enqueue({ weakDc.lock(), dg });
+            if (dg.ppid == PPID_DCEP)
+                outgoingMessageQueue.prepend({ weakDc.lock(), dg });
+            else
+                outgoingMessageQueue.enqueue({ weakDc.lock(), dg });
             procesOutgoingMessageQueue();
         });
     }

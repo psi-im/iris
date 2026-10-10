@@ -83,7 +83,7 @@ namespace XMPP { namespace Jingle { namespace SCTP {
         void            close(quint16 streamId);
         quint16         takeNextStreamId();
         Connection::Ptr newChannel(Reliability reliable, bool ordered, quint32 reliability, quint16 priority,
-                                   const QString &label, const QString &protocol);
+                                   const QString &label, const QString &protocol, bool deferOpening = false);
         QList<Connection::Ptr> allChannels() const;
         Connection::Ptr        nextChannel();
 
@@ -99,6 +99,7 @@ namespace XMPP { namespace Jingle { namespace SCTP {
     private:
         void connectChannelSignals(Connection::Ptr channel);
         void procesOutgoingMessageQueue();
+        void discardPendingMessages(quint16 streamId);
     };
 
 }}}
