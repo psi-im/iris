@@ -2,6 +2,10 @@ name: Load locked QCA dependency
 description: Read dependencies.lock.json, verify its QCA revision and install the exact release asset
 
 inputs:
+  lock-path:
+    description: Path to the dependency lock relative to the workspace (for git submodule consumers)
+    required: false
+    default: dependencies.lock.json
   qca-asset:
     description: QCA release asset name (empty means resolve only)
     required: false
@@ -20,6 +24,8 @@ runs:
   steps:
     - name: Export QCA lock metadata
       shell: bash
+      env:
+        QCA_LOCK_PATH: ${{ inputs.lock-path }}
       run: |
         set -euo pipefail
         python3 - <<'PY'
@@ -28,7 +34,7 @@ runs:
         import re
         from pathlib import Path
 
-        lock_path = Path(os.environ["GITHUB_WORKSPACE"]) / "dependencies.lock.json"
+        lock_path = Path(os.environ["GITHUB_WORKSPACE"]) / os.environ["QCA_LOCK_PATH"]
         data = json.loads(lock_path.read_text(encoding="utf-8"))["qca"]
         values = {
             "QCA_TAG": data["tag"],
@@ -108,9 +114,10 @@ runs:
         set -euo pipefail
         rm -rf "$QCA_DIRECTORY"
         mkdir -p "$QCA_DIRECTORY"
-        gh release download "$QCA_TAG" --repo psi-im/qca -p "$QCA_ASSET" -O "$PWD/iris-qca-release.zip"
-        (cd "$QCA_DIRECTORY" && cmake -E tar xvf "$GITHUB_WORKSPACE/iris-qca-release.zip")
-        rm -f "$PWD/iris-qca-release.zip"
+        archive="$PWD/iris-qca-release.zip"
+        gh release download "$QCA_TAG" --repo psi-im/qca -p "$QCA_ASSET" -O "$archive"
+        (cd "$QCA_DIRECTORY" && cmake -E tar xvf "$archive")
+        rm -f "$archive"
         if [[ "$QCA_INSTALL_MODE" == apt ]]; then
           test -n "$(find "$QCA_DIRECTORY" -type f -name '*.deb' -print -quit)"
         else
