@@ -28,12 +28,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: ./.github/actions/load-dependencies
-        with:
-          qca-asset: qca3-deb-ubuntu-24.04.zip
-          install-mode: apt
-          qca-directory: qca-release
-
       - name: Install build and Prosody dependencies
         shell: bash
         run: |
@@ -43,6 +37,12 @@ jobs:
           sudo service prosody stop 2>/dev/null || true
 
 
+
+      - uses: ./.github/actions/load-dependencies
+        with:
+          qca-asset: qca3-deb-ubuntu-24.04.zip
+          install-mode: apt
+          qca-directory: qca-release
 
       - name: Build live JinglePub client
         shell: bash
