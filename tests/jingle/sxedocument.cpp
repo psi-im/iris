@@ -45,7 +45,12 @@ struct Link {
 
 static QDomElement xml(QDomDocument &doc, const QString &text)
 {
-    check(doc.setContent(text, true), "invalid test XML");
+#if QT_VERSION < QT_VERSION_CHECK(6, 5, 0)
+    const bool parsed = doc.setContent(text, true);
+#else
+    const auto parsed = doc.setContent(text, QDomDocument::ParseOption::UseNamespaceProcessing);
+#endif
+    check(bool(parsed), "invalid test XML");
     return doc.documentElement();
 }
 
