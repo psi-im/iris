@@ -298,7 +298,7 @@ void BasicProtocol::extractStreamError(const QDomElement &e)
     if (nodes.count()) {
         for (int i = 0; i < nodes.count(); i++) {
             auto    e    = nodes.item(i).toElement();
-            QString lang = e.attributeNS(NS_STREAMS, "lang", "");
+            QString lang = e.attributeNS(NS_XML, "lang", "");
             langText.insert(lang, e.text());
         }
     } else
@@ -1509,7 +1509,7 @@ bool CoreProtocol::normalStep(const QDomElement &e)
                 decltype(errLangText) lt;
                 for (int i = 0; i < nodes.count(); i++) {
                     auto    e    = nodes.item(i).toElement();
-                    QString lang = e.attributeNS(NS_SASL, "lang", "");
+                    QString lang = e.attributeNS(NS_XML, "lang", "");
                     lt.insert(lang, e.text());
                 }
 
