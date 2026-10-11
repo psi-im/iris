@@ -44,6 +44,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
         // TODO
     public:
         Pad(Manager *manager, Session *session);
+        ~Pad() override;
         QDomElement         takeOutgoingSessionInfoUpdate() override;
         QString             ns() const override;
         Session            *session() const override;
@@ -61,7 +62,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
     class IRIS_EXPORT Application : public XMPP::Jingle::Application {
         Q_OBJECT
     public:
-        Application(const QSharedPointer<Pad> &pad, const QString &contentName, Origin creator, Origin senders);
+        Application(Pad *pad, const QString &contentName, Origin creator, Origin senders);
         ~Application() override;
 
         bool isValid() const;
@@ -142,9 +143,9 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
     public:
         Manager(QObject *parent = nullptr);
         ~Manager();
-        void         setJingleManager(XMPP::Jingle::Manager *jm) override;
-        Application *startApplication(const ApplicationManagerPad::Ptr &pad, const QString &contentName, Origin creator,
-                                      Origin senders) override;
+        void                   setJingleManager(XMPP::Jingle::Manager *jm) override;
+        Application           *startApplication(ApplicationManagerPad *pad, const QString &contentName, Origin creator,
+                                                Origin senders) override;
         ApplicationManagerPad *pad(Session *session) override; // pad factory
         void                   closeAll(const QString &ns = QString()) override;
 

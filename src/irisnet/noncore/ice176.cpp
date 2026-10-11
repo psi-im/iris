@@ -1588,6 +1588,10 @@ private slots:
                     continue;
                 }
 
+                emit q->peerActivity();
+                if (!guard || state == Stopped || state == Stopping)
+                    return;
+
                 StunMessage response;
                 response.setClass(StunMessage::SuccessResponse);
                 response.setMethod(StunTypes::Binding);
@@ -1635,6 +1639,9 @@ private slots:
                     iceDebug("received validated response from %s to %s", qPrintable(fromAddr),
                              qPrintable(locCand.info->addr));
 
+                    emit q->peerActivity();
+                    if (!guard || state == Stopped || state == Stopping)
+                        return;
                     handleCheckResponse(it, path, msg, fromAddr);
                     if (!guard || state == Stopped || state == Stopping)
                         return;

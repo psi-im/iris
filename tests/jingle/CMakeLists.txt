@@ -291,3 +291,15 @@ target_link_libraries(jingle_managershutdown_test PRIVATE iris Qt${QT_DEFAULT_MA
     Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
 add_test(NAME jingle_managershutdown COMMAND jingle_managershutdown_test)
 set_tests_properties(jingle_managershutdown PROPERTIES TIMEOUT 15)
+
+add_executable(jingle_peeroffline_test peeroffline.cpp)
+target_link_libraries(jingle_peeroffline_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
+    Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
+add_test(NAME jingle_peeroffline COMMAND jingle_peeroffline_test)
+set_tests_properties(jingle_peeroffline PROPERTIES TIMEOUT 10)
+
+add_executable(jingle_transportownership_test transportownership.cpp)
+target_link_libraries(jingle_transportownership_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
+    Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
+add_test(NAME jingle_transportownership COMMAND jingle_transportownership_test)
+set_tests_properties(jingle_transportownership PROPERTIES TIMEOUT 10)

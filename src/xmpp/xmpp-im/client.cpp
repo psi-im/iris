@@ -885,6 +885,12 @@ void Client::ppSubscription(const Jid &j, const QString &s, const QString &n) { 
 
 void Client::ppPresence(const Jid &j, const Status &s)
 {
+    if (!s.hasError()) {
+        QPointer<Client> guard(this);
+        emit             presenceReceived(j, s);
+        if (!guard)
+            return;
+    }
     if (s.isAvailable())
         debug(QString("Client: %1 is available.\n").arg(j.full()));
     else

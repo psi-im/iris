@@ -104,14 +104,14 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
 
     void Manager::setJingleManager(XMPP::Jingle::Manager *jm) { jingleManager = jm; }
 
-    Application *Manager::startApplication(const ApplicationManagerPad::Ptr &pad, const QString &contentName,
-                                           Origin creator, Origin senders)
+    Application *Manager::startApplication(ApplicationManagerPad *pad, const QString &contentName, Origin creator,
+                                           Origin senders)
     {
         if (!(contentName.size() > 0 && (senders == Origin::Initiator || senders == Origin::Responder))) {
             qDebug("Invalid Jignle FT App start parameters");
             return nullptr;
         }
-        return new Application(pad.staticCast<Pad>(), contentName, creator, senders); // ContentOrigin::Remote
+        return new Application(static_cast<Pad *>(pad), contentName, creator, senders); // ContentOrigin::Remote
     }
 
     ApplicationManagerPad *Manager::pad(Session *session) { return new Pad(this, session); }
@@ -140,9 +140,9 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
     class Application::Private {
     public:
         struct TransportDesc {
-            Origin                    creator = Origin::None;
-            State                     state   = State::Created;
-            QSharedPointer<Transport> transport;
+            Origin              creator = Origin::None;
+            State               state   = State::Created;
+            QPointer<Transport> transport;
         };
 
         Application *q = nullptr;
@@ -582,6 +582,8 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
             }
 
             connect(connection.data(), &Connection::readyRead, q, [this]() {
+                if (q->transport() && q->transport()->pad())
+                    q->transport()->pad()->noteIncomingActivity();
                 if (!readLoggingStarted) {
                     qDebug("jingle-ft: got first readRead for %s", qUtf8Printable(q->pad()->session()->peer().full()));
                     readLoggingStarted = true;
@@ -701,10 +703,10 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
         }
     };
 
-    Application::Application(const QSharedPointer<Pad> &pad, const QString &contentName, Origin creator,
-                             Origin senders) : d(new Private)
+    Application::Application(Pad *pad, const QString &contentName, Origin creator, Origin senders) : d(new Private)
     {
-        d->q         = this;
+        d->q = this;
+        setParent(pad);
         _pad         = pad;
         _contentName = contentName;
         _creator     = creator;
@@ -715,6 +717,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
 
     Application::~Application()
     {
+        setParent(nullptr);
         if (d->connection)
             d->connection->setReadHook({});
         delete d->hasher;
@@ -1026,11 +1029,19 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
 
     Connection::Ptr Application::connection() const { return d->connection.staticCast<XMPP::Jingle::Connection>(); }
 
-    Pad::Pad(Manager *manager, Session *session) : _manager(manager), _session(session) { }
+    Pad::Pad(Manager *manager, Session *session) : ApplicationManagerPad(session), _manager(manager), _session(session)
+    {
+    }
 
     QDomElement Pad::takeOutgoingSessionInfoUpdate()
     {
         return QDomElement(); // TODO
+    }
+
+    Pad::~Pad()
+    {
+        setParent(nullptr);
+        destroyOwnedObjects();
     }
 
     QString Pad::ns() const { return NS; }

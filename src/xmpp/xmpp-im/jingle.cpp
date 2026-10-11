@@ -539,6 +539,22 @@ namespace XMPP { namespace Jingle {
     //----------------------------------------------------------------------------
     // SessionManagerPad - handle event related to a type of app/transport but not specific instance
     //----------------------------------------------------------------------------
+    SessionManagerPad::SessionManagerPad(Session *session) : QObject(session) { }
+
+    SessionManagerPad::~SessionManagerPad() { destroyOwnedObjects(); }
+
+    void SessionManagerPad::destroyOwnedObjects()
+    {
+        QPointer<SessionManagerPad> guard(this);
+        while (!children().isEmpty()) {
+            auto child = children().first();
+            child->setParent(nullptr); // A callback may destroy the ancestor while the child is destructing.
+            delete child;
+            if (!guard)
+                return;
+        }
+    }
+
     QDomElement SessionManagerPad::takeOutgoingSessionInfoUpdate() { return QDomElement(); }
 
     void SessionManagerPad::populateOutgoing(Action action, QDomElement &el)

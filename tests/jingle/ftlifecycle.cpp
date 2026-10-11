@@ -80,7 +80,7 @@ private:
 
 class TestTransportPad final : public J::TransportManagerPad {
 public:
-    explicit TestTransportPad(J::Session *session) : session_(session) { }
+    explicit TestTransportPad(J::Session *session) : J::TransportManagerPad(session), session_(session) { }
     J::Session          *session() const override { return session_; }
     QString              ns() const override { return QStringLiteral("urn:iris:test:ft"); }
     J::TransportManager *manager() const override { return nullptr; }
@@ -91,7 +91,7 @@ private:
 
 class TestTransport final : public J::Transport {
 public:
-    TestTransport(const J::TransportManagerPad::Ptr &pad, J::Origin creator) :
+    TestTransport(J::TransportManagerPad *pad, J::Origin creator) :
         J::Transport(pad, creator), connection_(QSharedPointer<TestConnection>::create())
     {
     }
@@ -122,7 +122,7 @@ class TestApplication final : public FT::Application {
 public:
     using FT::Application::Application;
     using FT::Application::incomingRemove;
-    void installTransport(const QSharedPointer<J::Transport> &transport) { _transport = transport; }
+    void installTransport(J::Transport *transport) { _transport = transport; }
 };
 
 static FT::File testFile(quint64 size)
@@ -164,10 +164,9 @@ static void exerciseSessionTermination(Client &client, bool partial, bool localF
     auto *session
         = new J::Session(client.jingleManager(), Jid(QStringLiteral("peer@example.test/device")), J::Origin::Initiator);
     QPointer<J::Session> sessionGuard(session);
-    auto                 appPad
-        = QSharedPointer<FT::Pad>(static_cast<FT::Pad *>(client.jingleManager()->applicationPad(session, FT::NS)));
-    auto                     transportPad = J::TransportManagerPad::Ptr(new TestTransportPad(session));
-    auto                     transport    = QSharedPointer<TestTransport>::create(transportPad, J::Origin::Initiator);
+    auto appPad = QPointer<FT::Pad>(static_cast<FT::Pad *>(client.jingleManager()->applicationPad(session, FT::NS)));
+    auto transportPad = new TestTransportPad(session);
+    auto transport    = QPointer<TestTransport>(new TestTransport(transportPad, J::Origin::Initiator));
     QPointer<TestConnection> connection(transport->connection().data());
     auto *transfer = new TestApplication(appPad, QStringLiteral("session-termination"), J::Origin::Initiator,
                                          J::Origin::Initiator);
@@ -210,12 +209,12 @@ static void exerciseSessionTermination(Client &client, bool partial, bool localF
                                                       : peerReason;
     check(finished == 1 && result.isValid() && result.condition() == expected,
           "session termination lost its reason or overwrote a local/partial transfer failure");
-    check(!connection->isOpen(), "session termination left its data stream open");
+    check(!connection || !connection->isOpen(), "session termination left its data stream open");
     check(!sessionGuard || sessionGuard->state() == J::State::Finished,
           "reentrant completion reopened a terminated session");
     QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
     check(!sessionGuard && !appGuard, "session termination leaked the session or application");
-    transport.reset();
+    transport.clear(); // The session tree owned and destroyed the transport.
     check(!connection, "session termination leaked the transport connection");
 }
 
@@ -229,7 +228,7 @@ int main(int argc, char **argv)
     auto *rawPad = client.jingleManager()->applicationPad(&session, FT::NS);
     auto *ftPad  = dynamic_cast<FT::Pad *>(rawPad);
     check(ftPad, "client did not provide registered FT pad");
-    QSharedPointer<FT::Pad> appPad(ftPad);
+    QPointer<FT::Pad> appPad(ftPad);
 
     // Fatal integrity errors remain actionable after payload completion entered
     // Finishing. They must schedule ContentRemove, never be overwritten by the
@@ -254,8 +253,8 @@ int main(int argc, char **argv)
     // application when a known-size receiver reaches Finishing must not leave
     // beginPayloadFinishing() touching its destroyed Private afterwards.
     {
-        auto  transportPad = J::TransportManagerPad::Ptr(new TestTransportPad(&session));
-        auto  transport    = QSharedPointer<TestTransport>::create(transportPad, J::Origin::Initiator);
+        auto  transportPad = new TestTransportPad(&session);
+        auto  transport    = QPointer<TestTransport>(new TestTransport(transportPad, J::Origin::Initiator));
         auto *transfer
             = new TestApplication(appPad, QStringLiteral("reentrant"), J::Origin::Initiator, J::Origin::Responder);
         transfer->setFile(testFile(4));
@@ -287,8 +286,8 @@ int main(int argc, char **argv)
     // Exhausting the source does not prove receipt. Exercise the real finalize
     // timer callback without waiting for its thirty-second production interval.
     {
-        auto            transportPad = J::TransportManagerPad::Ptr(new TestTransportPad(&session));
-        auto            transport    = QSharedPointer<TestTransport>::create(transportPad, J::Origin::Initiator);
+        auto            transportPad = new TestTransportPad(&session);
+        auto            transport    = QPointer<TestTransport>(new TestTransport(transportPad, J::Origin::Initiator));
         TestApplication transfer(appPad, QStringLiteral("receipt-timeout"), J::Origin::Initiator, J::Origin::Initiator);
         transfer.setFile(testFile(4));
         transfer.setAcceptFile(testFile(4));
@@ -317,8 +316,8 @@ int main(int argc, char **argv)
     // Negotiating hash-used makes checksum confirmation mandatory. Receiving
     // the byte count cannot turn a missing checksum into success on timeout.
     for (bool wrongAlgorithm : { false, true }) {
-        auto            transportPad = J::TransportManagerPad::Ptr(new TestTransportPad(&session));
-        auto            transport    = QSharedPointer<TestTransport>::create(transportPad, J::Origin::Initiator);
+        auto            transportPad = new TestTransportPad(&session);
+        auto            transport    = QPointer<TestTransport>(new TestTransport(transportPad, J::Origin::Initiator));
         TestApplication transfer(appPad, QStringLiteral("checksum-timeout"), J::Origin::Initiator,
                                  J::Origin::Responder);
         auto            file = testFile(4);
@@ -361,8 +360,8 @@ int main(int argc, char **argv)
     // A queued write is not delivery: keep the reliable transport alive until
     // the remote application confirms receipt, then release it immediately.
     {
-        auto            transportPad = J::TransportManagerPad::Ptr(new TestTransportPad(&session));
-        auto            transport    = QSharedPointer<TestTransport>::create(transportPad, J::Origin::Initiator);
+        auto            transportPad = new TestTransportPad(&session);
+        auto            transport    = QPointer<TestTransport>(new TestTransport(transportPad, J::Origin::Initiator));
         TestApplication transfer(appPad, QStringLiteral("retain-until-receipt"), J::Origin::Initiator,
                                  J::Origin::Initiator);
         transfer.setFile(testFile(4));
@@ -423,8 +422,8 @@ int main(int argc, char **argv)
     // IBB peer close can beat the queued bytesWritten callback for the final
     // block. All payload is queued, but success still requires a receipt.
     {
-        auto            transportPad = J::TransportManagerPad::Ptr(new TestTransportPad(&session));
-        auto            transport    = QSharedPointer<TestTransport>::create(transportPad, J::Origin::Initiator);
+        auto            transportPad = new TestTransportPad(&session);
+        auto            transport    = QPointer<TestTransport>(new TestTransport(transportPad, J::Origin::Initiator));
         TestApplication transfer(appPad, QStringLiteral("close-before-write-notification"), J::Origin::Initiator,
                                  J::Origin::Initiator);
         transfer.setFile(testFile(4));
@@ -451,8 +450,8 @@ int main(int argc, char **argv)
     // A verified range may keep its live BUNDLE anchor until the application
     // confirms that a successor was accepted. No receipt may escape beforehand.
     {
-        auto transport = QSharedPointer<TestTransport>::create(
-            J::TransportManagerPad::Ptr(new TestTransportPad(&session)), J::Origin::Initiator);
+        auto transport
+            = QPointer<TestTransport>(new TestTransport(new TestTransportPad(&session), J::Origin::Initiator));
         TestApplication transfer(appPad, QStringLiteral("deferred-range"), J::Origin::Initiator, J::Origin::Responder);
         transfer.setFile(testFile(4));
         transfer.setAcceptFile(testFile(4));
@@ -489,8 +488,8 @@ int main(int argc, char **argv)
     // A file request is created by the responder but sent by the initiator.
     // Its checksum must identify the content creator and the accepted range.
     {
-        auto transport = QSharedPointer<TestTransport>::create(
-            J::TransportManagerPad::Ptr(new TestTransportPad(&session)), J::Origin::Responder);
+        auto transport
+            = QPointer<TestTransport>(new TestTransport(new TestTransportPad(&session), J::Origin::Responder));
         TestApplication transfer(appPad, QStringLiteral("requested-range"), J::Origin::Responder, J::Origin::Initiator);
         auto            offered = testFile(8);
         offered.addHash(Hash(Hash::Sha256));
@@ -536,10 +535,9 @@ int main(int argc, char **argv)
     for (bool wrongRange : { false, true }) {
         J::Session receiver(client.jingleManager(), Jid(QStringLiteral("peer@example.test/device")),
                             J::Origin::Responder);
-        auto       pad = QSharedPointer<FT::Pad>(
-            static_cast<FT::Pad *>(client.jingleManager()->applicationPad(&receiver, FT::NS)));
-        auto transport = QSharedPointer<TestTransport>::create(
-            J::TransportManagerPad::Ptr(new TestTransportPad(&receiver)), J::Origin::Responder);
+        auto pad = QPointer<FT::Pad>(static_cast<FT::Pad *>(client.jingleManager()->applicationPad(&receiver, FT::NS)));
+        auto transport
+            = QPointer<TestTransport>(new TestTransport(new TestTransportPad(&receiver), J::Origin::Responder));
         TestApplication transfer(pad, QStringLiteral("nested-range"), J::Origin::Responder, J::Origin::Initiator);
         auto            file = testFile(8);
         file.addHash(Hash(Hash::Sha256));
