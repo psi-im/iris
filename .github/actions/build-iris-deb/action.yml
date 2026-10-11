@@ -7,9 +7,6 @@ inputs:
   version:
     description: Iris package version
     required: true
-  qca-tag:
-    description: QCA release containing packages for this distribution
-    required: true
 runs:
   using: composite
   steps:
@@ -35,19 +32,12 @@ runs:
       set -euo pipefail
       sudo timeout 10m apt-get -o APT::Update::Error-Mode=any update
       sudo timeout 10m apt-get install -y cmake ninja-build dpkg-dev qt6-base-dev zlib1g-dev libusrsctp-dev libomemo-c-dev
-  - name: Install QCA3 release packages
-    shell: bash
-    env:
-      GH_TOKEN: ${{ github.token }}
-      QCA_TAG: ${{ inputs.qca-tag }}
-    run: |
-      set -euo pipefail
-      mkdir qca-release
-      gh release download "$QCA_TAG" --repo psi-im/qca \
-        -p "qca3-deb-${{ inputs.distribution }}.zip" -O qca3.zip
-      (cd qca-release && cmake -E tar xvf ../qca3.zip)
-      test -n "$(find qca-release -type f -name '*.deb' -print -quit)"
-      sudo apt-get install -y ./qca-release/*.deb
+  - name: Install pinned QCA Debian packages
+    uses: ./.github/actions/load-dependencies
+    with:
+      qca-asset: qca3-deb-${{ inputs.distribution }}.zip
+      install-mode: apt
+      qca-directory: qca-release
   - name: Build and stage
     shell: bash
     run: |
