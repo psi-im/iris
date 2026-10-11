@@ -131,4 +131,4 @@ runs:
         QCA_DIRECTORY: ${{ inputs.qca-directory }}
       run: |
         set -euo pipefail
-        sudo apt-get install -y "$QCA_DIRECTORY"/*.deb
+        sudo apt-get install -y ./"$QCA_DIRECTORY"/*.deb
