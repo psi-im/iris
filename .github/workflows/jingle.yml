@@ -27,6 +27,10 @@ jobs:
           fetch-depth: 0
 
       - uses: ./.github/actions/load-dependencies
+        with:
+          qca-asset: qca3-deb-ubuntu-24.04.zip
+          install-mode: apt
+          qca-directory: qca-release
 
       - name: Install build dependencies
         shell: bash
@@ -42,18 +46,7 @@ jobs:
           restore-keys: |
             iris-jingle-qca3-${{ runner.os }}-
 
-      - name: Install QCA3 release packages
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          mkdir qca-release
-          gh release download "$QCA_TAG" --repo psi-im/qca \
-            -p 'qca3-deb-ubuntu-24.04.zip' -O qca3.zip
-          (cd qca-release && cmake -E tar xvf ../qca3.zip)
-          test -n "$(find qca-release -type f -name '*.deb' -print -quit)"
-          sudo apt-get install -y ./qca-release/*.deb
+
 
       - name: Configure
         shell: bash
@@ -120,6 +113,10 @@ jobs:
           fetch-depth: 0
 
       - uses: ./.github/actions/load-dependencies
+        with:
+          qca-asset: qca3-deb-ubuntu-24.04.zip
+          install-mode: apt
+          qca-directory: qca-release
 
       - name: Cache sanitizer compiler objects
         uses: actions/cache/restore@v4
@@ -135,18 +132,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build ccache qt6-base-dev libssl-dev libusrsctp-dev
 
-      - name: Install QCA3 release packages
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          mkdir qca-release
-          gh release download "$QCA_TAG" --repo psi-im/qca \
-            -p 'qca3-deb-ubuntu-24.04.zip' -O qca3.zip
-          (cd qca-release && cmake -E tar xvf ../qca3.zip)
-          test -n "$(find qca-release -type f -name '*.deb' -print -quit)"
-          sudo apt-get install -y ./qca-release/*.deb
+
 
       - name: Configure ASan and UBSan
         shell: bash
