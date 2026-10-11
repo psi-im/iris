@@ -105,6 +105,12 @@ jobs:
           ref: ${{ github.sha }}
           path: packaging-workflow
 
+      - name: Stage shared dependency installer from workflow revision
+        shell: bash
+        run: |
+          mkdir -p .github/actions/load-dependencies
+          cp packaging-workflow/.github/actions/load-dependencies/action.yml .github/actions/load-dependencies/action.yml
+
       - name: Build, package and smoke-test Iris
         uses: ./packaging-workflow/.github/actions/build-iris-deb
         with:
@@ -123,7 +129,7 @@ jobs:
           set -euo pipefail
           export DEBIAN_FRONTEND=noninteractive
           apt-get -o Acquire::http::Timeout=30 -o Acquire::Retries=2 -o APT::Update::Error-Mode=any update
-          apt-get install -y --no-install-recommends ca-certificates git sudo build-essential gh
+          apt-get install -y --no-install-recommends ca-certificates git sudo build-essential gh python3 jq
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.version.outputs.source_sha }}
@@ -138,6 +144,12 @@ jobs:
         with:
           ref: ${{ github.sha }}
           path: packaging-workflow
+
+      - name: Stage shared dependency installer from workflow revision
+        shell: bash
+        run: |
+          mkdir -p .github/actions/load-dependencies
+          cp packaging-workflow/.github/actions/load-dependencies/action.yml .github/actions/load-dependencies/action.yml
 
       - name: Build, package and smoke-test Iris
         uses: ./packaging-workflow/.github/actions/build-iris-deb
@@ -169,8 +181,20 @@ jobs:
         run: |
           printf '%s\n' "${{ needs.version.outputs.version }}" > .version
 
+      - name: Checkout packaging workflow helpers
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: packaging-workflow
+
+      - name: Stage shared dependency installer from workflow revision
+        shell: bash
+        run: |
+          mkdir -p .github/actions/load-dependencies
+          cp packaging-workflow/.github/actions/load-dependencies/action.yml .github/actions/load-dependencies/action.yml
+
       - name: Build, install and smoke-test Iris SDK
-        uses: ./.github/actions/build-iris-desktop
+        uses: ./packaging-workflow/.github/actions/build-iris-desktop
         with:
           qt-version: ${{ env.QT_VERSION }}
           platform: ${{ matrix.platform }}
@@ -220,9 +244,21 @@ jobs:
         run: |
           printf '%s\n' "${{ needs.version.outputs.version }}" > .version
 
+      - name: Checkout packaging workflow helpers
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: packaging-workflow
+
+      - name: Stage shared dependency installer from workflow revision
+        shell: bash
+        run: |
+          mkdir -p .github/actions/load-dependencies
+          cp packaging-workflow/.github/actions/load-dependencies/action.yml .github/actions/load-dependencies/action.yml
+
       - name: Build and install Iris SDK
         id: build-iris
-        uses: ./.github/actions/build-iris-android
+        uses: ./packaging-workflow/.github/actions/build-iris-android
         with:
           qt-version: ${{ env.ANDROID_QT_VERSION }}
           qt-arch: ${{ matrix.qt_arch }}
