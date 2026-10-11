@@ -20,12 +20,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: ./.github/actions/load-dependencies
-        with:
-          qca-asset: qca3-deb-ubuntu-24.04.zip
-          install-mode: apt
-          qca-directory: qca-release
-
       - name: Install live-test dependencies
         shell: bash
         run: |
@@ -51,6 +45,12 @@ jobs:
           verbose: 1
 
 
+
+      - uses: ./.github/actions/load-dependencies
+        with:
+          qca-asset: qca3-deb-ubuntu-24.04.zip
+          install-mode: apt
+          qca-directory: qca-release
 
       - name: Configure and build release probe
         shell: bash
