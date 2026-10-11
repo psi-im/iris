@@ -108,8 +108,9 @@ runs:
         set -euo pipefail
         rm -rf "$QCA_DIRECTORY"
         mkdir -p "$QCA_DIRECTORY"
-        gh release download "$QCA_TAG" --repo psi-im/qca -p "$QCA_ASSET" -O "$RUNNER_TEMP/iris-qca-release.zip"
-        (cd "$QCA_DIRECTORY" && cmake -E tar xvf "$RUNNER_TEMP/iris-qca-release.zip")
+        gh release download "$QCA_TAG" --repo psi-im/qca -p "$QCA_ASSET" -O "$PWD/iris-qca-release.zip"
+        (cd "$QCA_DIRECTORY" && cmake -E tar xvf "$GITHUB_WORKSPACE/iris-qca-release.zip")
+        rm -f "$PWD/iris-qca-release.zip"
         if [[ "$QCA_INSTALL_MODE" == apt ]]; then
           test -n "$(find "$QCA_DIRECTORY" -type f -name '*.deb' -print -quit)"
         else
