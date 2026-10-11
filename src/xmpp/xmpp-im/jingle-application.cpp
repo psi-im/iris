@@ -882,7 +882,7 @@ namespace XMPP { namespace Jingle {
         if (expected && expected->state() < State::Unacked && expected->creator() == _pad->session()->role()
             && expected->pad()->ns() != replacement->pad()->ns()) {
             _transportSelector->backupTransport(expected);
-            if (!current())
+            if (!current() || !replacement)
                 return false;
         }
         ++_transportReplaceGeneration;
@@ -919,13 +919,22 @@ namespace XMPP { namespace Jingle {
 
         _transport = replacement;
         replacement->associate(this);
+        const auto installedGeneration = _transportReplaceGeneration;
+        auto       installed           = [this, guard = QPointer<Application>(this), replacement, installedGeneration] {
+            return guard && replacement && _state < State::Finishing && _transport == replacement
+                && _transportReplaceGeneration == installedGeneration;
+        };
         if (expected && expected != replacement)
             expected->disassociate(this);
-        if (!replacement)
+        // Releasing the previous transport calls stop(), which may delete this
+        // application or install another transport through a synchronous callback.
+        if (!installed())
             return false;
 
         if (auto session = _pad ? _pad->session() : nullptr)
             session->refreshAutomaticGroupings();
+        if (!installed())
+            return false;
 
         connect(_transport.data(), &Transport::updated, this, &Application::updated);
         connect(_transport.data(), &Transport::failed, this, [this]() { selectNextTransport(); });

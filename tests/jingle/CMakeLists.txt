@@ -303,3 +303,15 @@ target_link_libraries(jingle_transportownership_test PRIVATE iris Qt${QT_DEFAULT
     Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
 add_test(NAME jingle_transportownership COMMAND jingle_transportownership_test)
 set_tests_properties(jingle_transportownership PROPERTIES TIMEOUT 10)
+
+add_executable(jingle_sxedocument_test sxedocument.cpp)
+target_link_libraries(jingle_sxedocument_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
+    Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
+add_test(NAME jingle_sxedocument COMMAND jingle_sxedocument_test)
+set_tests_properties(jingle_sxedocument PROPERTIES TIMEOUT 10)
+
+add_executable(jingle_sxesession_test sxesession.cpp)
+target_link_libraries(jingle_sxesession_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
+    Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
+add_test(NAME jingle_sxesession COMMAND jingle_sxesession_test)
+set_tests_properties(jingle_sxesession PROPERTIES TIMEOUT 15)

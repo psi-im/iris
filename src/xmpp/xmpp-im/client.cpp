@@ -72,6 +72,7 @@
 #include "jingle-ibb.h"
 #include "jingle-ice.h"
 #include "jingle-s5b.h"
+#include "jingle-sxe.h"
 #include "jingle.h"
 #include "s5b.h"
 #include "stundisco.h"
@@ -199,6 +200,8 @@ Client::Client(QObject *par) : QObject(par)
     d->jingleManager->registerTransport(d->jingleS5BManager);
     d->jingleManager->registerTransport(d->jingleIBBManager);
     d->jingleManager->registerTransport(d->jingleICEManager);
+    d->jingleManager->registerApplication(new Jingle::SXE::Manager(Jingle::SXE::NS_SVG_WHITEBOARD, this));
+    d->jingleManager->registerTransport(new Jingle::SXE::TransportManager(d->jingleManager));
 }
 
 Client::~Client()

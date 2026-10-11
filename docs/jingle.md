@@ -177,6 +177,8 @@ Iris supplies file-transfer and RTP applications and three transport managers:
 | S5B | `urn:xmpp:jingle:transports:s5b:1` | `Reliable`, `Ordered`, `Fast`, `DataOriented`. |
 | IBB | `urn:xmpp:jingle:transports:ibb:1` | `AlwaysConnect`, `Reliable`, `Ordered`, `DataOriented`. |
 | ICE | `urn:xmpp:jingle:transports:ice:0`, `urn:xmpp:jingle:transports:ice-udp:1` | One manager with namespace-specific wire profiles; mode/build-dependent transport features. |
+| SVG whiteboard (SXE) | `urn:xmpp:jingle:apps:svg-whiteboard:0` | Generic XEP-0284 shared-document application registered for the whiteboard profile. |
+| SXE | `urn:xmpp:jingle:transports:sxe` | Carries `<sxe/>` payload in messages; offers no `Connection` and is never selected by feature. |
 
 `Manager::availableTransports()` filters managers by required features. The application still owns
 the final policy through `TransportSelector`; Jingle core deliberately does not hard-code a single
@@ -275,6 +277,34 @@ The active-session XML mapping is documented in the proposed XEP-0338 update. Th
 [published XEP-0338](https://xmpp.org/extensions/xep-0338.html) does not yet specify this exchange
 in the same detail; consumers should distinguish the Iris-supported extension profile from
 arbitrary SDP BUNDLE renegotiation.
+
+## Shared XML Editing (XEP-0284)
+
+`Jingle::SXE` implements [XEP-0284](https://xmpp.org/extensions/xep-0284.html) as a Jingle
+transport and a generic application. The client registers the application for the SVG
+whiteboard profile (`urn:xmpp:jingle:apps:svg-whiteboard:0`, a draft profile from
+<https://github.com/jabberworld/whiteboarding>); another document type only needs another
+`SXE::Manager(descriptionNs)`. Drawing is left to the client.
+
+- `SXE::Transport` signals `<host/>` entities (at least one is required) and carries
+  `<sxe xmlns='urn:xmpp:sxe:0'/>` elements in `<message/>` stanzas. A task under the root task
+  routes them by `(peer, sid)` before the chat message path sees them. Outgoing payload carries
+  `<no-store/>` and `<no-copy/>` hints (XEP-0334). Only one-to-one sessions are implemented: the
+  content creator hosts the document and payload goes to the Jingle peer.
+- `SXE::Document` maps the record set onto a `QDomDocument`. Local changes go through
+  `insertNodeAfter/Before()`, `removeNode()`, `setAttribute()`, `setNodeValue()` and are sent by
+  `flush()`. Records follow the XEP rules: primary/secondary weight ordering, removal of orphans and
+  of duplicate roots/attributes with lower secondary weight, `target` in `<set/>`/`<remove/>`,
+  no reuse of removed rids, and versioned `<set/>` where a conflicting edit reverts the record to
+  version `v - 1`. Long character data is split over several edits; snapshot chunks carry the
+  final version so the joiner keeps the sender's version numbers.
+- `SXE::Application` starts synchronization after Jingle acceptance: the joiner sends `<connect/>`,
+  accepts the `<state-offer/>` with the session description and imports the `<state/>` between
+  `<document-begin/>` and `<document-end/>`, applying payload buffered meanwhile per
+  `last-sender`/`last-id`. The host never sends edits to a joiner before its snapshot, so its
+  `last-id` is empty. The prolog is a `data:` URI kept as untrusted text and never parsed.
+- `Application::document()` is a child of the application. A UI can reparent it to keep the
+  content after the session; the application then holds it through `QPointer`.
 
 ## Pads in more detail
 

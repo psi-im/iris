@@ -96,6 +96,20 @@ namespace XMPP { namespace Jingle {
         }
     };
 
+    // Pads own candidates even before registration. Clean up abandoned parses
+    // without retaining a second owning pointer across provider callbacks.
+    struct ApplicationReleaser {
+        QList<QPointer<Application>> applications;
+
+        ~ApplicationReleaser()
+        {
+            for (const auto &application : std::as_const(applications)) {
+                if (application)
+                    delete application.data();
+            }
+        }
+    };
+
     //----------------------------------------------------------------------------
     // Session
     //----------------------------------------------------------------------------
@@ -698,17 +712,25 @@ namespace XMPP { namespace Jingle {
         using TransportResult = std::tuple<bool, Reason::Condition, QPointer<Transport>>;
         TransportResult parseIncomingTransport(const QDomElement &contentEl)
         {
-            auto    tel = contentEl.firstChildElement(QLatin1String("transport"));
-            QString transportNS;
+            QPointer<Session> session(q);
+            auto              tel = contentEl.firstChildElement(QLatin1String("transport"));
+            QString           transportNS;
             if (tel.isNull() || (transportNS = tel.namespaceURI()).isEmpty()) {
                 return TransportResult { false, Reason::NoReason, QPointer<Transport>() };
             }
             auto trPad = q->transportPadFactory(transportNS);
+            if (!session)
+                return { false, Reason::NoReason, {} };
             if (!trPad) {
                 return TransportResult { true, Reason::UnsupportedTransports, QPointer<Transport>() };
             }
             auto transport = trPad->manager()->newTransport(trPad, negateOrigin(role));
-            if (transport && transport->update(tel)) {
+            if (!session)
+                return { false, Reason::NoReason, {} };
+            const bool parsed = transport && transport->update(tel);
+            if (!session)
+                return { false, Reason::NoReason, {} };
+            if (parsed && transport) {
                 return TransportResult { true, Reason::NoReason, transport };
             }
             if (transport)
@@ -985,41 +1007,52 @@ namespace XMPP { namespace Jingle {
 
         enum AddContentError { Ok, Unparsed, Unexpected, Unsupported };
 
-        std::tuple<AddContentError, Reason::Condition, Application *> parseContentAdd(const QDomElement &ce)
+        std::tuple<AddContentError, Reason::Condition, QPointer<Application>> parseContentAdd(const QDomElement &ce)
         {
-            QDomElement descriptionEl = ce.firstChildElement(QLatin1String("description"));
-            QString     descriptionNS = descriptionEl.namespaceURI();
-            typedef std::tuple<AddContentError, Reason::Condition, Application *> result;
+            QPointer<Session> session(q);
+            QDomElement       descriptionEl = ce.firstChildElement(QLatin1String("description"));
+            QString           descriptionNS = descriptionEl.namespaceURI();
+            typedef std::tuple<AddContentError, Reason::Condition, QPointer<Application>> result;
 
             ContentBase       c(ce);
             auto              trpr = parseIncomingTransport(ce);
             TransportReleaser releaser { { std::get<2>(trpr) } };
+            if (!session)
+                return result { Unparsed, Reason::Success, nullptr };
             if (!c.isValid() || descriptionEl.isNull() || descriptionNS.isEmpty() || !std::get<0>(trpr)) {
                 return result { Unparsed, Reason::Success, nullptr };
             }
 
-            auto appPad   = q->applicationPadFactory(descriptionNS);
+            auto appPad = q->applicationPadFactory(descriptionNS);
+            if (!session)
+                return result { Unparsed, Reason::Success, nullptr };
             auto trReason = std::get<1>(trpr);
             if (!appPad || trReason != Reason::NoReason) {
                 return result { Unsupported, trReason == Reason::NoReason ? Reason::UnsupportedApplications : trReason,
                                 nullptr };
             }
-            std::unique_ptr<Application> app(appPad->manager()->startApplication(appPad, c.name, c.creator, c.senders));
-            if (!app)
+            QPointer<Application> app(appPad->manager()->startApplication(appPad, c.name, c.creator, c.senders));
+            ApplicationReleaser   appReleaser { { app } };
+            if (!session || !app)
                 return result { Unparsed, Reason::Success, nullptr };
 
             auto descErr = app->setRemoteOffer(descriptionEl);
+            if (!session || !app)
+                return result { Unparsed, Reason::Success, nullptr };
             if (descErr == Application::IncompatibleParameters) {
                 return result { Unsupported, Reason::IncompatibleParameters, nullptr };
             } else if (descErr == Application::Unparsed) {
                 return result { Unparsed, Reason::Success, nullptr };
             }
 
-            if (app->setTransport(std::get<2>(trpr))) {
-                return result { Ok, Reason::Success, app.release() };
-            }
+            const bool installed = app->setTransport(std::get<2>(trpr));
+            if (!session || !app)
+                return result { Unparsed, Reason::Success, nullptr };
+            appReleaser.applications.clear(); // The pad remains the sole lifetime owner.
+            if (installed)
+                return result { Ok, Reason::Success, app };
             // TODO We can do transport-replace in all cases where std::get<1>(trpr) != NoReason
-            return result { Unsupported, Reason::IncompatibleParameters, app.release() };
+            return result { Unsupported, Reason::IncompatibleParameters, app };
         }
 
         typedef std::tuple<AddContentError, Reason::Condition, QList<Application *>, QList<QDomElement>>
@@ -1027,7 +1060,9 @@ namespace XMPP { namespace Jingle {
 
         ParseContentListResult parseContentAddList(const QDomElement &jingleEl)
         {
-            QMap<QString, Application *>                             addSet;
+            QPointer<Session>                                        session(q);
+            ApplicationReleaser                                      releaser;
+            QMap<QString, QPointer<Application>>                     addSet;
             QMap<QString, std::pair<QDomElement, Reason::Condition>> rejectSet;
 
             QString contentTag(QStringLiteral("content"));
@@ -1036,13 +1071,15 @@ namespace XMPP { namespace Jingle {
 
                 Private::AddContentError err;
                 Reason::Condition        cond;
-                Application             *app;
+                QPointer<Application>    application;
 
-                std::tie(err, cond, app) = parseContentAdd(ce);
+                std::tie(err, cond, application) = parseContentAdd(ce);
+                releaser.applications.append(application);
+                if (!session)
+                    return { Unparsed, cond, {}, {} };
                 if (err == Private::AddContentError::Unparsed) {
                     lastError = XMPP::Stanza::Error(XMPP::Stanza::Error::ErrorType::Cancel,
                                                     XMPP::Stanza::Error::ErrorCond::BadRequest);
-                    qDeleteAll(addSet);
                     return ParseContentListResult(Unparsed, cond, QList<Application *>(), QList<QDomElement>());
                 }
 
@@ -1050,8 +1087,10 @@ namespace XMPP { namespace Jingle {
                 auto it          = addSet.find(contentName);
                 if (err != Private::AddContentError::Ok) {
                     // can't continue as well
-                    if (app) { // we are going to reject it completely so delete
-                        delete app;
+                    if (application) { // we are going to reject it completely so delete
+                        delete application.data();
+                        if (!session)
+                            return { Unparsed, cond, {}, {} };
                     }
 
                     if (it == addSet.end()) {
@@ -1066,27 +1105,43 @@ namespace XMPP { namespace Jingle {
 
                 rejectSet.remove(contentName);
                 // REVIEW probably not wantBetterTransport but wantBetterApplication
-                if (it == addSet.end() || (*it)->wantBetterTransport(app->transport())) {
+                if (!application || (it != addSet.end() && !*it))
+                    return { Unparsed, Reason::Success, {}, {} };
+                const bool preferred = it == addSet.end() || (*it)->wantBetterTransport(application->transport());
+                if (!session || !application || (it != addSet.end() && !*it))
+                    return { Unparsed, Reason::Success, {}, {} };
+                if (preferred) {
                     if (it == addSet.end()) {
-                        addSet.insert(contentName, app);
+                        addSet.insert(contentName, application);
                     } else {
-                        delete *it; // unpreferred app
-                        *it = app;
+                        delete it->data(); // unpreferred application
+                        if (!session || !application)
+                            return { Unparsed, Reason::Success, {}, {} };
+                        *it = application;
                     }
                 } else {
-                    delete app;
+                    delete application.data();
+                    if (!session)
+                        return { Unparsed, Reason::Success, {}, {} };
                 }
             }
 
+            QList<Application *> applications;
+            for (const auto &application : std::as_const(addSet)) {
+                if (!application)
+                    return { Unparsed, Reason::Success, {}, {} };
+                applications.append(application.data());
+            }
+            releaser.applications.clear();
             if (rejectSet.size()) {
                 QList<QDomElement> rejectList;
                 for (auto const &i : rejectSet) {
                     rejectList.append(i.first);
                 }
-                return ParseContentListResult(Unsupported, rejectSet.first().second, addSet.values(), rejectList);
+                return ParseContentListResult(Unsupported, rejectSet.first().second, applications, rejectList);
             }
 
-            return ParseContentListResult(Ok, Reason::Success, addSet.values(), QList<QDomElement>());
+            return ParseContentListResult(Ok, Reason::Success, applications, QList<QDomElement>());
         }
 
         std::tuple<AddContentError, Reason::Condition, Application *> parseContentAccept(const QDomElement &ce)
@@ -1356,7 +1411,10 @@ namespace XMPP { namespace Jingle {
             QList<Application *>     apps;
             QList<QDomElement>       rejects;
 
+            QPointer<Session> session(q);
             std::tie(err, cond, apps, rejects) = parseContentAddList(jingleEl);
+            if (!session)
+                return true;
             switch (err) {
             case Private::AddContentError::Unparsed:
             case Private::AddContentError::Unexpected:
@@ -3128,7 +3186,10 @@ namespace XMPP { namespace Jingle {
         QList<Application *>     apps;
         QList<QDomElement>       rejects;
 
+        QPointer<Session> session(this);
         std::tie(err, cond, apps, rejects) = d->parseContentAddList(jingleEl);
+        if (!session)
+            return false;
         switch (err) {
         case Private::AddContentError::Unparsed:
         case Private::AddContentError::Unexpected:

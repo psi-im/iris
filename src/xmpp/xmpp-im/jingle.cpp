@@ -914,9 +914,15 @@ namespace XMPP { namespace Jingle {
                                                XMPP::Stanza::Error::ErrorCond::ResourceConstraint);
             return nullptr;
         }
-        auto key = qMakePair(from, jingle.sid());
-        auto s   = new Session(this, from, Origin::Responder);
-        if (s->incomingInitiate(jingle, jingleEl)) { // if parsed well
+        auto              key = qMakePair(from, jingle.sid());
+        auto              s   = new Session(this, from, Origin::Responder);
+        QPointer<Session> session(s);
+        const bool        parsed = s->incomingInitiate(jingle, jingleEl);
+        if (!session) {
+            d->lastError = Stanza::Error(Stanza::Error::ErrorType::Cancel, Stanza::Error::ErrorCond::UnexpectedRequest);
+            return nullptr;
+        }
+        if (parsed) { // if parsed well
             d->sessions.insert(key, s);
             d->setupSession(s);
             // emit incomingSession makes sense when there are no unsolved conflicts in content descriptions /
