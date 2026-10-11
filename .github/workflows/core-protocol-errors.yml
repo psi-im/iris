@@ -27,12 +27,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: ./.github/actions/load-dependencies
-        with:
-          qca-asset: qca3-deb-ubuntu-24.04.zip
-          install-mode: apt
-          qca-directory: qca-release
-
       - name: Install build dependencies
         shell: bash
         run: |
@@ -40,6 +34,12 @@ jobs:
           sudo apt-get install -y cmake ninja-build zlib1g-dev qt6-base-dev libssl-dev
 
 
+
+      - uses: ./.github/actions/load-dependencies
+        with:
+          qca-asset: qca3-deb-ubuntu-24.04.zip
+          install-mode: apt
+          qca-directory: qca-release
 
       # Build only the core regression executable. Other historical Jingle
       # tests may require unrelated API migrations and must not block this check.
