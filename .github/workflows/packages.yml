@@ -27,7 +27,6 @@ jobs:
       source_ref: ${{ steps.resolve.outputs.source_ref }}
       source_sha: ${{ steps.resolve.outputs.source_sha }}
       version: ${{ steps.resolve.outputs.version }}
-      qca_tag: ${{ steps.resolve.outputs.qca_tag }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -68,7 +67,6 @@ jobs:
           echo "source_ref=$source_ref" >> "$GITHUB_OUTPUT"
           echo "source_sha=$source_sha" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "qca_tag=$QCA_TAG" >> "$GITHUB_OUTPUT"
           echo "Packaging $source_ref as Iris $version"
           jq -n --arg sha "$source_sha" --arg version "$version" \
             '{source_sha: $sha, version: $version}' > "$RUNNER_TEMP/iris-package-source.json"
@@ -107,12 +105,17 @@ jobs:
           ref: ${{ github.sha }}
           path: packaging-workflow
 
+      - name: Stage shared dependency installer from workflow revision
+        shell: bash
+        run: |
+          mkdir -p .github/actions/load-dependencies
+          cp packaging-workflow/.github/actions/load-dependencies/action.yml .github/actions/load-dependencies/action.yml
+
       - name: Build, package and smoke-test Iris
         uses: ./packaging-workflow/.github/actions/build-iris-deb
         with:
           distribution: ubuntu-${{ matrix.ubuntu-version }}
           version: ${{ needs.version.outputs.version }}
-          qca-tag: ${{ needs.version.outputs.qca_tag }}
 
   debian:
     name: Debian 13 (amd64)
@@ -126,7 +129,7 @@ jobs:
           set -euo pipefail
           export DEBIAN_FRONTEND=noninteractive
           apt-get -o Acquire::http::Timeout=30 -o Acquire::Retries=2 -o APT::Update::Error-Mode=any update
-          apt-get install -y --no-install-recommends ca-certificates git sudo build-essential gh
+          apt-get install -y --no-install-recommends ca-certificates git sudo build-essential gh python3 jq
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.version.outputs.source_sha }}
@@ -142,12 +145,17 @@ jobs:
           ref: ${{ github.sha }}
           path: packaging-workflow
 
+      - name: Stage shared dependency installer from workflow revision
+        shell: bash
+        run: |
+          mkdir -p .github/actions/load-dependencies
+          cp packaging-workflow/.github/actions/load-dependencies/action.yml .github/actions/load-dependencies/action.yml
+
       - name: Build, package and smoke-test Iris
         uses: ./packaging-workflow/.github/actions/build-iris-deb
         with:
           distribution: debian-13
           version: ${{ needs.version.outputs.version }}
-          qca-tag: ${{ needs.version.outputs.qca_tag }}
 
   desktop-sdk:
     needs: version
@@ -173,12 +181,23 @@ jobs:
         run: |
           printf '%s\n' "${{ needs.version.outputs.version }}" > .version
 
+      - name: Checkout packaging workflow helpers
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: packaging-workflow
+
+      - name: Stage shared dependency installer from workflow revision
+        shell: bash
+        run: |
+          mkdir -p .github/actions/load-dependencies
+          cp packaging-workflow/.github/actions/load-dependencies/action.yml .github/actions/load-dependencies/action.yml
+
       - name: Build, install and smoke-test Iris SDK
-        uses: ./.github/actions/build-iris-desktop
+        uses: ./packaging-workflow/.github/actions/build-iris-desktop
         with:
           qt-version: ${{ env.QT_VERSION }}
           platform: ${{ matrix.platform }}
-          qca-tag: ${{ needs.version.outputs.qca_tag }}
           install-prefix: ${{ github.workspace }}/sdk
 
       - name: Stage SDK licenses
@@ -225,16 +244,27 @@ jobs:
         run: |
           printf '%s\n' "${{ needs.version.outputs.version }}" > .version
 
+      - name: Checkout packaging workflow helpers
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: packaging-workflow
+
+      - name: Stage shared dependency installer from workflow revision
+        shell: bash
+        run: |
+          mkdir -p .github/actions/load-dependencies
+          cp packaging-workflow/.github/actions/load-dependencies/action.yml .github/actions/load-dependencies/action.yml
+
       - name: Build and install Iris SDK
         id: build-iris
-        uses: ./.github/actions/build-iris-android
+        uses: ./packaging-workflow/.github/actions/build-iris-android
         with:
           qt-version: ${{ env.ANDROID_QT_VERSION }}
           qt-arch: ${{ matrix.qt_arch }}
           abi: ${{ matrix.abi }}
           ndk-version: ${{ env.ANDROID_NDK_VERSION }}
           android-api: ${{ env.ANDROID_API }}
-          qca-tag: ${{ needs.version.outputs.qca_tag }}
           install-prefix: ${{ github.workspace }}/sdk
           build-type: RelWithDebInfo
 

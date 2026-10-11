@@ -28,8 +28,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: ./.github/actions/load-dependencies
-
       - name: Install build and Prosody dependencies
         shell: bash
         run: |
@@ -38,19 +36,13 @@ jobs:
           sudo systemctl stop prosody.service 2>/dev/null || true
           sudo service prosody stop 2>/dev/null || true
 
-      - name: Install QCA3 release packages
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          rm -rf qca-release qca3.zip
-          mkdir qca-release
-          gh release download "$QCA_TAG" --repo psi-im/qca \
-            -p 'qca3-deb-ubuntu-24.04.zip' -O qca3.zip
-          (cd qca-release && cmake -E tar xvf ../qca3.zip)
-          test -n "$(find qca-release -type f -name '*.deb' -print -quit)"
-          sudo apt-get install -y ./qca-release/*.deb
+
+
+      - uses: ./.github/actions/load-dependencies
+        with:
+          qca-asset: qca3-deb-ubuntu-24.04.zip
+          install-mode: apt
+          qca-directory: qca-release
 
       - name: Build live JinglePub client
         shell: bash

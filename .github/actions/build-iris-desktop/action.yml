@@ -8,9 +8,6 @@ inputs:
   platform:
     description: QCA SDK platform name
     required: true
-  qca-tag:
-    description: QCA release tag
-    required: true
   install-prefix:
     description: CMake install prefix
     required: true
@@ -38,18 +35,12 @@ runs:
       with:
         arch: x64
 
-    - name: Download QCA3 SDK
-      shell: bash
-      env:
-        GH_TOKEN: ${{ github.token }}
-      run: |
-        set -euo pipefail
-        rm -rf qca-sdk qca3.zip
-        mkdir qca-sdk
-        gh release download "${{ inputs.qca-tag }}" --repo psi-im/qca \
-          -p "qca3-qt6-${{ inputs.platform }}.zip" -O qca3.zip
-        (cd qca-sdk && cmake -E tar xvf ../qca3.zip)
-        test -n "$(find qca-sdk -type f \( -name 'Qca3-qt6Config.cmake' -o -name 'qca3-qt6-config.cmake' \) -print -quit)"
+    - name: Install pinned QCA SDK
+      uses: ./.github/actions/load-dependencies
+      with:
+        qca-asset: qca3-qt6-${{ inputs.platform }}.zip
+        install-mode: sdk
+        qca-directory: qca-sdk
 
     - name: Resolve Windows vcpkg cache key
       if: runner.os == 'Windows'

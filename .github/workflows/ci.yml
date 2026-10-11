@@ -43,8 +43,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: ./.github/actions/load-dependencies
-
       - name: Test release packaging selection
         if: matrix.name == 'qt5-qca2'
         run: python3 -m unittest discover -s tests/workflows -v
@@ -55,19 +53,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build zlib1g-dev libusrsctp-dev ${{ matrix.deps }}
 
-      - name: Install QCA3 release packages
-        if: matrix.qca == 'qca3'
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          mkdir qca-release
-          gh release download "$QCA_TAG" --repo psi-im/qca \
-            -p 'qca3-deb-ubuntu-24.04.zip' -O qca3.zip
-          (cd qca-release && cmake -E tar xvf ../qca3.zip)
-          test -n "$(find qca-release -type f -name '*.deb' -print -quit)"
-          sudo apt-get install -y ./qca-release/*.deb
+
+
+      - uses: ./.github/actions/load-dependencies
+        with:
+          qca-asset: ${{ matrix.qca == 'qca3' && 'qca3-deb-ubuntu-24.04.zip' || '' }}
+          install-mode: ${{ matrix.qca == 'qca3' && 'apt' || 'none' }}
+          qca-directory: qca-release
 
       - name: Configure
         shell: bash
@@ -128,14 +120,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: ./.github/actions/load-dependencies
-
       - name: Build, install and smoke-test Iris
         uses: ./.github/actions/build-iris-desktop
         with:
           qt-version: ${{ env.QT_VERSION }}
           platform: ${{ matrix.platform }}
-          qca-tag: ${{ env.QCA_TAG }}
           install-prefix: ${{ github.workspace }}/sdk
 
   android:
@@ -154,8 +143,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: ./.github/actions/load-dependencies
-
       - name: Build and install Iris
         id: build-iris
         uses: ./.github/actions/build-iris-android
@@ -165,7 +152,6 @@ jobs:
           abi: ${{ matrix.abi }}
           ndk-version: ${{ env.ANDROID_NDK_VERSION }}
           android-api: ${{ env.ANDROID_API }}
-          qca-tag: ${{ env.QCA_TAG }}
           install-prefix: ${{ github.workspace }}/sdk
 
       - name: Compile installed CMake consumer

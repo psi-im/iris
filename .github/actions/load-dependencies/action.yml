@@ -1,11 +1,31 @@
-name: Load dependency versions
-description: Export the repository dependency lock into the current GitHub Actions job
+name: Load locked QCA dependency
+description: Read dependencies.lock.json, verify its QCA revision and install the exact release asset
+
+inputs:
+  lock-path:
+    description: Path to the dependency lock relative to the workspace (for git submodule consumers)
+    required: false
+    default: dependencies.lock.json
+  qca-asset:
+    description: QCA release asset name (empty means resolve only)
+    required: false
+    default: ''
+  install-mode:
+    description: none, apt (Debian packages), or sdk (extract the platform SDK)
+    required: false
+    default: none
+  qca-directory:
+    description: Extraction directory for an SDK or Debian packages
+    required: false
+    default: qca-sdk
 
 runs:
   using: composite
   steps:
-    - name: Export dependency lock
+    - name: Export QCA lock metadata
       shell: bash
+      env:
+        QCA_LOCK_PATH: ${{ inputs.lock-path }}
       run: |
         set -euo pipefail
         python3 - <<'PY'
@@ -14,25 +34,101 @@ runs:
         import re
         from pathlib import Path
 
-        lock_path = Path(os.environ["GITHUB_WORKSPACE"]) / "dependencies.lock.json"
-        data = json.loads(lock_path.read_text(encoding="utf-8"))
+        lock_path = Path(os.environ["GITHUB_WORKSPACE"]) / os.environ["QCA_LOCK_PATH"]
+        data = json.loads(lock_path.read_text(encoding="utf-8"))["qca"]
         values = {
-            "QCA_TAG": data["qca"]["tag"],
-            "QCA_COMMIT": data["qca"]["commit"],
-            "QCA_MIN_VERSION": data["qca"]["minimum_version"],
+            "QCA_TAG": data["tag"],
+            "QCA_COMMIT": data["commit"],
+            "QCA_MIN_VERSION": data["minimum_version"],
         }
-
-        for name, value in values.items():
-            if not isinstance(value, str) or not value or "\n" in value or "\r" in value:
-                raise SystemExit(f"Invalid dependency lock value for {name}")
-
+        if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", values["QCA_TAG"]):
+            raise SystemExit("Invalid QCA release tag")
         if not re.fullmatch(r"[0-9a-f]{40}", values["QCA_COMMIT"]):
-            raise SystemExit("QCA_COMMIT must be a full lowercase Git SHA")
-
+            raise SystemExit("Invalid QCA commit SHA")
         if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", values["QCA_MIN_VERSION"]):
-            raise SystemExit("QCA_MIN_VERSION must be a numeric X.Y.Z string")
+            raise SystemExit("Invalid minimum QCA version")
+        selected = tuple(map(int, values["QCA_TAG"][1:].split(".")))
+        minimum = tuple(map(int, values["QCA_MIN_VERSION"].split(".")))
+        if selected < minimum:
+            raise SystemExit("Locked QCA release is older than the supported runtime minimum")
 
         with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env:
             for name, value in values.items():
                 env.write(f"{name}={value}\n")
+        print(f"Pinned QCA: {values['QCA_TAG']} ({values['QCA_COMMIT']}); runtime minimum {values['QCA_MIN_VERSION']}")
         PY
+
+    - name: Check selected artifact mode
+      if: inputs.install-mode != 'none' || inputs.qca-asset != ''
+      shell: bash
+      env:
+        QCA_ASSET: ${{ inputs.qca-asset }}
+        QCA_INSTALL_MODE: ${{ inputs.install-mode }}
+        QCA_DIRECTORY: ${{ inputs.qca-directory }}
+      run: |
+        set -euo pipefail
+        [[ "$QCA_INSTALL_MODE" == apt || "$QCA_INSTALL_MODE" == sdk ]] || {
+          echo "::error::Invalid QCA install mode" >&2; exit 1;
+        }
+        [[ "$QCA_ASSET" =~ ^qca3-(deb-(ubuntu-(24\.04|26\.04)|debian-13)|qt(5|6)-(windows-x64|macos-(arm64|x86_64)|android-(arm64-v8a|x86_64|x86)))\.zip$ ]] || {
+          echo "::error::Unexpected QCA release asset: $QCA_ASSET" >&2; exit 1;
+        }
+        if [[ "$QCA_INSTALL_MODE" == apt && "$QCA_ASSET" != qca3-deb-* ]]; then
+          echo "::error::Expected Debian QCA packages" >&2; exit 1;
+        fi
+        if [[ "$QCA_INSTALL_MODE" == sdk && "$QCA_ASSET" == qca3-deb-* ]]; then
+          echo "::error::Expected a QCA SDK archive" >&2; exit 1;
+        fi
+        [[ -n "$QCA_DIRECTORY" && "$QCA_DIRECTORY" != / && "$QCA_DIRECTORY" != . ]] || exit 1
+
+    - name: Verify release tag resolves to pinned commit
+      if: inputs.install-mode != 'none'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        ref=$(gh api "repos/psi-im/qca/git/ref/tags/$QCA_TAG")
+        type=$(jq -r '.object.type' <<< "$ref")
+        sha=$(jq -r '.object.sha' <<< "$ref")
+        if [[ "$type" == tag ]]; then
+          sha=$(gh api "repos/psi-im/qca/git/tags/$sha" --jq '.object.sha')
+        elif [[ "$type" != commit ]]; then
+          echo "::error::Unsupported QCA tag object type: $type" >&2
+          exit 1
+        fi
+        if [[ "$sha" != "$QCA_COMMIT" ]]; then
+          echo "::error::QCA $QCA_TAG resolves to $sha, not locked $QCA_COMMIT" >&2
+          exit 1
+        fi
+
+    - name: Download exact QCA release asset
+      if: inputs.install-mode != 'none'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        QCA_ASSET: ${{ inputs.qca-asset }}
+        QCA_DIRECTORY: ${{ inputs.qca-directory }}
+        QCA_INSTALL_MODE: ${{ inputs.install-mode }}
+      run: |
+        set -euo pipefail
+        rm -rf "$QCA_DIRECTORY"
+        mkdir -p "$QCA_DIRECTORY"
+        archive="$PWD/iris-qca-release.zip"
+        gh release download "$QCA_TAG" --repo psi-im/qca -p "$QCA_ASSET" -O "$archive"
+        (cd "$QCA_DIRECTORY" && cmake -E tar xvf "$archive")
+        rm -f "$archive"
+        if [[ "$QCA_INSTALL_MODE" == apt ]]; then
+          test -n "$(find "$QCA_DIRECTORY" -type f -name '*.deb' -print -quit)"
+        else
+          test -n "$(find "$QCA_DIRECTORY" -type f \( -name 'Qca3-qt6Config.cmake' -o -name 'Qca3-qt5Config.cmake' -o -name 'qca3-qt6-config.cmake' -o -name 'qca3-qt5-config.cmake' \) -print -quit)"
+        fi
+
+    - name: Install pinned QCA Debian packages
+      if: inputs.install-mode == 'apt'
+      shell: bash
+      env:
+        QCA_DIRECTORY: ${{ inputs.qca-directory }}
+      run: |
+        set -euo pipefail
+        sudo apt-get install -y ./"$QCA_DIRECTORY"/*.deb
