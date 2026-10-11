@@ -1,0 +1,67 @@
+name: XMPP core error regressions
+
+on:
+  pull_request:
+    paths:
+      - 'src/xmpp/xmpp-core/**'
+      - 'tests/jingle/coreprotocolerrors.cpp'
+      - 'tests/jingle/CMakeLists.txt'
+      - '.github/workflows/core-protocol-errors.yml'
+  push:
+    branches: [master]
+    paths:
+      - 'src/xmpp/xmpp-core/**'
+      - 'tests/jingle/coreprotocolerrors.cpp'
+      - 'tests/jingle/CMakeLists.txt'
+      - '.github/workflows/core-protocol-errors.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  protocol-errors:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: ./.github/actions/load-dependencies
+
+      - name: Install build dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build zlib1g-dev qt6-base-dev libssl-dev
+
+      - name: Install pinned QCA3 release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir qca-release
+          gh release download "$QCA_TAG" --repo psi-im/qca \
+            -p 'qca3-deb-ubuntu-24.04.zip' -O qca3.zip
+          (cd qca-release && cmake -E tar xvf ../qca3.zip)
+          sudo apt-get install -y ./qca-release/*.deb
+
+      # Build only the core regression executable. Other historical Jingle
+      # tests may require unrelated API migrations and must not block this check.
+      - name: Configure
+        run: |
+          cmake -S tests/jingle -B build-core -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DUSE_QT6=ON \
+            -DIRIS_SYSTEM_QCA=3 \
+            -DIRIS_BUNDLED_QCA=OFF \
+            -DIRIS_ENABLE_OMEMO=OFF \
+            -DIRIS_BUNDLED_USRSCTP=OFF \
+            -DIRIS_ENABLE_JINGLE_SCTP=OFF
+
+      - name: Build core XMPP regression test
+        run: cmake --build build-core --parallel 4 --target core_protocol_errors_test
+
+      - name: Test core XMPP error conditions
+        run: ctest --test-dir build-core --output-on-failure -R '^core_protocol_errors$'
