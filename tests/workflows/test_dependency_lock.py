@@ -96,7 +96,7 @@ file(WRITE "${CMAKE_BINARY_DIR}/selected-ref" "${IRIS_BUNDLED_QCA_GIT_TAG}")
 class DependencyEnvironment(unittest.TestCase):
     def run_loader(self, tag, commit, minimum_version="3.0.10"):
         action = (ROOT / '.github/actions/load-dependencies/action.yml').read_text()
-        script = textwrap.dedent(action.split('      run: |\n', 1)[1])
+        script = textwrap.dedent(action.split('      run: |\n', 1)[1].split('\n    - name:', 1)[0])
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / 'dependencies.lock.json').write_text(json.dumps(
