@@ -34,7 +34,8 @@ static void beginClient(CoreProtocol &protocol, const QByteArray &features)
     check(protocol.processStep() && protocol.event == BasicProtocol::EFeatures, "Failed to parse stream features");
 }
 
-static BasicProtocol::SASLCond saslFailure(const QByteArray &failure)
+static BasicProtocol::SASLCond saslFailure(const QByteArray &failure,
+                                           QHash<QString, QString> *localizedDescriptions = nullptr)
 {
     CoreProtocol protocol;
     beginClient(protocol, QByteArrayLiteral(
@@ -49,6 +50,8 @@ static BasicProtocol::SASLCond saslFailure(const QByteArray &failure)
     check(protocol.processStep() && protocol.event == XmlProtocol::EError, "Missing SASL failure event");
     check(protocol.errorCode == BasicProtocol::ErrAuth, "Wrong SASL error code");
     check(protocol.errCond.has_value(), "SASL failure left errCond disengaged");
+    if (localizedDescriptions)
+        *localizedDescriptions = protocol.errLangText;
     const auto *cond = std::get_if<BasicProtocol::SASLCond>(&*protocol.errCond);
     check(cond != nullptr, "Wrong SASL error condition type");
     return *cond;
@@ -81,6 +84,19 @@ static void testSasl()
     check(saslFailure("<failure xmlns='" + ns + "'><text>Try later</text>"
                       "<account-disabled/></failure>") == Cond::AccountDisabled,
           "Text preceding SASL condition masked condition");
+
+    // Exact SASL failure payload from a real Psi crash. The server
+    // violates RFC 6120's condition-before-text ordering; that must not
+    // cause the protocol or ClientStream to dereference an empty optional.
+    QHash<QString, QString> descriptions;
+    check(saslFailure(QByteArrayLiteral(
+                          "<failure xmlns='urn:ietf:params:xml:ns:xmpp-sasl'>"
+                          "<text xml:lang='en'>Invalid username or password</text>"
+                          "<not-authorized/></failure>"),
+                      &descriptions) == Cond::NotAuthorized,
+          "Real-world text-first SASL failure was not recognized");
+    check(descriptions.value(QStringLiteral("en")) == QStringLiteral("Invalid username or password"),
+          "SASL failure lost xml:lang on its description");
     check(saslFailure("<failure xmlns='" + ns + "'><new-condition/></failure>") == Cond::NotAuthorized,
           "Unknown SASL condition must be treated as not-authorized (RFC 6120)");
     check(saslFailure("<failure xmlns='" + ns + "'><text>Only text</text></failure>")
@@ -116,7 +132,9 @@ static void testStream()
     check(protocol.processStep() && protocol.event == XmlProtocol::ESend, "Failed to send stream header");
     protocol.addIncomingData(streamOpen()
                              + "<stream:error><s:future-condition "
-                               "xmlns:s='urn:ietf:params:xml:ns:xmpp-streams'/></stream:error>");
+                               "xmlns:s='urn:ietf:params:xml:ns:xmpp-streams'/>"
+                               "<text xmlns='urn:ietf:params:xml:ns:xmpp-streams' "
+                               "xml:lang='en'>Unknown failure</text></stream:error>");
     check(protocol.processStep() && protocol.event == XmlProtocol::ERecvOpen, "Failed to parse stream header");
     check(protocol.processStep() && protocol.event == XmlProtocol::EError, "Missing stream error event");
     check(protocol.errorCode == BasicProtocol::ErrStream, "Wrong stream error code");
@@ -125,6 +143,8 @@ static void testStream()
               && std::get<BasicProtocol::StreamCond>(*protocol.errCond)
                   == BasicProtocol::StreamCond::UndefinedCondition,
           "Unknown stream condition was not normalized");
+    check(protocol.errLangText.value(QStringLiteral("en")) == QStringLiteral("Unknown failure"),
+          "Stream error lost xml:lang on its description");
 }
 
 int main(int argc, char **argv)
