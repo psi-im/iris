@@ -28,6 +28,10 @@ jobs:
           fetch-depth: 0
 
       - uses: ./.github/actions/load-dependencies
+        with:
+          qca-asset: qca3-deb-ubuntu-24.04.zip
+          install-mode: apt
+          qca-directory: qca-release
 
       - name: Install build dependencies
         shell: bash
@@ -35,17 +39,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build zlib1g-dev qt6-base-dev libssl-dev
 
-      - name: Install pinned QCA3 release
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          mkdir qca-release
-          gh release download "$QCA_TAG" --repo psi-im/qca \
-            -p 'qca3-deb-ubuntu-24.04.zip' -O qca3.zip
-          (cd qca-release && cmake -E tar xvf ../qca3.zip)
-          sudo apt-get install -y ./qca-release/*.deb
+
 
       # Build only the core regression executable. Other historical Jingle
       # tests may require unrelated API migrations and must not block this check.
