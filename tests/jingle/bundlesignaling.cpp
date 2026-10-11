@@ -206,7 +206,8 @@ static WireOffer makeOffer(Client &client, TcpPortReserver *reserver, J::RTP::Me
 
     QList<QPointer<J::ICE::Transport>> transports;
     for (auto application : applications) {
-        auto transport = QPointer<J::ICE::Transport>(qobject_cast<J::ICE::Transport *>(application->transport().data()));
+        auto transport
+            = QPointer<J::ICE::Transport>(qobject_cast<J::ICE::Transport *>(application->transport().data()));
         check(bool(transport), "caps-driven RTP selection did not choose ICE");
         check(transport->pad()->ns() == transportNamespace, "RTP BUNDLE selected a lower-priority ICE profile");
         transports.append(transport);
@@ -1094,7 +1095,8 @@ static void exerciseActiveFileTransferBundleExtension(const WireOffer &offer, Tc
     // locally before the queued ContentAccept can be serialized. Session must
     // roll back only the provisional membership before sending ContentReject.
     rejectedFt->prepare();
-    auto rejectedTransport = QPointer<J::ICE::Transport>(qobject_cast<J::ICE::Transport *>(rejectedFt->transport().data()));
+    auto rejectedTransport
+        = QPointer<J::ICE::Transport>(qobject_cast<J::ICE::Transport *>(rejectedFt->transport().data()));
     check(bool(rejectedTransport), "rollback fixture did not create ICE transport");
     bool  rejectedBound = false, rejectedRequired = false;
     auto *rejectedProvisional
@@ -1383,7 +1385,18 @@ static void exerciseInitiatorActiveBundleExtension(const WireOffer &transportSou
     check(session.updateFromXml(J::Action::ContentAccept, independentAnswer) && ft->state() == J::State::Pending
               && shared->generation.membershipRevision == revision,
           "unrelated independent acceptance disturbed the BUNDLE transaction");
+    QPointer<J::Transport> independentTransport = independent->transport();
+    check(independentTransport && icePad->d->liveAssociationCount() == 2,
+          "independent acceptance did not retain its own association");
     delete independent;
+    // The pad owns Transport; Application teardown schedules its deletion.
+    QCoreApplication::sendPostedEvents(independentTransport.data(), QEvent::DeferredDelete);
+    check(!independentTransport && shared->generation.membershipRevision == revision
+              && session.negotiatedGroupings().size() == 1
+              && session.negotiatedGroupings().first().contents
+                  == QStringList({ audio->contentName(), video->contentName() })
+              && icePad->d->liveAssociationCount() == 1,
+          "independent teardown changed BUNDLE membership or retained its association");
 
     check(session.updateFromXml(J::Action::ContentAccept, invalid),
           "corrected, fully bundled content-accept was rejected");
