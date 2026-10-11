@@ -26,12 +26,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: ./.github/actions/load-dependencies
-        with:
-          qca-asset: qca3-deb-ubuntu-24.04.zip
-          install-mode: apt
-          qca-directory: qca-release
-
       - name: Install build dependencies
         shell: bash
         run: |
@@ -47,6 +41,12 @@ jobs:
             iris-jingle-qca3-${{ runner.os }}-
 
 
+
+      - uses: ./.github/actions/load-dependencies
+        with:
+          qca-asset: qca3-deb-ubuntu-24.04.zip
+          install-mode: apt
+          qca-directory: qca-release
 
       - name: Configure
         shell: bash
@@ -112,12 +112,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: ./.github/actions/load-dependencies
-        with:
-          qca-asset: qca3-deb-ubuntu-24.04.zip
-          install-mode: apt
-          qca-directory: qca-release
-
       - name: Cache sanitizer compiler objects
         uses: actions/cache/restore@v4
         with:
@@ -133,6 +127,12 @@ jobs:
           sudo apt-get install -y cmake ninja-build ccache qt6-base-dev libssl-dev libusrsctp-dev
 
 
+
+      - uses: ./.github/actions/load-dependencies
+        with:
+          qca-asset: qca3-deb-ubuntu-24.04.zip
+          install-mode: apt
+          qca-directory: qca-release
 
       - name: Configure ASan and UBSan
         shell: bash
