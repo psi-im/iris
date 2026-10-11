@@ -27,7 +27,6 @@ jobs:
       source_ref: ${{ steps.resolve.outputs.source_ref }}
       source_sha: ${{ steps.resolve.outputs.source_sha }}
       version: ${{ steps.resolve.outputs.version }}
-      qca_tag: ${{ steps.resolve.outputs.qca_tag }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -68,7 +67,6 @@ jobs:
           echo "source_ref=$source_ref" >> "$GITHUB_OUTPUT"
           echo "source_sha=$source_sha" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "qca_tag=$QCA_TAG" >> "$GITHUB_OUTPUT"
           echo "Packaging $source_ref as Iris $version"
           jq -n --arg sha "$source_sha" --arg version "$version" \
             '{source_sha: $sha, version: $version}' > "$RUNNER_TEMP/iris-package-source.json"
@@ -112,7 +110,6 @@ jobs:
         with:
           distribution: ubuntu-${{ matrix.ubuntu-version }}
           version: ${{ needs.version.outputs.version }}
-          qca-tag: ${{ needs.version.outputs.qca_tag }}
 
   debian:
     name: Debian 13 (amd64)
@@ -147,7 +144,6 @@ jobs:
         with:
           distribution: debian-13
           version: ${{ needs.version.outputs.version }}
-          qca-tag: ${{ needs.version.outputs.qca_tag }}
 
   desktop-sdk:
     needs: version
@@ -178,7 +174,6 @@ jobs:
         with:
           qt-version: ${{ env.QT_VERSION }}
           platform: ${{ matrix.platform }}
-          qca-tag: ${{ needs.version.outputs.qca_tag }}
           install-prefix: ${{ github.workspace }}/sdk
 
       - name: Stage SDK licenses
@@ -234,7 +229,6 @@ jobs:
           abi: ${{ matrix.abi }}
           ndk-version: ${{ env.ANDROID_NDK_VERSION }}
           android-api: ${{ env.ANDROID_API }}
-          qca-tag: ${{ needs.version.outputs.qca_tag }}
           install-prefix: ${{ github.workspace }}/sdk
           build-type: RelWithDebInfo
 
