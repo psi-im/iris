@@ -43,12 +43,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: ./.github/actions/load-dependencies
-        with:
-          qca-asset: ${{ matrix.qca == 'qca3' && 'qca3-deb-ubuntu-24.04.zip' || '' }}
-          install-mode: ${{ matrix.qca == 'qca3' && 'apt' || 'none' }}
-          qca-directory: qca-release
-
       - name: Test release packaging selection
         if: matrix.name == 'qt5-qca2'
         run: python3 -m unittest discover -s tests/workflows -v
@@ -60,6 +54,12 @@ jobs:
           sudo apt-get install -y cmake ninja-build zlib1g-dev libusrsctp-dev ${{ matrix.deps }}
 
 
+
+      - uses: ./.github/actions/load-dependencies
+        with:
+          qca-asset: ${{ matrix.qca == 'qca3' && 'qca3-deb-ubuntu-24.04.zip' || '' }}
+          install-mode: ${{ matrix.qca == 'qca3' && 'apt' || 'none' }}
+          qca-directory: qca-release
 
       - name: Configure
         shell: bash
