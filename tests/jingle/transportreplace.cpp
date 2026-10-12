@@ -580,8 +580,8 @@ static void testTieBreakDominatesUnsupportedSibling(Client &client)
           "mixed tie-break/unsupported batch mutated current transports");
 }
 
-static void testActiveLocalTransportSwitchEmitsReplace(Client &client, Task *success,
-                                                      J::State previousTransportState)
+static void testLocalTransportSwitchEmitsReplace(Client &client, Task *success, J::State applicationState,
+                                                J::State previousTransportState)
 {
     J::Session session(client.jingleManager(), Jid(QStringLiteral("peer@example.test/device")), J::Origin::Initiator);
     auto oldTransport
@@ -590,7 +590,7 @@ static void testActiveLocalTransportSwitchEmitsReplace(Client &client, Task *suc
         = makeTransport(session, J::Origin::Initiator, J::State::ApprovedToSend, QStringLiteral("fallback-s5b"));
     nextTransport->setHasUpdates(true);
     auto app = addApplication(session, QStringLiteral("file"), J::Origin::Initiator, oldTransport,
-                              std::make_unique<TestSelector>(), nullptr, J::State::Active);
+                              std::make_unique<TestSelector>(), nullptr, applicationState);
 
     check(app->setTransport(nextTransport), "active content could not install fallback transport");
     check(app->replacePlanned(), "active content did not plan transport-replace after selecting fallback");
@@ -677,11 +677,14 @@ int main(int argc, char **argv)
     testUnknownTransportIsRejectedWithoutMutation(client);
     testDisabledAndSelectorRejectedReplaceRemainUnchanged(client);
     testTieBreakDominatesUnsupportedSibling(client);
-    // The session may become Active before ICE finishes connecting. The
-    // replacement still requires a new transport-replace IQ in every case.
-    for (const auto previousTransportState :
-         { J::State::ApprovedToSend, J::State::Pending, J::State::Active }) {
-        testActiveLocalTransportSwitchEmitsReplace(client, &success, previousTransportState);
+    // A negotiated content may be Connecting (numeric state 5) while its ICE
+    // transport is still below Unacked. Every new local transport must be
+    // introduced with transport-replace, not transport-info.
+    for (const auto applicationState : { J::State::Connecting, J::State::Active }) {
+        for (const auto previousTransportState :
+             { J::State::ApprovedToSend, J::State::Pending, J::State::Active }) {
+            testLocalTransportSwitchEmitsReplace(client, &success, applicationState, previousTransportState);
+        }
     }
     // A replacement after session activation must use the same Jingle
     // transaction as a replacement during initial connection setup.
