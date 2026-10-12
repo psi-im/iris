@@ -427,10 +427,19 @@ namespace XMPP { namespace Jingle {
             }
             break;
         case State::Active:
-            // Preserve the action priority defined by Action: flush transport
-            // updates before changing media direction.
+            // An established content can switch transports too (e.g. FT from
+            // ICE/SCTP to S5B). The first stanza for a new local transport
+            // MUST be transport-replace, not transport-info, and a remotely
+            // initiated replacement needs transport-accept once prepared.
+            // Flush transport signaling before changing media direction.
             if (_transport->hasUpdates()) {
-                _update = { Action::TransportInfo, Reason() };
+                if (_pendingTransportReplace == PendingTransportReplace::Planned)
+                    _update = { Action::TransportReplace, _transportReplaceReason };
+                else if (inTrReplace && !_transport->isLocal()
+                         && _transport->state() == State::ApprovedToSend)
+                    _update = { Action::TransportAccept, Reason() };
+                else
+                    _update = { Action::TransportInfo, Reason() };
             } else if (_requestedSenders && !_sendersUpdateInFlight) {
                 if (*_requestedSenders == _senders)
                     _requestedSenders.reset();
