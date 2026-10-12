@@ -1,7 +1,8 @@
 # End-to-end encryption for Jingle sessions
 
 Design notes for an "end-to-end required" policy on Jingle sessions: what the deployed clients
-do, what Iris has, and how Iris and Psi should implement it. Nothing here is implemented yet.
+do, what Iris has, and how Iris and Psi implement it. Implemented so far: the OMEMO primitives
+(step 1 of the plan).
 
 ## Goal
 
@@ -107,9 +108,20 @@ Conversations `Content.setSecurity()/getSecurity()`, `JingleFileTransferConnecti
 - `OmemoEncryption` (`xmpp_omemo.h`) implements OMEMO 2 and the legacy profile, but as an
   `EncryptionMethod` it only offers `XmppStanza`. Internally the legacy path already supports a
   message without payload (key transport) and per-device key encryption.
-- Missing public API: encrypt a payload or a key for a bare JID and a set of devices (one device
-  for DTLS verification, all for JET) and return the `<encrypted/>` element; decrypt such an
-  element and return the plaintext or key, the sender device and its trust level.
+- `OmemoEncryption::encryptElement()`/`decryptElement()` encrypt one element for a peer outside
+  of a message and decrypt it, in either profile:
+  - only devices of the peer are targets (all, or the given ones), never the account's own;
+  - legacy: the element's text is the payload (the fingerprint of Conversations' DTLS
+    verification); without an element the result is a key transport message whose key and IV
+    are returned as `transportKey`/`transportIv` (the JET-OMEMO envelope);
+  - OMEMO 2: the element travels in an SCE envelope bound to both bare JIDs;
+  - decryption returns the content (legacy: `<payload/>` with the text, or nothing for a key
+    transport message), the sender device, its identity key and its trust level.
+
+  They reuse the message path (device lists, sessions, trust) on a message that is never sent.
+  `tests/jingle/omemoelement.cpp` runs them between two clients over an in-memory PEP service:
+  one-device encryption and the answer, a forged sender, legacy key transport, and OMEMO 2
+  refusing an empty element.
 - No JET, no DTLS fingerprint verification, no session-level security policy.
 
 ## Plan
