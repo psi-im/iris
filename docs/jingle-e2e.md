@@ -34,7 +34,8 @@ and it adds no protection for the media: only the DTLS fingerprint needs authent
 ## What Conversations and Dino do
 
 Read from the sources of Conversations (`bf3269cd`, 2026-09-28) and Dino (`8d49d83b`, 2026-08-21).
-Both use the legacy OMEMO profile (`eu.siacs.conversations.axolotl`).
+Both use the legacy OMEMO profile (`eu.siacs.conversations.axolotl`); neither implements OMEMO 2
+(`urn:xmpp:omemo:2`) at these revisions.
 
 ### OMEMO-verified DTLS fingerprints (calls)
 
@@ -114,8 +115,14 @@ Conversations `Content.setSecurity()/getSecurity()`, `JingleFileTransferConnecti
 ## Plan
 
 1. **OMEMO primitives.** Public API on `OmemoEncryption` for single-element encryption and
-   decryption (legacy profile first, for compatibility; OMEMO 2 once a specification exists), with
-   trust checks: an end-to-end session requires a trusted device under the user's trust settings.
+   decryption in both profiles, with trust checks: an end-to-end session requires a trusted device
+   under the user's trust settings. The profile is chosen per peer from its capabilities
+   (`OmemoEncryption::protocolsFor()`): OMEMO 2 when the peer advertises it **and** a feature
+   saying it handles OMEMO 2 inside Jingle (for now a Psi feature, later one of a XEP), since
+   OMEMO 2 support for messages does not imply it for JET or DTLS verification; otherwise the
+   legacy profile, which Conversations and Dino understand; otherwise no end-to-end protection.
+   For JET the chosen profile is visible in the `type` attribute of `<security/>`, which XEP-0396
+   already ties to the OMEMO namespace.
 2. **Session policy.** `Jingle::Session` gets an "end-to-end required" flag. Each transport
    reports its protection: none, encrypted but unauthenticated (DTLS with a plain fingerprint),
    end-to-end. Transport selection and fallback skip transports that cannot reach end-to-end
