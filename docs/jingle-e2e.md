@@ -1,8 +1,8 @@
 # End-to-end encryption for Jingle sessions
 
 Design notes for an "end-to-end required" policy on Jingle sessions: what the deployed clients
-do, what Iris has, and how Iris and Psi implement it. Implemented so far: the OMEMO primitives
-(step 1 of the plan).
+do, what Iris has, and how Iris and Psi implement it. Implemented so far: the OMEMO primitives,
+the session policy and OMEMO-verified DTLS fingerprints in Iris (steps 1–3 of the plan).
 
 ## Goal
 
@@ -122,11 +122,34 @@ Conversations `Content.setSecurity()/getSecurity()`, `JingleFileTransferConnecti
   `tests/jingle/omemoelement.cpp` runs them between two clients over an in-memory PEP service:
   one-device encryption and the answer, a forged sender, legacy key transport, and OMEMO 2
   refusing an empty element.
-- No JET, no DTLS fingerprint verification, no session-level security policy.
+- `Jingle::SignalingFilter` (registered with `Manager::addSignalingFilter()`) rewrites incoming and
+  outgoing `<jingle/>` elements asynchronously and adds extensions to outgoing XEP-0353
+  messages. While a filter works on an IQ of a session, later IQs of that session in the same
+  direction wait; without filters nothing changes. A filter error answers an incoming IQ, or fails
+  an outgoing one as if the peer had returned it; a refused `session-initiate` or `session-accept`
+  ends the session. `MessageInitiation` keeps foreign extensions (`extensions()`, `addExtension()`).
+- `Session::setEndToEndRequired()` is the local policy; `Session::peerAuthentication()` (method,
+  device, identity key, trust level) records who authenticated the peer's DTLS fingerprints.
+- `Jingle::OmemoDtlsVerification` (built with OMEMO) is that filter for OMEMO, in the wire format of
+  Conversations and Dino:
+  - outgoing `<proceed/>` gets our `<device/>`; the device in a received `<proceed/>` is the peer
+    device of that session;
+  - outgoing DTLS fingerprints of ICE transports (`ice:0` and `ice-udp:1`) are encrypted for that
+    device, in OMEMO 2 when the peer advertises it, otherwise in the legacy profile; without a
+    device they stay plain, unless the session requires end-to-end encryption;
+  - incoming encrypted fingerprints are decrypted and replaced by plain ones before Jingle sees
+    them; all of a session must come from one device, which then also receives our fingerprints;
+  - a session requiring end-to-end encryption refuses plain fingerprints, transports without DTLS,
+    untrusted devices and fingerprints it cannot encrypt, with `not-acceptable`.
+  `tests/jingle/omemodtls.cpp` runs a whiteboard on an ICE data channel between two clients in both
+  profiles: verified fingerprints only on the wire and a recorded authentication on both sides; a
+  session requiring end-to-end encryption without a peer device sends nothing and ends; without
+  the requirement fingerprints stay plain; a tampered fingerprint is refused.
+- No JET yet.
 
 ## Plan
 
-1. **OMEMO primitives.** Public API on `OmemoEncryption` for single-element encryption and
+1. **OMEMO primitives** (done). Public API on `OmemoEncryption` for single-element encryption and
    decryption in both profiles, with trust checks: an end-to-end session requires a trusted device
    under the user's trust settings. The profile is chosen per peer from its capabilities
    (`OmemoEncryption::preferredProtocolFor()`): OMEMO 2 when the peer advertises it, otherwise the
@@ -134,12 +157,12 @@ Conversations `Content.setSecurity()/getSecurity()`, `JingleFileTransferConnecti
    that supports OMEMO 2 is expected to accept it wherever it accepts the legacy `<encrypted/>`
    element. For JET the profile is also named by the `type` attribute of `<security/>`, which
    XEP-0396 ties to the OMEMO namespace.
-2. **Session policy.** `Jingle::Session` gets an "end-to-end required" flag. Each transport
+2. **Session policy** (done in Iris; applications set it). `Jingle::Session` gets an "end-to-end required" flag. Each transport
    reports its protection: none, encrypted but unauthenticated (DTLS with a plain fingerprint),
    end-to-end. Transport selection and fallback skip transports that cannot reach end-to-end
    under the policy; a content that ends up without protection is rejected or removed with
    `security-error`, and the application shows why.
-3. **OMEMO-verified DTLS.** Compatible with Conversations and Dino: the device id in XEP-0353
+3. **OMEMO-verified DTLS** (done in Iris; Psi has to create the filter and show the result). Compatible with Conversations and Dino: the device id in XEP-0353
    `<proceed/>`, encrypted fingerprints in `session-initiate`, `session-accept`, `content-add`,
    `content-accept` and `transport-replace` of ICE transports. Iris also applies it to `ice:0`
    transports and to SCTP data channels (file transfer, whiteboards), which share the DTLS

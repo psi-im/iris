@@ -25,6 +25,7 @@
 #include "xmpp/jid/jid.h"
 #include "xmpp_caps.h"
 #include "xmpp_client.h"
+#include "xmpp_stream.h"
 #include "xmpp_task.h"
 #include "xmpp_xmlcommon.h"
 
@@ -66,7 +67,27 @@ namespace XMPP { namespace Jingle {
             iq_.appendChild(jingleEl);
         }
 
-        void onGo() { send(iq_); }
+        void onGo()
+        {
+            // Signaling filters may rewrite the IQ (e.g. encrypt DTLS fingerprints) or refuse it.
+            QPointer<JT> guard(this);
+            client()->jingleManager()->sendFiltered(
+                to_, iq_, [guard](const QDomElement &iq, const std::optional<XMPP::Stanza::Error> &error) {
+                    if (!guard)
+                        return;
+                    if (error) {
+                        // Fail as if the peer had answered with the error.
+                        auto       reply  = createIQ(guard->doc(), "error", guard->to_.full(), guard->id());
+                        const auto baseNS = guard->client()->hasStream() ? guard->client()->stream().baseNS()
+                                                                         : QStringLiteral("jabber:client");
+                        reply.appendChild(error->toXml(*guard->doc(), baseNS));
+                        guard->setError(reply);
+                        return;
+                    }
+                    guard->iq_ = iq;
+                    guard->send(iq);
+                });
+        }
 
         bool take(const QDomElement &x)
         {
@@ -161,12 +182,14 @@ namespace XMPP { namespace Jingle {
         Jid     origFrom;   // "from" attr of IQ.
         Jid     otherParty; // either "from" or initiator/responder. it's where to send all requests.
         Jid     localParty; // that one will be set as initiator/responder if provided
-        bool    waitingAck               = false;
-        bool    needNotifyGroup          = false; // whenever grouping info changes
-        bool    groupingAllowed          = false;
-        bool    automaticGroupingEnabled = true;
-        bool    localGroupingsExplicit   = false;
-        bool    automaticGroupingsActive = false;
+        Session::PeerAuthentication peerAuthentication;
+        bool                        endToEndRequired         = false;
+        bool                        waitingAck               = false;
+        bool                        needNotifyGroup          = false; // whenever grouping info changes
+        bool                        groupingAllowed          = false;
+        bool                        automaticGroupingEnabled = true;
+        bool                        localGroupingsExplicit   = false;
+        bool                        automaticGroupingsActive = false;
 
         void setSessionFinished()
         {
@@ -672,7 +695,10 @@ namespace XMPP { namespace Jingle {
                 QPointer<Session> session(q);
                 if (!jt->success()) {
                     qDebug("Session accept/initiate returned iq error");
-                    emit q->terminated();
+                    // The peer refused it, or a signaling filter did: the session and its contents end.
+                    if (!terminateReason.isValid())
+                        terminateReason = Reason(Reason::FailedApplication, jt->statusString());
+                    setSessionFinished();
                     return;
                 }
                 state = finalState;
@@ -2660,6 +2686,22 @@ namespace XMPP { namespace Jingle {
     Origin Session::peerRole() const { return negateOrigin(d->role); }
 
     Features Session::peerFeatures() const { return d->manager->client()->capsManager()->disco(peer()).features(); }
+
+    Session::PeerAuthentication Session::peerAuthentication() const { return d->peerAuthentication; }
+
+    void Session::setPeerAuthentication(const PeerAuthentication &authentication)
+    {
+        const auto &old = d->peerAuthentication;
+        if (old.method == authentication.method && old.deviceId == authentication.deviceId
+            && old.identityKey == authentication.identityKey && old.trustLevel == authentication.trustLevel)
+            return;
+        d->peerAuthentication = authentication;
+        emit peerAuthenticationChanged();
+    }
+
+    void Session::setEndToEndRequired(bool required) { d->endToEndRequired = required; }
+
+    bool Session::isEndToEndRequired() const { return d->endToEndRequired; }
 
     bool Session::checkPeerCaps(const QString &ns) const
     {

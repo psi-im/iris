@@ -15,6 +15,7 @@
 #include <QPointer>
 #include <QTextStream>
 #include <QtCrypto>
+#include <functional>
 
 using namespace XMPP;
 
@@ -162,6 +163,9 @@ QDomElement serve(const QDomElement &iq, const Jid &sender)
     return error(iq, QStringLiteral("service-unavailable"));
 }
 
+// Sees, and may change, every stanza on its way; for tests that include this fixture.
+std::function<void(const Endpoint &from, QDomElement &stanza)> onStanza;
+
 // Delivers stanzas between the endpoints and answers PEP and server IQs until everything is quiet.
 void pump(Endpoint &a, Endpoint &b)
 {
@@ -173,6 +177,8 @@ void pump(Endpoint &a, Endpoint &b)
             for (auto stanza : out) {
                 moved = true;
                 stanza.setAttribute(QStringLiteral("from"), from->jid.full());
+                if (onStanza)
+                    onStanza(*from, stanza);
                 if (qEnvironmentVariableIsSet("OMEMO_TEST_DUMP")) {
                     QString     xml;
                     QTextStream ts(&xml);
