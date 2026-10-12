@@ -117,12 +117,11 @@ Conversations `Content.setSecurity()/getSecurity()`, `JingleFileTransferConnecti
 1. **OMEMO primitives.** Public API on `OmemoEncryption` for single-element encryption and
    decryption in both profiles, with trust checks: an end-to-end session requires a trusted device
    under the user's trust settings. The profile is chosen per peer from its capabilities
-   (`OmemoEncryption::protocolsFor()`): OMEMO 2 when the peer advertises it **and** a feature
-   saying it handles OMEMO 2 inside Jingle (for now a Psi feature, later one of a XEP), since
-   OMEMO 2 support for messages does not imply it for JET or DTLS verification; otherwise the
-   legacy profile, which Conversations and Dino understand; otherwise no end-to-end protection.
-   For JET the chosen profile is visible in the `type` attribute of `<security/>`, which XEP-0396
-   already ties to the OMEMO namespace.
+   (`OmemoEncryption::preferredProtocolFor()`): OMEMO 2 when the peer advertises it, otherwise the
+   legacy profile (Conversations and Dino today), otherwise no end-to-end protection. A client
+   that supports OMEMO 2 is expected to accept it wherever it accepts the legacy `<encrypted/>`
+   element. For JET the profile is also named by the `type` attribute of `<security/>`, which
+   XEP-0396 ties to the OMEMO namespace.
 2. **Session policy.** `Jingle::Session` gets an "end-to-end required" flag. Each transport
    reports its protection: none, encrypted but unauthenticated (DTLS with a plain fingerprint),
    end-to-end. Transport selection and fallback skip transports that cannot reach end-to-end
