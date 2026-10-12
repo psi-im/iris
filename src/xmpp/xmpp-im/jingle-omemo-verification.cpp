@@ -279,6 +279,13 @@ namespace XMPP { namespace Jingle {
         }
         if (found.plain.isEmpty())
             return false;
+        // A responder has received the initiator's fingerprints before answering: they must have been
+        // verified by a trusted device.
+        if (required && session->role() == Origin::Responder
+            && (!session->peerAuthentication().isValid() || !trusted(session->peerAuthentication().trustLevel))) {
+            done({}, refusal(QStringLiteral("The peer's DTLS fingerprint is not verified by a trusted OMEMO device")));
+            return true;
+        }
         const auto device = peerDevice(to, sid);
         if (!device || !d->omemo || !d->omemo->isReady()) {
             if (!required)

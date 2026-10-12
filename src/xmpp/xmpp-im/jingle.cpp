@@ -858,6 +858,18 @@ namespace XMPP { namespace Jingle {
     void Manager::receiveFiltered(const QDomElement &iq)
     {
         if (d->filters.isEmpty()) {
+            // Nothing can protect the transports of a session that requires end-to-end encryption.
+            const auto jingle = iq.firstChildElement(QStringLiteral("jingle"));
+            const auto session
+                = this->session(Jid(iq.attribute(QStringLiteral("from"))), jingle.attribute(QStringLiteral("sid")));
+            if (session && session->isEndToEndRequired()
+                && !jingle.firstChildElement(QStringLiteral("content")).isNull()) {
+                d->pushTask->respondError(iq,
+                                          Stanza::Error(Stanza::Error::ErrorType::Cancel,
+                                                        Stanza::Error::ErrorCond::NotAcceptable,
+                                                        QStringLiteral("No end-to-end encryption available")));
+                return;
+            }
             d->pushTask->process(iq);
             return;
         }
@@ -885,7 +897,15 @@ namespace XMPP { namespace Jingle {
                           std::function<void(const QDomElement &, const std::optional<XMPP::Stanza::Error> &)> send)
     {
         if (d->filters.isEmpty()) {
-            send(iq, std::nullopt);
+            const auto jingle  = iq.firstChildElement(QStringLiteral("jingle"));
+            const auto session = this->session(to, jingle.attribute(QStringLiteral("sid")));
+            if (session && session->isEndToEndRequired()
+                && !jingle.firstChildElement(QStringLiteral("content")).isNull())
+                send({},
+                     Stanza::Error(Stanza::Error::ErrorType::Cancel, Stanza::Error::ErrorCond::NotAcceptable,
+                                   QStringLiteral("No end-to-end encryption available")));
+            else
+                send(iq, std::nullopt);
             return;
         }
         const auto        stored = d->filterDocument.importNode(iq, true).toElement();

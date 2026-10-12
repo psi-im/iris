@@ -85,11 +85,14 @@ struct Run {
     QPointer<SXE::Application> remote;
 };
 
-Run startSession(Endpoint &alice, Endpoint &bob, bool proceed, bool requireEndToEnd)
+Run startSession(Endpoint &alice, Endpoint &bob, bool proceed, bool requireEndToEnd, bool peerRequires = false)
 {
     Run        run;
     auto       connection = QObject::connect(bob.client.jingleManager(), &J::Manager::incomingSession, &bob.client,
-                                             [&run](J::Session *session) { run.peerSession = session; });
+                                             [&run, peerRequires](J::Session *session) {
+                                           run.peerSession = session;
+                                           session->setEndToEndRequired(peerRequires);
+                                       });
     const auto sid = QStringLiteral("omemo-dtls-") + QString::number(QRandomGenerator::global()->bounded(1000000));
     if (proceed) {
         bob.client.jingleManager()->sendMessageInitiation(
@@ -166,6 +169,23 @@ void exercise(Endpoint &alice, Endpoint &bob, bool omemo2)
     run.session->terminate(J::Reason::Success);
     pumpUntil(alice, bob, [] { return false; }, 200);
 
+    // The responder requires end-to-end encryption but the initiator's fingerprint is plain: the
+    // responder does not answer with its own.
+    int accepts = 0;
+    onStanza    = [&accepts](const Endpoint &, QDomElement &stanza) {
+        if (stanza.firstChildElement(QStringLiteral("jingle")).attribute(QStringLiteral("action"))
+            == QLatin1String("session-accept"))
+            ++accepts;
+    };
+    run = startSession(alice, bob, false, false, true);
+    pumpUntil(alice, bob, [&run] { return !run.peerSession || run.peerSession->state() == J::State::Finished; }, 5000);
+    check(accepts == 0, "a responder requiring end-to-end encryption accepted an unverified fingerprint");
+    check(!run.peerSession || run.peerSession->state() == J::State::Finished,
+          "the responder's unverifiable session did not end");
+    if (run.session)
+        run.session->terminate(J::Reason::Success);
+    pumpUntil(alice, bob, [] { return false; }, 200);
+
     // A tampered fingerprint is refused.
     onStanza = [](const Endpoint &, QDomElement &stanza) {
         const auto jingle = stanza.firstChildElement(QStringLiteral("jingle"));
@@ -216,6 +236,17 @@ int main(int argc, char **argv)
         exercise(alice, bob, false);
     if (protocols.testFlag(OmemoProtocol::Omemo2))
         exercise(alice, bob, true);
+
+    // Without a filter nothing can protect the transports: a session requiring it sends nothing.
+    alice.client.jingleManager()->removeSignalingFilter(&aliceVerification);
+    Wire unfiltered;
+    onStanza = [&unfiltered](const Endpoint &, QDomElement &stanza) { unfiltered.plain += inspect(stanza).plain; };
+    auto run = startSession(alice, bob, false, true);
+    pumpUntil(alice, bob, [&run] { return !run.session || run.session->state() == J::State::Finished; }, 5000);
+    check(unfiltered.plain == 0 && !run.peerSession && (!run.session || run.session->state() == J::State::Finished),
+          "a session requiring end-to-end encryption ran without a signaling filter");
+    onStanza = nullptr;
+    alice.client.jingleManager()->addSignalingFilter(&aliceVerification);
     QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
     qInfo("OMEMO DTLS verification tests passed");
     pep.clear();

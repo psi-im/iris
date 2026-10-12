@@ -140,11 +140,17 @@ Conversations `Content.setSecurity()/getSecurity()`, `JingleFileTransferConnecti
   - incoming encrypted fingerprints are decrypted and replaced by plain ones before Jingle sees
     them; all of a session must come from one device, which then also receives our fingerprints;
   - a session requiring end-to-end encryption refuses plain fingerprints, transports without DTLS,
-    untrusted devices and fingerprints it cannot encrypt, with `not-acceptable`.
+    untrusted devices and fingerprints it cannot encrypt, with `not-acceptable`. A responder
+    learns the requirement after the `session-initiate` has been parsed, so its answer is refused
+    unless the initiator's fingerprints were verified by a trusted device.
+- Without any signaling filter, Jingle IQs with contents of a session requiring end-to-end
+  encryption are refused in both directions: nothing can protect them.
   `tests/jingle/omemodtls.cpp` runs a whiteboard on an ICE data channel between two clients in both
   profiles: verified fingerprints only on the wire and a recorded authentication on both sides; a
   session requiring end-to-end encryption without a peer device sends nothing and ends; without
-  the requirement fingerprints stay plain; a tampered fingerprint is refused.
+  the requirement fingerprints stay plain; a responder requiring it does not answer a plain
+  fingerprint; a tampered fingerprint is refused; without a filter a session requiring it sends
+  nothing.
 - No JET yet.
 
 ## Plan
