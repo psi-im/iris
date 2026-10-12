@@ -28,6 +28,9 @@
 namespace XMPP { namespace Jingle { namespace SXE {
     extern IRIS_EXPORT const QString NS_TRANSPORT;      // urn:xmpp:jingle:transports:sxe
     extern IRIS_EXPORT const QString NS_SVG_WHITEBOARD; // urn:xmpp:jingle:apps:svg-whiteboard:0
+    /// Proposed disco feature: SXE payload on reliable, ordered message-oriented Jingle connections
+    /// (e.g. an ICE SCTP data channel), one <sxe/> element per message.
+    extern IRIS_EXPORT const QString NS_CONNECTIONS; // urn:xmpp:sxe:0#connections
 
     /// The initial document of a whiteboard session started without a user document.
     IRIS_EXPORT QDomDocument emptyWhiteboardDocument();
@@ -132,6 +135,11 @@ namespace XMPP { namespace Jingle { namespace SXE {
      * creator hosts the document: the joiner sends <connect/>, accepts the
      * <state-offer/> and imports the state before editing. Local edits are
      * made through document() and sent by Document::flush().
+     *
+     * Payload goes over a Jingle connection with reliable, ordered messages when
+     * both sides support it (NS_CONNECTIONS), otherwise in <message/> stanzas
+     * (NS_TRANSPORT). A failed connection is replaced by the message transport
+     * with transport-replace, and the joiner synchronizes again.
      */
     class IRIS_EXPORT Application : public XMPP::Jingle::Application {
         Q_OBJECT

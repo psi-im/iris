@@ -331,3 +331,9 @@ target_link_libraries(jingle_sxecontentadd_test PRIVATE iris Qt${QT_DEFAULT_MAJO
     Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
 add_test(NAME jingle_sxecontentadd COMMAND jingle_sxecontentadd_test)
 set_tests_properties(jingle_sxecontentadd PROPERTIES TIMEOUT 15)
+
+add_executable(jingle_sxeconnection_test sxeconnection.cpp)
+target_link_libraries(jingle_sxeconnection_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
+    Qt${QT_DEFAULT_MAJOR_VERSION}::Network)
+add_test(NAME jingle_sxeconnection COMMAND jingle_sxeconnection_test)
+set_tests_properties(jingle_sxeconnection PROPERTIES TIMEOUT 60)

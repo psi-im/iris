@@ -2,8 +2,8 @@
 
 This document describes the Iris implementation of
 [XEP-0284 Shared XML Editing](https://xmpp.org/extensions/xep-0284.html) (Experimental) and the
-SVG whiteboard application type, and records the planned extensions: payload over other Jingle
-transports and session proposals with XEP-0353. The general Jingle object model is described in
+SVG whiteboard application type: payload in messages or on Jingle connections, Jingle senders
+and session proposals with XEP-0353. The general Jingle object model is described in
 [jingle.md](jingle.md).
 
 ## Specifications
@@ -27,7 +27,9 @@ supported. Proposed changes to the profile are listed at the end of this documen
 ```text
 Session
 ├── SXE::Pad ──────────────── SXE::Application (one <content/>, description = document type)
-│                                 └── Document (records ↔ QDomDocument; reparentable)
+│                                 ├── Document (records ↔ QDomDocument; reparentable)
+│                                 └── payload channel: a Connection, or the SXE transport
+├── ICE::Pad ──────────────── ICE::Transport ── SCTP data channel (one <sxe/> per message)
 └── SXE::TransportPad ─────── SXE::Transport (<host/>; <sxe/> in <message/>)
                                   ▲
                  IncomingSxeTask ─┘ routes <message><sxe session=sid/></message> by (peer, sid)
@@ -39,6 +41,9 @@ Session
   to the Jingle peer as `<message><sxe xmlns='urn:xmpp:sxe:0' session='SID' id='N'/></message>`
   with XEP-0334 `<no-store/>` and `<no-copy/>`. The manager returns `false` from
   `canMakeConnection()` so no other application selects it.
+- Payload goes over a Jingle connection when both sides support it, see
+  [Payload on Jingle connections](#payload-on-jingle-connections); otherwise, and as the
+  fallback, in messages.
 - Only one-to-one sessions are implemented. The creator of the content hosts the document.
 - After Jingle acceptance the joiner sends `<connect/>`, accepts the `<state-offer/>` that repeats
   the session description, and imports `<state/>` between `<document-begin/>` and
@@ -65,35 +70,38 @@ Session
   whiteboard can be proposed through `Jingle::Manager::sendMessageInitiation()`.
 
 Regression tests: `tests/jingle/sxedocument.cpp` (record model), `tests/jingle/sxesession.cpp`
-(two clients with looped-back streams: synchronization, conflicts, senders, proposals) and
+(two clients with looped-back streams: synchronization, conflicts, senders, proposals),
 `tests/jingle/sxecontentadd.cpp` (a whiteboard added to a session with a file transfer, and a
-refused second whiteboard). Set `SXE_TEST_DUMP=1` to print the exchanged stanzas.
+refused second whiteboard) and `tests/jingle/sxeconnection.cpp` (the same clients with ICE on
+localhost: synchronization and edits on an SCTP data channel, including large character data,
+and broken channels until the fallback to messages). Set `SXE_TEST_DUMP=1` to print the
+exchanged stanzas. The connection test is skipped when QCA has no DTLS.
 
-## Planned: payload over other Jingle transports
+## Payload on Jingle connections
 
-### Problem
+### Why
 
-All SXE payload currently travels client → server → client in `<message/>` stanzas:
+Payload in `<message/>` stanzas travels client → server → client:
 
 - servers shape client-to-server traffic (ejabberd's default `normal` shaper and Prosody's
   `c2s` limits allow a few kilobytes per second), so large snapshots and inline images are slow;
 - servers limit stanza size, which forces small `<sxe/>` elements;
 - each stanza passes the server's processing (and possibly archives, despite the hints).
 
-### Approach
+### Delivery
 
-Keep the SXE protocol and change only the delivery. SXE needs every element delivered, in
-order, as a unit, so the whiteboard content uses only connections with
-`MessageOriented | Reliable | Ordered | DataOriented` features. No framing is added: one
-message carries one UTF-8 serialized `<sxe/>` element without the `<message/>` wrapper. The
-message-based SXE transport remains the baseline and fallback.
+The SXE protocol is unchanged; only the delivery differs. SXE needs every element delivered, in
+order, as a unit, so the content uses only connections with
+`MessageOriented | Reliable | Ordered | DataOriented` features. One message carries one UTF-8
+serialized `<sxe/>` element without the `<message/>` wrapper; there is no framing.
 
 | Order | Transport | Notes |
 | --- | --- | --- |
-| 1 | ICE (`urn:xmpp:jingle:transports:ice:0`) with an SCTP data channel | Peer-to-peer, TURN fallback; can share a BUNDLE association with a running call. Channel label `sxe`, protocol `urn:xmpp:sxe:0` |
+| 1 | ICE (`urn:xmpp:jingle:transports:ice:0` or `ice-udp:1`) with an SCTP data channel | Peer-to-peer, TURN fallback. The channel label is the content name, as for file transfer |
 | 2 | SXE (`urn:xmpp:jingle:transports:sxe`) | Messages through the server; always available |
 
-Not used:
+The candidates are what `Jingle::Manager::availableTransports()` returns for those features, so
+a future transport with reliable, ordered messages qualifies without SXE changes. Not used:
 
 - S5B in TCP mode is a byte stream and would need framing.
 - S5B in UDP mode (XEP-0260) would deliver datagrams, but neither reliably nor in order; a lost
@@ -103,43 +111,40 @@ Not used:
   mode from the requested features, so that file transfer keeps getting TCP.
 - IBB uses the same server path as messages, with IQ overhead.
 
-A future transport with reliable, ordered messages qualifies without SXE changes.
-
 The `session` attribute stays the Jingle `sid` and `id` stays unique per sender, so buffering,
-duplicate detection and `last-id` handling are unchanged. Messages are not size-limited by the
-server, so `Document::MaxChdataPerEdit` and the per-`<sxe/>` budget can be raised for
-connection-based delivery, within the SCTP message size the peers support. A receiver rejects
-messages larger than a limit (for example 8 MiB) and ends the content with a
-failed-application reason.
+duplicate detection and `last-id` handling are unchanged. On a connection up to 65536 characters
+of edits go into one `<sxe/>` instead of 16384: SCTP messages are limited to 256 KiB by the
+association, which also reassembles fragmented messages. An `<sxe/>` that would still exceed
+256 KiB is dropped with a warning; edits stay far below that, since `Document` splits character
+data into `MaxChdataPerEdit` chunks.
 
 ### Negotiation and fallback
 
-- A peer advertises support for SXE payload on connections with a new disco feature
-  (proposed: `urn:xmpp:sxe:0#connections`). Without it, only the SXE transport is offered.
-- The application selects transports like file transfer: an `NSTransportsList` over
-  `{SXE, ICE}` (least to most preferred), filtered by peer capabilities, and
-  `expectSingleConnection(MessageOriented | Reliable | Ordered | DataOriented)` for
-  connection-based transports.
-- If a connection-based transport fails, Jingle `transport-replace` moves the content to the next
-  transport, ending with the SXE transport. In-flight edits may be lost with the failed
-  connection, so after any replacement the joiner sends `<connect/>` again and re-imports the
-  state. This reuses the existing synchronization instead of adding acknowledgements.
-- With an ICE transport the application can return `allowsSharedTransport() == true`; a
-  whiteboard added to a call then joins the call's BUNDLE association (requires
-  `IRIS_ENABLE_JINGLE_SCTP`).
-- Multi-user sessions keep using messages (to a MUC room), since peer-to-peer transports are
-  one-to-one.
+- A client that can make such connections advertises `urn:xmpp:sxe:0#connections`
+  (`SXE::NS_CONNECTIONS`, proposed). The content creator offers a connection transport only to a
+  peer with that feature; otherwise it offers the SXE transport as before. A responder accepts an
+  offered connection transport.
+- The transport selector is an `NSTransportsList` over the SXE transport and the connection
+  transports; the content waits for its channel with
+  `expectSingleConnection(MessageOriented | Reliable | Ordered | DataOriented)`. The content
+  becomes active when the channel is ready.
+- A transport that fails, a channel that is not created, or a channel that closes moves the
+  content to the next transport with `transport-replace`: another connection transport if one
+  remains, finally the SXE transport. When both sides notice a broken channel at once, both
+  propose a replacement and the Jingle tie-break decides; the proposal that lost is withdrawn, so
+  `isTransportReplaceEnabled()` allows replacing an SXE transport until it runs.
+- On every new channel the joiner sends `<connect/>` again and imports a fresh state, and the
+  host sends no edits until then. Edits of the host lost with the broken channel are part of
+  the new state; edits of the joiner lost with it, or made during the switch, are lost. This
+  reuses the synchronization instead of adding acknowledgements.
+- Multi-user sessions will keep using messages (to a MUC room), since peer-to-peer transports
+  are one-to-one.
 
-### Iris changes
+### Not done yet
 
-- An internal payload channel abstraction in `SXE::Application` with two implementations:
-  the existing message channel (`SXE::Transport::sendSxe()`/`sxeReceived()`) and a connection
-  channel (`writeDatagram()`/`readDatagram()` on a message-oriented `Connection`, write queue).
-- Transport selection through the selector above; `isTransportReplaceEnabled()` allows
-  replacement, and a successful replacement restarts state synchronization.
-- `SXE::TransportManager` stays excluded from generic connection selection.
-- Tests: the existing session test over an ICE/SCTP fixture, a forced transport failure that
-  falls back to the SXE transport, and message-size limits.
+- BUNDLE with a call: `allowsSharedTransport()` is still `false`, so a whiteboard added to a call
+  sets up its own ICE association instead of sharing the call's.
+- `Document::MaxChdataPerEdit` is not raised for connections.
 
 ## Senders of an SXE content
 
@@ -198,7 +203,8 @@ To be discussed with the profile author:
    so a joiner keeps the host's record versions.
 4. Recommend XEP-0334 `<no-store/>` for SXE messages.
 5. Define SXE payload over reliable, ordered message-oriented connections (one `<sxe/>` per
-   message, data channel label, disco feature) as described above.
+   message, data channel label, disco feature, fallback with transport-replace and a new
+   `<connect/>`) as described above.
 6. Recommend XEP-0353 for proposing a whiteboard session to all resources.
 7. Define Jingle `senders` for SXE contents as the participants allowed to edit, as described
    above, so a board can be frozen and resumed with `content-modify`.
