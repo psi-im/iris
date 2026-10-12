@@ -580,14 +580,14 @@ static void testTieBreakDominatesUnsupportedSibling(Client &client)
           "mixed tie-break/unsupported batch mutated current transports");
 }
 
-static void testOutgoingReplaceLifecycle(Client &client, Task *success)
+static void testOutgoingReplaceLifecycle(Client &client, Task *success, J::State applicationState)
 {
     J::Session session(client.jingleManager(), Jid(QStringLiteral("peer@example.test/device")), J::Origin::Initiator);
     auto       replacement
         = makeTransport(session, J::Origin::Initiator, J::State::ApprovedToSend, QStringLiteral("replacement"));
     replacement->setHasUpdates(true);
     auto app = addApplication(session, QStringLiteral("audio"), J::Origin::Initiator, replacement,
-                              std::make_unique<TestSelector>(), nullptr, J::State::Connecting);
+                              std::make_unique<TestSelector>(), nullptr, applicationState);
     app->markReplacePlanned();
     check(app->evaluateOutgoingUpdate().action == J::Action::TransportReplace,
           "planned replacement did not evaluate to transport-replace");
@@ -599,13 +599,13 @@ static void testOutgoingReplaceLifecycle(Client &client, Task *success)
     check(app->replaceInProgress(), "successful transport-replace ACK did not enter InProgress");
 }
 
-static void testRemoteTransportAcceptLifecycle(Client &client, Task *success)
+static void testRemoteTransportAcceptLifecycle(Client &client, Task *success, J::State applicationState)
 {
     J::Session session(client.jingleManager(), Jid(QStringLiteral("peer@example.test/device")), J::Origin::Initiator);
     auto remote = makeTransport(session, J::Origin::Responder, J::State::ApprovedToSend, QStringLiteral("remote"));
     remote->setHasUpdates(true);
     auto app = addApplication(session, QStringLiteral("audio"), J::Origin::Initiator, remote,
-                              std::make_unique<TestSelector>(), nullptr, J::State::Connecting);
+                              std::make_unique<TestSelector>(), nullptr, applicationState);
     app->markReplaceInProgress();
     check(app->evaluateOutgoingUpdate().action == J::Action::TransportAccept,
           "remote replacement did not evaluate to transport-accept");
@@ -652,8 +652,12 @@ int main(int argc, char **argv)
     testUnknownTransportIsRejectedWithoutMutation(client);
     testDisabledAndSelectorRejectedReplaceRemainUnchanged(client);
     testTieBreakDominatesUnsupportedSibling(client);
-    testOutgoingReplaceLifecycle(client, &success);
-    testRemoteTransportAcceptLifecycle(client, &success);
+    // A replacement after session activation must use the same Jingle
+    // transaction as a replacement during initial connection setup.
+    for (const auto applicationState : { J::State::Connecting, J::State::Active }) {
+        testOutgoingReplaceLifecycle(client, &success, applicationState);
+        testRemoteTransportAcceptLifecycle(client, &success, applicationState);
+    }
     testIncomingTransportAcceptIgnoresOutOfOrder(client);
 
     qInfo("Transport-replace legacy behavior regressions passed");
