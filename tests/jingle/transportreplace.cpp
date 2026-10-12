@@ -580,11 +580,12 @@ static void testTieBreakDominatesUnsupportedSibling(Client &client)
           "mixed tie-break/unsupported batch mutated current transports");
 }
 
-static void testActiveLocalTransportSwitchEmitsReplace(Client &client, Task *success)
+static void testActiveLocalTransportSwitchEmitsReplace(Client &client, Task *success,
+                                                      J::State previousTransportState)
 {
     J::Session session(client.jingleManager(), Jid(QStringLiteral("peer@example.test/device")), J::Origin::Initiator);
     auto oldTransport
-        = makeTransport(session, J::Origin::Initiator, J::State::Active, QStringLiteral("established-ice"));
+        = makeTransport(session, J::Origin::Initiator, previousTransportState, QStringLiteral("established-ice"));
     auto nextTransport
         = makeTransport(session, J::Origin::Initiator, J::State::ApprovedToSend, QStringLiteral("fallback-s5b"));
     nextTransport->setHasUpdates(true);
@@ -676,7 +677,12 @@ int main(int argc, char **argv)
     testUnknownTransportIsRejectedWithoutMutation(client);
     testDisabledAndSelectorRejectedReplaceRemainUnchanged(client);
     testTieBreakDominatesUnsupportedSibling(client);
-    testActiveLocalTransportSwitchEmitsReplace(client, &success);
+    // The session may become Active before ICE finishes connecting. The
+    // replacement still requires a new transport-replace IQ in every case.
+    for (const auto previousTransportState :
+         { J::State::ApprovedToSend, J::State::Pending, J::State::Active }) {
+        testActiveLocalTransportSwitchEmitsReplace(client, &success, previousTransportState);
+    }
     // A replacement after session activation must use the same Jingle
     // transaction as a replacement during initial connection setup.
     for (const auto applicationState : { J::State::Connecting, J::State::Active }) {
