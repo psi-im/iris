@@ -418,8 +418,9 @@ namespace XMPP { namespace Jingle { namespace SXE {
         QList<Buffered>                    buffered; // joiner: payload received before the state completes
         QMetaObject::Connection            transportConnection;
         QMetaObject::Connection            transportStateConnection;
-        Connection::Ptr                    connection;           // payload channel of a connection transport
-        bool                               channelReady = false; // payload can be exchanged on the transport
+        bool                               connectionsAllowed = false; // the selector offers connection transports
+        Connection::Ptr                    connection;                 // payload channel of a connection transport
+        bool                               channelReady = false;       // payload can be exchanged on the transport
 
         Transport *messageTransport() const { return qobject_cast<Transport *>(q->transport().data()); }
 
@@ -768,6 +769,7 @@ namespace XMPP { namespace Jingle { namespace SXE {
         if (pad->session()->role() != creator || session->peerFeatures().test(NS_CONNECTIONS))
             transports += connectionTransports(session->manager());
         _transportSelector.reset(new NSTransportsList(session, transports));
+        d->connectionsAllowed = transports.size() > 1;
 
         d->document = new Document(this);
         connect(d->document, &Document::outgoingEdits, this,
@@ -815,6 +817,8 @@ namespace XMPP { namespace Jingle { namespace SXE {
 
     // A connection transport can be replaced, finally by the SXE transport. That one is not replaced once it
     // runs; until then it is only a proposal, which a simultaneous replacement by the peer may win.
+    bool Application::allowsSharedTransport() const { return d->connectionsAllowed; }
+
     bool Application::isTransportReplaceEnabled() const
     {
         return !_transport || !d->messageTransport() || _transport->state() < State::Active;

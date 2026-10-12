@@ -170,7 +170,9 @@ namespace XMPP { namespace Jingle { namespace SXE {
         const std::optional<XMPP::Stanza::Error> &lastError() const override;
         Reason                                    lastReason() const override;
         bool                                      isTransportReplaceEnabled() const override;
-        bool                                      supportsContentModify() const override { return true; }
+        /// A whiteboard that may use connections shares an ICE association (BUNDLE) with other contents.
+        bool allowsSharedTransport() const override;
+        bool supportsContentModify() const override { return true; }
         void remove(Reason::Condition cond = Reason::Success, const QString &comment = QString()) override;
 
         SetDescError setRemoteOffer(const QDomElement &description) override;

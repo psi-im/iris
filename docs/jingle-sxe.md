@@ -74,7 +74,8 @@ Regression tests: `tests/jingle/sxedocument.cpp` (record model), `tests/jingle/s
 `tests/jingle/sxecontentadd.cpp` (a whiteboard added to a session with a file transfer, and a
 refused second whiteboard) and `tests/jingle/sxeconnection.cpp` (the same clients with ICE on
 localhost: synchronization and edits on an SCTP data channel, including large character data,
-and broken channels until the fallback to messages). Set `SXE_TEST_DUMP=1` to print the
+broken channels until the fallback to messages, and a whiteboard added to a running file
+transfer over ICE that joins its BUNDLE group). Set `SXE_TEST_DUMP=1` to print the
 exchanged stanzas. The connection test is skipped when QCA has no DTLS.
 
 ## Payload on Jingle connections
@@ -140,11 +141,17 @@ data into `MaxChdataPerEdit` chunks.
 - Multi-user sessions will keep using messages (to a MUC room), since peer-to-peer transports
   are one-to-one.
 
+- A content that may use connections returns `allowsSharedTransport() == true`, like file
+  transfer and RTP. A whiteboard added with `content-add` to a session whose contents run on ICE
+  (a call) joins their BUNDLE group and opens its data channel on the shared association; the
+  session's automatic grouping does the rest. A content limited to the SXE transport (the peer
+  lacks `urn:xmpp:sxe:0#connections`) stays out of BUNDLE.
+
 ### Not done yet
 
-- BUNDLE with a call: `allowsSharedTransport()` is still `false`, so a whiteboard added to a call
-  sets up its own ICE association instead of sharing the call's.
 - `Document::MaxChdataPerEdit` is not raised for connections.
+- Replacing the transport of a bundled whiteboard after its data channel breaks is not covered
+  by a test.
 
 ## Senders of an SXE content
 

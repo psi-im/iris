@@ -5,10 +5,13 @@
 #include "sxesession.cpp"
 #undef main
 
+#include <iris/jingle-ft.h>
 #include <iris/jingle-ice.h>
 #include <iris/tcpportreserver.h>
 #include <iris/xmpp_caps.h>
+#include <iris/xmpp_hash.h>
 
+#include <QBuffer>
 #include <QElapsedTimer>
 #include <QThread>
 
@@ -64,6 +67,89 @@ static bool synchronized(SXE::Application *a, SXE::Application *b)
 {
     return a && b && a->syncState() == SXE::Application::SyncState::Synchronized
         && b->syncState() == SXE::Application::SyncState::Synchronized;
+}
+
+static bool bundled(J::Session *session, const QString &a, const QString &b)
+{
+    for (const auto &group : session->negotiatedGroupings())
+        if (group.semantics == QLatin1String("BUNDLE") && group.contents.contains(a) && group.contents.contains(b))
+            return true;
+    return false;
+}
+
+// A whiteboard added to a session whose content already runs on ICE, as when a whiteboard is added to a
+// call, joins that content's BUNDLE association and its own data channel.
+static void addToBundle(Endpoint &alice, Endpoint &bob)
+{
+    namespace FT = XMPP::Jingle::FileTransfer;
+    QPointer<J::Session> bobSession;
+    auto connection = QObject::connect(bob.client.jingleManager(), &J::Manager::incomingSession, &bob.client,
+                                       [&](J::Session *session) { bobSession = session; });
+    Q_UNUSED(connection)
+
+    FT::File file;
+    file.setName(QStringLiteral("note.txt"));
+    file.setSize(4);
+    file.addHash(Hash::from(Hash::Sha256, QByteArray("data")));
+    QBuffer source;
+    source.setData("data");
+    source.open(QIODevice::ReadOnly);
+    QBuffer sink;
+    sink.open(QIODevice::WriteOnly);
+
+    auto session  = alice.client.jingleManager()->newSession(bob.jid);
+    auto transfer = qobject_cast<FT::Application *>(session->newContent(FT::NS, J::Origin::Initiator));
+    check(transfer && transfer->setTransport(session->newOutgoingTransport(J::ICE::NS)),
+          "file transfer over ICE was not created");
+    transfer->setFile(file);
+    // The file is held back so the transfer stays active, like the media of a call.
+    bool deviceRequested = false;
+    QObject::connect(transfer, &FT::Application::deviceRequested, transfer,
+                     [&](quint64, std::optional<quint64>) { deviceRequested = true; });
+    session->addContent(transfer);
+    session->initiate();
+    pump(alice, bob);
+    check(bobSession, "incoming file transfer session not offered");
+    for (auto content : bobSession->contentList()) {
+        if (auto received = qobject_cast<FT::Application *>(content)) {
+            received->setAcceptFile(file);
+            QObject::connect(received, &FT::Application::deviceRequested, received,
+                             [&sink, received](quint64, std::optional<quint64>) { received->setDevice(&sink, false); });
+        }
+    }
+    bobSession->accept();
+    check(pumpUntil(alice, bob,
+                    [&] { return session->state() == J::State::Active && transfer->state() == J::State::Active; }),
+          "the file transfer over ICE did not start");
+
+    QPointer<SXE::Application> remote;
+    QObject::connect(bobSession, &J::Session::newContentReceived, bobSession, [&] {
+        for (auto content : bobSession->contentList())
+            if (auto whiteboard = qobject_cast<SXE::Application *>(content); whiteboard && !remote) {
+                remote = whiteboard;
+                whiteboard->prepare();
+            }
+    });
+    const int messagesBefore = sxeMessages();
+    auto      local          = qobject_cast<SXE::Application *>(session->newContent(SXE::NS_SVG_WHITEBOARD));
+    check(local && local->allowsSharedTransport(), "the whiteboard may not share the association");
+    session->addContent(local);
+    check(pumpUntil(alice, bob, [&] { return synchronized(local, remote); }),
+          "the whiteboard added to the ICE session did not synchronize");
+    check(bundled(session, transfer->contentName(), local->contentName())
+              && bundled(bobSession, transfer->contentName(), local->contentName()),
+          "the whiteboard did not join the BUNDLE group of the running content");
+    check(local->transport()->pad()->ns() == J::ICE::NS && dataChannel(local),
+          "the bundled whiteboard has no data channel");
+    check(sxeMessages() == messagesBefore, "the bundled whiteboard sent its payload in messages");
+
+    // The shared association still carries the file.
+    check(deviceRequested, "the file was not requested");
+    transfer->setDevice(&source, false);
+    check(pumpUntil(alice, bob, [&] { return sink.data() == "data"; }), "the bundled file transfer did not complete");
+
+    session->terminate(J::Reason::Success);
+    pumpUntil(alice, bob, [] { return false; }, 200);
 }
 
 int main(int argc, char **argv)
@@ -170,7 +256,10 @@ int main(int argc, char **argv)
 
     session->terminate(J::Reason::Success);
     pumpUntil(alice, bob, [] { return false; }, 200);
+
+    addToBundle(alice, bob);
+
     QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
-    qInfo("SXE connection and fallback tests passed");
+    qInfo("SXE connection, fallback and BUNDLE tests passed");
     return 0;
 }
