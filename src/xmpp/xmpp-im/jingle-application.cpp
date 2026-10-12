@@ -281,6 +281,13 @@ namespace XMPP { namespace Jingle {
 
         void onReady()
         {
+            // The channel can become connected after an ICE transport has been
+            // replaced or destroyed. QPointer intentionally does not keep the
+            // old transport alive; never publish its stale connection as ready.
+            if (!transport || !connection) {
+                onFailed(QStringLiteral("Transport disappeared before its channel became ready"));
+                return;
+            }
             connection->disconnect(this); // qt signals
             transport->disconnect(this);
             ready(connection);
