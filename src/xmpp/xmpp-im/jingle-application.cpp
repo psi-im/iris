@@ -907,10 +907,12 @@ namespace XMPP { namespace Jingle {
         if (_transport) {
             if (replacement->isLocal()) {
                 auto ts = _transport->state() == State::Finished ? _transport->prevState() : _transport->state();
-                if (_transport->isRemote() || ts >= State::Unacked) {
-                    // Even when the previous transport still calls itself Unacked,
-                    // this successor has not been sent. It cannot inherit an IQ
-                    // completion belonging to the previous transport instance.
+                if (_transport->isRemote() || ts >= State::Unacked || _state >= State::Active) {
+                    // An active application has already been announced to the
+                    // peer, even when its old ICE transport is still connecting
+                    // and reports a pre-Unacked state. A newly selected local
+                    // transport must be introduced with transport-replace.
+                    // Never inherit an old transport's IQ completion.
                     _pendingTransportReplace = PendingTransportReplace::Planned;
                 }
             } else {
