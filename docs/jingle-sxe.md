@@ -96,9 +96,11 @@ message-based SXE transport remains the baseline and fallback.
 Not used:
 
 - S5B in TCP mode is a byte stream and would need framing.
-- S5B in UDP mode (XEP-0260) delivers datagrams but neither reliably nor in order; a lost
-  `<new/>` or `<set/>` breaks the document. (Its `Connection::features()` reports
-  `StreamOriented | Reliable | Ordered` in both modes, which should be fixed separately.)
+- S5B in UDP mode (XEP-0260) would deliver datagrams, but neither reliably nor in order; a lost
+  `<new/>` or `<set/>` breaks the document. Iris does not activate UDP mode yet, so every S5B
+  connection is a TCP stream. When UDP mode is added, `Connection::features()` must follow the
+  connection's mode (`MessageOriented | Unreliable` for UDP) and `addChannel()` must choose the
+  mode from the requested features, so that file transfer keeps getting TCP.
 - IBB uses the same server path as messages, with IQ overhead.
 
 A future transport with reliable, ordered messages qualifies without SXE changes.
