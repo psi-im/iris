@@ -580,6 +580,30 @@ static void testTieBreakDominatesUnsupportedSibling(Client &client)
           "mixed tie-break/unsupported batch mutated current transports");
 }
 
+static void testActiveLocalTransportSwitchEmitsReplace(Client &client, Task *success)
+{
+    J::Session session(client.jingleManager(), Jid(QStringLiteral("peer@example.test/device")), J::Origin::Initiator);
+    auto oldTransport
+        = makeTransport(session, J::Origin::Initiator, J::State::Active, QStringLiteral("established-ice"));
+    auto nextTransport
+        = makeTransport(session, J::Origin::Initiator, J::State::ApprovedToSend, QStringLiteral("fallback-s5b"));
+    nextTransport->setHasUpdates(true);
+    auto app = addApplication(session, QStringLiteral("file"), J::Origin::Initiator, oldTransport,
+                              std::make_unique<TestSelector>(), nullptr, J::State::Active);
+
+    check(app->setTransport(nextTransport), "active content could not install fallback transport");
+    check(app->replacePlanned(), "active content did not plan transport-replace after selecting fallback");
+    check(app->evaluateOutgoingUpdate().action == J::Action::TransportReplace,
+          "active transport switch sent transport-info before transport-replace");
+
+    const auto outgoing = app->takeOutgoingUpdate();
+    check(app->replaceNeedAck(), "active transport-replace did not enter NeedAck");
+    const auto &ack = std::get<1>(outgoing);
+    check(bool(ack), "active transport-replace did not have an IQ completion");
+    ack(success);
+    check(app->replaceInProgress(), "active transport-replace ACK did not enter InProgress");
+}
+
 static void testOutgoingReplaceLifecycle(Client &client, Task *success, J::State applicationState)
 {
     J::Session session(client.jingleManager(), Jid(QStringLiteral("peer@example.test/device")), J::Origin::Initiator);
@@ -652,6 +676,7 @@ int main(int argc, char **argv)
     testUnknownTransportIsRejectedWithoutMutation(client);
     testDisabledAndSelectorRejectedReplaceRemainUnchanged(client);
     testTieBreakDominatesUnsupportedSibling(client);
+    testActiveLocalTransportSwitchEmitsReplace(client, &success);
     // A replacement after session activation must use the same Jingle
     // transaction as a replacement during initial connection setup.
     for (const auto applicationState : { J::State::Connecting, J::State::Active }) {
