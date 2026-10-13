@@ -338,6 +338,11 @@ target_link_libraries(jingle_sxeconnection_test PRIVATE iris Qt${QT_DEFAULT_MAJO
 add_test(NAME jingle_sxeconnection COMMAND jingle_sxeconnection_test)
 set_tests_properties(jingle_sxeconnection PROPERTIES TIMEOUT 60)
 
+add_executable(jingle_jetcipher_test jetcipher.cpp)
+target_include_directories(jingle_jetcipher_test PRIVATE ../../src/xmpp/xmpp-im)
+target_link_libraries(jingle_jetcipher_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core)
+add_test(NAME jingle_jetcipher COMMAND jingle_jetcipher_test)
+
 if(IRIS_ENABLE_OMEMO)
     add_executable(omemo_element_test omemoelement.cpp)
     target_link_libraries(omemo_element_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
@@ -349,4 +354,9 @@ if(IRIS_ENABLE_OMEMO)
         Qt${QT_DEFAULT_MAJOR_VERSION}::Network Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
     add_test(NAME omemo_dtls COMMAND omemo_dtls_test)
     set_tests_properties(omemo_dtls PROPERTIES TIMEOUT 90)
+    add_executable(omemo_jet_test omemojet.cpp)
+    target_link_libraries(omemo_jet_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
+        Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
+    add_test(NAME omemo_jet COMMAND omemo_jet_test)
+    set_tests_properties(omemo_jet PROPERTIES TIMEOUT 60)
 endif()

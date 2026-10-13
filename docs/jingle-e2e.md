@@ -2,7 +2,8 @@
 
 Design notes for an "end-to-end required" policy on Jingle sessions: what the deployed clients
 do, what Iris has, and how Iris and Psi implement it. Implemented so far: the OMEMO primitives,
-the session policy and OMEMO-verified DTLS fingerprints in Iris (steps 1–3 of the plan).
+the session policy, OMEMO-verified DTLS fingerprints and JET-OMEMO for files in Iris (steps 1–4
+of the plan).
 
 ## Goal
 
@@ -151,7 +152,29 @@ Conversations `Content.setSecurity()/getSecurity()`, `JingleFileTransferConnecti
   the requirement fingerprints stay plain; a responder requiring it does not answer a plain
   fingerprint; a tampered fingerprint is refused; without a filter a session requiring it sends
   nothing.
-- No JET yet.
+- `Session::setEndToEndPreferred()` asks for protection where possible without refusing otherwise
+  (a session requiring it prefers it too). Signaling filters can add disco features
+  (`SignalingFilter::discoFeatures()`).
+- `Jingle::JetOmemo` (built with OMEMO) is JET-OMEMO for file transfer, in the format of
+  Conversations and Dino:
+  - for file-transfer contents it creates in a session that prefers or requires end-to-end
+    encryption, it adds `<security xmlns='urn:xmpp:jingle:jet:0' name cipher type>` with a legacy
+    OMEMO key transport message for all devices of the peer, when the peer advertises
+    `urn:xmpp:jingle:jet-omemo:0` and legacy OMEMO; otherwise the file goes unprotected, or a
+    session requiring encryption refuses it;
+  - received envelopes are decrypted and their key given to the content when it exists;
+  - it must be registered before `OmemoDtlsVerification`, which treats JET contents as protected.
+- `FileTransfer::Application::setTransportSecret()` encrypts the whole transfer as AES-GCM with the
+  16-byte tag appended (`JET::StreamCipher`, `jingle-jet_p.h`); size and hashes describe the plain
+  file. The receiver decrypts with AES-CTR from the counter block IV‖2 and checks the tag by
+  encrypting the plaintext again with GCM, since QCA needs a GCM tag before decryption; a wrong tag
+  ends the content with `security-error`, and the data written before is to be discarded. Ranged
+  and streaming transfers are refused.
+- `tests/jingle/jetcipher.cpp` checks the cipher against QCA's GCM decoder with any chunking,
+  tampering and truncation; `tests/jingle/omemojet.cpp` sends a file over IBB between two clients
+  with OMEMO: ciphertext with the tag on the wire, the plain file at the end, a tampered block
+  refused, preferred encryption falling back without peer support and required encryption sending
+  nothing.
 
 ## Plan
 
@@ -173,7 +196,7 @@ Conversations `Content.setSecurity()/getSecurity()`, `JingleFileTransferConnecti
    `content-accept` and `transport-replace` of ICE transports. Iris also applies it to `ice:0`
    transports and to SCTP data channels (file transfer, whiteboards), which share the DTLS
    association; Conversations and Dino only look at `ice-udp:1`.
-4. **JET-OMEMO for S5B and IBB.** Compatible format and whole-stream AES-128-GCM, with the
+4. **JET-OMEMO for files** (done in Iris, on any transport; Psi has to create the filter). Compatible format and whole-stream AES-128-GCM, with the
    received file kept unverified until the tag matches.
 5. **SXE payload in messages.** Under the policy the message transport is not used until its
    `<sxe/>` payload is OMEMO-encrypted (SCE); a whiteboard then needs a connection.

@@ -184,6 +184,7 @@ namespace XMPP { namespace Jingle {
         Jid     localParty; // that one will be set as initiator/responder if provided
         Session::PeerAuthentication peerAuthentication;
         bool                        endToEndRequired         = false;
+        bool                        endToEndPreferred        = false;
         bool                        waitingAck               = false;
         bool                        needNotifyGroup          = false; // whenever grouping info changes
         bool                        groupingAllowed          = false;
@@ -2702,6 +2703,10 @@ namespace XMPP { namespace Jingle {
     void Session::setEndToEndRequired(bool required) { d->endToEndRequired = required; }
 
     bool Session::isEndToEndRequired() const { return d->endToEndRequired; }
+
+    void Session::setEndToEndPreferred(bool preferred) { d->endToEndPreferred = preferred; }
+
+    bool Session::isEndToEndPreferred() const { return d->endToEndPreferred || d->endToEndRequired; }
 
     bool Session::checkPeerCaps(const QString &ns) const
     {

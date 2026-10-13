@@ -547,9 +547,10 @@ namespace XMPP { namespace Jingle {
     // SignalingFilter
     //----------------------------------------------------------------------------
     SignalingFilter::~SignalingFilter() = default;
-    bool SignalingFilter::filterIncoming(const Jid &, const QDomElement &, const Done &) { return false; }
-    bool SignalingFilter::filterOutgoing(const Jid &, const QDomElement &, const Done &) { return false; }
-    void SignalingFilter::decorateMessageInitiation(const Jid &, MessageInitiation &) { }
+    bool        SignalingFilter::filterIncoming(const Jid &, const QDomElement &, const Done &) { return false; }
+    bool        SignalingFilter::filterOutgoing(const Jid &, const QDomElement &, const Done &) { return false; }
+    void        SignalingFilter::decorateMessageInitiation(const Jid &, MessageInitiation &) { }
+    QStringList SignalingFilter::discoFeatures() const { return {}; }
 
     //----------------------------------------------------------------------------
     // SessionManagerPad - handle event related to a type of app/transport but not specific instance
@@ -1049,6 +1050,8 @@ namespace XMPP { namespace Jingle {
         for (auto const &mgr : d->transportManagers) {
             ret += mgr.second->discoFeatures();
         }
+        for (auto filter : d->filters)
+            ret += filter->discoFeatures();
         ret.removeDuplicates();
         return ret;
     }

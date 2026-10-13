@@ -59,6 +59,13 @@ namespace XMPP { namespace Jingle {
                 const auto transport = content.firstChildElement(QStringLiteral("transport"));
                 if (transport.isNull())
                     continue;
+                // Contents protected by JET (files) are end-to-end encrypted on any transport.
+                bool jet = false;
+                for (auto sec = content.firstChildElement(QStringLiteral("security")); !sec.isNull();
+                     sec      = sec.nextSiblingElement(QStringLiteral("security")))
+                    jet = jet || sec.namespaceURI() == QLatin1String("urn:xmpp:jingle:jet:0");
+                if (jet)
+                    continue;
                 if (!isIce(transport)) {
                     result.unprotected = true;
                     continue;

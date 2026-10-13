@@ -93,6 +93,10 @@ namespace XMPP { namespace Jingle {
         /// can protect them refuses everything else with security-error; without one nothing is sent.
         void setEndToEndRequired(bool required);
         bool isEndToEndRequired() const;
+        /// Local wish: protect what can be protected (e.g. JET for files) but run unprotected otherwise.
+        /// A session that requires end-to-end encryption prefers it as well.
+        void setEndToEndPreferred(bool preferred);
+        bool isEndToEndPreferred() const;
 
         TieBreaker       *tieBreaker();
         const TieBreaker *tieBreaker() const;

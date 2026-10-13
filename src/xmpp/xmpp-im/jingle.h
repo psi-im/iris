@@ -470,6 +470,8 @@ namespace Jingle {
         virtual bool filterOutgoing(const Jid &to, const QDomElement &jingle, const Done &done);
         /// Add extensions to an outgoing XEP-0353 message.
         virtual void decorateMessageInitiation(const Jid &to, MessageInitiation &initiation);
+        /// Service discovery features the filter adds to Manager::discoFeatures().
+        virtual QStringList discoFeatures() const;
     };
 
 } // namespace Jingle
