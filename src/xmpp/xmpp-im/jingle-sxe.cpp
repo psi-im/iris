@@ -121,15 +121,55 @@ namespace XMPP { namespace Jingle { namespace SXE {
     //----------------------------------------------------------------------------
     class Transport::Private {
     public:
-        QList<Jid> hosts;
-        bool       pendingUpdate = false;
+        QList<Jid>   hosts;
+        bool         pendingUpdate = false;
+        QString      encryption;   // agreed protection of the payload
+        QDomDocument holdDocument; // copies of payload waiting in the queues
+
+        QDomDocument &document() { return holdDocument; }
+
+        // Protection is asynchronous: keep the order of edits in both directions.
+        struct Queue {
+            bool                                              busy = false;
+            QList<std::function<void(std::function<void()>)>> jobs;
+
+            void run(const std::function<void(std::function<void()>)> &job)
+            {
+                if (busy) {
+                    jobs.append(job);
+                    return;
+                }
+                busy = true;
+                job([this]() { next(); });
+            }
+            void next()
+            {
+                if (jobs.isEmpty()) {
+                    busy = false;
+                    return;
+                }
+                auto job = jobs.takeFirst();
+                job([this]() { next(); });
+            }
+        };
+        Queue outgoing;
+        Queue incoming;
     };
+
+    PayloadProtector::~PayloadProtector() = default;
 
     namespace {
         class PreparedSxeUpdate : public XMPP::Jingle::Transport::PreparedUpdate {
         public:
             QList<Jid> hosts;
+            QString    encryption;
         };
+
+        PayloadProtector *protectorOf(TransportManagerPad *pad)
+        {
+            auto manager = pad ? qobject_cast<TransportManager *>(pad->manager()) : nullptr;
+            return manager ? manager->payloadProtector() : nullptr;
+        }
     }
 
     Transport::Transport(TransportManagerPad *pad, Origin creator) :
@@ -141,9 +181,13 @@ namespace XMPP { namespace Jingle { namespace SXE {
 
     void Transport::prepare()
     {
-        if (isLocal())
-            d->hosts = { _pad->session()->manager()->client()->jid() };
-        else if (d->hosts.isEmpty()) {
+        if (isLocal()) {
+            d->hosts           = { _pad->session()->manager()->client()->jid() };
+            const auto session = _pad->session();
+            if (auto protector = protectorOf(_pad);
+                protector && session->isEndToEndPreferred() && protector->canProtect(session->peer()))
+                d->encryption = protector->method();
+        } else if (d->hosts.isEmpty()) {
             onFinish(Reason::FailedTransport, QStringLiteral("SXE transport without a host"));
             return;
         }
@@ -161,8 +205,16 @@ namespace XMPP { namespace Jingle { namespace SXE {
         auto hosts = parseHosts(transportEl);
         if (hosts.isEmpty())
             return { PrepareUpdateStatus::Invalid, {}, {} }; // XEP-0284 requires at least one host
-        auto prepared   = std::make_unique<PreparedSxeUpdate>();
-        prepared->hosts = std::move(hosts);
+        // Payload protection both sides know; an answer must keep the offered one.
+        const auto encryption = transportEl.attribute(QStringLiteral("encryption"));
+        auto       protector  = protectorOf(_pad);
+        if (!encryption.isEmpty() && (!protector || protector->method() != encryption))
+            return { PrepareUpdateStatus::Invalid, {}, {} };
+        if (isLocal() && _state >= State::Unacked && encryption != d->encryption)
+            return { PrepareUpdateStatus::Invalid, {}, {} };
+        auto prepared        = std::make_unique<PreparedSxeUpdate>();
+        prepared->hosts      = std::move(hosts);
+        prepared->encryption = encryption;
         return { PrepareUpdateStatus::Ready, std::move(prepared), {} };
     }
 
@@ -172,6 +224,8 @@ namespace XMPP { namespace Jingle { namespace SXE {
         if (!prepared || _state == State::Finished)
             return false;
         d->hosts = prepared->hosts;
+        if (isRemote())
+            d->encryption = prepared->encryption;
         if (_state == State::Created && isRemote())
             setState(State::Pending);
         else if (isLocal() && _state == State::Pending)
@@ -195,6 +249,8 @@ namespace XMPP { namespace Jingle { namespace SXE {
 
         auto doc = _pad->session()->manager()->client()->doc();
         auto tel = doc->createElementNS(NS_TRANSPORT, QStringLiteral("transport"));
+        if (!d->encryption.isEmpty())
+            tel.setAttribute(QStringLiteral("encryption"), d->encryption);
         for (const auto &host : std::as_const(d->hosts)) {
             auto el = doc->createElement(QStringLiteral("host"));
             el.appendChild(doc->createTextNode(host.full()));
@@ -230,6 +286,8 @@ namespace XMPP { namespace Jingle { namespace SXE {
 
     QList<Jid> Transport::hosts() const { return d->hosts; }
 
+    QString Transport::encryption() const { return d->encryption; }
+
     void Transport::sendSxe(const QDomElement &sxe)
     {
         if (_state == State::Finished)
@@ -237,6 +295,43 @@ namespace XMPP { namespace Jingle { namespace SXE {
         auto session = _pad->session();
         auto client  = session->manager()->client();
         auto doc     = client->doc();
+        if (!d->encryption.isEmpty()) {
+            auto protector = protectorOf(_pad);
+            if (!protector || protector->method() != d->encryption) {
+                qWarning("jingle-sxe: dropping payload: its protection is unavailable");
+                return;
+            }
+            // The protected payload travels next to an empty marker that routes the message.
+            const auto          copy = d->document().importNode(sxe, true).toElement();
+            QPointer<Transport> guard(this);
+            d->outgoing.run([guard, protector, copy](std::function<void()> finished) {
+                if (!guard) {
+                    finished();
+                    return;
+                }
+                const auto peer = guard->_pad->session()->peer();
+                protector->protect(peer, copy, [guard, copy, finished](const QDomElement &protectedPayload) {
+                    if (guard && guard->_state != State::Finished && !protectedPayload.isNull()) {
+                        auto client  = guard->_pad->session()->manager()->client();
+                        auto doc     = client->doc();
+                        auto message = doc->createElement(QStringLiteral("message"));
+                        message.setAttribute(QStringLiteral("to"), guard->_pad->session()->peer().full());
+                        message.setAttribute(QStringLiteral("id"), client->genUniqueId());
+                        auto marker = doc->createElementNS(NS, QStringLiteral("sxe"));
+                        marker.setAttribute(QStringLiteral("session"), copy.attribute(QStringLiteral("session")));
+                        message.appendChild(marker);
+                        message.appendChild(doc->importNode(protectedPayload, true));
+                        message.appendChild(doc->createElementNS(NS_HINTS, QStringLiteral("no-store")));
+                        message.appendChild(doc->createElementNS(NS_HINTS, QStringLiteral("no-copy")));
+                        client->send(message);
+                    } else if (guard && protectedPayload.isNull()) {
+                        qWarning("jingle-sxe: payload could not be protected and was not sent");
+                    }
+                    finished();
+                });
+            });
+            return;
+        }
         auto message = doc->createElement(QStringLiteral("message"));
         message.setAttribute(QStringLiteral("to"), session->peer().full());
         message.setAttribute(QStringLiteral("id"), client->genUniqueId());
@@ -245,6 +340,38 @@ namespace XMPP { namespace Jingle { namespace SXE {
         message.appendChild(doc->createElementNS(NS_HINTS, QStringLiteral("no-store")));
         message.appendChild(doc->createElementNS(NS_HINTS, QStringLiteral("no-copy")));
         client->send(message);
+    }
+
+    void Transport::receive(const QDomElement &message, const QDomElement &sxe, const Jid &from)
+    {
+        if (_state == State::Finished)
+            return;
+        const bool marker = sxe.firstChildElement().isNull();
+        if (d->encryption.isEmpty()) {
+            if (!marker)
+                emit sxeReceived(sxe, from);
+            return;
+        }
+        if (!marker) {
+            qWarning("jingle-sxe: dropping unprotected payload of a protected session");
+            return;
+        }
+        auto protector = protectorOf(_pad);
+        if (!protector || protector->method() != d->encryption)
+            return;
+        const auto          copy = d->document().importNode(message, true).toElement();
+        const auto          sid  = sxe.attribute(QStringLiteral("session"));
+        QPointer<Transport> guard(this);
+        d->incoming.run([guard, protector, copy, sid, from](std::function<void()> finished) {
+            protector->unprotect(from, copy, [guard, sid, from, finished](const QDomElement &inner) {
+                if (guard && guard->_state != State::Finished && !inner.isNull() && inner.namespaceURI() == NS
+                    && inner.localName() == QLatin1String("sxe") && inner.attribute(QStringLiteral("session")) == sid)
+                    emit guard->sxeReceived(inner, from);
+                else if (guard && inner.isNull())
+                    qWarning("jingle-sxe: dropping payload that could not be unprotected");
+                finished();
+            });
+        });
     }
 
     //----------------------------------------------------------------------------
@@ -310,7 +437,7 @@ namespace XMPP { namespace Jingle { namespace SXE {
                 }
                 for (const auto &t : std::as_const(transports)) {
                     if (t && t->state() != State::Finished)
-                        emit t->sxeReceived(sxe, from);
+                        t->receive(stanza, sxe, from);
                 }
                 return true;
             }
@@ -324,6 +451,7 @@ namespace XMPP { namespace Jingle { namespace SXE {
     public:
         XMPP::Jingle::Manager *jingleManager = nullptr;
         QPointer<Task>         incomingTask;
+        PayloadProtector      *protector = nullptr;
     };
 
     TransportManager::TransportManager(QObject *parent) :
@@ -365,7 +493,22 @@ namespace XMPP { namespace Jingle { namespace SXE {
 
     QStringList TransportManager::ns() const { return { NS_TRANSPORT }; }
 
-    QStringList TransportManager::discoFeatures() const { return { NS, NS_TRANSPORT }; }
+    QStringList TransportManager::discoFeatures() const
+    {
+        QStringList features { NS, NS_TRANSPORT };
+        if (d->protector)
+            features += d->protector->discoFeatures();
+        return features;
+    }
+
+    TransportManager *TransportManager::of(XMPP::Jingle::Manager *manager)
+    {
+        return manager ? manager->findChild<TransportManager *>(QString(), Qt::FindDirectChildrenOnly) : nullptr;
+    }
+
+    void TransportManager::setPayloadProtector(PayloadProtector *protector) { d->protector = protector; }
+
+    PayloadProtector *TransportManager::payloadProtector() const { return d->protector; }
 
     //----------------------------------------------------------------------------
     // Pad

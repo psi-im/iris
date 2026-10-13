@@ -27,7 +27,7 @@ authenticated with the peer's OMEMO identity.
 | XEP-0420 Stanza Content Encryption | Experimental | Can encrypt `<iq/>` as well as `<message/>`; no client encrypts Jingle IQs, so it is not used here |
 | XEP-0391 Jingle Encrypted Transports (JET) | Deferred (0.1.2, 2018) | `<security/>` in a Jingle content with an encrypted transport key; examples only for file transfer |
 | XEP-0396 JET-OMEMO | Deferred (0.2.0, 2018) | The JET envelope is an OMEMO key transport message; examples use the legacy OMEMO namespace |
-| XEP-0320 DTLS-SRTP in Jingle | Draft | `<fingerprint xmlns='urn:xmpp:jingle:apps:dtls:0'/>` in the transport |
+| XEP-0320 DTLS-SRTP in Jingle | Stable (1.0.0) | `<fingerprint xmlns='urn:xmpp:jingle:apps:dtls:0'/>` in the transport |
 | OMEMO DTLS verification | Not a XEP | Conversations' namespace, implemented by Conversations and Dino (below) |
 
 Encrypting whole Jingle IQs with SCE would hide signaling from servers, but no client supports it
@@ -202,12 +202,14 @@ Conversations `Content.setSecurity()/getSecurity()`, `JingleFileTransferConnecti
    association; Conversations and Dino only look at `ice-udp:1`.
 4. **JET-OMEMO for files** (done in Iris, on any transport; Psi has to create the filter). Compatible format and whole-stream AES-128-GCM, with the
    received file kept unverified until the tag matches.
-5. **SXE payload in messages.** Under the policy the message transport is not used until its
-   `<sxe/>` payload is OMEMO-encrypted (SCE); a whiteboard then needs a connection.
+5. **SXE payload in messages** (done in Iris): `SXE::SxeOmemo` protects every `<sxe/>` with OMEMO 2
+   and SCE when both sides advertise `urn:xmpp:sxe:0#omemo`; the SXE transport then carries
+   `encryption='urn:xmpp:omemo:2'`, counts as protected for the policy, and drops unprotected
+   payload. Tested in `tests/jingle/sxeomemo.cpp`.
 
 ## Proposals
 
-- A XEP for OMEMO-verified DTLS fingerprints (the de facto protocol above), with OMEMO 2 and a
-  defined behaviour for `ice:0`, `content-add` and transport replacement.
-- JET with authenticated chunks (AEAD per chunk, nonce derived from the IV and the chunk number,
-  a final-chunk marker), so data can be verified while it streams and ranges can be resumed.
+The proposals to the XSF are in [xsf-proposals/](xsf-proposals/README.md): OMEMO-verified DTLS
+fingerprints (`protoxep-omemo-dtls-verification.md`), the JET stream format and chunks
+(`xep-0391-jet.md`), JET with OMEMO 2 (`xep-0396-jet-omemo2.md`) and protected SXE payload
+(`xep-0284-sxe-encryption.md`).

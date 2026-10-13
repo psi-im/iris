@@ -198,20 +198,6 @@ proposal reuses it:
 
 ## Proposed changes to the whiteboard profile
 
-To be discussed with the profile author:
-
-1. Multi-user whiteboards: Jingle with a MUC room as the peer does not work, since IQs to the
-   room's bare JID go to the MUC service itself. A MUJI-like model (XEP-0272) fits better:
-   advertise the session in room presence (XEP-0284 already defines `<sxe session name/>` in
-   presence), send payload as `groupchat` messages to the room, and let the initiator or any
-   synchronized participant answer `<connect/>` with a state offer.
-2. `<host/>` in one-to-one examples should be the initiator's full JID.
-3. Allow history `<set/>` chunks with the same version (for character data split across edits),
-   so a joiner keeps the host's record versions.
-4. Recommend XEP-0334 `<no-store/>` for SXE messages.
-5. Define SXE payload over reliable, ordered message-oriented connections (one `<sxe/>` per
-   message, data channel label, disco feature, fallback with transport-replace and a new
-   `<connect/>`) as described above.
-6. Recommend XEP-0353 for proposing a whiteboard session to all resources.
-7. Define Jingle `senders` for SXE contents as the participants allowed to edit, as described
-   above, so a board can be frozen and resumed with `content-modify`.
+The proposals to the profile and to XEP-0284 are in [xsf-proposals/](xsf-proposals/README.md):
+the profile changes in `protoxep-svg-whiteboard.md`, payload on connections in
+`xep-0284-sxe-connections.md`, and protected payload in `xep-0284-sxe-encryption.md`.

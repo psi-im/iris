@@ -38,6 +38,29 @@ namespace XMPP { namespace Jingle { namespace SXE {
     class TransportManager;
 
     /**
+     * @brief End-to-end protection of SXE payload in messages, e.g. SxeOmemo (OMEMO 2 with SCE).
+     *
+     * When both sides support the protector's method and the session prefers end-to-end encryption,
+     * the SXE transport carries encryption='method'; every <sxe/> then travels inside protect()'s
+     * element next to an empty <sxe session='SID'/> marker that routes the message, and plain payload is
+     * dropped. docs/xsf-proposals/xep-0284-sxe-encryption.md describes the format.
+     */
+    class IRIS_EXPORT PayloadProtector {
+    public:
+        /// The protected element (e.g. OMEMO <encrypted/>), or the inner <sxe/>; null on failure.
+        using Done = std::function<void(const QDomElement &result)>;
+
+        virtual ~PayloadProtector();
+        virtual QString     method() const                    = 0; // e.g. urn:xmpp:omemo:2
+        virtual bool        canProtect(const Jid &peer) const = 0;
+        virtual QStringList discoFeatures() const             = 0;
+        /// Protects @a sxe for @a peer; @a done gets the element to send next to the marker.
+        virtual void protect(const Jid &peer, const QDomElement &sxe, const Done &done) = 0;
+        /// Recovers the <sxe/> of a message from @a from that carries a protected element.
+        virtual void unprotect(const Jid &from, const QDomElement &message, const Done &done) = 0;
+    };
+
+    /**
      * @brief The XEP-0284 SXE Jingle transport.
      *
      * Signaling carries the <host/> entities. Payload is exchanged as <sxe/>
@@ -65,8 +88,12 @@ namespace XMPP { namespace Jingle { namespace SXE {
         QList<Connection::Ptr> channels() const override;
 
         QList<Jid> hosts() const;
+        /// The method protecting the payload end to end (PayloadProtector::method()), or empty.
+        QString encryption() const;
         /// Sends an <sxe/> element. 'session' and 'id' are filled in by the caller.
         void sendSxe(const QDomElement &sxe);
+        /// Internal: a message of the session arrived (IncomingSxeTask).
+        void receive(const QDomElement &message, const QDomElement &sxe, const Jid &from);
 
     signals:
         void sxeReceived(const QDomElement &sxe, const XMPP::Jid &from);
@@ -101,9 +128,15 @@ namespace XMPP { namespace Jingle { namespace SXE {
         bool              canMakeConnection(TransportFeatures desiredFeatures, const QString &ns) override;
         void              setJingleManager(XMPP::Jingle::Manager *jm) override;
         QPointer<XMPP::Jingle::Transport> newTransport(TransportManagerPad *pad, Origin creator) override;
-        TransportManagerPad              *pad(Session *session) override;
-        QStringList                       ns() const override;
-        QStringList                       discoFeatures() const override;
+
+        /// The SXE transport manager registered with @a manager, if any.
+        static TransportManager *of(XMPP::Jingle::Manager *manager);
+        /// Not owned; remove it before it is destroyed.
+        void                 setPayloadProtector(PayloadProtector *protector);
+        PayloadProtector    *payloadProtector() const;
+        TransportManagerPad *pad(Session *session) override;
+        QStringList          ns() const override;
+        QStringList          discoFeatures() const override;
 
     private:
         class Private;

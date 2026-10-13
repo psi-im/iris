@@ -67,7 +67,10 @@ namespace XMPP { namespace Jingle {
                 if (jet)
                     continue;
                 if (!isIce(transport)) {
-                    result.unprotected = true;
+                    // SXE payload protected end to end (SxeOmemo) is protected on its message transport.
+                    if (!(transport.namespaceURI() == QLatin1String("urn:xmpp:jingle:transports:sxe")
+                          && transport.hasAttribute(QStringLiteral("encryption"))))
+                        result.unprotected = true;
                     continue;
                 }
                 bool dtls = false;
