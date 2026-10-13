@@ -152,6 +152,77 @@ static void addToBundle(Endpoint &alice, Endpoint &bob)
     pumpUntil(alice, bob, [] { return false; }, 200);
 }
 
+// Both sides add a whiteboard to a running ICE session at once, as when both participants of a call asked
+// for one: the content-adds cross with the same name. XEP-0166 lets the initiator's overrule; the
+// responder withdraws its own and joins the initiator's, which ends up in the BUNDLE group.
+static void crossingAdds(Endpoint &alice, Endpoint &bob)
+{
+    namespace FT = XMPP::Jingle::FileTransfer;
+    QPointer<J::Session> bobSession;
+    auto connection = QObject::connect(bob.client.jingleManager(), &J::Manager::incomingSession, &bob.client,
+                                       [&](J::Session *session) { bobSession = session; });
+
+    FT::File file;
+    file.setName(QStringLiteral("held.txt"));
+    file.setSize(4);
+    file.addHash(Hash::from(Hash::Sha256, QByteArray("data")));
+    auto session  = alice.client.jingleManager()->newSession(bob.jid);
+    auto transfer = qobject_cast<FT::Application *>(session->newContent(FT::NS, J::Origin::Initiator));
+    check(transfer && transfer->setTransport(session->newOutgoingTransport(J::ICE::NS)),
+          "file transfer over ICE was not created");
+    transfer->setFile(file);
+    session->addContent(transfer);
+    session->initiate();
+    pump(alice, bob);
+    QObject::disconnect(connection);
+    check(bobSession, "incoming file transfer session not offered");
+    for (auto content : bobSession->contentList())
+        if (auto received = qobject_cast<FT::Application *>(content))
+            received->setAcceptFile(file);
+    bobSession->accept();
+    check(pumpUntil(alice, bob,
+                    [&] { return session->state() == J::State::Active && transfer->state() == J::State::Active; }),
+          "the file transfer over ICE did not start");
+
+    QPointer<SXE::Application> joined;
+    QObject::connect(bobSession, &J::Session::newContentReceived, bobSession, [&] {
+        for (auto content : bobSession->contentList())
+            if (auto whiteboard = qobject_cast<SXE::Application *>(content);
+                whiteboard && whiteboard->isRemote() && !joined) {
+                joined = whiteboard;
+                whiteboard->prepare();
+            }
+    });
+    int errors = 0;
+    onStanza   = [&errors](const Endpoint &, QDomElement &stanza) {
+        if (stanza.tagName() == QLatin1String("iq")
+            && stanza.attribute(QStringLiteral("type")) == QLatin1String("error")
+            && stanza.firstChildElement(QStringLiteral("error"))
+                   .elementsByTagName(QStringLiteral("tie-break"))
+                   .isEmpty())
+            ++errors;
+    };
+    auto aliceBoard = qobject_cast<SXE::Application *>(session->newContent(SXE::NS_SVG_WHITEBOARD));
+    QPointer<SXE::Application> bobBoard
+        = qobject_cast<SXE::Application *>(bobSession->newContent(SXE::NS_SVG_WHITEBOARD));
+    check(aliceBoard && bobBoard && aliceBoard->contentName() == bobBoard->contentName(),
+          "the crossing whiteboards were not created with the same name");
+    session->addContent(aliceBoard);
+    bobSession->addContent(bobBoard);
+    check(pumpUntil(alice, bob, [&] { return synchronized(aliceBoard, joined); }),
+          "the initiator's whiteboard did not win the crossing content-add");
+    check(!bobBoard || bobBoard->state() >= J::State::Finishing, "the responder's crossing whiteboard stayed");
+    check(errors == 0, "crossing content-adds were refused with errors other than tie-break");
+    check(bundled(session, transfer->contentName(), aliceBoard->contentName())
+              && bundled(bobSession, transfer->contentName(), aliceBoard->contentName()),
+          "the winning whiteboard did not join the BUNDLE group");
+    check(!dataChannel(aliceBoard).isNull(), "the winning whiteboard has no data channel");
+    onStanza = nullptr;
+
+    session->terminate(J::Reason::Success);
+    pumpUntil(alice, bob, [] { return false; }, 200);
+}
+
 int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
@@ -258,6 +329,7 @@ int main(int argc, char **argv)
     pumpUntil(alice, bob, [] { return false; }, 200);
 
     addToBundle(alice, bob);
+    crossingAdds(alice, bob);
 
     QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
     qInfo("SXE connection, fallback and BUNDLE tests passed");

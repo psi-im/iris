@@ -172,6 +172,25 @@ namespace XMPP { namespace Jingle {
         std::optional<PendingGroupExtension> outgoingGroupExtension;
         std::optional<PendingGroupExtension> incomingGroupExtension;
 
+        // XEP-0166 section 7.2.16: of two content-add actions crossing in a session the initiator's
+        // overrules. The initiator answers the responder's with tie-break; the responder withdraws
+        // its own (the peer refuses it) and processes the initiator's.
+        class ContentAddTieBreak : public TieBreaker::Resolver {
+        public:
+            explicit ContentAddTieBreak(Private *d) : d(d) { }
+            TieBreaker::Solution resolve(const QDomElement &, const QDomElement &) override
+            {
+                return d->role == Origin::Initiator ? TieBreaker::Solution::Break : TieBreaker::Solution::Postpone;
+            }
+
+        private:
+            Private *d;
+        };
+        ContentAddTieBreak       contentAddTieBreak { this };
+        TieBreaker::Registration contentAddTieBreakRegistration;
+        // Our contents whose content-add lost a tie-break: outside every group, waiting for the refusal.
+        QSet<ContentKey> withdrawnContentAdds;
+
         // not yet acccepted applications from initial incoming request
         QList<Application *> initialIncomingUnacceptedContent;
 
@@ -584,6 +603,18 @@ namespace XMPP { namespace Jingle {
                             auto callback = std::get<1>(h);
                             if (app) {
                                 const ContentKey key { app->contentName(), app->creator() };
+                                if (outgoingAction == Action::ContentAdd && withdrawnContentAdds.contains(key)) {
+                                    // Refused with tie-break as expected; a peer that accepted it anyway
+                                    // gets it removed, since it is outside the negotiated groups.
+                                    callback(jt);
+                                    if (!session)
+                                        return;
+                                    if (app && app->state() < State::Finishing)
+                                        app->remove(Reason::Cancel, QStringLiteral("Content-add lost a tie-break"));
+                                    if (!session)
+                                        return;
+                                    continue;
+                                }
                                 if ((outgoingAction == Action::ContentAccept && incomingExtension
                                      && key == incomingExtension->content && !currentIncoming)
                                     || (outgoingAction == Action::ContentAdd && outgoingExtension
@@ -775,7 +806,7 @@ namespace XMPP { namespace Jingle {
             const auto       groupingNs = QStringLiteral("urn:xmpp:jingle:apps:grouping:0");
             QSet<ContentKey> available;
             for (auto it = contentList.cbegin(); it != contentList.cend(); ++it) {
-                if (it.value() && it.value()->state() < State::Finishing)
+                if (it.value() && it.value()->state() < State::Finishing && !withdrawnContentAdds.contains(it.key()))
                     available.insert(it.key());
             }
             for (auto el = jingleEl.firstChildElement(); !el.isNull(); el = el.nextSiblingElement()) {
@@ -832,7 +863,8 @@ namespace XMPP { namespace Jingle {
                         continue;
                     }
                     for (auto it = contentList.cbegin(); it != contentList.cend(); ++it) {
-                        if (it.key().first == name && it.value()->state() < State::Finishing) {
+                        if (it.key().first == name && it.value()->state() < State::Finishing
+                            && !withdrawnContentAdds.contains(it.key())) {
                             resolved.insert(name, it.key().second);
                             break;
                         }
@@ -854,6 +886,31 @@ namespace XMPP { namespace Jingle {
             auto pad = transport ? transport->pad() : nullptr;
             if (pad)
                 pad->rollbackGroupExtension(key);
+        }
+
+        // The responder's side of a lost content-add tie-break, before the initiator's is processed: our
+        // contents end locally, as the peer refuses them. Returns false if the session was destroyed.
+        bool withdrawOutgoingContentAdds()
+        {
+            rollbackOutgoingGroupExtension();
+            QList<QPointer<Application>> withdrawn;
+            for (auto it = contentList.cbegin(); it != contentList.cend(); ++it) {
+                if (it.key().second == role && it.value() && it.value()->state() == State::Unacked
+                    && !it.value()->flags().testFlag(Application::InitialApplication)) {
+                    qInfo("jingle sid=%s content=%s content-add withdrawn after tie-break", qUtf8Printable(sid),
+                          qUtf8Printable(it.key().first));
+                    withdrawnContentAdds.insert(it.key());
+                    withdrawn.append(it.value());
+                }
+            }
+            QPointer<Session> session(q);
+            for (const auto &app : std::as_const(withdrawn)) {
+                if (app)
+                    app->setState(State::Finished);
+                if (!session)
+                    return false;
+            }
+            return true;
         }
 
         bool commitOutgoingGroupExtension(const QList<ContentGroup> &answer)
@@ -925,6 +982,8 @@ namespace XMPP { namespace Jingle {
 
         void retireContentGrouping(const ContentKey &key)
         {
+            if (withdrawnContentAdds.contains(key))
+                return; // never grouped; its name may belong to the initiator's content now
             if (negotiatedCreators.contains(key.first) && negotiatedCreators.value(key.first) != key.second)
                 return;
             auto affects = [&key](const PendingGroupExtension &pending) {
@@ -1019,6 +1078,7 @@ namespace XMPP { namespace Jingle {
                 // destruction notification can expose a stale entry. Roll back a
                 // still-provisional extension while the transport is still reachable.
                 retireContentGrouping(key);
+                withdrawnContentAdds.remove(key);
                 signalingContent.remove(content);
                 initialIncomingUnacceptedContent.removeOne(content);
                 if (contentList.value(key) == content)
@@ -1378,6 +1438,9 @@ namespace XMPP { namespace Jingle {
 
         bool handleIncomingContentAdd(const QDomElement &jingleEl)
         {
+            if (role == Origin::Responder && contentAddTieBreakRegistration.isPostponed()
+                && !withdrawOutgoingContentAdds())
+                return true;
             std::optional<QList<ContentGroup>>          peerGroups;
             std::optional<ActiveGroupExtension::Result> groupChange;
             QSet<QString>                               stanzaContentNames;
@@ -2589,11 +2652,12 @@ namespace XMPP { namespace Jingle {
 
     Session::Session(Manager *manager, const Jid &peer, Origin role) : QObject(manager), d(new Private)
     {
-        d->q               = this;
-        d->role            = role;
-        d->manager         = manager;
-        d->otherParty      = peer;
-        d->groupingAllowed = checkPeerCaps(QLatin1String("urn:ietf:rfc:5888"));
+        d->q                              = this;
+        d->role                           = role;
+        d->manager                        = manager;
+        d->otherParty                     = peer;
+        d->groupingAllowed                = checkPeerCaps(QLatin1String("urn:ietf:rfc:5888"));
+        d->contentAddTieBreakRegistration = tieBreaker_.registerResolver(Action::ContentAdd, &d->contentAddTieBreak);
         d->stepTimer.setSingleShot(true);
         d->stepTimer.setInterval(0);
         connect(&d->stepTimer, &QTimer::timeout, this, [this]() { d->doStep(); });

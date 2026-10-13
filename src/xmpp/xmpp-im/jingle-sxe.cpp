@@ -533,7 +533,8 @@ namespace XMPP { namespace Jingle { namespace SXE {
     {
         const QString base = ns() == NS_SVG_WHITEBOARD ? QStringLiteral("whiteboard") : QStringLiteral("sxe");
         QString       name = base;
-        for (int i = 2; _session->content(name, _session->role()); ++i)
+        // Unique across both creators: BUNDLE groups name contents without their creator.
+        for (int i = 2; _session->content(name, Origin::Initiator) || _session->content(name, Origin::Responder); ++i)
             name = QStringLiteral("%1-%2").arg(base).arg(i);
         return name;
     }
