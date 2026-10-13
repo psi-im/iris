@@ -51,6 +51,8 @@ struct Transfer {
     std::unique_ptr<QBuffer>  sink;
     QByteArray                wire; // IBB payload as sent
     bool                      security = false;
+    QString                   securityType;
+    QString                   cipher;
 };
 
 // Alice offers @a data to bob over IBB with the given policy; bob accepts.
@@ -71,10 +73,13 @@ std::unique_ptr<Transfer> send(Endpoint &alice, Endpoint &bob, const QByteArray 
         const auto ibb = stanza.firstChildElement(QStringLiteral("data"));
         if (ibb.namespaceURI() == IbbNs)
             raw->wire += QByteArray::fromBase64(ibb.text().toLatin1());
-        if (!stanza.firstChildElement(QStringLiteral("jingle"))
-                 .elementsByTagNameNS(J::JetOmemo::jetNs(), QStringLiteral("security"))
-                 .isEmpty())
-            raw->security = true;
+        const auto found = stanza.firstChildElement(QStringLiteral("jingle"))
+                               .elementsByTagNameNS(J::JetOmemo::jetNs(), QStringLiteral("security"));
+        if (!found.isEmpty()) {
+            raw->security     = true;
+            raw->securityType = found.at(0).toElement().attribute(QStringLiteral("type"));
+            raw->cipher       = found.at(0).toElement().attribute(QStringLiteral("cipher"));
+        }
     };
     auto connection = QObject::connect(bob.client.jingleManager(), &J::Manager::incomingSession, &bob.client,
                                        [raw](J::Session *session) { raw->peerSession = session; });
@@ -132,46 +137,57 @@ int main(int argc, char **argv)
         pep.clear();
         return 0;
     }
-    const QStringList legacy { OmemoEncryption::legacyDevicesNode() + QStringLiteral("+notify") };
-    setPeerFeatures(alice.client, bob.jid, bob.client.jingleManager()->discoFeatures() + legacy);
-    setPeerFeatures(bob.client, alice.jid, alice.client.jingleManager()->discoFeatures() + legacy);
+    const auto protocols = alice.omemo->supportedProtocols();
+    for (const bool omemo2 : { false, true }) {
+        if (!protocols.testFlag(omemo2 ? OmemoProtocol::Omemo2 : OmemoProtocol::Legacy))
+            continue;
+        QStringList legacy { OmemoEncryption::legacyDevicesNode() + QStringLiteral("+notify") };
+        if (omemo2)
+            legacy << OmemoEncryption::namespaceUri();
+        setPeerFeatures(alice.client, bob.jid, bob.client.jingleManager()->discoFeatures() + legacy);
+        setPeerFeatures(bob.client, alice.jid, alice.client.jingleManager()->discoFeatures() + legacy);
 
-    // Encrypted: the plain file arrives, the wire carries ciphertext and the tag.
-    const auto data = randomFile(100000);
-    auto       t    = send(alice, bob, data, true, false);
-    check(t->peerSession && t->receiving, "the encrypted offer did not arrive");
-    check(t->security && t->sending->isTransportEncrypted() && t->receiving->isTransportEncrypted(),
-          "the file was not offered with JET");
-    check(t->sink->data() == data, "the decrypted file differs");
-    check(t->wire.size() == data.size() + 16 && !t->wire.contains(data.left(64)),
-          "the wire did not carry ciphertext with the tag");
-    check(t->peerSession->peerAuthentication().deviceId == alice.omemo->ownDeviceId(),
-          "the receiver did not record the sender's device");
+        // Encrypted: the plain file arrives, the wire carries ciphertext and the tag.
+        const auto data = randomFile(100000);
+        auto       t    = send(alice, bob, data, true, false);
+        check(t->peerSession && t->receiving, "the encrypted offer did not arrive");
+        check(t->security && t->sending->isTransportEncrypted() && t->receiving->isTransportEncrypted(),
+              "the file was not offered with JET");
+        check(t->securityType == (omemo2 ? OmemoEncryption::namespaceUri() : OmemoEncryption::legacyNamespaceUri())
+                  && t->cipher.contains(omemo2 ? QLatin1String("aes-256") : QLatin1String("aes-128")),
+              "the JET envelope does not use the expected OMEMO profile and cipher");
+        check(t->sink->data() == data, "the decrypted file differs");
+        check(t->wire.size() == data.size() + 16 && !t->wire.contains(data.left(64)),
+              "the wire did not carry ciphertext with the tag");
+        check(t->peerSession->peerAuthentication().deviceId == alice.omemo->ownDeviceId(),
+              "the receiver did not record the sender's device");
 
-    // A tampered block fails authentication.
-    t = send(alice, bob, data, true, false, [](QDomElement &stanza) {
-        auto ibb = stanza.firstChildElement(QStringLiteral("data"));
-        if (ibb.namespaceURI() != IbbNs || ibb.attribute(QStringLiteral("seq")) != QLatin1String("1"))
-            return;
-        auto bytes = QByteArray::fromBase64(ibb.text().toLatin1());
-        bytes[0]   = char(bytes[0] ^ 1);
-        auto text  = ibb.firstChild().toText();
-        text.setData(QString::fromLatin1(bytes.toBase64()));
-    });
-    check(t->receiving && t->receiving->state() == J::State::Finished
-              && t->receiving->lastReason().condition() == J::Reason::SecurityError,
-          "a tampered file was not refused");
+        // A tampered block fails authentication.
+        t = send(alice, bob, data, true, false, [](QDomElement &stanza) {
+            auto ibb = stanza.firstChildElement(QStringLiteral("data"));
+            if (ibb.namespaceURI() != IbbNs || ibb.attribute(QStringLiteral("seq")) != QLatin1String("1"))
+                return;
+            auto bytes = QByteArray::fromBase64(ibb.text().toLatin1());
+            bytes[0]   = char(bytes[0] ^ 1);
+            auto text  = ibb.firstChild().toText();
+            text.setData(QString::fromLatin1(bytes.toBase64()));
+        });
+        check(t->receiving && t->receiving->state() == J::State::Finished
+                  && t->receiving->lastReason().condition() == J::Reason::SecurityError,
+              "a tampered file was not refused");
 
-    // Preferred, but the peer has no JET-OMEMO: the file goes unprotected.
-    setPeerFeatures(alice.client, bob.jid, QStringList { QStringLiteral("urn:xmpp:jingle:1") } + legacy);
-    t = send(alice, bob, data, true, false);
-    check(t->receiving && !t->security && !t->receiving->isTransportEncrypted() && t->sink->data() == data,
-          "a preferred encryption blocked a transfer to a peer without JET-OMEMO");
+        // Preferred, but the peer has no JET-OMEMO: the file goes unprotected.
+        setPeerFeatures(alice.client, bob.jid, QStringList { QStringLiteral("urn:xmpp:jingle:1") } + legacy);
+        t = send(alice, bob, data, true, false);
+        check(t->receiving && !t->security && !t->receiving->isTransportEncrypted() && t->sink->data() == data,
+              "a preferred encryption blocked a transfer to a peer without JET-OMEMO");
 
-    // Required, but the peer has no JET-OMEMO: nothing is offered.
-    t = send(alice, bob, data, true, true);
-    check(!t->peerSession && t->wire.isEmpty() && (!t->session || t->session->state() == J::State::Finished),
-          "a required encryption sent the file to a peer without JET-OMEMO");
+        // Required, but the peer has no JET-OMEMO: nothing is offered.
+        t = send(alice, bob, data, true, true);
+        check(!t->peerSession && t->wire.isEmpty() && (!t->session || t->session->state() == J::State::Finished),
+              "a required encryption sent the file to a peer without JET-OMEMO");
+        qInfo("JET-OMEMO %s passed", omemo2 ? "2" : "legacy");
+    }
 
     onStanza = nullptr;
     QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);

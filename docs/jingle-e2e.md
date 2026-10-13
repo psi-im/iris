@@ -158,10 +158,14 @@ Conversations `Content.setSecurity()/getSecurity()`, `JingleFileTransferConnecti
 - `Jingle::JetOmemo` (built with OMEMO) is JET-OMEMO for file transfer, in the format of
   Conversations and Dino:
   - for file-transfer contents it creates in a session that prefers or requires end-to-end
-    encryption, it adds `<security xmlns='urn:xmpp:jingle:jet:0' name cipher type>` with a legacy
-    OMEMO key transport message for all devices of the peer, when the peer advertises
-    `urn:xmpp:jingle:jet-omemo:0` and legacy OMEMO; otherwise the file goes unprotected, or a
-    session requiring encryption refuses it;
+    encryption, it adds `<security xmlns='urn:xmpp:jingle:jet:0' name cipher type>` with an OMEMO
+    envelope of the key for all devices of the peer, when the peer advertises
+    `urn:xmpp:jingle:jet-omemo:0`; otherwise the file goes unprotected, or a session requiring
+    encryption refuses it;
+  - the profile follows the peer's capabilities like messages: OMEMO 2 when advertised, with an
+    SCE envelope holding `<secret xmlns='urn:xmpp:jingle:jet-omemo:0' key iv/>` and AES-256-GCM (a
+    Psi extension, see `xsf-proposals/`); otherwise legacy OMEMO with a key transport message and
+    AES-128-GCM, as Conversations and Dino;
   - received envelopes are decrypted and their key given to the content when it exists;
   - it must be registered before `OmemoDtlsVerification`, which treats JET contents as protected.
 - `FileTransfer::Application::setTransportSecret()` encrypts the whole transfer as AES-GCM with the

@@ -29,11 +29,26 @@
 
 #include <QHash>
 #include <QPointer>
+#include <QtCrypto>
 
 namespace XMPP { namespace Jingle {
     namespace {
         const QString JetNs(QStringLiteral("urn:xmpp:jingle:jet:0"));
         const QString JetOmemoNs(QStringLiteral("urn:xmpp:jingle:jet-omemo:0"));
+
+        // OMEMO 2 has no key transport message: the secret travels as SCE content (a Psi extension,
+        // docs/xsf-proposals/xep-0396-jet-omemo2.md).
+        QDomElement secretElement(QDomDocument &document, const QByteArray &key, const QByteArray &iv)
+        {
+            auto secret = document.createElementNS(JetOmemoNs, QStringLiteral("secret"));
+            secret.setAttribute(QStringLiteral("key"), QString::fromLatin1(key.toBase64()));
+            secret.setAttribute(QStringLiteral("iv"), QString::fromLatin1(iv.toBase64()));
+            document.appendChild(secret);
+            return secret;
+        }
+
+        // Legacy OMEMO carries the 16-byte AES-128 key itself; OMEMO 2 an AES-256 key in the envelope.
+        int keySizeFor(OmemoProtocol protocol) { return protocol == OmemoProtocol::Omemo2 ? 32 : 16; }
 
         struct Secret {
             Origin                      creator = Origin::None;
@@ -152,8 +167,10 @@ namespace XMPP { namespace Jingle {
 
     QStringList JetOmemo::discoFeatures() const
     {
-        if (!d->omemo || !d->omemo->supportedProtocols().testFlag(OmemoProtocol::Legacy)
-            || !JET::StreamCipher::isSupported(16))
+        if (!d->omemo
+            || !((d->omemo->supportedProtocols().testFlag(OmemoProtocol::Legacy) && JET::StreamCipher::isSupported(16))
+                 || (d->omemo->supportedProtocols().testFlag(OmemoProtocol::Omemo2)
+                     && JET::StreamCipher::isSupported(32))))
             return {};
         return { JetNs, JetOmemoNs };
     }
@@ -178,8 +195,9 @@ namespace XMPP { namespace Jingle {
             return false;
 
         const bool required = session->isEndToEndRequired();
-        const bool possible = d->omemo && d->omemo->isReady() && JET::StreamCipher::isSupported(16)
-            && d->omemo->protocolsFor(to).testFlag(OmemoProtocol::Legacy)
+        // OMEMO 2 when the peer advertises it, as for messages; otherwise the profile of XEP-0396.
+        const auto protocol = d->omemo ? d->omemo->preferredProtocolFor(to) : std::nullopt;
+        const bool possible = protocol && d->omemo->isReady() && JET::StreamCipher::isSupported(keySizeFor(*protocol))
             && d->manager->client()->capsManager()->features(to).test(JetOmemoNs);
         if (!possible) {
             if (!required)
@@ -194,22 +212,38 @@ namespace XMPP { namespace Jingle {
         auto               secrets = std::make_shared<QList<Secret>>();
         sequence(
             int(contents.size()),
-            [this, guard, to, contents, failure, secrets](int index, std::function<void()> next) {
-                auto job    = d->omemo->encryptElement(to, OmemoProtocol::Legacy, QDomElement());
-                auto handle = [guard, job, content = contents.at(index), failure, secrets, next]() {
+            [this, guard, to, protocol, contents, failure, secrets](int index, std::function<void()> next) {
+                QByteArray   omemo2Key, omemo2Iv;
+                QDomDocument secretDocument;
+                QDomElement  secret;
+                if (*protocol == OmemoProtocol::Omemo2) {
+                    omemo2Key = QCA::Random::randomArray(32).toByteArray();
+                    omemo2Iv  = QCA::Random::randomArray(12).toByteArray();
+                    secret    = secretElement(secretDocument, omemo2Key, omemo2Iv);
+                }
+                auto job    = d->omemo->encryptElement(to, *protocol, secret);
+                auto handle = [guard, job, protocol, omemo2Key, omemo2Iv, content = contents.at(index), failure,
+                               secrets, next]() {
                     job->deleteLater();
                     if (!guard)
                         return;
-                    const auto key = job->metadata().details.value(QStringLiteral("transportKey")).toByteArray();
-                    const auto iv  = job->metadata().details.value(QStringLiteral("transportIv")).toByteArray();
-                    if (!*failure && (!job->success() || key.size() != 16 || iv.size() != 12)) {
+                    const auto key = *protocol == OmemoProtocol::Omemo2
+                        ? omemo2Key
+                        : job->metadata().details.value(QStringLiteral("transportKey")).toByteArray();
+                    const auto iv  = *protocol == OmemoProtocol::Omemo2
+                         ? omemo2Iv
+                         : job->metadata().details.value(QStringLiteral("transportIv")).toByteArray();
+                    if (!*failure && (!job->success() || key.size() != keySizeFor(*protocol) || iv.size() != 12)) {
                         *failure = job->errorString();
                     } else if (!*failure) {
                         auto document = content.ownerDocument();
                         auto security = document.createElementNS(JetNs, QStringLiteral("security"));
                         security.setAttribute(QStringLiteral("name"), content.attribute(QStringLiteral("name")));
-                        security.setAttribute(QStringLiteral("cipher"), JET::cipherFor(16));
-                        security.setAttribute(QStringLiteral("type"), OmemoEncryption::legacyNamespaceUri());
+                        security.setAttribute(QStringLiteral("cipher"), JET::cipherFor(keySizeFor(*protocol)));
+                        security.setAttribute(QStringLiteral("type"),
+                                              *protocol == OmemoProtocol::Omemo2
+                                                  ? OmemoEncryption::namespaceUri()
+                                                  : OmemoEncryption::legacyNamespaceUri());
                         security.appendChild(document.importNode(job->stanza(), true));
                         auto target = content;
                         target.appendChild(security);
@@ -269,8 +303,10 @@ namespace XMPP { namespace Jingle {
                 const auto content  = contents.at(index);
                 const auto security = securityOf(content);
                 const auto size     = JET::keySize(security.attribute(QStringLiteral("cipher")));
-                if (*failure || security.attribute(QStringLiteral("type")) != OmemoEncryption::legacyNamespaceUri()
-                    || size != 16
+                const auto type     = security.attribute(QStringLiteral("type"));
+                const bool omemo2   = type == OmemoEncryption::namespaceUri();
+                if (*failure || (!omemo2 && type != OmemoEncryption::legacyNamespaceUri())
+                    || size != std::optional<int>(omemo2 ? 32 : 16)
                     || security.attribute(QStringLiteral("name")) != content.attribute(QStringLiteral("name"))) {
                     if (!*failure)
                         *failure = QStringLiteral("Unsupported JET envelope or cipher");
@@ -278,14 +314,23 @@ namespace XMPP { namespace Jingle {
                     return;
                 }
                 auto job    = d->omemo->decryptElement(from, security.firstChildElement(QStringLiteral("encrypted")));
-                auto handle = [guard, job, content, failure, secrets, next]() {
+                auto handle = [guard, job, content, omemo2, failure, secrets, next]() {
                     job->deleteLater();
                     if (!guard)
                         return;
                     const auto &meta = job->metadata();
-                    const auto  key  = meta.details.value(QStringLiteral("transportKey")).toByteArray();
-                    const auto  iv   = meta.details.value(QStringLiteral("transportIv")).toByteArray();
-                    if (!*failure && (!job->success() || key.size() != 16 || iv.size() != 12)) {
+                    QByteArray  key  = meta.details.value(QStringLiteral("transportKey")).toByteArray();
+                    QByteArray  iv   = meta.details.value(QStringLiteral("transportIv")).toByteArray();
+                    if (omemo2) {
+                        const auto secret = job->stanza();
+                        const bool valid
+                            = secret.namespaceURI() == JetOmemoNs && secret.localName() == QLatin1String("secret");
+                        key = valid ? QByteArray::fromBase64(secret.attribute(QStringLiteral("key")).toLatin1())
+                                    : QByteArray();
+                        iv  = valid ? QByteArray::fromBase64(secret.attribute(QStringLiteral("iv")).toLatin1())
+                                    : QByteArray();
+                    }
+                    if (!*failure && (!job->success() || key.size() != (omemo2 ? 32 : 16) || iv.size() != 12)) {
                         *failure = QStringLiteral("The file key could not be decrypted: %1").arg(job->errorString());
                     } else if (!*failure) {
                         Session::PeerAuthentication auth;

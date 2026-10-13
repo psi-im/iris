@@ -36,9 +36,11 @@ namespace Jingle {
      *
      * For file-transfer contents of sessions that prefer or require end-to-end encryption
      * (Session::isEndToEndPreferred()), the creator of the content adds
-     * <security xmlns='urn:xmpp:jingle:jet:0' cipher='urn:xmpp:ciphers:aes-128-gcm-nopadding'
-     * type='eu.siacs.conversations.axolotl'> with a legacy OMEMO key transport message for all devices
-     * of the peer, and both sides give the key to FileTransfer::Application::setTransportSecret().
+     * <security xmlns='urn:xmpp:jingle:jet:0'> with an OMEMO envelope of the key for all devices of the
+     * peer, and both sides give the key to FileTransfer::Application::setTransportSecret(). With the
+     * legacy profile (Conversations, Dino) the envelope is a key transport message and the cipher
+     * AES-128-GCM; with OMEMO 2, chosen when the peer advertises it, an SCE envelope holds an AES-256 key
+     * (a Psi extension, docs/xsf-proposals/xep-0396-jet-omemo2.md).
      * The file then travels as AES-GCM over any transport (S5B, IBB, ICE).
      *
      * A session that only prefers encryption sends files unprotected to a peer without JET-OMEMO;
