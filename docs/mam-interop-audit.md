@@ -56,6 +56,16 @@ Dino keeps protocol operations separate from the application's `HistorySync`: it
 
 **Iris architecture choice:** Keep query construction, result validation, `<fin/>` pagination and optional streaming callback in the existing `MAMTask` / `MAMManager`. Reuse existing `SubsetsClientManager`, `Forwarding`, `Message`, disco and Task infrastructure. Leave persistent cursors, local DB ranges, storage and UI synchronization to Psi; do not create an Iris-level history database.
 
+## Work already staged in draft PR #118
+
+At this point the draft has **unvalidated initial fixes**, not a complete interoperable implementation:
+
+- Disallowed the broken `MAMTask` copy constructor, initialized its private state and reset incompatible filter modes.
+- Corrected RSM per-page `max`, bounded total limits and UTC ISO timestamp serialization.
+- Replaced mandatory archive metadata preflight and stanza-count-driven pagination with `<fin/>` IQ completion and RSM first/last cursors.
+
+**Not yet verified by dedicated MAM tests. Do not merge.** Server capability gating for `flip-page` and `include-groupchat`, MUC archive addressing, result-origin authentication, cancellation, per-page error paths and full client comparison remain open. The defect list above is a description of the *pre-audit master* baseline; individual items must be checked off only with tests.
+
 ## Implementation sequence and acceptance
 
 1. Repair and test existing MAM task lifecycle, copy safety, page size/total limits, correct RSM cursor semantics, timestamp encoding, `<fin/>` completion, IQ error propagation, result filtering and cancellation. Test both forward and reverse paging, partial final pages, empty archive, unlimited mode and unknown query IDs.
