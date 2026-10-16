@@ -30,15 +30,11 @@ public:
     bool flipPages = false;
     bool backwards = true;
     bool allowMUCArchives = true;
-    bool metadataFetched = false;
     Jid  j;
     MAMTask           *q;
-    QString            firstID;
-    QString            lastID;
     QString            lastArchiveID;
     QString            fromID;
     QString            toID;
-    QString            mainQueryID;
     QString            currentPageQueryID;
     QString            currentPageQueryIQID;
     QDateTime          from;
@@ -46,7 +42,6 @@ public:
     QList<QDomElement> archive;
 
     void  getPage();
-    void  getArchiveMetadata();
     XData makeMAMFilter();
 };
 
@@ -63,11 +58,13 @@ XData MAMTask::Private::makeMAMFilter()
 {
     XData::FieldList fl;
 
-    XData::Field with;
-    with.setType(XData::Field::Field_JidSingle);
-    with.setVar(QLatin1String("with"));
-    with.setValue(QStringList(j.full()));
-    fl.append(with);
+    if (!j.isEmpty()) {
+        XData::Field with;
+        with.setType(XData::Field::Field_JidSingle);
+        with.setVar(QLatin1String("with"));
+        with.setValue(QStringList(j.full()));
+        fl.append(with);
+    }
 
     XData::Field includeGroupchat;
     includeGroupchat.setType(XData::Field::Field_Boolean);
@@ -129,7 +126,7 @@ void MAMTask::Private::getPage()
     rsm.setMax(qMin(mamPageSize, remaining));
 
     if (flipPages)
-        query.appendChild(emptyTag(q->doc(), QLatin1String("flip-page")));
+        query.appendChild(q->doc()->createElementNS(XMPP_MAM_NAMESPACE, QLatin1String("flip-page")));
 
     if (lastArchiveID.isNull()) {
         if (backwards) {
@@ -153,18 +150,6 @@ void MAMTask::Private::getPage()
     q->send(iq);
 }
 
-void MAMTask::Private::getArchiveMetadata()
-{
-    // Craft a query to get the first and last messages in an archive
-    mainQueryID          = q->genUniqueID();
-    QDomElement iq       = createIQ(q->doc(), QLatin1String("get"), QLatin1String(), mainQueryID);
-    QDomElement metadata = emptyTag(q->doc(), QLatin1String("metadata"));
-    metadata.setAttribute(QLatin1String("xmlns"), XMPP_MAM_NAMESPACE);
-    iq.appendChild(metadata);
-
-    q->send(iq);
-}
-
 // Note: Set `j` to a resource if you just want to query that resource
 // if you want to query all resources, set `j` to the bare JID
 
@@ -174,10 +159,7 @@ void MAMTask::get(const Jid &j, const QDateTime &from, const QDateTime &to, cons
 {
     d->archive.clear();
     d->messagesFetched = 0;
-    d->metadataFetched = false;
     d->lastArchiveID = QString();
-    d->firstID = QString();
-    d->lastID = QString();
 
     d->j                = j;
     d->from             = from;
@@ -198,10 +180,7 @@ void MAMTask::get(const Jid &j, const QString &fromID, const QString &toID, cons
 {
     d->archive.clear();
     d->messagesFetched = 0;
-    d->metadataFetched = false;
     d->lastArchiveID = QString();
-    d->firstID = QString();
-    d->lastID = QString();
 
     d->j                = j;
     d->fromID           = fromID;
@@ -215,76 +194,62 @@ void MAMTask::get(const Jid &j, const QString &fromID, const QString &toID, cons
     d->backwards        = backwards;
 }
 
-void MAMTask::onGo() { d->getArchiveMetadata(); }
+void MAMTask::onGo() { d->getPage(); }
 
 bool MAMTask::take(const QDomElement &x)
 {
-    if (d->metadataFetched) {
-        if (iqVerify(x, QString(), d->currentPageQueryIQID)) {
-            if (!x.elementsByTagNameNS(QLatin1String("urn:ietf:params:xml:ns:xmpp-stanzas"),
-                                       QLatin1String("item-not-found"))
-                     .isEmpty()) {
-                setError(2, "First or last stanza UID of filter was not found in the archive");
-                return true;
-            } else if (!x.elementsByTagNameNS(XMPP_MAM_NAMESPACE, QLatin1String("fin")).isEmpty()) {
-                // We are done?
-                // setSuccess();
-                // return true;
-                return false; // TODO: testing
-            }
-            // Probably ignore it
-            return false;
-        }
-
-        QDomElement result = x.firstChildElement("result");
-        if (result != QDomElement() && result.namespaceURI() == XMPP_MAM_NAMESPACE
-            && result.attribute(QLatin1String("queryid")) == d->currentPageQueryID) {
-
-            d->archive.append(result);
-            d->lastArchiveID   = result.attribute(QLatin1String("id"));
-            d->messagesFetched = d->messagesFetched + 1;
-
-            // Check if we are done
-            if (result.attribute(QLatin1String("id")) == d->lastID || (d->mamMaxMessages > 0 && d->messagesFetched >= d->mamMaxMessages)) {
-                setSuccess();
-            } else if (d->messagesFetched % d->mamPageSize == 0) {
-                d->getPage();
-            }
-        }
-    } else {
-        if (!iqVerify(x, QString(), d->mainQueryID))
-            return false;
-
-        // Return if the archive is empty
-        QDomElement queryMetadata = x.firstChildElement(QLatin1String("metadata"));
-        if (queryMetadata == QDomElement()) {
-            setError(1, "Malformed server metadata response");
+    // The final IQ is the page boundary. Sending the next query while the
+    // server is still streaming <result/> messages can race with that IQ.
+    if (iqVerify(x, Jid(), d->currentPageQueryIQID)) {
+        if (x.attribute(QLatin1String("type")) == QLatin1String("error")) {
+            setError(x);
             return true;
         }
-        if (!queryMetadata.hasChildNodes()) {
-            // No data in archive
+
+        QDomElement fin = x.firstChildElement(QLatin1String("fin"));
+        if (fin.isNull() || fin.namespaceURI() != XMPP_MAM_NAMESPACE) {
+            setError(1, QStringLiteral("Missing MAM <fin/> in query response"));
+            return true;
+        }
+
+        if (fin.attribute(QLatin1String("complete")) == QLatin1String("true")
+            || (d->mamMaxMessages > 0 && d->messagesFetched >= d->mamMaxMessages)) {
             setSuccess();
             return true;
         }
 
-        QDomElement start_id = queryMetadata.firstChildElement(QLatin1String("start"));
-        QDomElement end_id   = queryMetadata.firstChildElement(QLatin1String("end"));
-
-        if (start_id.isNull() || end_id.isNull()) {
-            setError(1, "Malformed server metadata response");
+        // XEP-0313 requires <fin/> to contain the RSM first/last IDs,
+        // even when the server returned fewer items than we requested.
+        const auto set = SubsetsClientManager::findElement(fin, true);
+        if (set.isNull()) {
+            setError(1, QStringLiteral("Missing RSM cursor in MAM <fin/>"));
             return true;
         }
-
-        if (d->backwards) {
-            d->lastID  = start_id.attribute(QLatin1String("id"));
-            d->firstID = end_id.attribute(QLatin1String("id"));
-        } else {
-            d->firstID = start_id.attribute(QLatin1String("id"));
-            d->lastID  = end_id.attribute(QLatin1String("id"));
+        const auto edge = set.firstChildElement(d->backwards ? QLatin1String("first") : QLatin1String("last"));
+        const QString cursor = edge.text();
+        if (cursor.isEmpty() || cursor == d->lastArchiveID) {
+            setError(1, QStringLiteral("MAM pagination returned an empty or repeated cursor"));
+            return true;
         }
-        d->metadataFetched = true;
+        d->lastArchiveID = cursor;
         d->getPage();
+        return true;
     }
 
+    // Only results belonging to the current query are part of this task.
+    if (x.tagName() != QLatin1String("message"))
+        return false;
+    const QDomElement result = x.firstChildElement(QLatin1String("result"));
+    if (result.isNull() || result.namespaceURI() != XMPP_MAM_NAMESPACE
+        || result.attribute(QLatin1String("queryid")) != d->currentPageQueryID)
+        return false;
+
+    if (d->mamMaxMessages > 0 && d->messagesFetched >= d->mamMaxMessages) {
+        // A server that sends more items than requested must not grow
+        // the archive beyond the caller's explicit total limit.
+        return true;
+    }
+    d->archive.append(result);
+    ++d->messagesFetched;
     return true;
 }
