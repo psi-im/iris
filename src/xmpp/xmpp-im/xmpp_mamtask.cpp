@@ -125,9 +125,6 @@ void MAMTask::Private::getPage()
     const int remaining = mamMaxMessages > 0 ? mamMaxMessages - messagesFetched : mamPageSize;
     rsm.setMax(qMin(mamPageSize, remaining));
 
-    if (flipPages)
-        query.appendChild(q->doc()->createElementNS(XMPP_MAM_NAMESPACE, QLatin1String("flip-page")));
-
     if (lastArchiveID.isNull()) {
         if (backwards) {
             rsm.getLast();
@@ -146,6 +143,8 @@ void MAMTask::Private::getPage()
 
     query.appendChild(x.toXml(q->doc()));
     query.appendChild(rsm.makeQueryElement(q->doc()));
+    if (flipPages)
+        query.appendChild(q->doc()->createElementNS(XMPP_MAM_NAMESPACE, QLatin1String("flip-page")));
     iq.appendChild(query);
     q->send(iq);
 }
