@@ -40,7 +40,8 @@ class MAMTask : public Task {
     Q_OBJECT
 public:
     explicit MAMTask(Task *);
-    MAMTask(const MAMTask &x);
+    MAMTask(const MAMTask &) = delete;
+    MAMTask &operator=(const MAMTask &) = delete;
     ~MAMTask();
 
     const QList<QDomElement> &archive() const;
