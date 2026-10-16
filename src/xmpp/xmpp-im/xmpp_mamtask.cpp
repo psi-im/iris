@@ -18,22 +18,19 @@
  */
 
 #include "xmpp_mamtask.h"
-#if QT_VERSION >= QT_VERSION_CHECK(6, 9, 0)
-#include <QTimeZone>
-#endif
 
 using namespace XMLHelper;
 using namespace XMPP;
 
 class MAMTask::Private {
 public:
-    int  mamPageSize;    // TODO: this is the max page size for MAM request. Should be made into a config option in Psi+
-    int  mamMaxMessages; // maximum mam pages total, also should be config. zero means unlimited
-    int  messagesFetched;
-    bool flipPages;
-    bool backwards;
-    bool allowMUCArchives;
-    bool metadataFetched;
+    int  mamPageSize = 10; // maximum messages per page
+    int  mamMaxMessages = 0; // total cap; zero means unlimited
+    int  messagesFetched = 0;
+    bool flipPages = false;
+    bool backwards = true;
+    bool allowMUCArchives = true;
+    bool metadataFetched = false;
     Jid  j;
     MAMTask           *q;
     QString            firstID;
@@ -53,8 +50,11 @@ public:
     XData makeMAMFilter();
 };
 
-MAMTask::MAMTask(Task *parent) : Task(parent) { d = new Private; }
-MAMTask::MAMTask(const MAMTask &x) : Task(x.parent()) { d = x.d; }
+MAMTask::MAMTask(Task *parent) : Task(parent)
+{
+    d = new Private;
+    d->q = this;
+}
 MAMTask::~MAMTask() { delete d; }
 
 const QList<QDomElement> &MAMTask::archive() const { return d->archive; }
@@ -79,12 +79,7 @@ XData MAMTask::Private::makeMAMFilter()
         XData::Field start;
         start.setType(XData::Field::Field_TextSingle);
         start.setVar(QLatin1String("start"));
-#if QT_VERSION < QT_VERSION_CHECK(6, 9, 0)
-        from.setTimeSpec(Qt::UTC);
-#else
-        from.setTimeZone(QTimeZone::UTC);
-#endif
-        start.setValue(QStringList(from.toString()));
+        start.setValue(QStringList(from.toUTC().toString(Qt::ISODate)));
         fl.append(start);
     }
 
@@ -92,12 +87,7 @@ XData MAMTask::Private::makeMAMFilter()
         XData::Field end;
         end.setType(XData::Field::Field_TextSingle);
         end.setVar(QLatin1String("end"));
-#if QT_VERSION < QT_VERSION_CHECK(6, 9, 0)
-        to.setTimeSpec(Qt::UTC);
-#else
-        to.setTimeZone(QTimeZone::UTC);
-#endif
-        end.setValue(QStringList(to.toString()));
+        end.setValue(QStringList(to.toUTC().toString(Qt::ISODate)));
         fl.append(end);
     }
 
@@ -135,7 +125,8 @@ void MAMTask::Private::getPage()
     XData x = makeMAMFilter();
 
     SubsetsClientManager rsm;
-    rsm.setMax(mamMaxMessages);
+    const int remaining = mamMaxMessages > 0 ? mamMaxMessages - messagesFetched : mamPageSize;
+    rsm.setMax(qMin(mamPageSize, remaining));
 
     if (flipPages)
         query.appendChild(emptyTag(q->doc(), QLatin1String("flip-page")));
@@ -181,16 +172,21 @@ void MAMTask::Private::getArchiveMetadata()
 void MAMTask::get(const Jid &j, const QDateTime &from, const QDateTime &to, const bool allowMUCArchives,
                   int mamPageSize, int mamMaxMessages, bool flipPages, bool backwards)
 {
-    d->archive         = {};
+    d->archive.clear();
     d->messagesFetched = 0;
     d->metadataFetched = false;
+    d->lastArchiveID = QString();
+    d->firstID = QString();
+    d->lastID = QString();
 
     d->j                = j;
     d->from             = from;
     d->to               = to;
+    d->fromID           = QString();
+    d->toID             = QString();
     d->allowMUCArchives = allowMUCArchives;
-    d->mamPageSize      = mamPageSize;
-    d->mamMaxMessages   = mamMaxMessages;
+    d->mamPageSize      = qMax(1, mamPageSize);
+    d->mamMaxMessages   = qMax(0, mamMaxMessages);
     d->flipPages        = flipPages;
     d->backwards        = backwards;
     d->q                = this;
@@ -200,16 +196,21 @@ void MAMTask::get(const Jid &j, const QDateTime &from, const QDateTime &to, cons
 void MAMTask::get(const Jid &j, const QString &fromID, const QString &toID, const bool allowMUCArchives,
                   int mamPageSize, int mamMaxMessages, bool flipPages, bool backwards)
 {
-    d->archive         = {};
+    d->archive.clear();
     d->messagesFetched = 0;
     d->metadataFetched = false;
+    d->lastArchiveID = QString();
+    d->firstID = QString();
+    d->lastID = QString();
 
     d->j                = j;
     d->fromID           = fromID;
     d->toID             = toID;
+    d->from             = QDateTime();
+    d->to               = QDateTime();
     d->allowMUCArchives = allowMUCArchives;
-    d->mamPageSize      = mamPageSize;
-    d->mamMaxMessages   = mamMaxMessages;
+    d->mamPageSize      = qMax(1, mamPageSize);
+    d->mamMaxMessages   = qMax(0, mamMaxMessages);
     d->flipPages        = flipPages;
     d->backwards        = backwards;
 }
@@ -244,7 +245,7 @@ bool MAMTask::take(const QDomElement &x)
             d->messagesFetched = d->messagesFetched + 1;
 
             // Check if we are done
-            if (result.attribute(QLatin1String("id")) == d->lastID || d->messagesFetched >= d->mamMaxMessages) {
+            if (result.attribute(QLatin1String("id")) == d->lastID || (d->mamMaxMessages > 0 && d->messagesFetched >= d->mamMaxMessages)) {
                 setSuccess();
             } else if (d->messagesFetched % d->mamPageSize == 0) {
                 d->getPage();
