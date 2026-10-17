@@ -7,6 +7,7 @@
 #include <iris/xmpp_mammanager.h>
 #include <iris/xmpp_mamtask.h>
 #include <iris/xmpp_tasks.h>
+#include <iris/xmpp_xmlcommon.h>
 #include <QCoreApplication>
 #include <QDomDocument>
 #include <QtCrypto>
@@ -108,6 +109,19 @@ int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
     QCA::Initializer qca;
+    // Shared XML helpers must inspect direct children only, without
+    // mistaking a namespace prefix for the actual element name.
+    const auto children = xml(QStringLiteral(
+        "<root><container><item/></container>"
+        "<a:item xmlns:a='urn:example:first'/>"
+        "<item xmlns='urn:example:second'/></root>"));
+    require(firstChildElementByLocalName(children, QStringLiteral("item")).namespaceURI()
+                == QLatin1String("urn:example:first"),
+            "Direct-child local-name lookup skipped a prefixed element or descended recursively");
+    require(childElementsByTagNameNS(children, QStringLiteral("urn:example:second"),
+                                    QStringLiteral("item")).count() == 1,
+            "Existing namespace-aware direct-child lookup was changed");
+
     OfflineConnector connector;
     Recorder stream(&connector);
     Client c;
