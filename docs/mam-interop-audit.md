@@ -20,7 +20,7 @@ Primary standard: [XEP-0313 MAM 1.1.3](https://xmpp.org/extensions/xep-0313.html
 | --- | --- | --- |
 | XEP-0313 MAM | `xmpp_mamtask.{h,cpp}`, `xmpp_mammanager.{h,cpp}` | **Present but incorrect**; repair in place, not a second MAM manager |
 | XEP-0059 Result Set Management | `xmpp_subsets.{h,cpp}` / `SubsetsClientManager` | Reuse for page cursors/limits |
-| XEP-0359 Unique and Stable Stanza IDs | `Message::stanzaId()`, `setStanzaId()`, `originId()`, `setOriginId()` in `xmpp_message.h` / `types.cpp` | Single-ID limitation fixed on `ai/xep0359-multiple-stanza-ids`; `stanzaId(by)` and `stanzaIds()` preserve distinct issuers. Disco trust verification remains a caller responsibility. |
+| XEP-0359 Unique and Stable Stanza IDs | `Message::stanzaId(by)`, `stanzaIds()`, `setStanzaIds()`, `addStanzaId()`, `originId()` and `setOriginId()` in `xmpp_message.h` / `types.cpp` | A message may carry IDs issued by multiple entities. No ambiguous no-argument `stanzaId()` or single-ID replacement API is retained; disco trust verification remains a caller responsibility. |
 | XEP-0297 Stanza Forwarding | `xmpp_forwarding.{h,cpp}` | Reuse for parsing forwarded message and XEP-0203 delay |
 | XEP-0203 Delayed Delivery | `Forwarding`, `Message`, presence parsing | The original code truncated UTC offsets/fractions and appended an extra `Z` when serializing. Fixed and tested on `ai/xep0359-multiple-stanza-ids` (Qt5/Qt6). |
 | XEP-0280 Message Carbons | `xmpp_carbons.cpp`; `Message::forwarded()` | Keep separate from archive-result envelope handling and deduplication |

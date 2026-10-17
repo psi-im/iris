@@ -716,6 +716,7 @@ bool JT_PushPresence::take(const QDomElement &e)
         p.setPriority(tagContent(tag).toInt());
 
     QDateTime stamp;
+    bool modernDelay = false;
 
     for (QDomNode n = e.firstChild(); !n.isNull(); n = n.nextSibling()) {
         QDomElement i = n.toElement();
@@ -727,8 +728,12 @@ bool JT_PushPresence::take(const QDomElement &e)
                 stamp = stamp2TS(i.attribute("stamp"));
             }
         } else if (i.tagName() == "delay" && i.namespaceURI() == "urn:xmpp:delay") {
-            if (i.hasAttribute("stamp") && !stamp.isValid()) {
-                stamp = QDateTime::fromString(i.attribute("stamp").left(19), Qt::ISODate);
+            if (i.hasAttribute("stamp") && !modernDelay) {
+                const auto parsed = QDateTime::fromString(i.attribute("stamp"), Qt::ISODate);
+                if (parsed.isValid()) {
+                    stamp = parsed;
+                    modernDelay = true;
+                }
             }
         } else if (i.tagName() == "x" && i.namespaceURI() == "gabber:x:music:info") {
             QDomElement t;
@@ -777,13 +782,15 @@ bool JT_PushPresence::take(const QDomElement &e)
 
     if (stamp.isValid()) {
         if (client()->manualTimeZoneOffset()) {
-            stamp = stamp.addSecs(client()->timeZoneOffset() * 3600);
+            stamp = (modernDelay ? stamp.toUTC() : stamp).addSecs(client()->timeZoneOffset() * 3600);
         } else {
+            if (!modernDelay) {
 #if QT_VERSION < QT_VERSION_CHECK(6, 9, 0)
-            stamp.setTimeSpec(Qt::UTC);
+                stamp.setTimeSpec(Qt::UTC);
 #else
-            stamp.setTimeZone(QTimeZone::UTC);
+                stamp.setTimeZone(QTimeZone::UTC);
 #endif
+            }
             stamp = stamp.toLocalTime();
         }
         p.setTimeStamp(stamp);
