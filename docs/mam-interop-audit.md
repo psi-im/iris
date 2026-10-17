@@ -326,6 +326,15 @@ for MAM envelopes in `JT_PushMessage::take()` has been removed.
 - XEP-0059 RSM request building still reuses Iris's existing
   `SubsetsClientManager` in `xmpp_subsets.{h,cpp}`; no second RSM
   implementation has been introduced.
+- Generic XML lookup belongs in `xmpp_xmlcommon.{h,cpp}`, not private
+  MAM-specific helpers. `firstChildElementByLocalName()` replaces
+  the local `directChildNamed()`: it only examines direct children and
+  preserves the original prefix-insensitive matching semantics. The
+  preexisting `childElementsByTagNameNS()` remains the correct choice
+  when the namespace must participate in element selection. Regression
+  tests exercise both helpers.
 
-The task remains Draft pending fresh Qt5/Qt6 MAM regression and full CI,
-and outstanding nested forwarding and canonical client-source audit.
+The previous Qt5 fixture lifetime crash was fixed and Qt5/Qt6 MAM and
+cross-platform CI were all green on `df786e27`. The subsequent shared XML
+helper refactor still requires its own CI check. This PR remains Draft
+pending that validation, nested forwarding and canonical client-source audit.
