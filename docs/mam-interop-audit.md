@@ -197,3 +197,30 @@ heads; canonical upstream Conversations/monocles/Kaidan verification; any
 demonstrably needed remaining MAM compatibility. No claim of end-to-end
 application read-state synchronization: UI history lookup, storage and
 monotonic cursor changes belong to the consuming application, not Iris.
+
+
+## MAMTask request/execution lifecycle (review follow-up)
+
+`MAMTask` is a **one-shot** `Task`, not a reusable archive query object. A
+completed `Task` cannot be restarted because its base-class completion state
+is terminal. The two existing `get()` overloads are retained for API
+compatibility, but they now only replace a `Request` value before `go()`:
+
+- `Request` stores the chosen, mutually exclusive time/ID filter and paging
+  options. Reconfiguring before `go()` replaces the whole request rather than
+  leaving stale fields from the other filter mode.
+- `Progress` stores active query/IQ IDs, effective baseline-RSM boundaries,
+  cursor history, message count, final flags and buffered results. It is
+  initialized by `onGo()`, never by `get()`.
+- An ID-range fallback to baseline RSM modifies only the *effective*
+  `Progress` cursor, not the originally configured range.
+- The archive address, discovered capabilities and collection policy must be
+  provided before `go()`. They are frozen once execution starts so a
+  mid-query change cannot redirect sender validation.
+- `Private` no longer stores `MAMTask *q`; the task itself owns IQ construction,
+  sending, and caller-specific methods. PIMPL lifetime uses `std::unique_ptr`.
+
+Regression coverage checks switching ID/time filters prior to `go()`,
+no archive reset from a rejected in-flight `get()`, and rejection of a
+mid-query change of the archive JID. Do not attempt to reuse a finished
+`MAMTask`; request a new task from `MAMManager`.
