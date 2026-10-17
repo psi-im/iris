@@ -60,6 +60,9 @@ QDomElement  textTag(QDomDocument *doc, const QString &name, const QString &cont
 QDomElement  textTagNS(QDomDocument *doc, const QString &ns, const QString &name, const QString &content);
 QString      tagContent(const QDomElement &e);
 XDomNodeList childElementsByTagNameNS(const QDomElement &e, const QString &nsURI, const QString &localName);
+// Find the first direct child by local name, regardless of namespace.
+// For protocol recognition, check the returned element's namespaceURI().
+QDomElement  firstChildElementByLocalName(const QDomElement &e, const QString &localName);
 QDomElement  createIQ(QDomDocument *doc, const QString &type, const QString &to, const QString &id);
 QDomElement  queryTag(const QDomElement &e);
 QString      queryNS(const QDomElement &e);
