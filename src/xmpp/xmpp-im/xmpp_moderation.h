@@ -37,6 +37,7 @@ private:
     QString targetId_;
     QString reason_;
     bool    valid_ = false;
+    bool    awaitingResponse_ = false;
 };
 
 } // namespace XMPP
