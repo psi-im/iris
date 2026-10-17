@@ -1380,7 +1380,7 @@ Stanza Message::toStanza(Stream *stream, Jingle::Manager *jingleManager) const
     // timestamp
     if (d->timeStampSend && !d->timeStamp.isNull()) {
         QDomElement e = s.createElement("urn:xmpp:delay", "delay");
-        e.setAttribute("stamp", d->timeStamp.toUTC().toString(Qt::ISODate) + "Z");
+        e.setAttribute("stamp", d->timeStamp.toUTC().toString(Qt::ISODateWithMs));
         s.appendChild(e);
 
         e = s.createElement("jabber:x:delay", "x");
@@ -1869,23 +1869,30 @@ bool Message::fromStanza(const Stanza &s, bool useTimeZoneOffset, int timeZoneOf
     // timestamp
     QDomElement t = childElementsByTagNameNS(root, "urn:xmpp:delay", "delay").item(0).toElement();
     QDateTime   stamp;
-    if (!t.isNull()) {
-        stamp = QDateTime::fromString(t.attribute("stamp").left(19), Qt::ISODate);
+    const bool  modernDelay = !t.isNull();
+    if (modernDelay) {
+        stamp = QDateTime::fromString(t.attribute("stamp"), Qt::ISODate);
     } else {
         t = childElementsByTagNameNS(root, "jabber:x:delay", "x").item(0).toElement();
         if (!t.isNull()) {
             stamp = stamp2TS(t.attribute("stamp"));
         }
     }
-    if (!stamp.isNull()) {
+    if (stamp.isValid()) {
         if (useTimeZoneOffset) {
-            d->timeStamp = stamp.addSecs(timeZoneOffset * 3600);
+            // The manual offset is applied to UTC, not to a supplied
+            // non-UTC wall clock time.
+            d->timeStamp = (modernDelay ? stamp.toUTC() : stamp).addSecs(timeZoneOffset * 3600);
         } else {
+            // Legacy XEP-0091 stamps lack a timezone and are defined as UTC.
+            // Modern XEP-0203 stamps already contain a UTC offset or 'Z'.
+            if (!modernDelay) {
 #if QT_VERSION < QT_VERSION_CHECK(6, 9, 0)
-            stamp.setTimeSpec(Qt::UTC);
+                stamp.setTimeSpec(Qt::UTC);
 #else
-            stamp.setTimeZone(QTimeZone::UTC);
+                stamp.setTimeZone(QTimeZone::UTC);
 #endif
+            }
             d->timeStamp = stamp.toLocalTime();
         }
         d->timeStampSend = true;
