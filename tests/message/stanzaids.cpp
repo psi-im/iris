@@ -39,8 +39,9 @@ int main(int argc, char **argv)
               == QStringLiteral("account-id"), "Account stanza ID was lost");
     check(message.stanzaId(Jid(QStringLiteral("untrusted.example.test"))).id.isEmpty(),
           "Unknown assigning entity returned an ID");
-    check(message.stanzaId().id == QStringLiteral("account-id"),
-          "Legacy stanzaId() no longer selects the last distinct ID");
+    check(message.stanzaIds().at(0).id == QStringLiteral("room-id")
+              && message.stanzaIds().at(1).id == QStringLiteral("account-id"),
+          "Stanza ID order was not retained");
     check(message.originId() == QStringLiteral("client-origin"), "Origin ID was lost");
 
     const auto outgoing = message.toStanza(&stream);
@@ -58,10 +59,15 @@ int main(int argc, char **argv)
 
     roundTrip.addStanzaId({ Jid(QStringLiteral("alice@example.test")), QStringLiteral("duplicate") });
     check(roundTrip.stanzaIds().size() == 2, "Duplicate assigning entity was accepted");
-    roundTrip.setStanzaId({ Jid(QStringLiteral("new.example.test")), QStringLiteral("replacement") });
-    check(roundTrip.stanzaIds().size() == 1
-              && roundTrip.stanzaId().id == QStringLiteral("replacement"),
-          "Legacy setStanzaId() failed to replace the list");
+    roundTrip.setStanzaIds({
+        { Jid(QStringLiteral("new.example.test")), QStringLiteral("replacement") },
+        { Jid(QStringLiteral("new.example.test")), QStringLiteral("duplicate") },
+        { Jid(QStringLiteral("another.example.test")), QStringLiteral("another") }
+    });
+    check(roundTrip.stanzaIds().size() == 2
+              && roundTrip.stanzaId(Jid(QStringLiteral("new.example.test"))).id == QStringLiteral("replacement")
+              && roundTrip.stanzaId(Jid(QStringLiteral("another.example.test"))).id == QStringLiteral("another"),
+          "setStanzaIds() did not replace and validate the list");
 
     // Ordinary stanza IDs and XEP-0359 origin IDs are independent.
     QDomDocument noOriginDoc;
