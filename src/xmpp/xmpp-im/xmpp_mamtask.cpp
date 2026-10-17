@@ -110,11 +110,11 @@ public:
     {
         if (!active_)
             return false;
-        if (stanza.tagName() == QLatin1String("iq"))
-            return takeIq(stanza);
         if (stanza.tagName() == QLatin1String("message"))
             return takeResult(stanza);
-        return false;
+        // iqVerify() rejects everything except IQ stanzas matching this
+        // page's response ID and expected addressing.
+        return takeIq(stanza);
     }
 
 protected:
@@ -207,14 +207,13 @@ private:
 
     bool takeIq(const QDomElement &iq)
     {
-        // A response must belong to this *page*, not merely to its parent.
-        // An IQ from another own resource can pass generic iqVerify().
-        if (iq.attribute(QLatin1String("id")) != id())
+        // iqVerify() already checks the IQ element, response ID and
+        // generic JID addressing. It does not check the IQ response type or
+        // MAM's stricter sender identity (especially our other resources).
+        if (!iqVerify(iq, request_.archiveJid, id()) || !isExpectedSender(iq))
             return false;
         const auto type = iq.attribute(QLatin1String("type"));
         if (type != QLatin1String("result") && type != QLatin1String("error"))
-            return false;
-        if (!isExpectedSender(iq) || !iqVerify(iq, request_.archiveJid, id()))
             return false;
 
         if (type == QLatin1String("error")) {
