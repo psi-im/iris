@@ -156,6 +156,30 @@ int main(int argc, char **argv)
     require(optionalForwarding.success(), "Optional forwarding query failed");
 
 
+    // Namespace prefixes do not change XML element identity (XEP-0313).
+    MAMTask prefixed(c.rootTask());
+    prefixed.get(Jid(), QDateTime(), QDateTime(), false, 10, 0, false, false);
+    prefixed.go();
+    const auto prefixedIq = stream.sent.last();
+    const auto prefixedResult = QStringLiteral(
+        "<message from='alice@example.test' xmlns:mam='urn:xmpp:mam:2' "
+        "xmlns:f='urn:xmpp:forward:0' xmlns:d='urn:xmpp:delay' "
+        "xmlns:c='jabber:client'><mam:result queryid='%1' id='prefixed-uid'>"
+        "<f:forwarded><d:delay stamp='2026-10-16T12:00:00Z'/>"
+        "<c:message from='bob@example.test'><c:body>Hi</c:body></c:message>"
+        "</f:forwarded></mam:result></message>").arg(qid(prefixedIq));
+    require(c.rootTask()->take(xml(prefixedResult)), "Prefixed MAM result not consumed");
+    require(prefixed.archive().size() == 1
+                && prefixed.archive().first().attribute(QStringLiteral("id"))
+                       == QStringLiteral("prefixed-uid"),
+            "Valid prefixed MAM result was lost");
+    const auto prefixedFin = QStringLiteral(
+        "<iq from='alice@example.test' type='result' id='%1' "
+        "xmlns:mam='urn:xmpp:mam:2'><mam:fin complete='true'/></iq>")
+        .arg(prefixedIq.attribute(QStringLiteral("id")));
+    require(c.rootTask()->take(xml(prefixedFin)), "Prefixed MAM fin not consumed");
+    require(prefixed.success(), "Valid prefixed MAM fin failed");
+
     MAMTask muc(c.rootTask());
     const Jid room(QStringLiteral("room@conference.example.test"));
     muc.setArchiveJid(room);
