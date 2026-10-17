@@ -26,6 +26,21 @@
 using namespace XMLHelper;
 using namespace XMPP;
 
+namespace {
+// Namespace-aware QDomElement::localName() handles prefixed server XML;
+// retain the first matching local name so invalid namespaces are not skipped.
+QDomElement directChildNamed(const QDomElement &parent, const QString &name)
+{
+    for (auto child = parent.firstChildElement(); !child.isNull(); child = child.nextSiblingElement()) {
+        const auto local = child.localName().isEmpty() ? child.tagName().section(QLatin1Char(':'), -1)
+                                                        : child.localName();
+        if (local == name)
+            return child;
+    }
+    return {};
+}
+} // namespace
+
 class MAMTask::Private {
 public:
     int  mamPageSize = 10; // maximum messages per page
@@ -272,7 +287,7 @@ bool MAMTask::take(const QDomElement &x)
         if (x.attribute(QLatin1String("type")) != QLatin1String("result"))
             return false;
 
-        QDomElement fin = x.firstChildElement(QLatin1String("fin"));
+        QDomElement fin = directChildNamed(x, QLatin1String("fin"));
         if (fin.isNull() || fin.namespaceURI() != XMPP_MAM_NAMESPACE) {
             setError(1, QStringLiteral("Missing MAM <fin/> in query response"));
             return true;
@@ -292,7 +307,7 @@ bool MAMTask::take(const QDomElement &x)
             setError(1, QStringLiteral("Missing RSM cursor in MAM <fin/>"));
             return true;
         }
-        const auto edge = set.firstChildElement(d->backwards ? QLatin1String("first") : QLatin1String("last"));
+        const auto edge = directChildNamed(set, d->backwards ? QLatin1String("first") : QLatin1String("last"));
         const QString cursor = edge.text();
         if (cursor.isEmpty() || d->visitedCursors.contains(cursor)) {
             setError(1, QStringLiteral("MAM pagination returned an empty or repeated cursor"));
@@ -307,7 +322,7 @@ bool MAMTask::take(const QDomElement &x)
     // Only results belonging to the current query are part of this task.
     if (x.tagName() != QLatin1String("message"))
         return false;
-    const QDomElement result = x.firstChildElement(QLatin1String("result"));
+    const QDomElement result = directChildNamed(x, QLatin1String("result"));
     if (result.isNull() || result.namespaceURI() != XMPP_MAM_NAMESPACE
         || result.attribute(QLatin1String("queryid")) != d->currentPageQueryID)
         return false;
@@ -315,15 +330,15 @@ bool MAMTask::take(const QDomElement &x)
     // A matching queryid is not proof that the sender owns this archive.
     if (!d->isExpectedSender(x))
         return true; // discard forged result
-    const QDomElement forwarded = result.firstChildElement(QLatin1String("forwarded"));
+    const QDomElement forwarded = directChildNamed(result, QLatin1String("forwarded"));
     if (forwarded.isNull() || forwarded.namespaceURI() != QLatin1String("urn:xmpp:forward:0")
         || result.attribute(QLatin1String("id")).isEmpty())
         return true;
     // Validate the envelope before counting or emitting an archive entry.
     // Full message parsing remains the responsibility of the existing
     // Forwarding/Message implementation, not a second parser in MAMTask.
-    const auto delay = forwarded.firstChildElement(QLatin1String("delay"));
-    const auto message = forwarded.firstChildElement(QLatin1String("message"));
+    const auto delay = directChildNamed(forwarded, QLatin1String("delay"));
+    const auto message = directChildNamed(forwarded, QLatin1String("message"));
     // XEP-0313 permits tombstones without an inner message. Both the
     // forwarded message and its delay are SHOULD, not MUST. Check either
     // element when present while retaining the archive UID in all cases.
