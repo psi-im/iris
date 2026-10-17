@@ -23,6 +23,7 @@
 
 #include <QSet>
 
+#include <utility>
 #include <variant>
 
 using namespace XMLHelper;
@@ -84,6 +85,7 @@ public:
         bool complete = false;
         bool stable = true;
         bool active = false;
+        bool started = false; // Task::done() prevents a second execution
         QString cursor;
         QString fromId;
         QString toId;
@@ -108,9 +110,21 @@ MAMTask::MAMTask(Task *parent) : Task(parent), d(std::make_unique<Private>())
 MAMTask::~MAMTask() = default;
 
 const QList<QDomElement> &MAMTask::archive() const { return d->progress.archive; }
-void MAMTask::setCollectResults(bool enabled) { d->collectResults = enabled; }
-void MAMTask::setArchiveJid(const Jid &j) { d->archiveJid = j; }
-void MAMTask::setArchiveFeatures(const Features &f) { d->archiveFeatures = f; }
+void MAMTask::setCollectResults(bool enabled)
+{
+    if (!d->progress.started)
+        d->collectResults = enabled;
+}
+void MAMTask::setArchiveJid(const Jid &j)
+{
+    if (!d->progress.started)
+        d->archiveJid = j;
+}
+void MAMTask::setArchiveFeatures(const Features &f)
+{
+    if (!d->progress.started)
+        d->archiveFeatures = f;
+}
 bool MAMTask::isComplete() const { return d->progress.complete; }
 bool MAMTask::isStable() const { return d->progress.stable; }
 
@@ -216,7 +230,7 @@ void MAMTask::getPage()
 void MAMTask::get(const Jid &j, const QDateTime &from, const QDateTime &to, const bool allowMUCArchives,
                   int mamPageSize, int mamMaxMessages, bool flipPages, bool backwards)
 {
-    if (d->progress.active)
+    if (d->progress.started)
         return;
     auto request = Private::Request::create(
         j, allowMUCArchives, mamPageSize, mamMaxMessages, flipPages, backwards);
@@ -227,7 +241,7 @@ void MAMTask::get(const Jid &j, const QDateTime &from, const QDateTime &to, cons
 void MAMTask::get(const Jid &j, const QString &fromID, const QString &toID, const bool allowMUCArchives,
                   int mamPageSize, int mamMaxMessages, bool flipPages, bool backwards)
 {
-    if (d->progress.active)
+    if (d->progress.started)
         return;
     auto request = Private::Request::create(
         j, allowMUCArchives, mamPageSize, mamMaxMessages, flipPages, backwards);
@@ -237,10 +251,13 @@ void MAMTask::get(const Jid &j, const QString &fromID, const QString &toID, cons
 
 void MAMTask::onGo()
 {
-    // Task is one-shot. Everything tied to a particular execution belongs
-    // here, not in request configuration.
+    // Task is one-shot. Do not restart it after Task::done() has fired.
+    if (d->progress.started)
+        return;
+    // All mutable execution state is initialized here, not in get().
     d->progress = Private::Progress {};
     auto &progress = d->progress;
+    progress.started = true;
     const auto &request = d->request;
     progress.active = true;
 
