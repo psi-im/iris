@@ -1716,7 +1716,10 @@ bool Message::fromStanza(const Stanza &s, bool useTimeZoneOffset, int timeZoneOf
     d = new Private;
     setTo(s.to());
     setFrom(s.from());
-    setId(s.id());
+    // A received stanza id is not an XEP-0359 origin-id. An explicit
+    // <origin-id/> element parsed below is the only source for originId.
+    // Keep setId() generating origin IDs for locally composed messages.
+    d->id = s.id();
     setLang(s.lang());
 
     auto typeStr = s.type();
