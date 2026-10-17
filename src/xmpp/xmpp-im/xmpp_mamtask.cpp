@@ -18,6 +18,9 @@
  */
 
 #include "xmpp_mamtask.h"
+#include "xmpp_features.h"
+
+#include <QSet>
 
 using namespace XMLHelper;
 using namespace XMPP;
@@ -31,6 +34,11 @@ public:
     bool backwards = true;
     bool allowMUCArchives = true;
     Jid  j;
+    Jid  archiveJid;
+    Features archiveFeatures;
+    bool complete = false;
+    bool stable = true;
+    QSet<QString> visitedCursors;
     MAMTask           *q;
     QString            lastArchiveID;
     QString            fromID;
@@ -53,6 +61,10 @@ MAMTask::MAMTask(Task *parent) : Task(parent)
 MAMTask::~MAMTask() { delete d; }
 
 const QList<QDomElement> &MAMTask::archive() const { return d->archive; }
+void MAMTask::setArchiveJid(const Jid &j) { d->archiveJid = j; }
+void MAMTask::setArchiveFeatures(const Features &f) { d->archiveFeatures = f; }
+bool MAMTask::isComplete() const { return d->complete; }
+bool MAMTask::isStable() const { return d->stable; }
 
 XData MAMTask::Private::makeMAMFilter()
 {
@@ -66,11 +78,14 @@ XData MAMTask::Private::makeMAMFilter()
         fl.append(with);
     }
 
-    XData::Field includeGroupchat;
-    includeGroupchat.setType(XData::Field::Field_Boolean);
-    includeGroupchat.setVar(QLatin1String("include-groupchat"));
-    includeGroupchat.setValue(QStringList(QLatin1String(allowMUCArchives ? "true" : "false")));
-    fl.append(includeGroupchat);
+    // The optional field is legal only when advertised by this archive.
+    if (archiveJid.isEmpty() && archiveFeatures.test(QStringLiteral("urn:xmpp:mam:2#groupchat-field"))) {
+        XData::Field includeGroupchat;
+        includeGroupchat.setType(XData::Field::Field_Boolean);
+        includeGroupchat.setVar(QLatin1String("include-groupchat"));
+        includeGroupchat.setValue(QStringList(QLatin1String(allowMUCArchives ? "true" : "false")));
+        fl.append(includeGroupchat);
+    }
 
     if (from.isValid()) {
         XData::Field start;
@@ -88,7 +103,7 @@ XData MAMTask::Private::makeMAMFilter()
         fl.append(end);
     }
 
-    if (!fromID.isNull()) {
+    if (!fromID.isEmpty()) {
         XData::Field start_id;
         start_id.setType(XData::Field::Field_TextSingle);
         start_id.setVar(QLatin1String("after-id"));
@@ -96,7 +111,7 @@ XData MAMTask::Private::makeMAMFilter()
         fl.append(start_id);
     }
 
-    if (!toID.isNull()) {
+    if (!toID.isEmpty()) {
         XData::Field end_id;
         end_id.setType(XData::Field::Field_TextSingle);
         end_id.setVar(QLatin1String("before-id"));
@@ -115,7 +130,7 @@ XData MAMTask::Private::makeMAMFilter()
 void MAMTask::Private::getPage()
 {
     currentPageQueryIQID = q->genUniqueID();
-    QDomElement iq       = createIQ(q->doc(), QLatin1String("set"), QLatin1String(), currentPageQueryIQID);
+    QDomElement iq       = createIQ(q->doc(), QLatin1String("set"), archiveJid.full(), currentPageQueryIQID);
     QDomElement query    = q->doc()->createElementNS(XMPP_MAM_NAMESPACE, QLatin1String("query"));
     currentPageQueryID   = q->genUniqueID();
     query.setAttribute(QLatin1String("queryid"), currentPageQueryID);
@@ -143,7 +158,7 @@ void MAMTask::Private::getPage()
 
     query.appendChild(x.toXml(q->doc()));
     query.appendChild(rsm.makeQueryElement(q->doc()));
-    if (flipPages)
+    if (flipPages && archiveFeatures.test(QStringLiteral("urn:xmpp:mam:2#extended")))
         query.appendChild(q->doc()->createElementNS(XMPP_MAM_NAMESPACE, QLatin1String("flip-page")));
     iq.appendChild(query);
     q->send(iq);
@@ -159,6 +174,9 @@ void MAMTask::get(const Jid &j, const QDateTime &from, const QDateTime &to, cons
     d->archive.clear();
     d->messagesFetched = 0;
     d->lastArchiveID = QString();
+    d->visitedCursors.clear();
+    d->complete = false;
+    d->stable = true;
 
     d->j                = j;
     d->from             = from;
@@ -180,6 +198,9 @@ void MAMTask::get(const Jid &j, const QString &fromID, const QString &toID, cons
     d->archive.clear();
     d->messagesFetched = 0;
     d->lastArchiveID = QString();
+    d->visitedCursors.clear();
+    d->complete = false;
+    d->stable = true;
 
     d->j                = j;
     d->fromID           = fromID;
@@ -193,13 +214,21 @@ void MAMTask::get(const Jid &j, const QString &fromID, const QString &toID, cons
     d->backwards        = backwards;
 }
 
-void MAMTask::onGo() { d->getPage(); }
+void MAMTask::onGo()
+{
+    if ((!d->fromID.isEmpty() || !d->toID.isEmpty())
+        && !d->archiveFeatures.test(QStringLiteral("urn:xmpp:mam:2#extended"))) {
+        setError(1, QStringLiteral("MAM ID filters require urn:xmpp:mam:2#extended"));
+        return;
+    }
+    d->getPage();
+}
 
 bool MAMTask::take(const QDomElement &x)
 {
     // The final IQ is the page boundary. Sending the next query while the
     // server is still streaming <result/> messages can race with that IQ.
-    if (iqVerify(x, Jid(), d->currentPageQueryIQID)) {
+    if (iqVerify(x, d->archiveJid, d->currentPageQueryIQID)) {
         if (x.attribute(QLatin1String("type")) == QLatin1String("error")) {
             setError(x);
             return true;
@@ -211,8 +240,9 @@ bool MAMTask::take(const QDomElement &x)
             return true;
         }
 
-        if (fin.attribute(QLatin1String("complete")) == QLatin1String("true")
-            || (d->mamMaxMessages > 0 && d->messagesFetched >= d->mamMaxMessages)) {
+        d->complete = fin.attribute(QLatin1String("complete")) == QLatin1String("true");
+        d->stable = d->stable && fin.attribute(QLatin1String("stable")) != QLatin1String("false");
+        if (d->complete || (d->mamMaxMessages > 0 && d->messagesFetched >= d->mamMaxMessages)) {
             setSuccess();
             return true;
         }
@@ -226,11 +256,12 @@ bool MAMTask::take(const QDomElement &x)
         }
         const auto edge = set.firstChildElement(d->backwards ? QLatin1String("first") : QLatin1String("last"));
         const QString cursor = edge.text();
-        if (cursor.isEmpty() || cursor == d->lastArchiveID) {
+        if (cursor.isEmpty() || d->visitedCursors.contains(cursor)) {
             setError(1, QStringLiteral("MAM pagination returned an empty or repeated cursor"));
             return true;
         }
         d->lastArchiveID = cursor;
+        d->visitedCursors.insert(cursor);
         d->getPage();
         return true;
     }
@@ -242,6 +273,19 @@ bool MAMTask::take(const QDomElement &x)
     if (result.isNull() || result.namespaceURI() != XMPP_MAM_NAMESPACE
         || result.attribute(QLatin1String("queryid")) != d->currentPageQueryID)
         return false;
+
+    // A matching queryid is not proof that the sender owns this archive.
+    const Jid sender(x.attribute(QLatin1String("from")));
+    if (!d->archiveJid.isEmpty()) {
+        if (sender.isEmpty() || !sender.compare(d->archiveJid, false))
+            return true; // discard forged result
+    } else if (!sender.isEmpty() && !sender.compare(Jid(client()->jid().bare()), false)) {
+        return true;
+    }
+    const QDomElement forwarded = result.firstChildElement(QLatin1String("forwarded"));
+    if (forwarded.isNull() || forwarded.namespaceURI() != QLatin1String("urn:xmpp:forward:0")
+        || result.attribute(QLatin1String("id")).isEmpty())
+        return true;
 
     if (d->mamMaxMessages > 0 && d->messagesFetched >= d->mamMaxMessages) {
         // A server that sends more items than requested must not grow
