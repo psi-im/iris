@@ -34,17 +34,6 @@ using namespace XMPP;
 
 namespace {
 
-QDomElement directChildNamed(const QDomElement &parent, const QString &name)
-{
-    for (auto child = parent.firstChildElement(); !child.isNull(); child = child.nextSiblingElement()) {
-        const auto local = child.localName().isEmpty() ? child.tagName().section(QLatin1Char(':'), -1)
-                                                        : child.localName();
-        if (local == name)
-            return child;
-    }
-    return {};
-}
-
 struct TimeRange {
     QDateTime from;
     QDateTime to;
@@ -129,12 +118,12 @@ public:
         const auto mam = message.mamResult();
         if (!mam.isValid() || mam.queryId != queryId_ || !isExpectedSender(message.from()))
             return Result::NotHandled;
-        const auto forwarded = directChildNamed(mam.xml, QLatin1String("forwarded"));
+        const auto forwarded = firstChildElementByLocalName(mam.xml, QLatin1String("forwarded"));
         if (forwarded.isNull() || forwarded.namespaceURI() != QLatin1String("urn:xmpp:forward:0")
             || mam.id.isEmpty())
             return Result::HandledStop;
-        const auto delay = directChildNamed(forwarded, QLatin1String("delay"));
-        const auto innerMessage = directChildNamed(forwarded, QLatin1String("message"));
+        const auto delay = firstChildElementByLocalName(forwarded, QLatin1String("delay"));
+        const auto innerMessage = firstChildElementByLocalName(forwarded, QLatin1String("message"));
         // Both delay and inner message are optional for archive tombstones.
         if ((!delay.isNull()
              && (delay.namespaceURI() != QLatin1String("urn:xmpp:delay")
@@ -262,7 +251,7 @@ private:
             return true;
         }
 
-        const auto fin = directChildNamed(iq, QLatin1String("fin"));
+        const auto fin = firstChildElementByLocalName(iq, QLatin1String("fin"));
         if (fin.isNull() || fin.namespaceURI() != XMPP_MAM_NAMESPACE) {
             setError(1, QStringLiteral("Missing MAM <fin/> in query response"));
             return true;
@@ -273,9 +262,9 @@ private:
         // Missing/malformed RSM is only an error when another page is
         // required. The coordinator owns that decision (including the
         // global maxMessages cap); this task exposes the cursor, if present.
-        const auto rsm = directChildNamed(fin, QLatin1String("set"));
+        const auto rsm = firstChildElementByLocalName(fin, QLatin1String("set"));
         if (!rsm.isNull() && rsm.namespaceURI() == QLatin1String("http://jabber.org/protocol/rsm")) {
-            const auto edge = directChildNamed(rsm,
+            const auto edge = firstChildElementByLocalName(rsm,
                 request_.request.backwards ? QLatin1String("first") : QLatin1String("last"));
             if (!edge.isNull() && edge.namespaceURI() == QLatin1String("http://jabber.org/protocol/rsm"))
                 nextCursor_ = edge.text();
