@@ -102,6 +102,12 @@ int main(int argc, char **argv)
     baseline.go();
     require(!stream.sent.isEmpty(), "No initial MAM query");
     auto first = stream.sent.last();
+    // A coordinator owns a child Task for the active page. IQ correlation
+    // must stay in that child rather than the multi-page parent.
+    require(baseline.children().size() == 1
+                && baseline.children().first()->inherits("XMPP::Task"),
+            "MAM coordinator did not create a child page Task");
+    auto *initialPage = baseline.children().first();
     require(first.attribute(QStringLiteral("to")).isEmpty(), "Own archive IQ has a to");
     require(!hasField(first, QStringLiteral("with")), "Unfiltered query has a with");
     require(!hasField(first, QStringLiteral("include-groupchat")), "Unadvertised field sent");
@@ -177,6 +183,23 @@ int main(int argc, char **argv)
     fin(c, first, QStringLiteral("alice@example.test"), QStringLiteral("m2"),
         QStringLiteral("m3"), false, false);
     auto second = stream.sent.last();
+    require(baseline.children().size() >= 2
+                && baseline.children().last() != initialPage
+                && baseline.children().last()->inherits("XMPP::Task"),
+            "Next page reused the previous child Task");
+    // The retired page still exists until deleteLater(), but it must not
+    // consume a late result or IQ from its old query.
+    const auto stale = QStringLiteral(
+        "<message from='alice@example.test'><result xmlns='urn:xmpp:mam:2' "
+        "queryid='%1' id='late-old-page'><forwarded xmlns='urn:xmpp:forward:0'/>"
+        "</result></message>").arg(qid(first));
+    require(!baseline.take(xml(stale)), "Retired page consumed a late MAM result");
+    require(!baseline.take(xml(QStringLiteral(
+                "<iq from='alice@example.test' type='result' id='%1'>"
+                "<fin xmlns='urn:xmpp:mam:2' complete='true'/></iq>")
+            .arg(first.attribute(QStringLiteral("id")))),
+            "Retired page consumed a late MAM IQ");
+    require(baseline.archive().size() == 2, "Late page result changed coordinator results");
     require(qid(first) != qid(second), "Query ID was reused");
     require(rsm(second).firstChildElement(QStringLiteral("before")).text() == QStringLiteral("m2"),
             "Wrong backward cursor");
