@@ -338,3 +338,15 @@ The previous Qt5 fixture lifetime crash was fixed and Qt5/Qt6 MAM and
 cross-platform CI were all green on `df786e27`. The subsequent shared XML
 helper refactor still requires its own CI check. This PR remains Draft
 pending that validation, nested forwarding and canonical client-source audit.
+
+
+## Namespace-shadowing hardening (2026-10-18)
+
+MAM envelope, forwarding, IQ completion and RSM edge selection must match
+both the direct child's local name and its XML namespace. An unrelated
+same-local-name element preceding a valid sibling must not hide the latter.
+The existing `childElementsByTagNameNS()` helper is used; no MAM-specific
+QName parser is introduced. Optional `delay` and forwarded `message`
+remain optional for redacted XEP-0313 results, while wrong-namespace-only
+lookalikes are rejected. Regression coverage includes shadowed forwarded,
+delay, message, fin, set and RSM cursor elements.

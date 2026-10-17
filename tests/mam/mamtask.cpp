@@ -390,6 +390,42 @@ int main(int argc, char **argv)
     fin(c, secondPrefixedPage, QStringLiteral("alice@example.test"), QString(), QString(), true);
     require(prefixedPaged.success(), "Prefixed RSM pagination did not finish");
 
+
+    // Foreign-namespace lookalikes must not shadow later valid direct
+    // children, including the RSM cursor used for the next MAM page.
+    MAMTask namespaceShadowed(c.rootTask());
+    namespaceShadowed.get(Jid(), QDateTime(), QDateTime(), false, 2, 0, false, false);
+    namespaceShadowed.go();
+    const auto shadowedIq = stream.sent.last();
+    const auto shadowedResult = QStringLiteral(
+        "<message from='alice@example.test' xmlns:x='urn:example:foreign'>"
+        "<result xmlns='urn:xmpp:mam:2' queryid='%1' id='shadowed-uid'>"
+        "<x:forwarded/><forwarded xmlns='urn:xmpp:forward:0'>"
+        "<x:delay stamp='invalid'/>"
+        "<delay xmlns='urn:xmpp:delay' stamp='2026-10-16T12:00:00Z'/>"
+        "<x:message/><message xmlns='jabber:client' from='bob@example.test'/>"
+        "</forwarded></result></message>").arg(qid(shadowedIq));
+    require(c.rootTask()->take(xml(shadowedResult)), "Shadowed MAM result not consumed");
+    require(namespaceShadowed.archive().size() == 1
+                && namespaceShadowed.archive().first().attribute(QStringLiteral("id"))
+                       == QStringLiteral("shadowed-uid"),
+            "Foreign namespace hid a valid forwarded result");
+    const auto shadowedFin = QStringLiteral(
+        "<iq from='alice@example.test' type='result' id='%1' xmlns:x='urn:example:foreign'>"
+        "<x:fin/><fin xmlns='urn:xmpp:mam:2' complete='false'>"
+        "<x:set/><set xmlns='http://jabber.org/protocol/rsm'>"
+        "<x:last>foreign-cursor</x:last><last>real-cursor</last>"
+        "</set></fin></iq>").arg(shadowedIq.attribute(QStringLiteral("id")));
+    require(c.rootTask()->take(xml(shadowedFin)), "Shadowed MAM fin not consumed");
+    const auto nextShadowedPage = stream.sent.last();
+    require(nextShadowedPage.attribute(QStringLiteral("id"))
+                != shadowedIq.attribute(QStringLiteral("id"))
+                && rsm(nextShadowedPage).firstChildElement(QStringLiteral("after")).text()
+                       == QStringLiteral("real-cursor"),
+            "Foreign namespace hid the valid RSM cursor");
+    fin(c, nextShadowedPage, QStringLiteral("alice@example.test"), QString(), QString(), true);
+    require(namespaceShadowed.success(), "Namespace-shadowed MAM pagination failed");
+
     MAMTask muc(c.rootTask());
     const Jid room(QStringLiteral("room@conference.example.test"));
     muc.setArchiveJid(room);
