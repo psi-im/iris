@@ -54,6 +54,18 @@ int main(int argc, char **argv)
         "<occupant-id xmlns='urn:xmpp:occupant-id:0' id='%1'/>")
         .arg(QString(129, QLatin1Char('x')))).occupantId().isEmpty(),
         "Oversized occupant ID was accepted");
+    // Astral characters occupy two UTF-16 code units but one Unicode character.
+    const auto emoji = QStringLiteral("😀");
+    const auto emoji128 = emoji.repeated(128);
+    const auto emoji129 = emoji.repeated(129);
+    check(parseMessage(QStringLiteral(
+        "<occupant-id xmlns='urn:xmpp:occupant-id:0' id='%1'/>")
+        .arg(emoji128)).occupantId() == emoji128,
+        "128 non-BMP Unicode characters were incorrectly rejected");
+    check(parseMessage(QStringLiteral(
+        "<occupant-id xmlns='urn:xmpp:occupant-id:0' id='%1'/>")
+        .arg(emoji129)).occupantId().isEmpty(),
+        "129 non-BMP Unicode characters were accepted");
     check(parseMessage(QStringLiteral(
         "<occupant-id xmlns='urn:wrong:occupant-id' id='forged'/>")).occupantId().isEmpty(),
         "Incorrect namespace was accepted");
@@ -85,8 +97,16 @@ int main(int argc, char **argv)
         .arg(QString(129, QLatin1Char('x'))));
     check(received == 3 && occupantId.isEmpty(), "Oversized presence occupant ID was accepted");
     parsePresence(QStringLiteral(
+        "<occupant-id xmlns='urn:xmpp:occupant-id:0' id='%1'/>").arg(emoji128));
+    check(received == 4 && occupantId == emoji128,
+          "128 non-BMP presence Unicode characters were incorrectly rejected");
+    parsePresence(QStringLiteral(
+        "<occupant-id xmlns='urn:xmpp:occupant-id:0' id='%1'/>").arg(emoji129));
+    check(received == 5 && occupantId.isEmpty(),
+          "129 non-BMP presence Unicode characters were accepted");
+    parsePresence(QStringLiteral(
         "<o:occupant-id xmlns:o='urn:xmpp:occupant-id:0' id='prefixed'/>"));
-    check(received == 4 && occupantId == QStringLiteral("prefixed"),
+    check(received == 6 && occupantId == QStringLiteral("prefixed"),
           "Prefixed presence occupant ID was ignored");
 
     // These accessors expose UNTRUSTED data: room disco#info must advertise
