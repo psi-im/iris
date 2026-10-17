@@ -741,6 +741,7 @@ public:
     QList<MUCInvite> mucInvites;
     MUCDecline       mucDecline;
     QString          mucPassword;
+    QString          occupantId; // XEP-0421, untrusted until room disco
     bool             hasMUCUser = false;
 
     bool spooled = false, wasEncrypted = false;
@@ -1131,6 +1132,14 @@ MUCDecline Message::mucDecline() const { return d ? d->mucDecline : MUCDecline()
 QString Message::mucPassword() const { return d ? d->mucPassword : QString(); }
 
 void Message::setMUCPassword(const QString &p) { MessageD()->mucPassword = p; }
+
+QString Message::occupantId() const { return d ? d->occupantId : QString(); }
+
+void Message::setOccupantId(const QString &id)
+{
+    // XEP-0421: at most 128 Unicode characters. Empty clears the identifier.
+    MessageD()->occupantId = id.toUcs4().size() <= 128 ? id : QString();
+}
 
 bool Message::hasMUCUser() const { return d && d->hasMUCUser; }
 
@@ -1607,6 +1616,14 @@ Stanza Message::toStanza(Stream *stream, Jingle::Manager *jingleManager) const
         s.appendChild(element);
     }
 
+    // XEP-0421: preserve a received MUC occupant ID. Authentication of the
+    // assigning room depends on disco and belongs to the consuming client.
+    if (!d->occupantId.isEmpty()) {
+        auto e = s.createElement(QStringLiteral("urn:xmpp:occupant-id:0"), QStringLiteral("occupant-id"));
+        e.setAttribute(QStringLiteral("id"), d->occupantId);
+        s.appendChild(e);
+    }
+
     // XEP-0359: Unique and Stable Stanza IDs
     if (!d->originId.isEmpty()) {
         auto e = s.createElement(QStringLiteral("urn:xmpp:sid:0"), QStringLiteral("origin-id"));
@@ -1747,6 +1764,7 @@ bool Message::fromStanza(const Stanza &s, bool useTimeZoneOffset, int timeZoneOf
     bool         hasBodyOrThread = false;
     bool         hasSubject      = false;
     int          jmiElementCount = 0;
+    int          occupantIdElements = 0;
     for (QDomElement e = root.firstChildElement(); !e.isNull(); e = e.nextSiblingElement()) {
         if (e.namespaceURI() == s.baseNS()) {
             if (e.tagName() == QLatin1String("subject")) {
@@ -1836,6 +1854,11 @@ bool Message::fromStanza(const Stanza &s, bool useTimeZoneOffset, int timeZoneOf
             d->processingHints |= NoCopy;
         } else if (e.tagName() == QLatin1String("store") && e.namespaceURI() == QLatin1String("urn:xmpp:hints")) {
             d->processingHints |= Store;
+        } else if (e.localName() == QLatin1String("occupant-id")
+                   && e.namespaceURI() == QLatin1String("urn:xmpp:occupant-id:0")) {
+            ++occupantIdElements;
+            if (occupantIdElements == 1)
+                setOccupantId(e.attribute(QStringLiteral("id")));
         } else if (e.namespaceURI() == QLatin1String("urn:xmpp:mam:2")
                    && (e.localName().isEmpty() ? e.tagName() : e.localName()) == QLatin1String("result")) {
             if (!d->mamResult.isValid()) {
@@ -1855,6 +1878,10 @@ bool Message::fromStanza(const Stanza &s, bool useTimeZoneOffset, int timeZoneOf
             // printf("extension element: [%s]\n", e.tagName().latin1());
         }
     }
+
+    // Multiple occupant IDs in one stanza are ambiguous: never select one.
+    if (occupantIdElements != 1)
+        d->occupantId.clear();
 
     d->pureSubject = hasSubject && !hasBodyOrThread; // this is somewhat important for muc
 
@@ -2451,6 +2478,7 @@ public:
     QList<BoBData> bobDataList;
 
     // MUC
+    QString    occupantId; // XEP-0421, untrusted until room disco
     bool       isMUC         = false;
     bool       hasMUCItem    = false;
     bool       hasMUCDestroy = false;
@@ -2579,6 +2607,8 @@ void Status::setCaps(const CapsSpec &caps) { d->caps = caps; }
 
 void Status::setMUC() { d->isMUC = true; }
 
+void Status::setOccupantId(const QString &id) { d->occupantId = id.toUcs4().size() <= 128 ? id : QString(); }
+
 void Status::setMUCItem(const MUCItem &i)
 {
     d->hasMUCItem = true;
@@ -2681,6 +2711,8 @@ const QString &Status::songTitle() const { return d->songTitle; }
 const CapsSpec &Status::caps() const { return d->caps; }
 
 bool Status::isMUC() const { return d->isMUC || !d->mucPassword.isEmpty() || hasMUCHistory(); }
+
+QString Status::occupantId() const { return d->occupantId; }
 
 bool Status::hasMUCItem() const { return d->hasMUCItem; }
 
