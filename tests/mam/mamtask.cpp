@@ -201,7 +201,7 @@ int main(int argc, char **argv)
     require(!baseline.take(xml(QStringLiteral(
                 "<iq from='alice@example.test' type='result' id='%1'>"
                 "<fin xmlns='urn:xmpp:mam:2' complete='true'/></iq>")
-            .arg(first.attribute(QStringLiteral("id")))),
+            .arg(first.attribute(QStringLiteral("id"))))),
             "Retired page consumed a late MAM IQ");
     require(baseline.archive().size() == 2, "Late page result changed coordinator results");
     require(qid(first) != qid(second), "Query ID was reused");
