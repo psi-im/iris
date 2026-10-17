@@ -50,7 +50,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build zlib1g-dev ${{ matrix.deps }}
+          sudo apt-get install -y cmake ninja-build gdb zlib1g-dev ${{ matrix.deps }}
       - uses: ./.github/actions/load-dependencies
         if: matrix.name == 'qt6-qca3'
         with:
@@ -70,4 +70,9 @@ jobs:
       - name: Build MAM regression
         run: cmake --build build-mam --parallel 4 --target iris_mamtask_test
       - name: Test MAM query lifecycle
-        run: ctest --test-dir build-mam --output-on-failure -R '^iris_mamtask$'
+        run: |
+          if ! ctest --test-dir build-mam --output-on-failure -R '^iris_mamtask
+; then
+            gdb -batch -ex run -ex 'thread apply all bt' --args build-mam/tests/mam/iris_mamtask_test || true
+            exit 1
+          fi
