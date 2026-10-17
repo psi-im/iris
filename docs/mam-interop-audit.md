@@ -56,15 +56,35 @@ Dino keeps protocol operations separate from the application's `HistorySync`: it
 
 **Iris architecture choice:** Keep query construction, result validation, `<fin/>` pagination and optional streaming callback in the existing `MAMTask` / `MAMManager`. Reuse existing `SubsetsClientManager`, `Forwarding`, `Message`, disco and Task infrastructure. Leave persistent cursors, local DB ranges, storage and UI synchronization to Psi; do not create an Iris-level history database.
 
-## Work already staged in draft PR #118
+## Client-source comparison (2026-10-17)
 
-At this point the draft has **unvalidated initial fixes**, not a complete interoperable implementation:
+This comparison distinguishes **protocol transport** from **application synchronization and message replay**.
 
-- Disallowed the broken `MAMTask` copy constructor, initialized its private state and reset incompatible filter modes.
-- Corrected RSM per-page `max`, bounded total limits and UTC ISO timestamp serialization.
-- Replaced mandatory archive metadata preflight and stanza-count-driven pagination with `<fin/>` IQ completion and RSM first/last cursors.
+| Client / inspected source | Confirmed archive behavior | Iris coverage on PR #118 |
+| --- | --- | --- |
+| [Dino MAM module](https://github.com/dino/dino/blob/master/xmpp-vala/src/module/xep/0313_message_archive_management.vala) + [HistorySync](https://github.com/dino/dino/blob/master/libdino/src/service/history_sync.vala) | MAM v2, own/MUC archive JID, queryid correlation, sender checks, RSM first/last, per-archive range tracking, persisted archive IDs | Wire protocol and streaming results covered; DB ranges remain application responsibility |
+| [Kaidan GitHub mirror](https://github.com/KaidanIM/Kaidan/blob/master/src/MessageHandler.cpp) | QXmppMamManager; time-based catch-up, per-contact initial/backlog, reverse RSM, streaming `archivedMessageReceived`, completion callback | Query filters, paging, streaming and fin state covered; storage/UI remain application responsibility |
+| [Monocles DinoXIM development fork](https://git.dinox.im/dinoxim/monocles-chat/src/branch/master/src/main/java/eu/siacs/conversations/services/MessageArchiveService.java), modified 2026-10-04 | MAM namespaces 0/1/2, account/MUC discovery, catch-up, reverse paging, per-conversation cursors, sender verification | MAM2 behavior covered; legacy 0/1 namespaces still to assess |
+| [Conversations-derived public fork](https://github.com/r4sas/Conversations-I2P/blob/master/src/main/java/eu/siacs/conversations/services/MessageArchiveService.java) | MAM 0/1/2, own/MUC archive routing, timestamp/cursor catch-up and page lifecycle | Modern MAM2 covered; legacy compatibility open |
 
-**Not yet verified by dedicated MAM tests. Do not merge.** Server capability gating for `flip-page` and `include-groupchat`, MUC archive addressing, result-origin authentication, cancellation, per-page error paths and full client comparison remain open. The defect list above is a description of the *pre-audit master* baseline; individual items must be checked off only with tests.
+**Source provenance:** the monocles link is a current, public development fork, **not** the canonical Codeberg monocles repository; the Conversations link is likewise a fork. The canonical Codeberg trees remain to be checked independently. Do not claim an exhaustive upstream audit based on these forks.
+
+## Implementation status in draft PR #118
+
+Completed in Iris's **existing** `MAMTask`, without a second manager:
+
+- Fixed query initialization, disallowed copying the QObject-backed task, reset mutually exclusive filter modes and serialized timestamps as UTC ISO-8601.
+- Changed page lifecycle to wait for `<fin/>`; use RSM `first`/`last`, `complete` and cumulative `stable`. Detect repeated cursors and honor page size vs total cap, including unlimited mode.
+- Separated the archive JID from the optional `with` filter; own-account and MUC room archives can be queried independently.
+- Applied disco feature gates to `flip-page`, `after-id`, `before-id` and `include-groupchat`. For compatible one-sided ID queries, use baseline RSM before/after as allowed by XEP-0313 §9.
+- Verified exact archive sender JID and queryid before accepting a forwarded result; ignore unsolicited, malformed and post-completion results.
+- Fixed a dispatcher bug: `JT_PushMessage` previously swallowed MAM result envelopes before `MAMTask` could receive them.
+- Added `resultReceived(const QDomElement&)` and `setCollectResults(false)` for streaming catch-up without accumulating the entire archive; existing `archive()` remains backward compatible by default.
+- Added `tests/mam/mamtask.cpp` with a real Client/Task/recording-stream fixture for own/MUC archives, forged senders, baseline and extended queries, RSM paging, total limits, streaming, and `complete`/`stable`.
+
+**CI:** the dedicated MAM tests are newly introduced and the full cross-platform `Build and test` workflow has not yet completed. The separate Jingle and Prosody workflows passed. Keep this PR **Draft** until all failures are resolved.
+
+**Outstanding:** canonical Conversations/monocles verification; legacy MAM 0/1 decision; optional MAM metadata and `ids` retrieval only if a scoped client uses them; IQ-error and malformed/empty-page tests; XEP-0359 multi-`stanza-id` trust and the adjacent replay XEPs in `Message` (not in `MAMTask`). Iris currently stores only one `stanza-id` although XEP-0359 permits multiple with distinct `by` values. That is a separate message-layer change, not a reason to duplicate MAM.
 
 ## Implementation sequence and acceptance
 
