@@ -293,3 +293,39 @@ sending its own page IQ.
 ## Subscriber pipeline follow-up (2026-10-17 15:00 UTC)
 
 MAM envelopes now enter the normal JT_PushMessage Stanza/Message parser. A private MAMPageTask subscriber consumes only matching active-page results. Other messages, including unknown query IDs, continue to ordinary subscribers and consumers. SubscriberResult distinguishes NotHandled, HandledContinue, HandledStop and Error while preserving the legacy bool virtual method. Qt5 MAM regression currently fails with a segfault; Qt6 passed. Diagnose before merging.
+
+## Message subscriber integration (2026-10-17)
+
+MAM `<result/>` is carried inside a **regular XMPP message stanza**.
+It must not bypass `JT_PushMessage`, stanza construction/validation, XML
+subscribers, or `Message::fromStanza()`. The temporary early `return false`
+for MAM envelopes in `JT_PushMessage::take()` has been removed.
+
+- `Message::MamResult` retains the archive result ID, query ID, and the
+  original result element; `Message::fromStanza()` recognizes the envelope.
+  Existing `MAMTask::archive()` and streaming result XML remain available.
+- The private, **one-IQ-per-page** `MAMPageTask` also subscribes to the
+  existing `JT_PushMessage` message dispatch chain. It checks active page,
+  query ID, exact archive sender and forwarding shape, then reports its
+  result and returns `HandledStop`. Page IQs/`fin` remain Task-routed.
+- An unknown query ID, nonmatching sender, or inactive page returns
+  `NotHandled`: the message continues to other subscribers and normal
+  application delivery. Iris must not introduce an extra global UI filter;
+  the consumer decides whether it is displayable.
+- `JT_PushMessage::SubscriberResult` distinguishes `NotHandled`,
+  `HandledContinue`, `HandledStop` and `Error`. The legacy virtual
+  bool `messageEvent` remains bridged (false = NotHandled, true =
+  HandledStop), preserving existing Carbons, Forwarding and PubSub subscribers
+  until they explicitly opt into richer results. XML subscriber mutation and
+  removal semantics are unchanged.
+- Test fixtures must retain their owning `QDomDocument` for the lifetime
+  of received `QDomElement` nodes. Returning an element from a destroyed
+  local document caused a Qt5 crash in `Stanza::lang()` once MAM messages
+  were routed through the standard parser; it was not evidence that the new
+  message dispatch path itself needed to be bypassed.
+- XEP-0059 RSM request building still reuses Iris's existing
+  `SubsetsClientManager` in `xmpp_subsets.{h,cpp}`; no second RSM
+  implementation has been introduced.
+
+The task remains Draft pending fresh Qt5/Qt6 MAM regression and full CI,
+and outstanding nested forwarding and canonical client-source audit.
