@@ -28,6 +28,8 @@
 
 #include <QDateTime>
 
+#include <memory>
+
 #define XMPP_MAM_NAMESPACE QLatin1String("urn:xmpp:mam:2")
 
 class QDomElement;
@@ -63,6 +65,7 @@ public:
     // XEP-0313 'stable=false' means results need later confirmation.
     bool isStable() const;
 
+    // Configuration is only valid before go(); Task is one-shot.
     // Time filter
     void get(const Jid &j, const QDateTime &from = QDateTime(), const QDateTime &to = QDateTime(),
              const bool allowMUCArchives = true, int mamPageSize = 10, int mamMaxMessages = 0, bool flipPages = true,
@@ -73,16 +76,20 @@ public:
              const bool allowMUCArchives = true, int mamPageSize = 10, int mamMaxMessages = 0, bool flipPages = true,
              bool backwards = true);
 
-    void onGo();
-    bool take(const QDomElement &);
+    void onGo() override;
+    bool take(const QDomElement &) override;
 
 signals:
     // Emitted for each validated result, before the final fin IQ.
     void resultReceived(const QDomElement &result);
 
 private:
+    XData makeMAMFilter() const;
+    bool isExpectedSender(const QDomElement &stanza) const;
+    void getPage();
+
     class Private;
-    Private *d;
+    std::unique_ptr<Private> d;
 };
 } // namespace XMPP
 
