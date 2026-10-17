@@ -43,8 +43,9 @@ int main(int argc, char **argv)
           "Moderation action metadata lost");
 
     const auto untrusted = parse(occupant, actionXml);
-    check(untrusted.moderatedRetraction().kind == Message::ModeratedRetraction::Kind::None,
-          "MUC occupant spoofed a moderation action");
+    check(untrusted.moderatedRetraction().kind == Message::ModeratedRetraction::Kind::None
+              && untrusted.retraction().isEmpty(),
+          "MUC occupant spoofed a moderation action or ordinary retraction");
 
     const QString tombstoneXml = QStringLiteral(
         "<retracted xmlns='urn:xmpp:message-retract:1' stamp='2026-10-17T09:00:00Z'>"
