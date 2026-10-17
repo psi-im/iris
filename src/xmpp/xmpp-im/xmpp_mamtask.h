@@ -84,11 +84,8 @@ signals:
     void resultReceived(const QDomElement &result);
 
 private:
-    XData makeMAMFilter() const;
-    bool isExpectedSender(const QDomElement &stanza) const;
-    void getPage();
-    bool takeIq(const QDomElement &stanza);
-    bool takeResult(const QDomElement &stanza);
+    // Creates the next child page Task; never examines stanza or IQ content.
+    void startPage();
 
     class Private;
     std::unique_ptr<Private> d;
