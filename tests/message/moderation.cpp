@@ -82,10 +82,22 @@ int main(int argc, char **argv)
                               .arg(iq.attribute(QStringLiteral("id")));
     check(client.rootTask()->take(xml(spoofed)) == false && finished == 0,
           "Spoofed moderation acknowledgement was accepted");
+    // iqVerify checks sender and ID, but inbound get/set requests can
+    // independently reuse a pending response ID.
+    for (const auto &type : { QStringLiteral("get"), QStringLiteral("set") }) {
+        const auto request = QStringLiteral(
+            "<iq type='%1' from='room@conference.example.test' id='%2'>"
+            "<query xmlns='urn:example:unrelated'/></iq>")
+            .arg(type, iq.attribute(QStringLiteral("id")));
+        check(!client.rootTask()->take(xml(request)) && finished == 0,
+              "Incoming IQ get/set was swallowed as a moderation response");
+    }
     const auto ack = QStringLiteral("<iq type='result' from='room@conference.example.test' id='%1'/>")
                           .arg(iq.attribute(QStringLiteral("id")));
     check(client.rootTask()->take(xml(ack)), "MUC moderation result was not handled");
     check(task.success() && finished == 1, "Successful moderation acknowledgement failed");
+    check(!client.rootTask()->take(xml(ack)) && finished == 1,
+          "Completed moderation task consumed a duplicate acknowledgement");
 
     ModeratedRetractionTask denied(client.rootTask());
     denied.request(room, roomId);
@@ -97,5 +109,18 @@ int main(int argc, char **argv)
                          .arg(stream.sent.last().attribute(QStringLiteral("id")));
     check(client.rootTask()->take(xml(err)), "Moderation error was not consumed");
     check(!denied.success() && !denied.statusString().isEmpty(), "Moderation error was swallowed");
+
+    ModeratedRetractionTask malformed(client.rootTask());
+    int malformedFinished = 0;
+    QObject::connect(&malformed, &Task::finished, &malformed, [&] { ++malformedFinished; });
+    malformed.request(room, roomId);
+    malformed.go();
+    const auto missingErrorPayload = QStringLiteral(
+        "<iq type='error' from='room@conference.example.test' id='%1'/>")
+        .arg(stream.sent.last().attribute(QStringLiteral("id")));
+    check(client.rootTask()->take(xml(missingErrorPayload)),
+          "Correlated malformed moderation error was not handled");
+    check(malformedFinished == 1 && !malformed.success() && !malformed.statusString().isEmpty(),
+          "Moderation error without payload failed to terminate the task");
     return 0;
 }
