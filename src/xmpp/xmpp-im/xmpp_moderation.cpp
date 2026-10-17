@@ -10,7 +10,11 @@
 
 namespace XMPP {
 
-ModeratedRetractionTask::ModeratedRetractionTask(Task *parent) : Task(parent) { }
+ModeratedRetractionTask::ModeratedRetractionTask(Task *parent) : Task(parent)
+{
+    // Task dispatch may still visit completed children before deleteLater().
+    connect(this, &Task::finished, this, [this] { awaitingResponse_ = false; });
+}
 
 void ModeratedRetractionTask::request(const Jid &room, const Message::StanzaId &target,
                                      const QString &reason)
@@ -40,17 +44,28 @@ void ModeratedRetractionTask::onGo()
         moderate.appendChild(textTagNS(doc(), QStringLiteral("urn:xmpp:message-moderate:1"),
                                        QStringLiteral("reason"), reason_));
     iq.appendChild(moderate);
+    awaitingResponse_ = true;
     send(iq);
 }
 
 bool ModeratedRetractionTask::take(const QDomElement &stanza)
 {
-    if (!valid_ || !iqVerify(stanza, room_, id()))
+    if (!awaitingResponse_ || !iqVerify(stanza, room_, id()))
         return false;
-    if (stanza.attribute(QStringLiteral("type")) == QLatin1String("result"))
+
+    // iqVerify() authenticates the IQ envelope and id, not the response
+    // type: an incoming get/set can independently reuse the same id.
+    const auto type = stanza.attribute(QStringLiteral("type"));
+    if (type != QLatin1String("result") && type != QLatin1String("error"))
+        return false;
+
+    if (type == QLatin1String("result")) {
         setSuccess();
-    else
+    } else if (stanza.firstChildElement(QStringLiteral("error")).isNull()) {
+        setError(1, QStringLiteral("Moderation IQ error without error payload"));
+    } else {
         setError(stanza);
+    }
     return true;
 }
 
