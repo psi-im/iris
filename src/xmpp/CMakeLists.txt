@@ -115,6 +115,7 @@ set(XMPP_IM_HEADERS
     xmpp-im/xmpp_mamtask.h
     xmpp-im/xmpp_mammanager.h
     xmpp-im/xmpp_mds.h
+    xmpp-im/xmpp_moderation.h
     xmpp-im/xmpp_serverinfomanager.h
     xmpp-im/xmpp_task.h
     xmpp-im/xmpp_tasks.h
@@ -187,6 +188,7 @@ target_sources(iris PRIVATE
     xmpp-im/xmpp_mamtask.cpp
     xmpp-im/xmpp_mammanager.cpp
     xmpp-im/xmpp_mds.cpp
+    xmpp-im/xmpp_moderation.cpp
     xmpp-im/xmpp_pubsub.cpp
     xmpp-im/xmpp_omemostorage.cpp
     xmpp-im/xmpp_sce.cpp
