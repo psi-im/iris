@@ -18,6 +18,7 @@
  */
 
 #include "xmpp_mamtask.h"
+#include "xmpp_client.h"
 #include "xmpp_features.h"
 
 #include <QSet>
