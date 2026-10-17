@@ -26,6 +26,22 @@ public:
     void write(const Stanza &s) override { sent.append(s.element().cloneNode(true).toElement()); }
     QList<QDomElement> sent;
 };
+// Proves that a sibling task can still receive an IQ that does not
+// belong to MAM. The root task dispatches children in creation order.
+class IQProbe final : public Task {
+public:
+    explicit IQProbe(Task *parent) : Task(parent) { }
+
+    bool take(const QDomElement &stanza) override
+    {
+        if (stanza.tagName() != QLatin1String("iq"))
+            return false;
+        ++received;
+        return true;
+    }
+
+    int received = 0;
+};
 static QDomElement xml(const QString &text)
 {
     QDomDocument d;
@@ -94,6 +110,48 @@ int main(int argc, char **argv)
     require(rsm(first).firstChildElement(QStringLiteral("max")).text() == QStringLiteral("2"),
             "Wrong page size");
     require(!rsm(first).firstChildElement(QStringLiteral("before")).isNull(), "Missing last-page cursor");
+    // Unrelated IQs must remain available to other Task handlers, even
+    // if their IDs happen to overlap with the pending MAM request.
+    {
+        IQProbe observer(c.rootTask());
+        const auto id = first.attribute(QStringLiteral("id"));
+        require(c.rootTask()->take(xml(QStringLiteral(
+                    "<iq from='alice@example.test' type='result' id='unrelated-id'>"
+                    "<query xmlns='jabber:iq:roster'/></iq>"))),
+                "Unrelated IQ was not offered to the sibling task");
+        require(observer.received == 1 && finished == 0,
+                "MAM consumed a foreign IQ response with another id");
+
+        // iqVerify() alone accepts a result from another own resource for
+        // an own-archive request. MAM must decline rather than swallow it.
+        const auto otherResource = QStringLiteral(
+            "<iq from='alice@example.test/phone' type='result' id='%1'>"
+            "<query xmlns='jabber:iq:roster'/></iq>").arg(id);
+        require(c.rootTask()->take(xml(otherResource)),
+                "IQ from another own resource was not routed");
+        require(observer.received == 2 && finished == 0,
+                "MAM swallowed an IQ sent by another own resource");
+
+        const auto serverResponse = QStringLiteral(
+            "<iq from='example.test' type='error' id='%1'>"
+            "<error type='cancel'><service-unavailable "
+            "xmlns='urn:ietf:params:xml:ns:xmpp-stanzas'/></error></iq>").arg(id);
+        require(c.rootTask()->take(xml(serverResponse)),
+                "IQ from an unrelated service was not routed");
+        require(observer.received == 3 && finished == 0,
+                "MAM swallowed another service's IQ error");
+
+        // XMPP IQ requests use a separate peer ID space; 'get'/'set'
+        // with a matching id are not answers to our outgoing 'set'.
+        const auto incomingRequest = QStringLiteral(
+            "<iq from='alice@example.test' type='set' id='%1'>"
+            "<query xmlns='urn:example:unrelated'/></iq>").arg(id);
+        require(!baseline.take(xml(incomingRequest)),
+                "MAM treated an incoming IQ set as a query completion");
+
+        require(baseline.archive().isEmpty() && finished == 0,
+                "Unrelated IQs changed the active MAM query");
+    }
     result(c, first, QStringLiteral("other@example.test"), QStringLiteral("fake"));
     result(c, first, QStringLiteral("alice@example.test/other-device"), QStringLiteral("fake2"));
     require(baseline.archive().isEmpty(), "Forged result was accepted");
@@ -375,6 +433,20 @@ int main(int argc, char **argv)
         "</error></iq>").arg(errorQuery.attribute(QStringLiteral("id")));
     require(c.rootTask()->take(xml(errorIq)), "MAM IQ error was not consumed");
     require(!failed.success() && !failed.statusString().isEmpty(), "MAM IQ error was not propagated");
+
+    // A correctly correlated result from the archive with no MAM <fin/>
+    // is a malformed reply and must fail explicitly, not wait for timeout.
+    MAMTask missingFin(c.rootTask());
+    missingFin.get(Jid(), QDateTime(), QDateTime(), false);
+    missingFin.go();
+    const auto noFinIq = stream.sent.last();
+    const auto unrelatedPayload = QStringLiteral(
+        "<iq from='alice@example.test' type='result' id='%1'>"
+        "<query xmlns='jabber:iq:roster'/></iq>").arg(noFinIq.attribute(QStringLiteral("id")));
+    require(c.rootTask()->take(xml(unrelatedPayload)),
+            "Correlated malformed MAM result was not handled");
+    require(!missingFin.success() && !missingFin.statusString().isEmpty(),
+            "Malformed correlated MAM result did not report a protocol error");
 
     MAMTask loop(c.rootTask());
     loop.get(Jid(), QDateTime(), QDateTime(), false, 2, 0, false, false);
