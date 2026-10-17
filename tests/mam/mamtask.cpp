@@ -257,6 +257,9 @@ int main(int argc, char **argv)
     muc.go();
     auto roomIq = stream.sent.last();
     require(roomIq.attribute(QStringLiteral("to")) == room.full(), "MUC query not addressed to room");
+    // The archive identity is frozen at go(): changing it mid-query must
+    // not redirect result authentication to a different MUC room.
+    muc.setArchiveJid(Jid(QStringLiteral("other@conference.example.test")));
     require(!hasField(roomIq, QStringLiteral("with")), "MUC room used as with filter");
     result(c, roomIq, QStringLiteral("other@example.test"), QStringLiteral("fake"));
     result(c, roomIq, QStringLiteral("room@conference.example.test/occupant"), QStringLiteral("fake2"));
