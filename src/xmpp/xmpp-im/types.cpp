@@ -751,7 +751,8 @@ public:
     QString                                  replaceId;
     QString                                  originId;                // XEP-0359
     QString                                  encryptionProtocol;      // XEP-0380
-    Message::StanzaId                        stanzaId;                // XEP-0359
+    QList<Message::StanzaId>                 stanzaIds;               // XEP-0359
+    Message::Reply                            reply;                   // XEP-0461
     QList<Reference>                         references;              // XEP-0385 and XEP-0372
     QList<StatelessFileSharing::FileSharing> fileSharings;            // XEP-0447
     QList<StatelessFileSharing::Sources>     attachedFileSources;     // XEP-0447 / XEP-0367
@@ -1133,9 +1134,47 @@ void Message::setMUCPassword(const QString &p) { MessageD()->mucPassword = p; }
 
 bool Message::hasMUCUser() const { return d && d->hasMUCUser; }
 
-Message::StanzaId Message::stanzaId() const { return d ? d->stanzaId : StanzaId(); }
+Message::StanzaId Message::stanzaId() const
+{
+    return d && !d->stanzaIds.isEmpty() ? d->stanzaIds.constLast() : StanzaId();
+}
 
-void Message::setStanzaId(const Message::StanzaId &id) { MessageD()->stanzaId = id; }
+Message::StanzaId Message::stanzaId(const Jid &by) const
+{
+    if (d) {
+        for (const auto &id : d->stanzaIds) {
+            if (id.by.compare(by))
+                return id;
+        }
+    }
+    return {};
+}
+
+QList<Message::StanzaId> Message::stanzaIds() const { return d ? d->stanzaIds : QList<StanzaId>(); }
+
+void Message::setStanzaId(const Message::StanzaId &id)
+{
+    MessageD()->stanzaIds.clear();
+    addStanzaId(id);
+}
+
+void Message::addStanzaId(const Message::StanzaId &id)
+{
+    // XEP-0359 requires a non-empty ID and one direct-child stanza-id per
+    // assigning entity. Keep the first occurrence when parsing invalid input.
+    if (id.id.isEmpty() || !id.by.isValid() || !id.by.resource().isEmpty())
+        return;
+    auto &ids = MessageD()->stanzaIds;
+    for (const auto &existing : std::as_const(ids)) {
+        if (existing.by.compare(id.by))
+            return;
+    }
+    ids.append(id);
+}
+
+Message::Reply Message::reply() const { return d ? d->reply : Reply(); }
+
+void Message::setReply(const Reply &reply) { MessageD()->reply = reply.isValid() ? reply : Reply(); }
 
 QString Message::originId() const { return d ? d->originId : QString(); }
 
@@ -1346,7 +1385,7 @@ Stanza Message::toStanza(Stream *stream, Jingle::Manager *jingleManager) const
     // timestamp
     if (d->timeStampSend && !d->timeStamp.isNull()) {
         QDomElement e = s.createElement("urn:xmpp:delay", "delay");
-        e.setAttribute("stamp", d->timeStamp.toUTC().toString(Qt::ISODate) + "Z");
+        e.setAttribute("stamp", d->timeStamp.toUTC().toString(Qt::ISODateWithMs));
         s.appendChild(e);
 
         e = s.createElement("jabber:x:delay", "x");
@@ -1574,10 +1613,17 @@ Stanza Message::toStanza(Stream *stream, Jingle::Manager *jingleManager) const
         e.setAttribute(QStringLiteral("id"), d->originId);
         s.appendChild(e);
     }
-    if (!d->stanzaId.id.isEmpty() && d->stanzaId.by.isValid()) { // only for servers using iris
+    for (const auto &id : std::as_const(d->stanzaIds)) {
         auto e = s.createElement(QStringLiteral("urn:xmpp:sid:0"), QStringLiteral("stanza-id"));
-        e.setAttribute(QStringLiteral("id"), d->stanzaId.id);
-        e.setAttribute(QStringLiteral("by"), d->stanzaId.by.full());
+        e.setAttribute(QStringLiteral("id"), id.id);
+        e.setAttribute(QStringLiteral("by"), id.by.full());
+        s.appendChild(e);
+    }
+    if (d->reply.isValid()) {
+        auto e = s.createElement(QStringLiteral("urn:xmpp:reply:0"), QStringLiteral("reply"));
+        e.setAttribute(QStringLiteral("id"), d->reply.id);
+        if (d->reply.to.isValid())
+            e.setAttribute(QStringLiteral("to"), d->reply.to.full());
         s.appendChild(e);
     }
 
@@ -1670,7 +1716,10 @@ bool Message::fromStanza(const Stanza &s, bool useTimeZoneOffset, int timeZoneOf
     d = new Private;
     setTo(s.to());
     setFrom(s.from());
-    setId(s.id());
+    // A received stanza id is not an XEP-0359 origin-id. An explicit
+    // <origin-id/> element parsed below is the only source for originId.
+    // Keep setId() generating origin IDs for locally composed messages.
+    d->id = s.id();
     setLang(s.lang());
 
     auto typeStr = s.type();
@@ -1797,8 +1846,9 @@ bool Message::fromStanza(const Stanza &s, bool useTimeZoneOffset, int timeZoneOf
         } else if (e.tagName() == QLatin1String("origin-id") && e.namespaceURI() == QLatin1String("urn:xmpp:sid:0")) {
             d->originId = e.attribute(QStringLiteral("id"));
         } else if (e.tagName() == QLatin1String("stanza-id") && e.namespaceURI() == QLatin1String("urn:xmpp:sid:0")) {
-            d->stanzaId.id = e.attribute(QStringLiteral("id"));
-            d->stanzaId.by = Jid(e.attribute(QStringLiteral("by")));
+            addStanzaId({ Jid(e.attribute(QStringLiteral("by"))), e.attribute(QStringLiteral("id")) });
+        } else if (e.tagName() == QLatin1String("reply") && e.namespaceURI() == QLatin1String("urn:xmpp:reply:0")) {
+            setReply({ Jid(e.attribute(QStringLiteral("to"))), e.attribute(QStringLiteral("id")) });
         }
 
         else {
@@ -1836,23 +1886,30 @@ bool Message::fromStanza(const Stanza &s, bool useTimeZoneOffset, int timeZoneOf
     // timestamp
     QDomElement t = childElementsByTagNameNS(root, "urn:xmpp:delay", "delay").item(0).toElement();
     QDateTime   stamp;
-    if (!t.isNull()) {
-        stamp = QDateTime::fromString(t.attribute("stamp").left(19), Qt::ISODate);
+    const bool  modernDelay = !t.isNull();
+    if (modernDelay) {
+        stamp = QDateTime::fromString(t.attribute("stamp"), Qt::ISODate);
     } else {
         t = childElementsByTagNameNS(root, "jabber:x:delay", "x").item(0).toElement();
         if (!t.isNull()) {
             stamp = stamp2TS(t.attribute("stamp"));
         }
     }
-    if (!stamp.isNull()) {
+    if (stamp.isValid()) {
         if (useTimeZoneOffset) {
-            d->timeStamp = stamp.addSecs(timeZoneOffset * 3600);
+            // The manual offset is applied to UTC, not to a supplied
+            // non-UTC wall clock time.
+            d->timeStamp = (modernDelay ? stamp.toUTC() : stamp).addSecs(timeZoneOffset * 3600);
         } else {
+            // Legacy XEP-0091 stamps lack a timezone and are defined as UTC.
+            // Modern XEP-0203 stamps already contain a UTC offset or 'Z'.
+            if (!modernDelay) {
 #if QT_VERSION < QT_VERSION_CHECK(6, 9, 0)
-            stamp.setTimeSpec(Qt::UTC);
+                stamp.setTimeSpec(Qt::UTC);
 #else
-            stamp.setTimeZone(QTimeZone::UTC);
+                stamp.setTimeZone(QTimeZone::UTC);
 #endif
+            }
             d->timeStamp = stamp.toLocalTime();
         }
         d->timeStampSend = true;
