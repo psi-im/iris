@@ -10,6 +10,7 @@
 #include <QCoreApplication>
 #include <QDomDocument>
 #include <QtCrypto>
+#include <cstdio>
 using namespace XMPP;
 
 static void require(bool ok, const char *message) { if (!ok) qFatal("%s", message); }
