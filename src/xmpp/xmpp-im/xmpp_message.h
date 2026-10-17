@@ -29,6 +29,7 @@
 #include <iris/xmpp-im/xmpp_rosterx.h>
 #include <iris/xmpp-im/xmpp_url.h>
 
+#include <QDomElement>
 #include <QExplicitlySharedDataPointer>
 #include <QSet>
 
@@ -72,6 +73,15 @@ public:
     struct Reactions {
         QString       targetId;
         QSet<QString> reactions;
+    };
+
+    // XEP-0313 result envelope carried by an ordinary message stanza.
+    // Keep its original XML for callers that consume the legacy MAMTask::archive().
+    struct MamResult {
+        QString queryId;
+        QString id;
+        QDomElement xml;
+        bool isValid() const { return !xml.isNull(); }
     };
 
     Message();
@@ -191,6 +201,10 @@ public:
     void setForwarded(const Forwarding &frw);
     // note, the next method has to be called only on not-null message
     const Forwarding &forwarded() const;
+
+    // XEP-0313: returned metadata does not imply that this message is
+    // addressed to a chat; routing belongs to message subscribers.
+    MamResult mamResult() const;
 
     // XEP-0308
     QString replaceId() const;
