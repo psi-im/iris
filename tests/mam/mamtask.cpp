@@ -4,6 +4,7 @@
 #include <iris/xmpp_client.h>
 #include <iris/xmpp_clientstream.h>
 #include <iris/xmpp_features.h>
+#include <iris/xmpp_mammanager.h>
 #include <iris/xmpp_mamtask.h>
 #include <QCoreApplication>
 #include <QDomDocument>
@@ -205,6 +206,26 @@ int main(int argc, char **argv)
             "Baseline backward ID cursor missing");
     fin(c, prior, QStringLiteral("alice@example.test"), QString(), QString(), true);
     require(before.success(), "Baseline backward ID query failed");
+
+    // The returned task is configurable before go(): reverse after-id
+    // requires the archive's disco-advertised MAM #extended feature.
+    MAMManager manager(&c);
+    auto *unsupportedLatest = manager.getLatestMessagesFromArchive(
+        Jid(), QStringLiteral("m1"), false, 10);
+    const auto countBeforeUnsupported = stream.sent.size();
+    unsupportedLatest->go();
+    require(!unsupportedLatest->success() && stream.sent.size() == countBeforeUnsupported,
+            "Reverse after-id silently used unsupported baseline RSM");
+
+    auto *latest = manager.getLatestMessagesFromArchive(Jid(), QStringLiteral("m1"), false, 10);
+    latest->setArchiveFeatures(features);
+    latest->go();
+    const auto latestIq = stream.sent.last();
+    require(hasField(latestIq, QStringLiteral("after-id")), "Manager dropped extended after-id");
+    require(!rsm(latestIq).firstChildElement(QStringLiteral("before")).isNull(),
+            "Manager lost reverse pagination");
+    fin(c, latestIq, QStringLiteral("alice@example.test"), QString(), QString(), true);
+    require(latest->success(), "Manager extended reverse query did not finish");
 
     // Bounded pagination must cap the final RSM page without claiming the
     // archive is exhausted. A streaming consumer must not retain results.
