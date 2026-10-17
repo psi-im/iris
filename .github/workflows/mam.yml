@@ -71,8 +71,7 @@ jobs:
         run: cmake --build build-mam --parallel 4 --target iris_mamtask_test
       - name: Test MAM query lifecycle
         run: |
-          if ! ctest --test-dir build-mam --output-on-failure -R '^iris_mamtask
-; then
+          if ! ctest --test-dir build-mam --output-on-failure -R iris_mamtask; then
             gdb -batch -ex run -ex 'thread apply all bt' --args build-mam/tests/mam/iris_mamtask_test || true
             exit 1
           fi
