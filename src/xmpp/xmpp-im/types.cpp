@@ -759,6 +759,7 @@ public:
     QList<Jingle::JinglePub>                 jinglePublications;      // XEP-0358
     Jingle::MessageInitiation                jingleMessageInitiation; // XEP-0353
     Forwarding                               forwarding;              // XEP-0297
+    Message::MamResult                       mamResult;               // XEP-0313
     Message::Reactions                       reactions;               // XEP-0444
     QString                                  retraction;              // XEP-0424
 };
@@ -1199,6 +1200,8 @@ XMPP::Message::Reactions Message::reactions() const { return d ? d->reactions : 
 void Message::setRetraction(const QString &retractedMessageId) { MessageD()->retraction = retractedMessageId; }
 
 QString Message::retraction() const { return d ? d->retraction : QString {}; }
+
+Message::MamResult Message::mamResult() const { return d ? d->mamResult : MamResult {}; }
 
 QString Message::invite() const { return d ? d->invite : QString(); }
 
@@ -1784,6 +1787,13 @@ bool Message::fromStanza(const Stanza &s, bool useTimeZoneOffset, int timeZoneOf
             d->processingHints |= NoCopy;
         } else if (e.tagName() == QLatin1String("store") && e.namespaceURI() == QLatin1String("urn:xmpp:hints")) {
             d->processingHints |= Store;
+        } else if (e.namespaceURI() == QLatin1String("urn:xmpp:mam:2")
+                   && (e.localName().isEmpty() ? e.tagName() : e.localName()) == QLatin1String("result")) {
+            if (!d->mamResult.isValid()) {
+                d->mamResult.xml = e;
+                d->mamResult.queryId = e.attribute(QLatin1String("queryid"));
+                d->mamResult.id = e.attribute(QLatin1String("id"));
+            }
         } else if (e.tagName() == QLatin1String("origin-id") && e.namespaceURI() == QLatin1String("urn:xmpp:sid:0")) {
             d->originId = e.attribute(QStringLiteral("id"));
         } else if (e.tagName() == QLatin1String("stanza-id") && e.namespaceURI() == QLatin1String("urn:xmpp:sid:0")) {
