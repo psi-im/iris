@@ -858,13 +858,17 @@ public:
         return false;
     }
 
-    bool processMessage(Message &msg, bool nested)
+    SubscriberResult processMessage(Message &msg, bool nested)
     {
+        auto outcome = SubscriberResult::NotHandled;
         foreach (const SubsData &sd, subsMData) {
-            if (sd.sbs->messageEvent(msg, sd.userData, nested))
-                return true;
+            const auto result = sd.sbs->messageEventResult(msg, sd.userData, nested);
+            if (result == SubscriberResult::HandledStop || result == SubscriberResult::Error)
+                return result;
+            if (result == SubscriberResult::HandledContinue)
+                outcome = result;
         }
-        return false;
+        return outcome;
     }
 };
 
@@ -886,6 +890,12 @@ bool JT_PushMessage::Subscriber::messageEvent(Message &msg, int userData, bool n
     Q_UNUSED(userData);
     Q_UNUSED(nested)
     return false;
+}
+
+JT_PushMessage::SubscriberResult JT_PushMessage::Subscriber::messageEventResult(
+    Message &msg, int userData, bool nested)
+{
+    return messageEvent(msg, userData, nested) ? SubscriberResult::HandledStop : SubscriberResult::NotHandled;
 }
 
 JT_PushMessage::JT_PushMessage(Task *parent) : Task(parent), d(new Private) { }
@@ -953,18 +963,15 @@ bool JT_PushMessage::processXmlSubscribers(QDomElement &el, Client *client, bool
     return (processed && el.childNodes().length() == 0);
 }
 
-bool JT_PushMessage::processMessageSubscribers(Message &msg, bool nested) { return d->processMessage(msg, nested); }
+bool JT_PushMessage::processMessageSubscribers(Message &msg, bool nested)
+{
+    const auto result = d->processMessage(msg, nested);
+    return result == SubscriberResult::HandledStop || result == SubscriberResult::Error;
+}
 
 bool JT_PushMessage::take(const QDomElement &e)
 {
     if (e.tagName() != "message")
-        return false;
-
-    // MAM results belong to the active MAMTask, not the ordinary message
-    // pipeline. Otherwise this catch-all push task consumes them before
-    // MAMTask can validate their queryid and archive sender.
-    const QDomElement mamResult = e.firstChildElement(QStringLiteral("result"));
-    if (!mamResult.isNull() && mamResult.namespaceURI() == QLatin1String("urn:xmpp:mam:2"))
         return false;
 
     QDomElement e1 = e;
