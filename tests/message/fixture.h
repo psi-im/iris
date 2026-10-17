@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #pragma once
 
+#include <iris/xmpp.h>
 #include <iris/xmpp_client.h>
 #include <iris/xmpp_clientstream.h>
 
