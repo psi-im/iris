@@ -35,6 +35,7 @@ class QString;
 
 namespace XMPP {
 class Jid;
+class Features;
 
 class MAMTask : public Task {
     Q_OBJECT
@@ -45,6 +46,18 @@ public:
     ~MAMTask();
 
     const QList<QDomElement> &archive() const;
+
+    // The archive being queried (e.g. a MUC room) is distinct from the
+    // optional 'with' filter passed to get(). Empty means the own archive.
+    void setArchiveJid(const Jid &archiveJid);
+    // Pass features advertised by disco#info for this exact archive JID.
+    // Without them, only baseline XEP-0313 operations are attempted.
+    void setArchiveFeatures(const Features &features);
+
+    // A bounded request can finish successfully without exhausting the archive.
+    bool isComplete() const;
+    // XEP-0313 'stable=false' means results need later confirmation.
+    bool isStable() const;
 
     // Time filter
     void get(const Jid &j, const QDateTime &from = QDateTime(), const QDateTime &to = QDateTime(),
