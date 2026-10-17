@@ -85,6 +85,17 @@ public:
         QSet<QString> reactions;
     };
 
+    // XEP-0425: received moderation metadata (not proof of room support).
+    // For Tombstone, the original message UID is supplied by the MAM result.
+    struct ModeratedRetraction {
+        enum class Kind { None, Action, Tombstone };
+        Kind    kind = Kind::None;
+        Jid     by;
+        QString moderatorOccupantId;
+        QString reason;
+        QString stamp; // XML datetime, only set for a validated tombstone stamp
+    };
+
     // XEP-0313 result envelope carried by an ordinary message stanza.
     // Keep its original XML for callers that consume the legacy MAMTask::archive().
     struct MamResult {
@@ -287,6 +298,7 @@ public:
 
     void    setRetraction(const QString &retractedMessageId);
     QString retraction() const;
+    ModeratedRetraction moderatedRetraction() const;
 
     // Obsolete invitation
     QString invite() const;
