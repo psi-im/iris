@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 // XEP-0203: preserve the UTC instant and fractional seconds in MAM replay.
-#include <iris/xmpp.h>
-#include <iris/xmpp_client.h>
-#include <iris/xmpp_clientstream.h>
+#include "fixture.h"
 #include <iris/xmpp_forwarding.h>
 #include <iris/xmpp_message.h>
 
@@ -11,25 +9,7 @@
 #include <QtCrypto>
 
 using namespace XMPP;
-
-static void check(bool ok, const char *message)
-{
-    if (!ok)
-        qFatal("%s", message);
-}
-
-class OfflineConnector final : public Connector {
-public:
-    void setOptHostPort(const QString &, quint16) override { }
-    void connectToServer(const QString &) override { }
-    ByteStream *stream() const override { return nullptr; }
-    void done() override { }
-};
-
-class RecordingStream final : public ClientStream {
-public:
-    explicit RecordingStream(Connector *connector) : ClientStream(connector) { }
-};
+using namespace MessageTest;
 
 static QDomElement parse(const QString &xml, QDomDocument &document)
 {
@@ -46,12 +26,9 @@ int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
     QCA::Initializer qca;
-    OfflineConnector connector;
-    RecordingStream stream(&connector);
-    Client client;
-    client.start(QStringLiteral("example.test"), QStringLiteral("alice"), QString(),
-                 QStringLiteral("desktop"));
-    client.connectToServer(&stream, Jid(QStringLiteral("alice@example.test/desktop")));
+    Endpoint endpoint;
+    auto &stream = endpoint.stream;
+    auto &client = endpoint.client;
 
     QDomDocument source;
     const auto root = parse(QStringLiteral(

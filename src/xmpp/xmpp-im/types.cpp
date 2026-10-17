@@ -752,6 +752,7 @@ public:
     QString                                  originId;                // XEP-0359
     QString                                  encryptionProtocol;      // XEP-0380
     QList<Message::StanzaId>                 stanzaIds;               // XEP-0359
+    Message::Reply                            reply;                   // XEP-0461
     QList<Reference>                         references;              // XEP-0385 and XEP-0372
     QList<StatelessFileSharing::FileSharing> fileSharings;            // XEP-0447
     QList<StatelessFileSharing::Sources>     attachedFileSources;     // XEP-0447 / XEP-0367
@@ -1170,6 +1171,10 @@ void Message::addStanzaId(const Message::StanzaId &id)
     }
     ids.append(id);
 }
+
+Message::Reply Message::reply() const { return d ? d->reply : Reply(); }
+
+void Message::setReply(const Reply &reply) { MessageD()->reply = reply.isValid() ? reply : Reply(); }
 
 QString Message::originId() const { return d ? d->originId : QString(); }
 
@@ -1614,6 +1619,13 @@ Stanza Message::toStanza(Stream *stream, Jingle::Manager *jingleManager) const
         e.setAttribute(QStringLiteral("by"), id.by.full());
         s.appendChild(e);
     }
+    if (d->reply.isValid()) {
+        auto e = s.createElement(QStringLiteral("urn:xmpp:reply:0"), QStringLiteral("reply"));
+        e.setAttribute(QStringLiteral("id"), d->reply.id);
+        if (d->reply.to.isValid())
+            e.setAttribute(QStringLiteral("to"), d->reply.to.full());
+        s.appendChild(e);
+    }
 
     // XEP-0297: Stanza Forwarding
     if (d->forwarding.type() != Forwarding::ForwardedNone)
@@ -1832,6 +1844,8 @@ bool Message::fromStanza(const Stanza &s, bool useTimeZoneOffset, int timeZoneOf
             d->originId = e.attribute(QStringLiteral("id"));
         } else if (e.tagName() == QLatin1String("stanza-id") && e.namespaceURI() == QLatin1String("urn:xmpp:sid:0")) {
             addStanzaId({ Jid(e.attribute(QStringLiteral("by"))), e.attribute(QStringLiteral("id")) });
+        } else if (e.tagName() == QLatin1String("reply") && e.namespaceURI() == QLatin1String("urn:xmpp:reply:0")) {
+            setReply({ Jid(e.attribute(QStringLiteral("to"))), e.attribute(QStringLiteral("id")) });
         }
 
         else {

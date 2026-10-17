@@ -71,6 +71,13 @@ public:
         QString id;
     };
 
+    // XEP-0461. The 'to' JID is optional; the referenced message ID is not.
+    struct Reply {
+        Jid     to;
+        QString id;
+        bool isValid() const { return !id.isEmpty() && (to.isEmpty() || to.isValid()); }
+    };
+
     struct Reactions {
         QString       targetId;
         QSet<QString> reactions;
@@ -237,6 +244,8 @@ public:
     QList<StanzaId> stanzaIds() const;
     void            setStanzaId(const StanzaId &id); // Replace all IDs.
     void            addStanzaId(const StanzaId &id);
+    Reply            reply() const;
+    void             setReply(const Reply &reply);
     QString         originId() const;
     void     setOriginId(const QString &id);
 
