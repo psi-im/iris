@@ -95,3 +95,56 @@ Completed in Iris's **existing** `MAMTask`, without a second manager:
 5. Cross-check current Conversations, monocles, Dino and Kaidan sources; run Qt5/Qt6, unit and sanitizer CI; document tested interop. No Psi integration until separately requested.
 
 Completion requires passing tests and an audited comparison, **not** merely adding namespace strings or declaring feature support.
+
+
+## Audit follow-up — 2026-10-17 (work retained in Git)
+
+The earlier implementation-status snapshot above is historical; use the current
+PR heads and CI for authoritative status.
+
+- **PR #118** (`ai/mam-interoperability-audit`): XEP-0313 tombstone results
+  are accepted without a forwarded `<message/>` or `<delay/>` (both are
+  SHOULD, not MUST). Present elements are validated, archive result UID
+  remains available, and regression cases cover malformed present elements,
+  missing message/delay and empty forwarding. The existing `MAMManager`
+  returns a configurable `MAMTask` **before** `go()`; clients set
+  `setArchiveFeatures()` for reverse `after-id` queries, which require
+  `#extended`. This contract now has a regression test; no new manager API.
+- **PR #119** (`ai/xep0359-multiple-stanza-ids`): XEP-0359 multiple
+  stanza IDs, XEP-0203 timestamps and XEP-0461 replies; input parsing
+  distinguishes an ordinary stanza `id` from explicit XEP-0359
+  `<origin-id/>`, preserving outgoing ID generation. Tests cover that
+  distinction and modern/legacy delayed presence timestamps.
+- **PR #120** (`ai/xep0421-occupant-ids`, stacked on PR #119): XEP-0421
+  opaque MUC occupant IDs in existing `Message` and `Status`, including
+  MAM-replayed messages and presence. XML parsing enforces at most one direct
+  occupant-id and a maximum of 128 characters. The value remains
+  **untrusted** until a caller verifies the specific room's
+  `urn:xmpp:occupant-id:0` disco#info feature. This is intentionally not
+  a second MUC identity layer.
+
+Additional capabilities confirmed in Dino's current XMPP modules:
+
+- **XEP-0421:** `xmpp-vala/src/module/xep/0421_occupant_ids.vala`.
+- **XEP-0424 message retraction:** already parsed by Iris's existing
+  `Message` (`urn:xmpp:message-retract:1`); do not reimplement.
+- **XEP-0425 moderated message retraction:** Dino has
+  `0425_message_moderation.vala`. Iris support remains to be assessed
+  outside MAMTask, using existing IQ/Task and MUC machinery.
+- **XEP-0490 message displayed synchronization:** Dino has
+  `0490_message_displayed_synchronization.vala`. This belongs in
+  existing PEP/PubSub and stanza-ID layers, not MAMTask. Verify PEP
+  publication options/access restrictions and sender attribution before
+  marking read positions; never regress cursors.
+- Dino's MAM modules use `urn:xmpp:mam:2`; legacy MAM 0/1
+  compatibility is not justified solely by Dino. Evaluate only after
+  checking a current targeted client and expected server support.
+
+**Source provenance:** `dino/dino` is upstream on GitHub; Kaidan's active
+upstream is `invent.kde.org/network/kaidan`, rather than its archived
+GitHub mirror. Public Conversations-derived and monocles development forks
+do not establish their canonical Codeberg upstream feature set.
+
+All three PRs remain Draft until current Qt5/Qt6 and cross-platform CI,
+protocol review, and the remaining interop comparisons are complete.
+Psi integration is outside this audit.
