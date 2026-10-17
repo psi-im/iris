@@ -148,3 +148,52 @@ do not establish their canonical Codeberg upstream feature set.
 All three PRs remain Draft until current Qt5/Qt6 and cross-platform CI,
 protocol review, and the remaining interop comparisons are complete.
 Psi integration is outside this audit.
+
+## Follow-up implementation status — 2026-10-17 10:30 UTC
+
+This section supersedes earlier *open gap* descriptions; all branches below
+are Draft and deliberately not merged. CI status is a snapshot, not a claim
+about future commits.
+
+- **PR #118**, `ai/mam-interoperability-audit`: namespace-prefixed MAM
+  `result`, `forwarded`, `delay`, `message`, `fin`, RSM `set` and
+  `first/last` handling now follows local names plus XML namespaces.
+  Regression tests include paginated prefixed RSM; the latest matrix is
+  running. Existing MAM paging, tombstones, manager contract and streaming
+  functionality are kept in the original classes.
+- **PR #119**, `ai/xep0359-multiple-stanza-ids`: multiple stanza IDs,
+  origin-id parsing, XEP-0203 timestamps and XEP-0461 reply support;
+  previously green on Qt5/Qt6 and full CI.
+- **PR #120**, `ai/xep0421-occupant-ids`, based on #119: MUC occupant
+  identifier parser/serializer. The 128-character limit now counts Unicode
+  code points rather than UTF-16 code units; 128/129 non-BMP character
+  regressions cover messages and presence. An occupant ID remains raw until
+  the **specific room** advertises `urn:xmpp:occupant-id:0`.
+- **PR #121**, `ai/xep0490-displayed-sync`, based on #119: XEP-0490
+  `MessageDisplayedSync` XML payload parser/serializer, secure PEP
+  publication options, sender and stanza-ID issuer validation. Uses
+  existing `PubSubManager::publish/items`; no new PubSub/MAM manager or
+  persistence. The application MUST check the account's disco for
+  `http://jabber.org/protocol/pubsub#publish-options` before publication,
+  accept notifications only from its own bare JID, resolve referenced
+  stanza IDs against local history and never move the displayed cursor
+  backwards. The PR's Message Qt5/Qt6 and full build matrix passed.
+- **PR #122**, `ai/xep0425-moderated-retraction`, based on #120:
+  `ModeratedRetractionTask` sends an XEP-0425 IQ to the bare MUC JID
+  using the room-issued stanza-ID, sends optional reason and propagates IQ
+  result/error. Existing Task/IQ infrastructure is reused; the caller
+  checks room disco and moderation eligibility.
+- **PR #123**, `ai/xep0425-moderation-metadata`, based on #122:
+  `Message::ModeratedRetraction` models moderated MUC action vs archived
+  tombstone, moderator JID, occupant ID, reason and timestamp. Tombstones
+  never fabricate a live retraction action or a target ID; the MAM result
+  UID identifies the archived original. A forged moderated action from a
+  MUC occupant cannot be processed via the legacy XEP-0424
+  `Message::retraction()` accessor. Room identity, advertised features and
+  MAM archive provenance remain the application's trust responsibility.
+
+**Remaining work:** full CI and review for the latest #118/#120/#122/#123
+heads; canonical upstream Conversations/monocles/Kaidan verification; any
+demonstrably needed remaining MAM compatibility. No claim of end-to-end
+application read-state synchronization: UI history lookup, storage and
+monotonic cursor changes belong to the consuming application, not Iris.
