@@ -310,6 +310,10 @@ public:
 
 MAMTask::MAMTask(Task *parent) : Task(parent), d(std::make_unique<Private>())
 {
+    // A multi-page query may outlive the default 120-second Task deadline.
+    // Each child page keeps its own timeout; callers can still set an
+    // explicit overall deadline on this coordinator if needed.
+    setTimeout(0);
     connect(this, &Task::finished, this, [this] {
         d->progress.active = false;
         if (d->progress.currentPage) {
