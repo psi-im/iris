@@ -33,6 +33,8 @@ int main(int argc, char **argv)
     Message message;
     check(message.fromStanza(stream.createStanza(source.documentElement())), "Cannot parse message");
     check(message.stanzaIds().size() == 2, "Distinct stanza IDs were lost or invalid IDs accepted");
+    check(message.stanzaIds().at(0).isValid() && message.stanzaIds().at(1).isValid(),
+          "Parsed stanza IDs failed their own validity check");
     check(message.stanzaId(Jid(QStringLiteral("room@conference.example.test"))).id
               == QStringLiteral("room-id"), "Room stanza ID was overwritten");
     check(message.stanzaId(Jid(QStringLiteral("alice@example.test"))).id
