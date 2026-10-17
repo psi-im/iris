@@ -10,7 +10,7 @@
 #include <QCoreApplication>
 #include <QDomDocument>
 #include <QtCrypto>
-#include <cstdio>
+#include <QSharedPointer>
 using namespace XMPP;
 
 static void require(bool ok, const char *message) { if (!ok) qFatal("%s", message); }
@@ -59,9 +59,13 @@ public:
 };
 static QDomElement xml(const QString &text)
 {
-    QDomDocument d;
-    require(d.setContent(text, true), "Malformed XML fixture");
-    return d.documentElement();
+    // Qt5 requires the owning document to survive the Stanza/Message
+    // processing of its nodes. A local QDomDocument leaves dangling nodes.
+    static QList<QSharedPointer<QDomDocument>> documents;
+    auto doc = QSharedPointer<QDomDocument>::create();
+    require(doc->setContent(text, true), "Malformed XML fixture");
+    documents.append(doc);
+    return doc->documentElement();
 }
 static QString qid(const QDomElement &iq)
 {
@@ -118,7 +122,6 @@ int main(int argc, char **argv)
             ++unhandledMamEnvelopes;
     });
 
-    fprintf(stderr, "MAM diagnostic: baseline\n");
     MAMTask baseline(c.rootTask());
     int finished = 0;
     QObject::connect(&baseline, &Task::finished, &baseline, [&] { ++finished; });
@@ -137,7 +140,6 @@ int main(int argc, char **argv)
             "MAM coordinator has a global default timeout or page timeout is disabled");
     // A caller can opt into an overall deadline without changing the
     // default per-page deadline for ordinary multi-page requests.
-    fprintf(stderr, "MAM diagnostic: explicitDeadline\n");
     MAMTask explicitDeadline(c.rootTask());
     explicitDeadline.setTimeout(15);
     require(explicitDeadline.timeout() == 15, "Explicit MAM deadline cannot be configured");
@@ -254,7 +256,6 @@ int main(int argc, char **argv)
 
     // Query configuration is replaceable before go(), and the choice of
     // time vs ID range is exclusive. The previous filter must not leak.
-    fprintf(stderr, "MAM diagnostic: reconfiguredTime\n");
     MAMTask reconfiguredTime(c.rootTask());
     reconfiguredTime.get(Jid(), QStringLiteral("obsolete"), QStringLiteral("old-end"),
                          false, 2, 0, false, false);
@@ -271,7 +272,6 @@ int main(int argc, char **argv)
     fin(c, timeIq, QStringLiteral("alice@example.test"), QString(), QString(), true);
     require(reconfiguredTime.success(), "Reconfigured time query failed");
 
-    fprintf(stderr, "MAM diagnostic: reconfiguredId\n");
     MAMTask reconfiguredId(c.rootTask());
     Features extendedForReconfiguration;
     extendedForReconfiguration.addFeature(QStringLiteral("urn:xmpp:mam:2#extended"));
@@ -290,7 +290,6 @@ int main(int argc, char **argv)
 
     // Calling get() during a running request cannot silently wipe buffered
     // results or replace its active query parameters.
-    fprintf(stderr, "MAM diagnostic: immutableWhileRunning\n");
     MAMTask immutableWhileRunning(c.rootTask());
     immutableWhileRunning.get(Jid(), begin, end, false, 2, 0, false, false);
     immutableWhileRunning.go();
@@ -307,7 +306,6 @@ int main(int argc, char **argv)
 
     // XEP-0313 tombstones retain their archive ID even without a message.
     // Missing delay and message are valid; malformed present elements are not.
-    fprintf(stderr, "MAM diagnostic: optionalForwarding\n");
     MAMTask optionalForwarding(c.rootTask());
     optionalForwarding.get(Jid(), QDateTime(), QDateTime(), false, 10, 0, false, false);
     optionalForwarding.go();
@@ -335,7 +333,6 @@ int main(int argc, char **argv)
 
 
     // Namespace prefixes do not change XML element identity (XEP-0313).
-    fprintf(stderr, "MAM diagnostic: prefixed\n");
     MAMTask prefixed(c.rootTask());
     prefixed.get(Jid(), QDateTime(), QDateTime(), false, 10, 0, false, false);
     prefixed.go();
@@ -359,7 +356,6 @@ int main(int argc, char **argv)
     require(c.rootTask()->take(xml(prefixedFin)), "Prefixed MAM fin not consumed");
     require(prefixed.success(), "Valid prefixed MAM fin failed");
 
-    fprintf(stderr, "MAM diagnostic: prefixedPaged\n");
     MAMTask prefixedPaged(c.rootTask());
     prefixedPaged.get(Jid(), QDateTime(), QDateTime(), false, 2, 0, false, false);
     prefixedPaged.go();
@@ -380,7 +376,6 @@ int main(int argc, char **argv)
     fin(c, secondPrefixedPage, QStringLiteral("alice@example.test"), QString(), QString(), true);
     require(prefixedPaged.success(), "Prefixed RSM pagination did not finish");
 
-    fprintf(stderr, "MAM diagnostic: muc\n");
     MAMTask muc(c.rootTask());
     const Jid room(QStringLiteral("room@conference.example.test"));
     muc.setArchiveJid(room);
@@ -399,13 +394,11 @@ int main(int argc, char **argv)
     fin(c, roomIq, room.full(), QStringLiteral("room1"), QStringLiteral("room1"), true);
     require(muc.success() && muc.archive().size() == 1, "Room archive failed");
 
-    fprintf(stderr, "MAM diagnostic: id\n");
     MAMTask id(c.rootTask());
     id.get(Jid(), QStringLiteral("m1"), QStringLiteral("m5"), false, 10, 0, false, false);
     auto count = stream.sent.size();
     id.go();
     require(!id.success() && stream.sent.size() == count, "Unadvertised extended filter sent");
-    fprintf(stderr, "MAM diagnostic: extended\n");
     MAMTask extended(c.rootTask());
     Features features;
     features.addFeature(QStringLiteral("urn:xmpp:mam:2#extended"));
@@ -417,7 +410,6 @@ int main(int argc, char **argv)
     require(extended.success(), "Empty extended query did not finish");
 
     // Baseline RSM supports one-sided ID cursors without #extended.
-    fprintf(stderr, "MAM diagnostic: fallback\n");
     MAMTask fallback(c.rootTask());
     fallback.get(Jid(), QStringLiteral("m1"), QString(), false, 10, 0, false, false);
     fallback.go();
@@ -428,7 +420,6 @@ int main(int argc, char **argv)
     fin(c, after, QStringLiteral("alice@example.test"), QString(), QString(), true);
     require(fallback.success(), "Baseline forward ID query failed");
 
-    fprintf(stderr, "MAM diagnostic: before\n");
     MAMTask before(c.rootTask());
     before.get(Jid(), QString(), QStringLiteral("m5"), false, 10, 0, false, true);
     before.go();
@@ -461,7 +452,6 @@ int main(int argc, char **argv)
 
     // Bounded pagination must cap the final RSM page without claiming the
     // archive is exhausted. A streaming consumer must not retain results.
-    fprintf(stderr, "MAM diagnostic: bounded\n");
     MAMTask bounded(c.rootTask());
     Features all;
     all.addFeature(QStringLiteral("urn:xmpp:mam:2#extended"));
@@ -504,7 +494,6 @@ int main(int argc, char **argv)
     require(unhandledMamEnvelopes == deliveredBeforeUnknown + 1,
             "A non-matching MAM page suppressed ordinary message dispatch");
 
-    fprintf(stderr, "MAM diagnostic: failed\n");
     MAMTask failed(c.rootTask());
     failed.get(Jid(), QDateTime(), QDateTime(), false);
     failed.go();
@@ -518,7 +507,6 @@ int main(int argc, char **argv)
 
     // A correctly correlated result from the archive with no MAM <fin/>
     // is a malformed reply and must fail explicitly, not wait for timeout.
-    fprintf(stderr, "MAM diagnostic: missingFin\n");
     MAMTask missingFin(c.rootTask());
     missingFin.get(Jid(), QDateTime(), QDateTime(), false);
     missingFin.go();
@@ -531,7 +519,6 @@ int main(int argc, char **argv)
     require(!missingFin.success() && !missingFin.statusString().isEmpty(),
             "Malformed correlated MAM result did not report a protocol error");
 
-    fprintf(stderr, "MAM diagnostic: loop\n");
     MAMTask loop(c.rootTask());
     loop.get(Jid(), QDateTime(), QDateTime(), false, 2, 0, false, false);
     loop.go();
