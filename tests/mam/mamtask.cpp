@@ -180,6 +180,26 @@ int main(int argc, char **argv)
     require(c.rootTask()->take(xml(prefixedFin)), "Prefixed MAM fin not consumed");
     require(prefixed.success(), "Valid prefixed MAM fin failed");
 
+    MAMTask prefixedPaged(c.rootTask());
+    prefixedPaged.get(Jid(), QDateTime(), QDateTime(), false, 2, 0, false, false);
+    prefixedPaged.go();
+    const auto firstPrefixedPage = stream.sent.last();
+    const auto finWithPrefixedRsm = QStringLiteral(
+        "<iq from='alice@example.test' type='result' id='%1' "
+        "xmlns:mam='urn:xmpp:mam:2' xmlns:r='http://jabber.org/protocol/rsm'>"
+        "<mam:fin complete='false'><r:set><r:first>oldest</r:first>"
+        "<r:last>newest</r:last></r:set></mam:fin></iq>")
+        .arg(firstPrefixedPage.attribute(QStringLiteral("id")));
+    require(c.rootTask()->take(xml(finWithPrefixedRsm)), "Prefixed RSM fin not consumed");
+    const auto secondPrefixedPage = stream.sent.last();
+    require(secondPrefixedPage.attribute(QStringLiteral("id"))
+                != firstPrefixedPage.attribute(QStringLiteral("id"))
+                && rsm(secondPrefixedPage).firstChildElement(QStringLiteral("after")).text()
+                      == QStringLiteral("newest"),
+            "Prefixed RSM cursor did not advance pagination");
+    fin(c, secondPrefixedPage, QStringLiteral("alice@example.test"), QString(), QString(), true);
+    require(prefixedPaged.success(), "Prefixed RSM pagination did not finish");
+
     MAMTask muc(c.rootTask());
     const Jid room(QStringLiteral("room@conference.example.test"));
     muc.setArchiveJid(room);
