@@ -194,7 +194,7 @@ QDomElement CarbonsManager::forwardedMessage(const QDomElement &stanza) const
         return {};
 
     for (auto carbon = stanza.firstChildElement(); !carbon.isNull(); carbon = carbon.nextSiblingElement()) {
-        const auto name = carbon.tagName();
+        const auto name = carbon.localName();
         if (carbon.namespaceURI() != xmlns_carbons
             || (name != QLatin1String("received") && name != QLatin1String("sent"))) {
             continue;
@@ -202,12 +202,13 @@ QDomElement CarbonsManager::forwardedMessage(const QDomElement &stanza) const
 
         for (auto forwarded = carbon.firstChildElement(); !forwarded.isNull();
              forwarded      = forwarded.nextSiblingElement()) {
-            if (forwarded.tagName() != QLatin1String("forwarded") || forwarded.namespaceURI() != xmlns_forward) {
+            if (forwarded.localName() != QLatin1String("forwarded") || forwarded.namespaceURI() != xmlns_forward) {
                 continue;
             }
             for (auto message = forwarded.firstChildElement(); !message.isNull();
                  message      = message.nextSiblingElement()) {
-                if (message.tagName() == QLatin1String("message"))
+                if (message.localName() == QLatin1String("message")
+                    && message.namespaceURI() == QLatin1String("jabber:client"))
                     return message;
             }
         }

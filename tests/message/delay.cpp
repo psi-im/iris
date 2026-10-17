@@ -68,6 +68,36 @@ int main(int argc, char **argv)
               == QStringLiteral("2026-10-16T10:00:00.250Z"),
           "Forwarded delay serialization emitted an invalid UTC stamp");
 
+    // Reusing the same decoder must not leak an earlier delay into a later
+    // forwarded message that has no <delay/> element.
+    QDomDocument withoutDelayDocument;
+    const auto withoutDelay = parse(QStringLiteral(
+        "<forwarded xmlns='urn:xmpp:forward:0'>"
+        "<message xmlns='jabber:client' from='carol@example.test' type='chat'>"
+        "<body>Fresh</body></message></forwarded>"), withoutDelayDocument);
+    check(forwarded.fromXml(withoutDelay, &client), "Cannot parse a forwarded message without delay");
+    check(!forwarded.timeStamp().isValid() && forwarded.message().body() == QStringLiteral("Fresh"),
+          "Forwarding reused the timestamp or message from a previous envelope");
+
+    // Expanded XML names are prefix-independent, including a prefixed
+    // forwarding envelope around an ordinary client-namespace message.
+    QDomDocument prefixedDocument;
+    const auto prefixedForwarded = parse(QStringLiteral(
+        "<f:forwarded xmlns:f='urn:xmpp:forward:0'>"
+        "<message xmlns='jabber:client' from='carol@example.test' type='chat'>"
+        "<body>Prefixed</body></message></f:forwarded>"), prefixedDocument);
+    check(forwarded.fromXml(prefixedForwarded, &client)
+              && forwarded.message().body() == QStringLiteral("Prefixed"),
+          "Namespace-prefixed forwarded envelope was rejected");
+
+    QDomDocument wrongNamespaceDocument;
+    const auto wrongNamespace = parse(QStringLiteral(
+        "<forwarded xmlns='urn:xmpp:forward:0'>"
+        "<message xmlns='urn:other:0' from='carol@example.test' type='chat'>"
+        "<body>Forged</body></message></forwarded>"), wrongNamespaceDocument);
+    check(!forwarded.fromXml(wrongNamespace, &client),
+          "Forwarded message in an unrelated XML namespace was accepted");
+
     QDomDocument legacyDocument;
     const auto legacyXml = parse(QStringLiteral(
         "<message xmlns='jabber:client' from='bob@example.test' type='chat'>"

@@ -80,14 +80,19 @@ void Forwarding::setMessage(const Message &msg) { msg_ = msg; }
 
 bool Forwarding::fromXml(const QDomElement &e, Client *client)
 {
-    if (e.tagName() != QString::fromLatin1("forwarded") || e.namespaceURI() != xmlns_forward)
+    if (!client || e.localName() != QLatin1String("forwarded") || e.namespaceURI() != xmlns_forward)
         return false;
 
-    bool correct      = false;
-    type_             = Forwarding::ForwardedNone;
+    // A Forwarding object may be reused for successive MAM/carbon envelopes.
+    // Never retain the previous message or delay when a new envelope omits it.
+    bool correct = false;
+    type_ = Forwarding::ForwardedNone;
+    ts_ = QDateTime();
+    msg_ = Message();
     QDomElement child = e.firstChildElement();
     while (!child.isNull()) {
-        if (child.tagName() == QString::fromLatin1("message")) {
+        if (child.localName() == QLatin1String("message")
+            && child.namespaceURI() == QLatin1String("jabber:client")) {
             if (client->pushMessage()->processXmlSubscribers(child, client, true))
                 break;
             Stanza  s = client->stream().createStanza(addCorrectNS(child));
@@ -105,7 +110,7 @@ bool Forwarding::fromXml(const QDomElement &e, Client *client)
                 type_   = ForwardedMessage;
                 correct = true;
             }
-        } else if (child.tagName() == QString::fromLatin1("delay") && child.namespaceURI() == xmlns_delay) {
+        } else if (child.localName() == QLatin1String("delay") && child.namespaceURI() == xmlns_delay) {
             ts_ = QDateTime::fromString(child.attribute(QString::fromLatin1("stamp")), Qt::ISODate);
         }
         child = child.nextSiblingElement();
