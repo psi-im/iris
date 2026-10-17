@@ -20,18 +20,18 @@ Primary standard: [XEP-0313 MAM 1.1.3](https://xmpp.org/extensions/xep-0313.html
 | --- | --- | --- |
 | XEP-0313 MAM | `xmpp_mamtask.{h,cpp}`, `xmpp_mammanager.{h,cpp}` | **Present but incorrect**; repair in place, not a second MAM manager |
 | XEP-0059 Result Set Management | `xmpp_subsets.{h,cpp}` / `SubsetsClientManager` | Reuse for page cursors/limits |
-| XEP-0359 Unique and Stable Stanza IDs | `Message::stanzaId()`, `setStanzaId()`, `originId()`, `setOriginId()` in `xmpp_message.h` / `types.cpp` | Check multiplicity and trusted `by` selection; never treat arbitrary IDs as verified archive IDs |
+| XEP-0359 Unique and Stable Stanza IDs | `Message::stanzaId()`, `setStanzaId()`, `originId()`, `setOriginId()` in `xmpp_message.h` / `types.cpp` | Single-ID limitation fixed on `ai/xep0359-multiple-stanza-ids`; `stanzaId(by)` and `stanzaIds()` preserve distinct issuers. Disco trust verification remains a caller responsibility. |
 | XEP-0297 Stanza Forwarding | `xmpp_forwarding.{h,cpp}` | Reuse for parsing forwarded message and XEP-0203 delay |
-| XEP-0203 Delayed Delivery | Existing timestamp parsing in forwarding/message processing | Check UTC parsing and MAM timestamp handling |
+| XEP-0203 Delayed Delivery | `Forwarding`, `Message`, presence parsing | The original code truncated UTC offsets/fractions and appended an extra `Z` when serializing. Fixed and tested on `ai/xep0359-multiple-stanza-ids` (Qt5/Qt6). |
 | XEP-0280 Message Carbons | `xmpp_carbons.cpp`; `Message::forwarded()` | Keep separate from archive-result envelope handling and deduplication |
 | XEP-0334 Message Processing Hints | `Message::processingHints()` | Preserve hints when replaying messages |
 | XEP-0308 Last Message Correction | `Message::replaceId()` | Replayed correction is not a second user message |
 | XEP-0424 Message Retraction | Handling found in `types.cpp` | Verify semantics against archived originals/tombstones |
 | XEP-0444 Message Reactions | Handling found in `types.cpp` | Verify replay of reactions and deduplication |
-| XEP-0425 Message Moderation | No matching handling found in first source search | Verify exact client variant and required MUC archive semantics |
+| XEP-0425 Message Moderation | No dedicated IQ API found | Dino's implementation sends a moderation IQ; this is a distinct MUC operation, not required to parse ordinary MAM result envelopes. XEP-0424 retraction handling already exists. |
 | XEP-0421 Occupant IDs | No matching namespace found in first source search | Validate MUC identity and archived sender handling |
 | XEP-0461 Message Replies | No matching `urn:xmpp:reply:0` found in first source search | Check any alternate parsing implementation before adding |
-| XEP-0490 Message Displayed Synchronization | No matching namespace found in first source search | Verify relevance as archived-message marker |
+| XEP-0490 Message Displayed Synchronization | Generic PubSub manager exists, no typed MDS API | Dino publishes a per-conversation `displayed` PubSub item containing XEP-0359 IDs. This is not a MAM transport extension; do not add it to MAMTask. |
 | XEP-0441 MAM Preferences | Not found in first MAM source search | Optional protocol, not required for baseline sync; specification discourages use where it interferes with synchronization |
 | XEP-0442 PubSub MAM | Not found in first MAM source search | Include only if verified in scope client; avoid speculative support |
 
@@ -77,14 +77,14 @@ Completed in Iris's **existing** `MAMTask`, without a second manager:
 - Changed page lifecycle to wait for `<fin/>`; use RSM `first`/`last`, `complete` and cumulative `stable`. Detect repeated cursors and honor page size vs total cap, including unlimited mode.
 - Separated the archive JID from the optional `with` filter; own-account and MUC room archives can be queried independently.
 - Applied disco feature gates to `flip-page`, `after-id`, `before-id` and `include-groupchat`. For compatible one-sided ID queries, use baseline RSM before/after as allowed by XEP-0313 §9.
-- Verified exact archive sender JID and queryid before accepting a forwarded result; ignore unsolicited, malformed and post-completion results.
+- Verified exact archive sender JID and queryid for results and final IQ; ignore unsolicited, forged and post-completion results. Regression tests cover forged own-resource completion IQs.
 - Fixed a dispatcher bug: `JT_PushMessage` previously swallowed MAM result envelopes before `MAMTask` could receive them.
 - Added `resultReceived(const QDomElement&)` and `setCollectResults(false)` for streaming catch-up without accumulating the entire archive; existing `archive()` remains backward compatible by default.
-- Added `tests/mam/mamtask.cpp` with a real Client/Task/recording-stream fixture for own/MUC archives, forged senders, baseline and extended queries, RSM paging, total limits, streaming, and `complete`/`stable`.
+- Added `tests/mam/mamtask.cpp` with a real Client/Task/recording-stream fixture for own/MUC archives, forged senders and IQ completion, baseline and extended queries, RSM paging, total limits, streaming, `complete`/`stable`, IQ errors and repeated cursors.
 
-**CI:** the dedicated MAM tests are newly introduced and the full cross-platform `Build and test` workflow has not yet completed. The separate Jingle and Prosody workflows passed. Keep this PR **Draft** until all failures are resolved.
+**CI:** Dedicated MAM regression jobs on Qt5/QCA2 and Qt6/QCA3 passed on `e19915a` (2026-10-17), including actual CTest execution. The earlier cross-platform `Build and test` matrix passed all seven jobs on `be7b937`. The latest security/edge-case commit `ffe52da` is being retested; keep the PR **Draft** until the updated matrix finishes.
 
-**Outstanding:** canonical Conversations/monocles verification; legacy MAM 0/1 decision; optional MAM metadata and `ids` retrieval only if a scoped client uses them; IQ-error and malformed/empty-page tests; XEP-0359 multi-`stanza-id` trust and the adjacent replay XEPs in `Message` (not in `MAMTask`). Iris currently stores only one `stanza-id` although XEP-0359 permits multiple with distinct `by` values. That is a separate message-layer change, not a reason to duplicate MAM.
+**Outstanding:** canonical Conversations/monocles verification; legacy MAM 0/1 decision; optional MAM metadata and `ids` retrieval only if a scoped client uses them; malformed forwarded-result tests and sanitizer coverage. XEP-0359 multi-ID and XEP-0203 timestamp fixes are isolated in the separate message-layer branch `ai/xep0359-multiple-stanza-ids` (both new tests pass Qt5/Qt6). XEP-0421 occupant IDs and XEP-0461 replies still need implementation decisions, without inflating MAMTask.
 
 ## Implementation sequence and acceptance
 

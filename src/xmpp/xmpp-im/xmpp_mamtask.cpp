@@ -319,6 +319,15 @@ bool MAMTask::take(const QDomElement &x)
     if (forwarded.isNull() || forwarded.namespaceURI() != QLatin1String("urn:xmpp:forward:0")
         || result.attribute(QLatin1String("id")).isEmpty())
         return true;
+    // Validate the envelope before counting or emitting an archive entry.
+    // Full message parsing remains the responsibility of the existing
+    // Forwarding/Message implementation, not a second parser in MAMTask.
+    const auto delay = forwarded.firstChildElement(QLatin1String("delay"));
+    const auto message = forwarded.firstChildElement(QLatin1String("message"));
+    if (delay.isNull() || delay.namespaceURI() != QLatin1String("urn:xmpp:delay")
+        || !QDateTime::fromString(delay.attribute(QLatin1String("stamp")), Qt::ISODate).isValid()
+        || message.isNull() || message.namespaceURI() != QLatin1String("jabber:client"))
+        return true;
 
     if (d->mamMaxMessages > 0 && d->messagesFetched >= d->mamMaxMessages) {
         // A server that sends more items than requested must not grow

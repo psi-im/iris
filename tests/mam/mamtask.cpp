@@ -96,6 +96,17 @@ int main(int argc, char **argv)
     result(c, first, QStringLiteral("other@example.test"), QStringLiteral("fake"));
     result(c, first, QStringLiteral("alice@example.test/other-device"), QStringLiteral("fake2"));
     require(baseline.archive().isEmpty(), "Forged result was accepted");
+    const auto missingMessage = QStringLiteral(
+        "<message from='alice@example.test'><result xmlns='urn:xmpp:mam:2' queryid='%1' id='bad1'>"
+        "<forwarded xmlns='urn:xmpp:forward:0'><delay xmlns='urn:xmpp:delay' "
+        "stamp='2026-10-16T12:00:00Z'/></forwarded></result></message>").arg(qid(first));
+    require(c.rootTask()->take(xml(missingMessage)), "Malformed result not consumed");
+    const auto missingDelay = QStringLiteral(
+        "<message from='alice@example.test'><result xmlns='urn:xmpp:mam:2' queryid='%1' id='bad2'>"
+        "<forwarded xmlns='urn:xmpp:forward:0'><message xmlns='jabber:client'/>"
+        "</forwarded></result></message>").arg(qid(first));
+    require(c.rootTask()->take(xml(missingDelay)), "Malformed result not consumed");
+    require(baseline.archive().isEmpty(), "Malformed forwarded result was accepted");
     result(c, first, QStringLiteral("alice@example.test"), QStringLiteral("m2"));
     result(c, first, QStringLiteral("alice@example.test"), QStringLiteral("m3"));
     require(finished == 0 && baseline.archive().size() == 2, "Page completed before fin");
