@@ -108,6 +108,14 @@ int main(int argc, char **argv)
                 && baseline.children().first()->inherits("XMPP::Task"),
             "MAM coordinator did not create a child page Task");
     auto *initialPage = baseline.children().first();
+    require(baseline.timeout() == 0
+                && static_cast<Task *>(initialPage)->timeout() > 0,
+            "MAM coordinator has a global default timeout or page timeout is disabled");
+    // A caller can opt into an overall deadline without changing the
+    // default per-page deadline for ordinary multi-page requests.
+    MAMTask explicitDeadline(c.rootTask());
+    explicitDeadline.setTimeout(15);
+    require(explicitDeadline.timeout() == 15, "Explicit MAM deadline cannot be configured");
     require(first.attribute(QStringLiteral("to")).isEmpty(), "Own archive IQ has a to");
     require(!hasField(first, QStringLiteral("with")), "Unfiltered query has a with");
     require(!hasField(first, QStringLiteral("include-groupchat")), "Unadvertised field sent");
