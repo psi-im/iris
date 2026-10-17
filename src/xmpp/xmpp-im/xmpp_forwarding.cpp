@@ -106,7 +106,7 @@ bool Forwarding::fromXml(const QDomElement &e, Client *client)
                 correct = true;
             }
         } else if (child.tagName() == QString::fromLatin1("delay") && child.namespaceURI() == xmlns_delay) {
-            ts_ = QDateTime::fromString(child.attribute(QString::fromLatin1("stamp")).left(19), Qt::ISODate);
+            ts_ = QDateTime::fromString(child.attribute(QString::fromLatin1("stamp")), Qt::ISODate);
         }
         child = child.nextSiblingElement();
     }
@@ -123,7 +123,7 @@ QDomElement Forwarding::toXml(Stream *stream) const
     if (ts_.isValid()) {
         QDomElement delay = stream->doc().createElement(QString::fromLatin1("delay"));
         delay.setAttribute(QString::fromLatin1("xmlns"), xmlns_delay);
-        delay.setAttribute(QString::fromLatin1("stamp"), ts_.toUTC().toString(Qt::ISODate) + "Z");
+        delay.setAttribute(QString::fromLatin1("stamp"), ts_.toUTC().toString(Qt::ISODateWithMs));
         e.appendChild(delay);
     }
     e.appendChild(msg_.toStanza(stream).element());
