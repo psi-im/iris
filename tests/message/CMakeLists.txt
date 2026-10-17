@@ -29,3 +29,9 @@ target_link_libraries(message_mds_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION
     Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
 add_test(NAME message_mds COMMAND message_mds_test)
 set_tests_properties(message_mds PROPERTIES TIMEOUT 10)
+
+add_executable(message_moderation_test moderation.cpp)
+target_link_libraries(message_moderation_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
+    Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
+add_test(NAME message_moderation COMMAND message_moderation_test)
+set_tests_properties(message_moderation PROPERTIES TIMEOUT 10)
