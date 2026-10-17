@@ -2201,6 +2201,12 @@ bool Message::fromStanza(const Stanza &s, bool useTimeZoneOffset, int timeZoneOf
     const auto moderateNs = QStringLiteral("urn:xmpp:message-moderate:1");
     const auto tombstone = directChild(root, QStringLiteral("retracted"), retractNs);
     const auto action = directChild(root, QStringLiteral("retract"), retractNs);
+    // A forged 'moderated' retraction from a MUC occupant must not fall
+    // through into the ordinary XEP-0424 retraction consumer.
+    if (d->type == Type::Groupchat && !action.isNull()
+        && !directChild(action, QStringLiteral("moderated"), moderateNs).isNull()
+        && (!d->from.isValid() || !d->from.resource().isEmpty()))
+        d->retraction.clear();
     const bool isTombstone = !tombstone.isNull()
         && QDateTime::fromString(tombstone.attribute(QStringLiteral("stamp")), Qt::ISODate).isValid();
     const bool isAction = !action.isNull() && !d->retraction.isEmpty()
