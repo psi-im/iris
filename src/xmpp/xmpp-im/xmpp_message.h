@@ -237,6 +237,11 @@ public:
     Jingle::MessageInitiation jingleMessageInitiation() const;
     void                      setJingleMessageInitiation(const Jingle::MessageInitiation &initiation);
 
+    // XEP-0421: raw/untrusted MUC identifier. Consumers MUST verify the
+    // room advertises urn:xmpp:occupant-id:0 before using it as an identity.
+    QString occupantId() const;
+    void    setOccupantId(const QString &id);
+
     // XEP-0359. Consumers must verify the assigning entity via disco before
     // trusting stanza IDs for deduplication or MAM catch-up.
     StanzaId        stanzaId(const Jid &by) const;

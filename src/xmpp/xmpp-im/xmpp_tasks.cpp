@@ -717,13 +717,19 @@ bool JT_PushPresence::take(const QDomElement &e)
 
     QDateTime stamp;
     bool modernDelay = false;
+    int occupantIdElements = 0;
 
     for (QDomNode n = e.firstChild(); !n.isNull(); n = n.nextSibling()) {
         QDomElement i = n.toElement();
         if (i.isNull())
             continue;
 
-        if (i.tagName() == "x" && i.namespaceURI() == "jabber:x:delay") {
+        if (i.localName() == QLatin1String("occupant-id")
+            && i.namespaceURI() == QLatin1String("urn:xmpp:occupant-id:0")) {
+            ++occupantIdElements;
+            if (occupantIdElements == 1)
+                p.setOccupantId(i.attribute(QStringLiteral("id")));
+        } else if (i.tagName() == "x" && i.namespaceURI() == "jabber:x:delay") {
             if (i.hasAttribute("stamp") && !stamp.isValid()) {
                 stamp = stamp2TS(i.attribute("stamp"));
             }
@@ -779,6 +785,10 @@ bool JT_PushPresence::take(const QDomElement &e)
             p.addBoBData(bd);
         }
     }
+
+    // Multiple occupant IDs in a presence are ambiguous.
+    if (occupantIdElements != 1)
+        p.setOccupantId(QString());
 
     if (stamp.isValid()) {
         if (client()->manualTimeZoneOffset()) {
