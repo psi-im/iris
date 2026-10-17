@@ -164,9 +164,9 @@ XData MAMTask::makeMAMFilter() const
 
     if (const auto *range = std::get_if<Private::TimeRange>(&request.range)) {
         if (range->from.isValid())
-            addField(QLatin1String("start"), range->from.toUTC().toString(Qt::ISODate));
+            addField(QLatin1String("start"), range->from.toUTC().toString(Qt::ISODateWithMs));
         if (range->to.isValid())
-            addField(QLatin1String("end"), range->to.toUTC().toString(Qt::ISODate));
+            addField(QLatin1String("end"), range->to.toUTC().toString(Qt::ISODateWithMs));
     } else {
         // Effective boundaries can differ from the configured ID range when
         // a single boundary is expressed using baseline RSM.
