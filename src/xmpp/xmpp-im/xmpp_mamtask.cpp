@@ -20,7 +20,9 @@
 #include "xmpp_mamtask.h"
 #include "xmpp_client.h"
 #include "xmpp_features.h"
+#include "xmpp_tasks.h"
 
+#include <QPointer>
 #include <QSet>
 
 #include <functional>
@@ -91,30 +93,63 @@ struct PageRequest {
 
 // One child Task per MAM page. It is the *only* task that recognizes its
 // queryid and IQ id. MAMTask receives completion and validated results only.
-class MAMPageTask final : public Task {
+class MAMPageTask final : public Task, public JT_PushMessage::Subscriber {
 public:
     MAMPageTask(Task *parent, PageRequest request, std::function<void(const QDomElement &)> onResult) :
         Task(parent), request_(std::move(request)), onResult_(std::move(onResult))
     {
         // finished() can be emitted during take(). A completed page must
         // immediately stop consuming stanzas, before deleteLater() runs.
-        connect(this, &Task::finished, this, [this] { active_ = false; });
+        connect(this, &Task::finished, this, [this] { deactivate(); });
     }
+
+    ~MAMPageTask() override { deactivate(); }
 
     bool isComplete() const { return complete_; }
     bool isStable() const { return stable_; }
     const QString &nextCursor() const { return nextCursor_; }
-    void deactivate() { active_ = false; }
+    void deactivate()
+    {
+        active_ = false;
+        if (push_) {
+            push_->unsubscribeMessage(this);
+            push_.clear();
+        }
+    }
+
+    // Messages have already passed JT_PushMessage XML subscribers, Stanza
+    // validation and Message::fromStanza(). Only a matching, active MAM
+    // page should consume the envelope; unknown results are ordinary
+    // messages for the remaining subscribers/application to classify.
+    JT_PushMessage::SubscriberResult messageEventResult(Message &message, int, bool nested) override
+    {
+        using Result = JT_PushMessage::SubscriberResult;
+        if (!active_ || nested)
+            return Result::NotHandled;
+        const auto mam = message.mamResult();
+        if (!mam.isValid() || mam.queryId != queryId_ || !isExpectedSender(message.from()))
+            return Result::NotHandled;
+        const auto forwarded = directChildNamed(mam.xml, QLatin1String("forwarded"));
+        if (forwarded.isNull() || forwarded.namespaceURI() != QLatin1String("urn:xmpp:forward:0")
+            || mam.id.isEmpty())
+            return Result::HandledStop;
+        const auto delay = directChildNamed(forwarded, QLatin1String("delay"));
+        const auto innerMessage = directChildNamed(forwarded, QLatin1String("message"));
+        // Both delay and inner message are optional for archive tombstones.
+        if ((!delay.isNull()
+             && (delay.namespaceURI() != QLatin1String("urn:xmpp:delay")
+                 || !QDateTime::fromString(delay.attribute(QLatin1String("stamp")), Qt::ISODate).isValid()))
+            || (!innerMessage.isNull() && innerMessage.namespaceURI() != QLatin1String("jabber:client")))
+            return Result::HandledStop;
+        onResult_(mam.xml);
+        return Result::HandledStop;
+    }
 
     bool take(const QDomElement &stanza) override
     {
-        if (!active_)
-            return false;
-        if (stanza.tagName() == QLatin1String("message"))
-            return takeResult(stanza);
-        // iqVerify() rejects everything except IQ stanzas matching this
-        // page's response ID and expected addressing.
-        return takeIq(stanza);
+        // Page IQs use Task dispatch; MAM messages use the ordinary
+        // JT_PushMessage subscription chain, never a competing XML path.
+        return active_ && takeIq(stanza);
     }
 
 protected:
@@ -122,6 +157,9 @@ protected:
     {
         active_ = true;
         queryId_ = genUniqueID();
+        push_ = client()->pushMessage();
+        if (push_)
+            push_->subscribeMessage(this, 0);
         auto iq = createIQ(doc(), QLatin1String("set"), request_.archiveJid.full(), id());
         auto query = doc()->createElementNS(XMPP_MAM_NAMESPACE, QLatin1String("query"));
         query.setAttribute(QLatin1String("queryid"), queryId_);
@@ -197,9 +235,8 @@ private:
         return data;
     }
 
-    bool isExpectedSender(const QDomElement &stanza) const
+    bool isExpectedSender(const Jid &sender) const
     {
-        const Jid sender(stanza.attribute(QLatin1String("from")));
         if (!request_.archiveJid.isEmpty())
             return !sender.isEmpty() && sender.compare(request_.archiveJid, true);
         return sender.isEmpty() || sender.compare(Jid(client()->jid().bare()), true);
@@ -210,7 +247,8 @@ private:
         // iqVerify() already checks the IQ element, response ID and
         // generic JID addressing. It does not check the IQ response type or
         // MAM's stricter sender identity (especially our other resources).
-        if (!iqVerify(iq, request_.archiveJid, id()) || !isExpectedSender(iq))
+        if (!iqVerify(iq, request_.archiveJid, id())
+            || !isExpectedSender(Jid(iq.attribute(QLatin1String("from")))))
             return false;
         const auto type = iq.attribute(QLatin1String("type"));
         if (type != QLatin1String("result") && type != QLatin1String("error"))
@@ -246,38 +284,11 @@ private:
         return true;
     }
 
-    bool takeResult(const QDomElement &stanza)
-    {
-        const auto result = directChildNamed(stanza, QLatin1String("result"));
-        if (result.isNull() || result.namespaceURI() != XMPP_MAM_NAMESPACE
-            || result.attribute(QLatin1String("queryid")) != queryId_)
-            return false;
-        // Consume a forged MAM envelope so that it is not surfaced as an
-        // ordinary message. Only validated results reach the coordinator.
-        if (!isExpectedSender(stanza))
-            return true;
-
-        const auto forwarded = directChildNamed(result, QLatin1String("forwarded"));
-        if (forwarded.isNull() || forwarded.namespaceURI() != QLatin1String("urn:xmpp:forward:0")
-            || result.attribute(QLatin1String("id")).isEmpty())
-            return true;
-        const auto delay = directChildNamed(forwarded, QLatin1String("delay"));
-        const auto message = directChildNamed(forwarded, QLatin1String("message"));
-        // Both inner message and delay are optional for MAM tombstones.
-        if ((!delay.isNull()
-             && (delay.namespaceURI() != QLatin1String("urn:xmpp:delay")
-                 || !QDateTime::fromString(delay.attribute(QLatin1String("stamp")), Qt::ISODate).isValid()))
-            || (!message.isNull() && message.namespaceURI() != QLatin1String("jabber:client")))
-            return true;
-
-        onResult_(result);
-        return true;
-    }
-
-    PageRequest request_;
+     PageRequest request_;
     std::function<void(const QDomElement &)> onResult_;
     QString queryId_;
     QString nextCursor_;
+    QPointer<JT_PushMessage> push_;
     bool active_ = false;
     bool complete_ = false;
     bool stable_ = true;
