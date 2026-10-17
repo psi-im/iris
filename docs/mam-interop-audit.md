@@ -264,3 +264,28 @@ The earlier Request/Progress separation above still applies, but **IQ
 generation and IQ validation now belong exclusively to MAMPageTask**, not
 to MAMTask. This section supersedes earlier descriptions of a coordinator
 sending its own page IQ.
+
+## Audit follow-up — 2026-10-17 12:30 UTC
+
+- The page-task hierarchy originally inherited `Task`'s 120-second timeout
+  for **both** its parent coordinator and each child page. This terminated
+  otherwise healthy multi-page queries after 120 seconds in total. The
+  coordinator now uses `setTimeout(0)` by default while each child retains
+  the normal 120-second page deadline. A caller can opt into a separate global
+  deadline via the inherited `setTimeout(N)`. Regression tests cover both
+  defaults and the explicit override.
+- `iqVerify()` intentionally validates stanza type/name, response id and
+  generic addressing, **not** whether an IQ is a `result/error` response.
+  The private `MAMPageTask` additionally validates exact archive sender and
+  `type=result/error`, without reimplementing the generic checks. The
+  XEP-0425 moderation IQ handler in sibling Draft PR #122 was separately
+  fixed to apply the same response-type rule and stop accepting replies after
+  completion; this functionality is not duplicated in MAMTask.
+- Current Kaidan primary source is KDE Invent `network/kaidan`. Its
+  [official KDE GitHub mirror](https://github.com/KDE/kaidan/blob/master/src/MessageController.cpp)
+  confirms own/MUC MAM retrieval, RSM `before` for backlog and `after` for
+  catch-up, and selecting XEP-0359 stanza IDs by expected issuer. The older
+  `KaidanIM/Kaidan` mirror should not be treated as current upstream.
+- Canonical Codeberg Conversations and monocles trees remain inaccessible
+  from the available web source, so comparisons based on forks must remain
+  explicitly qualified. No claim of canonical source-level completion.
