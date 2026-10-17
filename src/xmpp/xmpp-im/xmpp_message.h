@@ -239,12 +239,11 @@ public:
 
     // XEP-0359. Consumers must verify the assigning entity via disco before
     // trusting stanza IDs for deduplication or MAM catch-up.
-    StanzaId        stanzaId() const; // Legacy: last parsed ID.
     StanzaId        stanzaId(const Jid &by) const;
     QList<StanzaId> stanzaIds() const;
-    void            setStanzaId(const StanzaId &id); // Replace all IDs.
+    void            setStanzaIds(const QList<StanzaId> &ids);
     void            addStanzaId(const StanzaId &id);
-    Reply            reply() const;
+    Reply           reply() const;
     void             setReply(const Reply &reply);
     QString         originId() const;
     void     setOriginId(const QString &id);
