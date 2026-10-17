@@ -289,3 +289,7 @@ sending its own page IQ.
 - Canonical Codeberg Conversations and monocles trees remain inaccessible
   from the available web source, so comparisons based on forks must remain
   explicitly qualified. No claim of canonical source-level completion.
+
+## Subscriber pipeline follow-up (2026-10-17 15:00 UTC)
+
+MAM envelopes now enter the normal JT_PushMessage Stanza/Message parser. A private MAMPageTask subscriber consumes only matching active-page results. Other messages, including unknown query IDs, continue to ordinary subscribers and consumers. SubscriberResult distinguishes NotHandled, HandledContinue, HandledStop and Error while preserving the legacy bool virtual method. Qt5 MAM regression currently fails with a segfault; Qt6 passed. Diagnose before merging.
