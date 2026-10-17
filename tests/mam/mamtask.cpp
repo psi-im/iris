@@ -176,8 +176,12 @@ int main(int argc, char **argv)
     result(c, first, QStringLiteral("alice@example.test"), QStringLiteral("m3"));
     require(finished == 0 && baseline.archive().size() == 2, "Page completed before fin");
     const int sentBeforeSpoofedFin = stream.sent.size();
-    fin(c, first, QStringLiteral("alice@example.test/other-device"), QStringLiteral("m2"),
-        QStringLiteral("m3"), true);
+    const auto spoofedFin = QStringLiteral(
+        "<iq from='alice@example.test/other-device' type='result' id='%1'>"
+        "<fin xmlns='urn:xmpp:mam:2' complete='true'/></iq>")
+        .arg(first.attribute(QStringLiteral("id")));
+    require(!baseline.take(xml(spoofedFin)),
+            "MAM swallowed a forged fin IQ instead of declining it");
     require(finished == 0 && stream.sent.size() == sentBeforeSpoofedFin,
             "Forged IQ from another own resource completed the archive query");
     fin(c, first, QStringLiteral("alice@example.test"), QStringLiteral("m2"),
