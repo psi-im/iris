@@ -99,6 +99,11 @@ int main(int argc, char **argv)
     result(c, first, QStringLiteral("alice@example.test"), QStringLiteral("m2"));
     result(c, first, QStringLiteral("alice@example.test"), QStringLiteral("m3"));
     require(finished == 0 && baseline.archive().size() == 2, "Page completed before fin");
+    const int sentBeforeSpoofedFin = stream.sent.size();
+    fin(c, first, QStringLiteral("alice@example.test/other-device"), QStringLiteral("m2"),
+        QStringLiteral("m3"), true);
+    require(finished == 0 && stream.sent.size() == sentBeforeSpoofedFin,
+            "Forged IQ from another own resource completed the archive query");
     fin(c, first, QStringLiteral("alice@example.test"), QStringLiteral("m2"),
         QStringLiteral("m3"), false, false);
     auto second = stream.sent.last();
@@ -202,5 +207,27 @@ int main(int argc, char **argv)
                 "<message from='alice@example.test'><result xmlns='urn:xmpp:mam:2' "
                 "queryid='no-open-query' id='late'/></message>"))),
             "Unsolicited MAM result was handled as an ordinary message");
+
+    MAMTask failed(c.rootTask());
+    failed.get(Jid(), QDateTime(), QDateTime(), false);
+    failed.go();
+    const auto errorQuery = stream.sent.last();
+    const auto errorIq = QStringLiteral(
+        "<iq from='alice@example.test' type='error' id='%1'><error type='cancel'>"
+        "<item-not-found xmlns='urn:ietf:params:xml:ns:xmpp-stanzas'/>"
+        "</error></iq>").arg(errorQuery.attribute(QStringLiteral("id")));
+    require(c.rootTask()->take(xml(errorIq)), "MAM IQ error was not consumed");
+    require(!failed.success() && !failed.statusString().isEmpty(), "MAM IQ error was not propagated");
+
+    MAMTask loop(c.rootTask());
+    loop.get(Jid(), QDateTime(), QDateTime(), false, 2, 0, false, false);
+    loop.go();
+    const auto loopPage1 = stream.sent.last();
+    fin(c, loopPage1, QStringLiteral("alice@example.test"), QStringLiteral("same"),
+        QStringLiteral("same"), false);
+    const auto loopPage2 = stream.sent.last();
+    fin(c, loopPage2, QStringLiteral("alice@example.test"), QStringLiteral("same"),
+        QStringLiteral("same"), false);
+    require(!loop.success() && !loop.statusString().isEmpty(), "Repeated cursor caused an infinite loop");
     return 0;
 }

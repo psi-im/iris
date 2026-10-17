@@ -54,6 +54,7 @@ public:
 
     void  getPage();
     XData makeMAMFilter();
+    bool  isExpectedSender(const QDomElement &stanza) const;
 };
 
 MAMTask::MAMTask(Task *parent) : Task(parent)
@@ -130,6 +131,14 @@ XData MAMTask::Private::makeMAMFilter()
     x.setRegistrarType(XMPP_MAM_NAMESPACE);
 
     return x;
+}
+
+bool MAMTask::Private::isExpectedSender(const QDomElement &stanza) const
+{
+    const Jid sender(stanza.attribute(QLatin1String("from")));
+    if (!archiveJid.isEmpty())
+        return !sender.isEmpty() && sender.compare(archiveJid, true);
+    return sender.isEmpty() || sender.compare(Jid(q->client()->jid().bare()), true);
 }
 
 void MAMTask::Private::getPage()
@@ -251,6 +260,8 @@ bool MAMTask::take(const QDomElement &x)
     // The final IQ is the page boundary. Sending the next query while the
     // server is still streaming <result/> messages can race with that IQ.
     if (iqVerify(x, d->archiveJid, d->currentPageQueryIQID)) {
+        if (!d->isExpectedSender(x))
+            return true; // An IQ from another resource must not finish our query.
         if (x.attribute(QLatin1String("type")) == QLatin1String("error")) {
             if (x.firstChildElement(QLatin1String("error")).isNull())
                 setError(1, QStringLiteral("MAM IQ error without error payload"));
@@ -301,17 +312,9 @@ bool MAMTask::take(const QDomElement &x)
         || result.attribute(QLatin1String("queryid")) != d->currentPageQueryID)
         return false;
 
-    if (x.tagName() != QLatin1String("message"))
-        return false;
-
     // A matching queryid is not proof that the sender owns this archive.
-    const Jid sender(x.attribute(QLatin1String("from")));
-    if (!d->archiveJid.isEmpty()) {
-        if (sender.isEmpty() || !sender.compare(d->archiveJid, true))
-            return true; // discard forged result
-    } else if (!sender.isEmpty() && !sender.compare(Jid(client()->jid().bare()), true)) {
-        return true;
-    }
+    if (!d->isExpectedSender(x))
+        return true; // discard forged result
     const QDomElement forwarded = result.firstChildElement(QLatin1String("forwarded"));
     if (forwarded.isNull() || forwarded.namespaceURI() != QLatin1String("urn:xmpp:forward:0")
         || result.attribute(QLatin1String("id")).isEmpty())
