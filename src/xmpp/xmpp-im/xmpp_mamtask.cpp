@@ -302,8 +302,8 @@ bool MAMTask::take(const QDomElement &x)
 
         // XEP-0313 requires <fin/> to contain the RSM first/last IDs,
         // even when the server returned fewer items than we requested.
-        const auto set = SubsetsClientManager::findElement(fin, true);
-        if (set.isNull()) {
+        const auto set = directChildNamed(fin, QLatin1String("set"));
+        if (set.isNull() || set.namespaceURI() != QLatin1String("http://jabber.org/protocol/rsm")) {
             setError(1, QStringLiteral("Missing RSM cursor in MAM <fin/>"));
             return true;
         }
