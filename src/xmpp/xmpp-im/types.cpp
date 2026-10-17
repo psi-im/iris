@@ -1167,7 +1167,7 @@ void Message::addStanzaId(const Message::StanzaId &id)
 {
     // XEP-0359 requires a non-empty ID and one direct-child stanza-id per
     // assigning entity. Keep the first occurrence when parsing invalid input.
-    if (id.id.isEmpty() || !id.by.isValid() || !id.by.resource().isEmpty())
+    if (!id.isValid())
         return;
     auto &ids = MessageD()->stanzaIds;
     for (const auto &existing : std::as_const(ids)) {

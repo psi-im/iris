@@ -69,6 +69,8 @@ public:
     struct StanzaId {
         Jid     by;
         QString id;
+
+        bool isValid() const { return by.isBare() && !id.isEmpty(); }
     };
 
     // XEP-0461. The 'to' JID is optional; the referenced message ID is not.
