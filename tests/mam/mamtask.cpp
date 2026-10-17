@@ -96,16 +96,16 @@ int main(int argc, char **argv)
     result(c, first, QStringLiteral("other@example.test"), QStringLiteral("fake"));
     result(c, first, QStringLiteral("alice@example.test/other-device"), QStringLiteral("fake2"));
     require(baseline.archive().isEmpty(), "Forged result was accepted");
-    const auto missingMessage = QStringLiteral(
+    const auto invalidDelay = QStringLiteral(
         "<message from='alice@example.test'><result xmlns='urn:xmpp:mam:2' queryid='%1' id='bad1'>"
         "<forwarded xmlns='urn:xmpp:forward:0'><delay xmlns='urn:xmpp:delay' "
-        "stamp='2026-10-16T12:00:00Z'/></forwarded></result></message>").arg(qid(first));
-    require(c.rootTask()->take(xml(missingMessage)), "Malformed result not consumed");
-    const auto missingDelay = QStringLiteral(
+        "stamp='not-a-date'/></forwarded></result></message>").arg(qid(first));
+    require(c.rootTask()->take(xml(invalidDelay)), "Invalid delay result not consumed");
+    const auto invalidMessage = QStringLiteral(
         "<message from='alice@example.test'><result xmlns='urn:xmpp:mam:2' queryid='%1' id='bad2'>"
-        "<forwarded xmlns='urn:xmpp:forward:0'><message xmlns='jabber:client'/>"
+        "<forwarded xmlns='urn:xmpp:forward:0'><message xmlns='urn:invalid:message'/>"
         "</forwarded></result></message>").arg(qid(first));
-    require(c.rootTask()->take(xml(missingDelay)), "Malformed result not consumed");
+    require(c.rootTask()->take(xml(invalidMessage)), "Invalid message result not consumed");
     require(baseline.archive().isEmpty(), "Malformed forwarded result was accepted");
     result(c, first, QStringLiteral("alice@example.test"), QStringLiteral("m2"));
     result(c, first, QStringLiteral("alice@example.test"), QStringLiteral("m3"));
@@ -126,6 +126,34 @@ int main(int argc, char **argv)
         QStringLiteral("m1"), true);
     require(finished == 1 && baseline.success() && baseline.archive().size() == 3, "Pagination failed");
     require(baseline.isComplete() && !baseline.isStable(), "Fin flags not retained");
+
+    // XEP-0313 tombstones retain their archive ID even without a message.
+    // Missing delay and message are valid; malformed present elements are not.
+    MAMTask optionalForwarding(c.rootTask());
+    optionalForwarding.get(Jid(), QDateTime(), QDateTime(), false, 10, 0, false, false);
+    optionalForwarding.go();
+    const auto optionalIq = stream.sent.last();
+    const auto sendOptional = [&](const QString &id, const QString &payload) {
+        const auto stanza = QStringLiteral(
+            "<message from='alice@example.test'><result xmlns='urn:xmpp:mam:2' queryid='%1' id='%2'>"
+            "<forwarded xmlns='urn:xmpp:forward:0'>%3</forwarded></result></message>")
+            .arg(qid(optionalIq)).arg(id).arg(payload);
+        require(c.rootTask()->take(xml(stanza)), "Optional forwarded result not consumed");
+    };
+    sendOptional(QStringLiteral("deleted"), QStringLiteral(
+        "<delay xmlns='urn:xmpp:delay' stamp='2026-10-16T12:00:00Z'/>"));
+    sendOptional(QStringLiteral("undelayed"), QStringLiteral("<message xmlns='jabber:client'/>"));
+    sendOptional(QStringLiteral("empty"), QString());
+    require(optionalForwarding.archive().size() == 3, "Valid optional forwarding was rejected");
+    require(optionalForwarding.archive().at(0).attribute(QStringLiteral("id")) == QStringLiteral("deleted"),
+            "Tombstone archive UID was lost");
+    require(optionalForwarding.archive().at(0).firstChildElement(QStringLiteral("forwarded"))
+            .firstChildElement(QStringLiteral("message")).isNull(),
+            "Tombstone acquired a fabricated message");
+    fin(c, optionalIq, QStringLiteral("alice@example.test"), QStringLiteral("deleted"),
+        QStringLiteral("empty"), true);
+    require(optionalForwarding.success(), "Optional forwarding query failed");
+
 
     MAMTask muc(c.rootTask());
     const Jid room(QStringLiteral("room@conference.example.test"));
