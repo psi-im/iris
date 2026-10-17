@@ -18,7 +18,7 @@ class OfflineConnector final : public XMPP::Connector {
 public:
     void setOptHostPort(const QString &, quint16) override { }
     void connectToServer(const QString &) override { }
-    XMPP::ByteStream *stream() const override { return nullptr; }
+    ByteStream *stream() const override { return nullptr; }
     void done() override { }
 };
 
