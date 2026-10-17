@@ -47,6 +47,10 @@ public:
 
     const QList<QDomElement> &archive() const;
 
+    // By default, every result is retained in archive(). Disable buffering
+    // for large catch-up queries and consume resultReceived() incrementally.
+    void setCollectResults(bool enabled);
+
     // The archive being queried (e.g. a MUC room) is distinct from the
     // optional 'with' filter passed to get(). Empty means the own archive.
     void setArchiveJid(const Jid &archiveJid);
@@ -71,6 +75,10 @@ public:
 
     void onGo();
     bool take(const QDomElement &);
+
+signals:
+    // Emitted for each validated result, before the final fin IQ.
+    void resultReceived(const QDomElement &result);
 
 private:
     class Private;

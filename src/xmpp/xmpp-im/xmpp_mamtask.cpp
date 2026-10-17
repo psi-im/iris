@@ -38,6 +38,8 @@ public:
     Features archiveFeatures;
     bool complete = false;
     bool stable = true;
+    bool active = false;
+    bool collectResults = true;
     QSet<QString> visitedCursors;
     MAMTask           *q;
     QString            lastArchiveID;
@@ -57,10 +59,12 @@ MAMTask::MAMTask(Task *parent) : Task(parent)
 {
     d = new Private;
     d->q = this;
+    connect(this, &Task::finished, this, [this] { d->active = false; });
 }
 MAMTask::~MAMTask() { delete d; }
 
 const QList<QDomElement> &MAMTask::archive() const { return d->archive; }
+void MAMTask::setCollectResults(bool enabled) { d->collectResults = enabled; }
 void MAMTask::setArchiveJid(const Jid &j) { d->archiveJid = j; }
 void MAMTask::setArchiveFeatures(const Features &f) { d->archiveFeatures = f; }
 bool MAMTask::isComplete() const { return d->complete; }
@@ -177,6 +181,7 @@ void MAMTask::get(const Jid &j, const QDateTime &from, const QDateTime &to, cons
     d->visitedCursors.clear();
     d->complete = false;
     d->stable = true;
+    d->active = false;
 
     d->j                = j;
     d->from             = from;
@@ -201,6 +206,7 @@ void MAMTask::get(const Jid &j, const QString &fromID, const QString &toID, cons
     d->visitedCursors.clear();
     d->complete = false;
     d->stable = true;
+    d->active = false;
 
     d->j                = j;
     d->fromID           = fromID;
@@ -216,6 +222,7 @@ void MAMTask::get(const Jid &j, const QString &fromID, const QString &toID, cons
 
 void MAMTask::onGo()
 {
+    d->active = true;
     if ((!d->fromID.isEmpty() || !d->toID.isEmpty())
         && !d->archiveFeatures.test(QStringLiteral("urn:xmpp:mam:2#extended"))) {
         setError(1, QStringLiteral("MAM ID filters require urn:xmpp:mam:2#extended"));
@@ -226,13 +233,20 @@ void MAMTask::onGo()
 
 bool MAMTask::take(const QDomElement &x)
 {
+    if (!d->active)
+        return false;
     // The final IQ is the page boundary. Sending the next query while the
     // server is still streaming <result/> messages can race with that IQ.
     if (iqVerify(x, d->archiveJid, d->currentPageQueryIQID)) {
         if (x.attribute(QLatin1String("type")) == QLatin1String("error")) {
-            setError(x);
+            if (x.firstChildElement(QLatin1String("error")).isNull())
+                setError(1, QStringLiteral("MAM IQ error without error payload"));
+            else
+                setError(x);
             return true;
         }
+        if (x.attribute(QLatin1String("type")) != QLatin1String("result"))
+            return false;
 
         QDomElement fin = x.firstChildElement(QLatin1String("fin"));
         if (fin.isNull() || fin.namespaceURI() != XMPP_MAM_NAMESPACE) {
@@ -292,7 +306,9 @@ bool MAMTask::take(const QDomElement &x)
         // the archive beyond the caller's explicit total limit.
         return true;
     }
-    d->archive.append(result);
     ++d->messagesFetched;
+    if (d->collectResults)
+        d->archive.append(result);
+    emit resultReceived(result);
     return true;
 }

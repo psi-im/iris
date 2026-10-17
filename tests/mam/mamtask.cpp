@@ -138,5 +138,46 @@ int main(int argc, char **argv)
     require(hasField(stream.sent.last(), QStringLiteral("after-id")), "Extended ID filter missing");
     fin(c, stream.sent.last(), QStringLiteral("alice@example.test"), QString(), QString(), true);
     require(extended.success(), "Empty extended query did not finish");
+
+    // Bounded pagination must cap the final RSM page without claiming the
+    // archive is exhausted. A streaming consumer must not retain results.
+    MAMTask bounded(c.rootTask());
+    Features all;
+    all.addFeature(QStringLiteral("urn:xmpp:mam:2#extended"));
+    all.addFeature(QStringLiteral("urn:xmpp:mam:2#groupchat-field"));
+    bounded.setArchiveFeatures(all);
+    bounded.setCollectResults(false);
+    int delivered = 0;
+    QObject::connect(&bounded, &MAMTask::resultReceived, &bounded,
+                     [&](const QDomElement &entry) {
+                         require(!entry.attribute(QStringLiteral("id")).isEmpty(),
+                                 "Streamed result has no archive id");
+                         ++delivered;
+                     });
+    bounded.get(Jid(), QDateTime(), QDateTime(), false, 2, 3, true, false);
+    bounded.go();
+    auto page1 = stream.sent.last();
+    require(hasField(page1, QStringLiteral("include-groupchat")), "Advertised groupchat field missing");
+    require(!page1.firstChildElement(QStringLiteral("query"))
+             .firstChildElement(QStringLiteral("flip-page")).isNull(), "Advertised flip-page missing");
+    result(c, page1, QStringLiteral("alice@example.test"), QStringLiteral("b1"));
+    result(c, page1, QStringLiteral("alice@example.test"), QStringLiteral("b2"));
+    fin(c, page1, QStringLiteral("alice@example.test"), QStringLiteral("b1"),
+        QStringLiteral("b2"), false);
+    auto page2 = stream.sent.last();
+    require(rsm(page2).firstChildElement(QStringLiteral("max")).text() == QStringLiteral("1"),
+            "Final RSM page exceeds remaining cap");
+    require(rsm(page2).firstChildElement(QStringLiteral("after")).text() == QStringLiteral("b2"),
+            "Wrong forward cursor");
+    result(c, page2, QStringLiteral("alice@example.test"), QStringLiteral("b3"));
+    fin(c, page2, QStringLiteral("alice@example.test"), QStringLiteral("b3"),
+        QStringLiteral("b3"), false);
+    require(bounded.success() && !bounded.isComplete() && delivered == 3,
+            "Bounded streaming query did not terminate correctly");
+    require(bounded.archive().isEmpty(), "Streaming query retained buffered results");
+    require(!c.rootTask()->take(xml(QStringLiteral(
+                "<message from='alice@example.test'><result xmlns='urn:xmpp:mam:2' "
+                "queryid='no-open-query' id='late'/></message>"))),
+            "Unsolicited MAM result was handled as an ordinary message");
     return 0;
 }
