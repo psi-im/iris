@@ -223,10 +223,22 @@ void MAMTask::get(const Jid &j, const QString &fromID, const QString &toID, cons
 void MAMTask::onGo()
 {
     d->active = true;
-    if ((!d->fromID.isEmpty() || !d->toID.isEmpty())
-        && !d->archiveFeatures.test(QStringLiteral("urn:xmpp:mam:2#extended"))) {
-        setError(1, QStringLiteral("MAM ID filters require urn:xmpp:mam:2#extended"));
-        return;
+    if (!d->archiveFeatures.test(QStringLiteral("urn:xmpp:mam:2#extended"))) {
+        // A single ID boundary can be expressed with baseline RSM, provided
+        // its direction agrees with the requested traversal. This is the
+        // normal fallback used by clients on non-extended MAM servers.
+        if (!d->fromID.isEmpty() && d->toID.isEmpty() && !d->backwards) {
+            d->lastArchiveID = d->fromID;
+            d->visitedCursors.insert(d->lastArchiveID);
+            d->fromID.clear();
+        } else if (!d->toID.isEmpty() && d->fromID.isEmpty() && d->backwards) {
+            d->lastArchiveID = d->toID;
+            d->visitedCursors.insert(d->lastArchiveID);
+            d->toID.clear();
+        } else if (!d->fromID.isEmpty() || !d->toID.isEmpty()) {
+            setError(1, QStringLiteral("This MAM ID range requires urn:xmpp:mam:2#extended"));
+            return;
+        }
     }
     d->getPage();
 }

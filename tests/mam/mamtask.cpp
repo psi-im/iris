@@ -125,7 +125,7 @@ int main(int argc, char **argv)
     require(muc.success() && muc.archive().size() == 1, "Room archive failed");
 
     MAMTask id(c.rootTask());
-    id.get(Jid(), QStringLiteral("m1"), QString(), false, 10, 0, false, false);
+    id.get(Jid(), QStringLiteral("m1"), QStringLiteral("m5"), false, 10, 0, false, false);
     auto count = stream.sent.size();
     id.go();
     require(!id.success() && stream.sent.size() == count, "Unadvertised extended filter sent");
@@ -138,6 +138,27 @@ int main(int argc, char **argv)
     require(hasField(stream.sent.last(), QStringLiteral("after-id")), "Extended ID filter missing");
     fin(c, stream.sent.last(), QStringLiteral("alice@example.test"), QString(), QString(), true);
     require(extended.success(), "Empty extended query did not finish");
+
+    // Baseline RSM supports one-sided ID cursors without #extended.
+    MAMTask fallback(c.rootTask());
+    fallback.get(Jid(), QStringLiteral("m1"), QString(), false, 10, 0, false, false);
+    fallback.go();
+    auto after = stream.sent.last();
+    require(!hasField(after, QStringLiteral("after-id")), "Fallback sent an extended field");
+    require(rsm(after).firstChildElement(QStringLiteral("after")).text() == QStringLiteral("m1"),
+            "Baseline forward ID cursor missing");
+    fin(c, after, QStringLiteral("alice@example.test"), QString(), QString(), true);
+    require(fallback.success(), "Baseline forward ID query failed");
+
+    MAMTask before(c.rootTask());
+    before.get(Jid(), QString(), QStringLiteral("m5"), false, 10, 0, false, true);
+    before.go();
+    auto prior = stream.sent.last();
+    require(!hasField(prior, QStringLiteral("before-id")), "Fallback sent an extended field");
+    require(rsm(prior).firstChildElement(QStringLiteral("before")).text() == QStringLiteral("m5"),
+            "Baseline backward ID cursor missing");
+    fin(c, prior, QStringLiteral("alice@example.test"), QString(), QString(), true);
+    require(before.success(), "Baseline backward ID query failed");
 
     // Bounded pagination must cap the final RSM page without claiming the
     // archive is exhausted. A streaming consumer must not retain results.
