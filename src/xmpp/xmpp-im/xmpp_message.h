@@ -31,6 +31,7 @@
 
 #include <QDomElement>
 #include <QExplicitlySharedDataPointer>
+#include <QList>
 #include <QSet>
 
 class QDateTime;
@@ -68,6 +69,13 @@ public:
     struct StanzaId {
         Jid     by;
         QString id;
+    };
+
+    // XEP-0461. The 'to' JID is optional; the referenced message ID is not.
+    struct Reply {
+        Jid     to;
+        QString id;
+        bool isValid() const { return !id.isEmpty() && (to.isEmpty() || to.isValid()); }
     };
 
     struct Reactions {
@@ -229,10 +237,15 @@ public:
     Jingle::MessageInitiation jingleMessageInitiation() const;
     void                      setJingleMessageInitiation(const Jingle::MessageInitiation &initiation);
 
-    // XEP-0359
-    StanzaId stanzaId() const;
-    void     setStanzaId(const StanzaId &id);
-    QString  originId() const;
+    // XEP-0359. Consumers must verify the assigning entity via disco before
+    // trusting stanza IDs for deduplication or MAM catch-up.
+    StanzaId        stanzaId(const Jid &by) const;
+    QList<StanzaId> stanzaIds() const;
+    void            setStanzaIds(const QList<StanzaId> &ids);
+    void            addStanzaId(const StanzaId &id);
+    Reply           reply() const;
+    void             setReply(const Reply &reply);
+    QString         originId() const;
     void     setOriginId(const QString &id);
 
     // XEP-0380

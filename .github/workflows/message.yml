@@ -1,0 +1,72 @@
+name: Message protocol regressions
+
+on:
+  pull_request:
+    paths:
+      - 'src/xmpp/xmpp-im/types.cpp'
+      - 'src/xmpp/xmpp-im/xmpp_message.h'
+      - 'src/xmpp/xmpp-im/xmpp_forwarding.cpp'
+      - 'src/xmpp/xmpp-im/xmpp_tasks.cpp'
+      - 'tests/message/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/message.yml'
+  push:
+    paths:
+      - 'src/xmpp/xmpp-im/types.cpp'
+      - 'src/xmpp/xmpp-im/xmpp_message.h'
+      - 'src/xmpp/xmpp-im/xmpp_forwarding.cpp'
+      - 'src/xmpp/xmpp-im/xmpp_tasks.cpp'
+      - 'tests/message/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/message.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: iris-message-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  message:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: qt5-qca2
+            deps: qtbase5-dev libqca-qt5-2-dev libb2-dev
+            cmake: -DIRIS_SYSTEM_QCA=2
+          - name: qt6-qca3
+            deps: qt6-base-dev
+            cmake: -DUSE_QT6=ON -DIRIS_SYSTEM_QCA=3
+    name: Message (${{ matrix.name }})
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build zlib1g-dev ${{ matrix.deps }}
+      - uses: ./.github/actions/load-dependencies
+        if: matrix.name == 'qt6-qca3'
+        with:
+          qca-asset: qca3-deb-ubuntu-24.04.zip
+          install-mode: apt
+          qca-directory: qca-release
+      - name: Configure
+        run: |
+          cmake -S . -B build-message -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DIRIS_BUILD_TESTS=ON \
+            -DIRIS_ENABLE_OMEMO=OFF \
+            -DIRIS_BUNDLED_QCA=OFF \
+            -DIRIS_BUNDLED_USRSCTP=OFF \
+            -DIRIS_ENABLE_JINGLE_SCTP=OFF \
+            ${{ matrix.cmake }}
+      - name: Build message regressions
+        run: cmake --build build-message --parallel 4 --target message_stanzaids_test message_delay_test message_replies_test
+      - name: Test message replay
+        run: ctest --test-dir build-message --output-on-failure -R '^message_(stanzaids|delay|replies)$'
