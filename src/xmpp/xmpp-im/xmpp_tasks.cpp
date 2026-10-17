@@ -960,6 +960,13 @@ bool JT_PushMessage::take(const QDomElement &e)
     if (e.tagName() != "message")
         return false;
 
+    // MAM results belong to the active MAMTask, not the ordinary message
+    // pipeline. Otherwise this catch-all push task consumes them before
+    // MAMTask can validate their queryid and archive sender.
+    const QDomElement mamResult = e.firstChildElement(QStringLiteral("result"));
+    if (!mamResult.isNull() && mamResult.namespaceURI() == QLatin1String("urn:xmpp:mam:2"))
+        return false;
+
     QDomElement e1 = e;
 
     if (processXmlSubscribers(e1, client(), false))
