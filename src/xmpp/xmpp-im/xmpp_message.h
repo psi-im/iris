@@ -31,6 +31,7 @@
 
 #include <QDomElement>
 #include <QExplicitlySharedDataPointer>
+#include <QList>
 #include <QSet>
 
 class QDateTime;
@@ -229,10 +230,14 @@ public:
     Jingle::MessageInitiation jingleMessageInitiation() const;
     void                      setJingleMessageInitiation(const Jingle::MessageInitiation &initiation);
 
-    // XEP-0359
-    StanzaId stanzaId() const;
-    void     setStanzaId(const StanzaId &id);
-    QString  originId() const;
+    // XEP-0359. Consumers must verify the assigning entity via disco before
+    // trusting stanza IDs for deduplication or MAM catch-up.
+    StanzaId        stanzaId() const; // Legacy: last parsed ID.
+    StanzaId        stanzaId(const Jid &by) const;
+    QList<StanzaId> stanzaIds() const;
+    void            setStanzaId(const StanzaId &id); // Replace all IDs.
+    void            addStanzaId(const StanzaId &id);
+    QString         originId() const;
     void     setOriginId(const QString &id);
 
     // XEP-0380
