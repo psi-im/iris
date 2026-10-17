@@ -1138,7 +1138,7 @@ QString Message::occupantId() const { return d ? d->occupantId : QString(); }
 void Message::setOccupantId(const QString &id)
 {
     // XEP-0421: at most 128 Unicode characters. Empty clears the identifier.
-    MessageD()->occupantId = id.size() <= 128 ? id : QString();
+    MessageD()->occupantId = id.toUcs4().size() <= 128 ? id : QString();
 }
 
 bool Message::hasMUCUser() const { return d && d->hasMUCUser; }
@@ -2607,7 +2607,7 @@ void Status::setCaps(const CapsSpec &caps) { d->caps = caps; }
 
 void Status::setMUC() { d->isMUC = true; }
 
-void Status::setOccupantId(const QString &id) { d->occupantId = id.size() <= 128 ? id : QString(); }
+void Status::setOccupantId(const QString &id) { d->occupantId = id.toUcs4().size() <= 128 ? id : QString(); }
 
 void Status::setMUCItem(const MUCItem &i)
 {
