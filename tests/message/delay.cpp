@@ -3,6 +3,8 @@
 #include "fixture.h"
 #include <iris/xmpp_forwarding.h>
 #include <iris/xmpp_message.h>
+#include <iris/xmpp_status.h>
+#include <iris/xmpp_tasks.h>
 
 #include <QCoreApplication>
 #include <QDomDocument>
@@ -74,5 +76,34 @@ int main(int argc, char **argv)
     check(legacy.fromStanza(stream.createStanza(legacyXml)), "Cannot parse legacy delay");
     check(utc(legacy.timeStamp()) == QStringLiteral("2026-10-16T12:00:00.000Z"),
           "Legacy XEP-0091 UTC interpretation regressed");
+
+    // XEP-0203 presence timestamps retain fractional seconds, offset,
+    // and precedence over legacy XEP-0091 timestamps.
+    JT_PushPresence presenceTask(client.rootTask());
+    int presenceCount = 0;
+    QDateTime presenceStamp;
+    QObject::connect(&presenceTask, &JT_PushPresence::presence, &presenceTask,
+                     [&](const Jid &, const Status &status) {
+                         ++presenceCount;
+                         presenceStamp = status.timeStamp();
+                     });
+    QDomDocument presenceDocument;
+    const auto presenceXml = parse(QStringLiteral(
+        "<presence from='room@conference.example.test/bob'>"
+        "<x xmlns='jabber:x:delay' stamp='20261016T09:00:00'/>"
+        "<delay xmlns='urn:xmpp:delay' stamp='2026-10-16T12:00:00.250+02:00'/>"
+        "</presence>"), presenceDocument);
+    check(presenceTask.take(presenceXml), "Cannot parse delayed presence");
+    check(presenceCount == 1 && utc(presenceStamp) == QStringLiteral("2026-10-16T10:00:00.250Z"),
+          "Presence lost XEP-0203 offset, fractions or modern-delay precedence");
+
+    QDomDocument legacyPresenceDocument;
+    const auto legacyPresence = parse(QStringLiteral(
+        "<presence from='room@conference.example.test/bob'>"
+        "<x xmlns='jabber:x:delay' stamp='20261016T12:00:00'/>"
+        "</presence>"), legacyPresenceDocument);
+    check(presenceTask.take(legacyPresence), "Cannot parse legacy delayed presence");
+    check(presenceCount == 2 && utc(presenceStamp) == QStringLiteral("2026-10-16T12:00:00.000Z"),
+          "Legacy presence delay was not interpreted as UTC");
     return 0;
 }
