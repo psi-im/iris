@@ -128,6 +128,56 @@ int main(int argc, char **argv)
     require(finished == 1 && baseline.success() && baseline.archive().size() == 3, "Pagination failed");
     require(baseline.isComplete() && !baseline.isStable(), "Fin flags not retained");
 
+    // Query configuration is replaceable before go(), and the choice of
+    // time vs ID range is exclusive. The previous filter must not leak.
+    MAMTask reconfiguredTime(c.rootTask());
+    reconfiguredTime.get(Jid(), QStringLiteral("obsolete"), QStringLiteral("old-end"),
+                         false, 2, 0, false, false);
+    const auto begin = QDateTime::fromString(QStringLiteral("2026-10-15T12:00:00Z"), Qt::ISODate);
+    const auto end = QDateTime::fromString(QStringLiteral("2026-10-16T12:00:00Z"), Qt::ISODate);
+    reconfiguredTime.get(Jid(), begin, end, false, 3, 0, false, false);
+    reconfiguredTime.go();
+    const auto timeIq = stream.sent.last();
+    require(hasField(timeIq, QStringLiteral("start")) && hasField(timeIq, QStringLiteral("end"))
+                && !hasField(timeIq, QStringLiteral("after-id"))
+                && !hasField(timeIq, QStringLiteral("before-id"))
+                && rsm(timeIq).firstChildElement(QStringLiteral("max")).text() == QStringLiteral("3"),
+            "Reconfigured time request leaked stale ID filters or page size");
+    fin(c, timeIq, QStringLiteral("alice@example.test"), QString(), QString(), true);
+    require(reconfiguredTime.success(), "Reconfigured time query failed");
+
+    MAMTask reconfiguredId(c.rootTask());
+    Features extendedForReconfiguration;
+    extendedForReconfiguration.addFeature(QStringLiteral("urn:xmpp:mam:2#extended"));
+    reconfiguredId.setArchiveFeatures(extendedForReconfiguration);
+    reconfiguredId.get(Jid(), begin, end, false, 3, 0, false, false);
+    reconfiguredId.get(Jid(), QStringLiteral("new-start"), QStringLiteral("new-end"),
+                       false, 4, 0, false, false);
+    reconfiguredId.go();
+    const auto idIq = stream.sent.last();
+    require(hasField(idIq, QStringLiteral("after-id")) && hasField(idIq, QStringLiteral("before-id"))
+                && !hasField(idIq, QStringLiteral("start")) && !hasField(idIq, QStringLiteral("end"))
+                && rsm(idIq).firstChildElement(QStringLiteral("max")).text() == QStringLiteral("4"),
+            "Reconfigured ID request leaked stale time filters or page size");
+    fin(c, idIq, QStringLiteral("alice@example.test"), QString(), QString(), true);
+    require(reconfiguredId.success(), "Reconfigured ID query failed");
+
+    // Calling get() during a running request cannot silently wipe buffered
+    // results or replace its active query parameters.
+    MAMTask immutableWhileRunning(c.rootTask());
+    immutableWhileRunning.get(Jid(), begin, end, false, 2, 0, false, false);
+    immutableWhileRunning.go();
+    const auto immutableIq = stream.sent.last();
+    result(c, immutableIq, QStringLiteral("alice@example.test"), QStringLiteral("still-here"));
+    immutableWhileRunning.get(Jid(), QStringLiteral("other-start"), QStringLiteral("other-end"),
+                              false, 2, 0, false, true);
+    require(immutableWhileRunning.archive().size() == 1,
+            "Configuring a running task erased buffered results");
+    fin(c, immutableIq, QStringLiteral("alice@example.test"), QStringLiteral("still-here"),
+        QStringLiteral("still-here"), true);
+    require(immutableWhileRunning.success() && immutableWhileRunning.archive().size() == 1,
+            "Configuration changed the in-flight task or lost its archive");
+
     // XEP-0313 tombstones retain their archive ID even without a message.
     // Missing delay and message are valid; malformed present elements are not.
     MAMTask optionalForwarding(c.rootTask());
