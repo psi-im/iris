@@ -300,12 +300,15 @@ bool MAMTask::take(const QDomElement &x)
         || result.attribute(QLatin1String("queryid")) != d->currentPageQueryID)
         return false;
 
+    if (x.tagName() != QLatin1String("message"))
+        return false;
+
     // A matching queryid is not proof that the sender owns this archive.
     const Jid sender(x.attribute(QLatin1String("from")));
     if (!d->archiveJid.isEmpty()) {
-        if (sender.isEmpty() || !sender.compare(d->archiveJid, false))
+        if (sender.isEmpty() || !sender.compare(d->archiveJid, true))
             return true; // discard forged result
-    } else if (!sender.isEmpty() && !sender.compare(Jid(client()->jid().bare()), false)) {
+    } else if (!sender.isEmpty() && !sender.compare(Jid(client()->jid().bare()), true)) {
         return true;
     }
     const QDomElement forwarded = result.firstChildElement(QLatin1String("forwarded"));

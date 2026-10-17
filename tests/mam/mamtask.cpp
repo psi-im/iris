@@ -94,6 +94,7 @@ int main(int argc, char **argv)
             "Wrong page size");
     require(!rsm(first).firstChildElement(QStringLiteral("before")).isNull(), "Missing last-page cursor");
     result(c, first, QStringLiteral("other@example.test"), QStringLiteral("fake"));
+    result(c, first, QStringLiteral("alice@example.test/other-device"), QStringLiteral("fake2"));
     require(baseline.archive().isEmpty(), "Forged result was accepted");
     result(c, first, QStringLiteral("alice@example.test"), QStringLiteral("m2"));
     result(c, first, QStringLiteral("alice@example.test"), QStringLiteral("m3"));
@@ -119,6 +120,7 @@ int main(int argc, char **argv)
     require(roomIq.attribute(QStringLiteral("to")) == room.full(), "MUC query not addressed to room");
     require(!hasField(roomIq, QStringLiteral("with")), "MUC room used as with filter");
     result(c, roomIq, QStringLiteral("other@example.test"), QStringLiteral("fake"));
+    result(c, roomIq, QStringLiteral("room@conference.example.test/occupant"), QStringLiteral("fake2"));
     require(muc.archive().isEmpty(), "Forged room result accepted");
     result(c, roomIq, room.full(), QStringLiteral("room1"));
     fin(c, roomIq, room.full(), QStringLiteral("room1"), QStringLiteral("room1"), true);
