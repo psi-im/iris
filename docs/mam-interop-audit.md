@@ -224,3 +224,43 @@ Regression coverage checks switching ID/time filters prior to `go()`,
 no archive reset from a rejected in-flight `get()`, and rejection of a
 mid-query change of the archive JID. Do not attempt to reuse a finished
 `MAMTask`; request a new task from `MAMManager`.
+
+
+## Page-task hierarchy refactor (2026-10-17)
+
+The original MAMTask took responsibility for both multi-page orchestration and
+parsing IQ responses. That contradicted Iris's hierarchical Task dispatch:
+`Task::take()` delegates each stanza to its child tasks, which own correlation.
+
+**Current design in PR #118:**
+
+- `MAMTask : Task` is a **one-shot coordinator**. It freezes the configured
+  Request when started, owns aggregate Progress (pagination direction,
+  visited cursors, message count, cumulative `complete` / `stable`, result
+  buffering), and creates one child for each page. Its `take()` only invokes
+  the inherited `Task::take()` for its children.
+- `MAMPageTask : Task` is entirely private to `xmpp_mamtask.cpp`. Each
+  instance constructs and sends exactly **one MAM IQ**, correlates the page
+  query ID with streamed MAM result messages, verifies sender and exact IQ
+  response, parses `<fin/>`, and signals `finished()` on completion.
+- The coordinator consumes validated page entries via a callback, subject to
+  the total result limit, and connects to the child's existing `finished()`
+  signal. It starts the next page only after receiving the previous page's
+  `<fin/>`, using RSM edge cursors extracted by that child.
+- A completed child is deactivated **synchronously**, then scheduled for
+  deletion with `safeDelete()`. A delayed result or IQ from an older page
+  cannot be consumed by that child while it awaits `deleteLater()`.
+- Parent completion (including timeout/disconnect) also deactivates the
+  outstanding page, avoiding late callbacks on a completed coordinator.
+- Parsing of forwarded messages continues to use Iris's existing message
+  and forwarding implementation; no second MAM message parser or public
+  page type was introduced.
+
+Tests assert the active MAM child is a Task, each subsequent page gets a
+distinct child, retired pages decline stale results / IQs, and MAM never
+swallows unrelated IQs from sibling tasks. Tests cover Qt5 and Qt6.
+
+The earlier Request/Progress separation above still applies, but **IQ
+generation and IQ validation now belong exclusively to MAMPageTask**, not
+to MAMTask. This section supersedes earlier descriptions of a coordinator
+sending its own page IQ.
