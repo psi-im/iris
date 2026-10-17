@@ -1134,11 +1134,6 @@ void Message::setMUCPassword(const QString &p) { MessageD()->mucPassword = p; }
 
 bool Message::hasMUCUser() const { return d && d->hasMUCUser; }
 
-Message::StanzaId Message::stanzaId() const
-{
-    return d && !d->stanzaIds.isEmpty() ? d->stanzaIds.constLast() : StanzaId();
-}
-
 Message::StanzaId Message::stanzaId(const Jid &by) const
 {
     if (d) {
@@ -1152,10 +1147,11 @@ Message::StanzaId Message::stanzaId(const Jid &by) const
 
 QList<Message::StanzaId> Message::stanzaIds() const { return d ? d->stanzaIds : QList<StanzaId>(); }
 
-void Message::setStanzaId(const Message::StanzaId &id)
+void Message::setStanzaIds(const QList<StanzaId> &ids)
 {
     MessageD()->stanzaIds.clear();
-    addStanzaId(id);
+    for (const auto &id : ids)
+        addStanzaId(id);
 }
 
 void Message::addStanzaId(const Message::StanzaId &id)
