@@ -87,6 +87,8 @@ private:
     XData makeMAMFilter() const;
     bool isExpectedSender(const QDomElement &stanza) const;
     void getPage();
+    bool takeIq(const QDomElement &stanza);
+    bool takeResult(const QDomElement &stanza);
 
     class Private;
     std::unique_ptr<Private> d;
