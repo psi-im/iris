@@ -288,56 +288,73 @@ bool MAMTask::take(const QDomElement &x)
 {
     if (!d->progress.active)
         return false;
-    // The final IQ is the page boundary. Sending the next query while the
-    // server is still streaming <result/> messages can race with that IQ.
-    if (iqVerify(x, d->archiveJid, d->progress.iqId)) {
-        if (!isExpectedSender(x))
-            return true; // An IQ from another resource must not finish our query.
-        if (x.attribute(QLatin1String("type")) == QLatin1String("error")) {
-            if (x.firstChildElement(QLatin1String("error")).isNull())
-                setError(1, QStringLiteral("MAM IQ error without error payload"));
-            else
-                setError(x);
-            return true;
-        }
-        if (x.attribute(QLatin1String("type")) != QLatin1String("result"))
-            return false;
 
-        QDomElement fin = directChildNamed(x, QLatin1String("fin"));
-        if (fin.isNull() || fin.namespaceURI() != XMPP_MAM_NAMESPACE) {
-            setError(1, QStringLiteral("Missing MAM <fin/> in query response"));
-            return true;
-        }
+    // The common Task dispatcher offers every stanza to every child task.
+    // Each handler must decline stanzas that are not its own.
+    if (x.tagName() == QLatin1String("iq"))
+        return takeIq(x);
+    if (x.tagName() == QLatin1String("message"))
+        return takeResult(x);
+    return false;
+}
 
-        d->progress.complete = fin.attribute(QLatin1String("complete")) == QLatin1String("true");
-        d->progress.stable = d->progress.stable && fin.attribute(QLatin1String("stable")) != QLatin1String("false");
-        if (d->progress.complete || (d->request.maxMessages > 0 && d->progress.fetched >= d->request.maxMessages)) {
-            setSuccess();
-            return true;
-        }
+bool MAMTask::takeIq(const QDomElement &x)
+{
+    // A MAM page finishes only on the reply to the IQ we sent. In
+    // particular, iqVerify() alone is not enough: for a query of the own
+    // archive it can accept replies from another of our account resources.
+    if (d->progress.iqId.isEmpty() || x.attribute(QLatin1String("id")) != d->progress.iqId)
+        return false;
+    const auto type = x.attribute(QLatin1String("type"));
+    if (type != QLatin1String("result") && type != QLatin1String("error"))
+        return false;
+    if (!isExpectedSender(x) || !iqVerify(x, d->archiveJid, d->progress.iqId))
+        return false;
 
-        // XEP-0313 requires <fin/> to contain the RSM first/last IDs,
-        // even when the server returned fewer items than we requested.
-        const auto set = directChildNamed(fin, QLatin1String("set"));
-        if (set.isNull() || set.namespaceURI() != QLatin1String("http://jabber.org/protocol/rsm")) {
-            setError(1, QStringLiteral("Missing RSM cursor in MAM <fin/>"));
-            return true;
-        }
-        const auto edge = directChildNamed(set, d->request.backwards ? QLatin1String("first") : QLatin1String("last"));
-        const QString cursor = edge.text();
-        if (cursor.isEmpty() || d->progress.visitedCursors.contains(cursor)) {
-            setError(1, QStringLiteral("MAM pagination returned an empty or repeated cursor"));
-            return true;
-        }
-        d->progress.cursor = cursor;
-        d->progress.visitedCursors.insert(cursor);
-        getPage();
+    // From this point the IQ is correlated to the pending MAM request.
+    // A result without <fin/> is a protocol error, not an unrelated IQ.
+    if (x.attribute(QLatin1String("type")) == QLatin1String("error")) {
+        if (x.firstChildElement(QLatin1String("error")).isNull())
+            setError(1, QStringLiteral("MAM IQ error without error payload"));
+        else
+            setError(x);
+        return true;
+    }
+    QDomElement fin = directChildNamed(x, QLatin1String("fin"));
+    if (fin.isNull() || fin.namespaceURI() != XMPP_MAM_NAMESPACE) {
+        setError(1, QStringLiteral("Missing MAM <fin/> in query response"));
         return true;
     }
 
-    // Only results belonging to the current query are part of this task.
-    if (x.tagName() != QLatin1String("message"))
-        return false;
+    d->progress.complete = fin.attribute(QLatin1String("complete")) == QLatin1String("true");
+    d->progress.stable = d->progress.stable && fin.attribute(QLatin1String("stable")) != QLatin1String("false");
+    if (d->progress.complete || (d->request.maxMessages > 0 && d->progress.fetched >= d->request.maxMessages)) {
+        setSuccess();
+        return true;
+    }
+
+    // XEP-0313 requires <fin/> to contain the RSM first/last IDs,
+    // even when the server returned fewer items than we requested.
+    const auto set = directChildNamed(fin, QLatin1String("set"));
+    if (set.isNull() || set.namespaceURI() != QLatin1String("http://jabber.org/protocol/rsm")) {
+        setError(1, QStringLiteral("Missing RSM cursor in MAM <fin/>"));
+        return true;
+    }
+    const auto edge = directChildNamed(set, d->request.backwards ? QLatin1String("first") : QLatin1String("last"));
+    const QString cursor = edge.text();
+    if (cursor.isEmpty() || d->progress.visitedCursors.contains(cursor)) {
+        setError(1, QStringLiteral("MAM pagination returned an empty or repeated cursor"));
+        return true;
+    }
+    d->progress.cursor = cursor;
+    d->progress.visitedCursors.insert(cursor);
+    getPage();
+    return true;
+}
+
+bool MAMTask::takeResult(const QDomElement &x)
+{
+    // Only messages belonging to the current query are archived.
     const QDomElement result = directChildNamed(x, QLatin1String("result"));
     if (result.isNull() || result.namespaceURI() != XMPP_MAM_NAMESPACE
         || result.attribute(QLatin1String("queryid")) != d->progress.queryId)
