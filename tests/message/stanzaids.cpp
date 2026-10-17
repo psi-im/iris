@@ -62,5 +62,26 @@ int main(int argc, char **argv)
     check(roundTrip.stanzaIds().size() == 1
               && roundTrip.stanzaId().id == QStringLiteral("replacement"),
           "Legacy setStanzaId() failed to replace the list");
+
+    // Ordinary stanza IDs and XEP-0359 origin IDs are independent.
+    QDomDocument noOriginDoc;
+    check(noOriginDoc.setContent(QStringLiteral(
+              "<message xmlns='jabber:client' from='bob@example.test' id='legacy-id'>"
+              "<body>Legacy message</body></message>"), true), "Invalid no-origin fixture");
+    Message noOrigin;
+    check(noOrigin.fromStanza(stream.createStanza(noOriginDoc.documentElement())),
+          "Cannot parse a message without origin-id");
+    check(noOrigin.id() == QStringLiteral("legacy-id") && noOrigin.originId().isEmpty(),
+          "Incoming stanza id was incorrectly promoted to origin-id");
+    const auto noOriginWire = noOrigin.toStanza(&stream);
+    check(!noOriginWire.isNull(), "Cannot serialize message without origin-id");
+    check(noOriginWire.element().elementsByTagNameNS(QStringLiteral("urn:xmpp:sid:0"),
+                                                     QStringLiteral("origin-id")).size() == 0,
+          "Roundtrip fabricated an XEP-0359 origin-id");
+
+    Message locallyComposed;
+    locallyComposed.setId(QStringLiteral("outgoing-id"));
+    check(locallyComposed.originId() == QStringLiteral("outgoing-id"),
+          "Locally composed messages lost automatic origin-id generation");
     return 0;
 }
