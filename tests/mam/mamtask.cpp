@@ -6,6 +6,7 @@
 #include <iris/xmpp_features.h>
 #include <iris/xmpp_mammanager.h>
 #include <iris/xmpp_mamtask.h>
+#include <iris/xmpp_tasks.h>
 #include <QCoreApplication>
 #include <QDomDocument>
 #include <QtCrypto>
@@ -41,6 +42,19 @@ public:
     }
 
     int received = 0;
+};
+// A non-consuming subscriber runs before the MAM page subscriber and
+// must not prevent the page from receiving the same validated Message.
+class MAMObserver final : public JT_PushMessage::Subscriber {
+public:
+    JT_PushMessage::SubscriberResult messageEventResult(Message &message, int, bool nested) override
+    {
+        if (nested || !message.mamResult().isValid())
+            return JT_PushMessage::SubscriberResult::NotHandled;
+        ++observed;
+        return JT_PushMessage::SubscriberResult::HandledContinue;
+    }
+    int observed = 0;
 };
 static QDomElement xml(const QString &text)
 {
@@ -94,6 +108,14 @@ int main(int argc, char **argv)
     Client c;
     c.start(QStringLiteral("example.test"), QStringLiteral("alice"), QString(), QStringLiteral("desktop"));
     c.connectToServer(&stream, Jid(QStringLiteral("alice@example.test/desktop")));
+
+    MAMObserver observer;
+    c.pushMessage()->subscribeMessage(&observer, 0);
+    int unhandledMamEnvelopes = 0;
+    QObject::connect(c.pushMessage(), &JT_PushMessage::message, &c, [&](const Message &message) {
+        if (message.mamResult().isValid())
+            ++unhandledMamEnvelopes;
+    });
 
     MAMTask baseline(c.rootTask());
     int finished = 0;
@@ -180,8 +202,14 @@ int main(int argc, char **argv)
         "</forwarded></result></message>").arg(qid(first));
     require(c.rootTask()->take(xml(invalidMessage)), "Invalid message result not consumed");
     require(baseline.archive().isEmpty(), "Malformed forwarded result was accepted");
+    const int deliveredBeforeValid = unhandledMamEnvelopes;
+    const int observedBeforeValid = observer.observed;
     result(c, first, QStringLiteral("alice@example.test"), QStringLiteral("m2"));
     result(c, first, QStringLiteral("alice@example.test"), QStringLiteral("m3"));
+    require(observer.observed == observedBeforeValid + 2,
+            "MAM results bypassed the ordinary message subscriber chain");
+    require(unhandledMamEnvelopes == deliveredBeforeValid,
+            "Consumed active MAM page was also delivered as an ordinary message");
     require(finished == 0 && baseline.archive().size() == 2, "Page completed before fin");
     const int sentBeforeSpoofedFin = stream.sent.size();
     const auto spoofedFin = QStringLiteral(
@@ -453,10 +481,13 @@ int main(int argc, char **argv)
     require(bounded.success() && !bounded.isComplete() && delivered == 3,
             "Bounded streaming query did not terminate correctly");
     require(bounded.archive().isEmpty(), "Streaming query retained buffered results");
-    require(!c.rootTask()->take(xml(QStringLiteral(
+    const int deliveredBeforeUnknown = unhandledMamEnvelopes;
+    require(c.rootTask()->take(xml(QStringLiteral(
                 "<message from='alice@example.test'><result xmlns='urn:xmpp:mam:2' "
                 "queryid='no-open-query' id='late'/></message>"))),
-            "Unsolicited MAM result was handled as an ordinary message");
+            "Unknown MAM result did not traverse the normal message pipeline");
+    require(unhandledMamEnvelopes == deliveredBeforeUnknown + 1,
+            "A non-matching MAM page suppressed ordinary message dispatch");
 
     MAMTask failed(c.rootTask());
     failed.get(Jid(), QDateTime(), QDateTime(), false);
@@ -493,5 +524,6 @@ int main(int argc, char **argv)
     fin(c, loopPage2, QStringLiteral("alice@example.test"), QStringLiteral("same"),
         QStringLiteral("same"), false);
     require(!loop.success() && !loop.statusString().isEmpty(), "Repeated cursor caused an infinite loop");
+    c.pushMessage()->unsubscribeMessage(&observer);
     return 0;
 }
