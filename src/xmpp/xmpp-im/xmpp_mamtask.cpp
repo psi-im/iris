@@ -324,9 +324,13 @@ bool MAMTask::take(const QDomElement &x)
     // Forwarding/Message implementation, not a second parser in MAMTask.
     const auto delay = forwarded.firstChildElement(QLatin1String("delay"));
     const auto message = forwarded.firstChildElement(QLatin1String("message"));
-    if (delay.isNull() || delay.namespaceURI() != QLatin1String("urn:xmpp:delay")
-        || !QDateTime::fromString(delay.attribute(QLatin1String("stamp")), Qt::ISODate).isValid()
-        || message.isNull() || message.namespaceURI() != QLatin1String("jabber:client"))
+    // XEP-0313 permits tombstones without an inner message. Both the
+    // forwarded message and its delay are SHOULD, not MUST. Check either
+    // element when present while retaining the archive UID in all cases.
+    if ((!delay.isNull()
+         && (delay.namespaceURI() != QLatin1String("urn:xmpp:delay")
+             || !QDateTime::fromString(delay.attribute(QLatin1String("stamp")), Qt::ISODate).isValid()))
+        || (!message.isNull() && message.namespaceURI() != QLatin1String("jabber:client")))
         return true;
 
     if (d->mamMaxMessages > 0 && d->messagesFetched >= d->mamMaxMessages) {
