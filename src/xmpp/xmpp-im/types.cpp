@@ -764,6 +764,7 @@ public:
     Message::MamResult                       mamResult;               // XEP-0313
     Message::Reactions                       reactions;               // XEP-0444
     QString                                  retraction;              // XEP-0424
+    Message::ModeratedRetraction             moderatedRetraction;     // XEP-0425
 };
 
 #define MessageD() (d ? d : (d = new Private))
@@ -1244,6 +1245,11 @@ XMPP::Message::Reactions Message::reactions() const { return d ? d->reactions : 
 void Message::setRetraction(const QString &retractedMessageId) { MessageD()->retraction = retractedMessageId; }
 
 QString Message::retraction() const { return d ? d->retraction : QString {}; }
+
+Message::ModeratedRetraction Message::moderatedRetraction() const
+{
+    return d ? d->moderatedRetraction : ModeratedRetraction {};
+}
 
 Message::MamResult Message::mamResult() const { return d ? d->mamResult : MamResult {}; }
 
@@ -2168,11 +2174,61 @@ bool Message::fromStanza(const Stanza &s, bool useTimeZoneOffset, int timeZoneOf
         }
     }
 
-    // XEP-0424 message retraction
+    // XEP-0424 message retraction remains independent of XEP-0425 metadata.
     d->retraction = childElementsByTagNameNS(root, "urn:xmpp:message-retract:1", QStringLiteral("retract"))
                         .item(0)
                         .toElement()
                         .attribute(QLatin1String("id"));
+
+    // XEP-0425: an action must be from the bare MUC service; a MAM
+    // tombstone can retain the original author's MUC occupant resource.
+    // The consumer additionally verifies the room's disco feature and the
+    // provenance of the MAM result. A tombstone is NOT a retract action.
+    const auto directChild = [](const QDomElement &parent, const QString &name, const QString &ns) {
+        for (auto child = parent.firstChildElement(); !child.isNull(); child = child.nextSiblingElement()) {
+            const auto local = child.localName().isEmpty()
+                ? child.tagName().section(QLatin1Char(':'), -1) : child.localName();
+            if (local == name && child.namespaceURI() == ns)
+                return child;
+        }
+        return QDomElement {};
+    };
+    const auto retractNs = QStringLiteral("urn:xmpp:message-retract:1");
+    const auto moderateNs = QStringLiteral("urn:xmpp:message-moderate:1");
+    const auto tombstone = directChild(root, QStringLiteral("retracted"), retractNs);
+    const auto action = directChild(root, QStringLiteral("retract"), retractNs);
+    // A forged 'moderated' retraction from a MUC occupant must not fall
+    // through into the ordinary XEP-0424 retraction consumer.
+    if (d->type == Type::Groupchat && !action.isNull()
+        && !directChild(action, QStringLiteral("moderated"), moderateNs).isNull()
+        && (!d->from.isValid() || !d->from.resource().isEmpty()))
+        d->retraction.clear();
+    const bool isTombstone = !tombstone.isNull()
+        && QDateTime::fromString(tombstone.attribute(QStringLiteral("stamp")), Qt::ISODate).isValid();
+    const bool isAction = !action.isNull() && !d->retraction.isEmpty()
+        && d->from.isValid() && d->from.resource().isEmpty();
+    if (d->type == Type::Groupchat && (isTombstone || isAction)) {
+        const auto envelope = isTombstone ? tombstone : action;
+        const auto moderated = directChild(envelope, QStringLiteral("moderated"), moderateNs);
+        if (!moderated.isNull()) {
+            const auto byText = moderated.attribute(QStringLiteral("by"));
+            const Jid by(byText);
+            if (byText.isEmpty() || by.isValid()) {
+                d->moderatedRetraction.kind = isTombstone
+                    ? ModeratedRetraction::Kind::Tombstone : ModeratedRetraction::Kind::Action;
+                d->moderatedRetraction.by = by;
+                const auto occupant = directChild(moderated, QStringLiteral("occupant-id"),
+                                                  QStringLiteral("urn:xmpp:occupant-id:0"));
+                const auto occupantId = occupant.attribute(QStringLiteral("id"));
+                if (!occupantId.isEmpty() && occupantId.toUcs4().size() <= 128)
+                    d->moderatedRetraction.moderatorOccupantId = occupantId;
+                const auto reason = directChild(envelope, QStringLiteral("reason"), retractNs);
+                d->moderatedRetraction.reason = reason.text();
+                if (isTombstone)
+                    d->moderatedRetraction.stamp = tombstone.attribute(QStringLiteral("stamp"));
+            }
+        }
+    }
     return true;
 }
 
