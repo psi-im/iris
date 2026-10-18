@@ -80,14 +80,16 @@ void Forwarding::setMessage(const Message &msg) { msg_ = msg; }
 
 bool Forwarding::fromXml(const QDomElement &e, Client *client)
 {
-    if (e.tagName() != QString::fromLatin1("forwarded") || e.namespaceURI() != xmlns_forward)
+    if ((e.localName().isEmpty() ? e.tagName() : e.localName()) != QLatin1String("forwarded")
+        || e.namespaceURI() != xmlns_forward)
         return false;
 
     bool correct      = false;
     type_             = Forwarding::ForwardedNone;
     QDomElement child = e.firstChildElement();
     while (!child.isNull()) {
-        if (child.tagName() == QString::fromLatin1("message")) {
+        const QString childName = child.localName().isEmpty() ? child.tagName() : child.localName();
+        if (childName == QLatin1String("message")) {
             if (client->pushMessage()->processXmlSubscribers(child, client, true))
                 break;
             Stanza  s = client->stream().createStanza(addCorrectNS(child));
@@ -105,7 +107,7 @@ bool Forwarding::fromXml(const QDomElement &e, Client *client)
                 type_   = ForwardedMessage;
                 correct = true;
             }
-        } else if (child.tagName() == QString::fromLatin1("delay") && child.namespaceURI() == xmlns_delay) {
+        } else if (childName == QLatin1String("delay") && child.namespaceURI() == xmlns_delay) {
             ts_ = QDateTime::fromString(child.attribute(QString::fromLatin1("stamp")), Qt::ISODate);
         }
         child = child.nextSiblingElement();

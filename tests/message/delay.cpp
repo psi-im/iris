@@ -61,6 +61,22 @@ int main(int argc, char **argv)
     check(utc(forwarded.timeStamp()) == QStringLiteral("2026-10-16T10:00:00.250Z"),
           "Forwarded timestamp lost the timezone offset");
 
+    // XML namespace prefixes are arbitrary: a conforming MAM server may
+    // qualify both forwarded and delay without changing their expanded names.
+    QDomDocument prefixedDocument;
+    const auto prefixedXml = parse(QStringLiteral(
+        "<f:forwarded xmlns:f='urn:xmpp:forward:0'>"
+        "<d:delay xmlns:d='urn:xmpp:delay' stamp='2026-10-16T12:00:00.250+02:00'/>"
+        "<message xmlns='jabber:client' from='bob@example.test' type='chat'>"
+        "<body>Prefixed archive</body></message></f:forwarded>"), prefixedDocument);
+    Forwarding prefixed;
+    check(prefixed.fromXml(prefixedXml, &client),
+          "Cannot parse namespace-prefixed XEP-0297 forwarded envelope");
+    check(prefixed.message().body() == QStringLiteral("Prefixed archive"),
+          "Prefixed forwarding discarded the nested message");
+    check(utc(prefixed.timeStamp()) == QStringLiteral("2026-10-16T10:00:00.250Z"),
+          "Prefixed XEP-0203 delay was ignored");
+
     const auto forwardedOut = forwarded.toXml(&stream);
     check(!forwardedOut.isNull(), "Cannot serialize forwarded message");
     const auto forwardedDelay = forwardedOut.firstChildElement(QStringLiteral("delay"));
