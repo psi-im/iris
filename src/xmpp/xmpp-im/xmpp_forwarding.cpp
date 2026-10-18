@@ -90,7 +90,7 @@ bool Forwarding::fromXml(const QDomElement &e, Client *client)
         if (child.tagName() == QString::fromLatin1("message")) {
             if (client->pushMessage()->processXmlSubscribers(child, client, true))
                 break;
-            Stanza  s = client->stream().createStanza(addCorrectNS(child));
+            Stanza  s = Stanza::fromXml(addCorrectNS(child));
             Message msg;
             if (msg.fromStanza(s, client->manualTimeZoneOffset(), client->timeZoneOffset(), client->jingleManager())) {
                 const auto eme

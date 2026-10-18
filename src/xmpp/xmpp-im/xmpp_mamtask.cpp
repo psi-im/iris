@@ -46,24 +46,24 @@ struct IdRange {
 
 // Configuration belongs to the coordinator. It never changes after go().
 struct Request {
-    Jid with;
-    std::variant<TimeRange, IdRange> range = TimeRange {};
-    bool allowMUCArchives = true;
-    int pageSize = 10;
-    int maxMessages = 0;
-    bool flipPages = false;
-    bool backwards = true;
+    Jid                              with;
+    std::variant<TimeRange, IdRange> range            = TimeRange {};
+    bool                             allowMUCArchives = true;
+    int                              pageSize         = 10;
+    int                              maxMessages      = 0;
+    bool                             flipPages        = false;
+    bool                             backwards        = true;
 
-    static Request create(const Jid &with, bool allowMUCArchives, int pageSize,
-                          int maxMessages, bool flipPages, bool backwards)
+    static Request create(const Jid &with, bool allowMUCArchives, int pageSize, int maxMessages, bool flipPages,
+                          bool backwards)
     {
         Request request;
-        request.with = with;
+        request.with             = with;
         request.allowMUCArchives = allowMUCArchives;
-        request.pageSize = qMax(1, pageSize);
-        request.maxMessages = qMax(0, maxMessages);
-        request.flipPages = flipPages;
-        request.backwards = backwards;
+        request.pageSize         = qMax(1, pageSize);
+        request.maxMessages      = qMax(0, maxMessages);
+        request.flipPages        = flipPages;
+        request.backwards        = backwards;
         return request;
     }
 };
@@ -71,13 +71,13 @@ struct Request {
 // Complete, immutable snapshot for exactly one MAM IQ and its streamed results.
 // The coordinator supplies effective paging cursors but never owns IQ routing.
 struct PageRequest {
-    Request request;
-    Jid archiveJid;
+    Request  request;
+    Jid      archiveJid;
     Features archiveFeatures;
-    QString cursor;     // null means initial page; empty but non-null is invalid
-    QString fromId;     // effective #extended filter after baseline RSM fallback
-    QString toId;
-    int maxResults = 10;
+    QString  cursor; // null means initial page; empty but non-null is invalid
+    QString  fromId; // effective #extended filter after baseline RSM fallback
+    QString  toId;
+    int      maxResults = 10;
 };
 
 // One child Task per MAM page. It is the *only* task that recognizes its
@@ -94,10 +94,11 @@ public:
 
     ~MAMPageTask() override { deactivate(); }
 
-    bool isComplete() const { return complete_; }
-    bool isStable() const { return stable_; }
+    bool           isComplete() const { return complete_; }
+    bool           isStable() const { return stable_; }
+    QDomElement    errorResponse() const { return errorResponse_; }
     const QString &nextCursor() const { return nextCursor_; }
-    void deactivate()
+    void           deactivate()
     {
         active_ = false;
         if (push_) {
@@ -119,10 +120,9 @@ public:
         if (!mam.isValid() || mam.queryId != queryId_ || !isExpectedSender(message.from()))
             return Result::NotHandled;
         const auto forwarded = firstChildElementByLocalName(mam.xml, QLatin1String("forwarded"));
-        if (forwarded.isNull() || forwarded.namespaceURI() != QLatin1String("urn:xmpp:forward:0")
-            || mam.id.isEmpty())
+        if (forwarded.isNull() || forwarded.namespaceURI() != QLatin1String("urn:xmpp:forward:0") || mam.id.isEmpty())
             return Result::HandledStop;
-        const auto delay = firstChildElementByLocalName(forwarded, QLatin1String("delay"));
+        const auto delay        = firstChildElementByLocalName(forwarded, QLatin1String("delay"));
         const auto innerMessage = firstChildElementByLocalName(forwarded, QLatin1String("message"));
         // Both delay and inner message are optional for archive tombstones.
         if ((!delay.isNull()
@@ -144,12 +144,12 @@ public:
 protected:
     void onGo() override
     {
-        active_ = true;
+        active_  = true;
         queryId_ = genUniqueID();
-        push_ = client()->pushMessage();
+        push_    = client()->pushMessage();
         if (push_)
             push_->subscribeMessage(this, 0);
-        auto iq = createIQ(doc(), QLatin1String("set"), request_.archiveJid.full(), id());
+        auto iq    = createIQ(doc(), QLatin1String("set"), request_.archiveJid.full(), id());
         auto query = doc()->createElementNS(XMPP_MAM_NAMESPACE, QLatin1String("query"));
         query.setAttribute(QLatin1String("queryid"), queryId_);
 
@@ -170,8 +170,7 @@ protected:
 
         query.appendChild(makeFilter().toXml(doc()));
         query.appendChild(rsm.makeQueryElement(doc()));
-        if (request_.request.flipPages
-            && request_.archiveFeatures.test(QStringLiteral("urn:xmpp:mam:2#extended")))
+        if (request_.request.flipPages && request_.archiveFeatures.test(QStringLiteral("urn:xmpp:mam:2#extended")))
             query.appendChild(doc()->createElementNS(XMPP_MAM_NAMESPACE, QLatin1String("flip-page")));
         iq.appendChild(query);
         send(iq);
@@ -193,8 +192,7 @@ private:
             XData::Field includeGroupchat;
             includeGroupchat.setType(XData::Field::Field_Boolean);
             includeGroupchat.setVar(QLatin1String("include-groupchat"));
-            includeGroupchat.setValue(QStringList(
-                QLatin1String(request_.request.allowMUCArchives ? "true" : "false")));
+            includeGroupchat.setValue(QStringList(QLatin1String(request_.request.allowMUCArchives ? "true" : "false")));
             fields.append(includeGroupchat);
         }
         const auto addField = [&fields](const QString &name, const QString &value) {
@@ -236,14 +234,14 @@ private:
         // iqVerify() already checks the IQ element, response ID and
         // generic JID addressing. It does not check the IQ response type or
         // MAM's stricter sender identity (especially our other resources).
-        if (!iqVerify(iq, request_.archiveJid, id())
-            || !isExpectedSender(Jid(iq.attribute(QLatin1String("from")))))
+        if (!iqVerify(iq, request_.archiveJid, id()) || !isExpectedSender(Jid(iq.attribute(QLatin1String("from")))))
             return false;
         const auto type = iq.attribute(QLatin1String("type"));
         if (type != QLatin1String("result") && type != QLatin1String("error"))
             return false;
 
         if (type == QLatin1String("error")) {
+            errorResponse_ = iq;
             if (iq.firstChildElement(QLatin1String("error")).isNull())
                 setError(1, QStringLiteral("MAM IQ error without error payload"));
             else
@@ -257,15 +255,15 @@ private:
             return true;
         }
         complete_ = fin.attribute(QLatin1String("complete")) == QLatin1String("true");
-        stable_ = fin.attribute(QLatin1String("stable")) != QLatin1String("false");
+        stable_   = fin.attribute(QLatin1String("stable")) != QLatin1String("false");
 
         // Missing/malformed RSM is only an error when another page is
         // required. The coordinator owns that decision (including the
         // global maxMessages cap); this task exposes the cursor, if present.
         const auto rsm = firstChildElementByLocalName(fin, QLatin1String("set"));
         if (!rsm.isNull() && rsm.namespaceURI() == QLatin1String("http://jabber.org/protocol/rsm")) {
-            const auto edge = firstChildElementByLocalName(rsm,
-                request_.request.backwards ? QLatin1String("first") : QLatin1String("last"));
+            const auto edge = firstChildElementByLocalName(
+                rsm, request_.request.backwards ? QLatin1String("first") : QLatin1String("last"));
             if (!edge.isNull() && edge.namespaceURI() == QLatin1String("http://jabber.org/protocol/rsm"))
                 nextCursor_ = edge.text();
         }
@@ -273,14 +271,15 @@ private:
         return true;
     }
 
-     PageRequest request_;
+    PageRequest                              request_;
+    QDomElement                              errorResponse_;
     std::function<void(const QDomElement &)> onResult_;
-    QString queryId_;
-    QString nextCursor_;
-    QPointer<JT_PushMessage> push_;
-    bool active_ = false;
-    bool complete_ = false;
-    bool stable_ = true;
+    QString                                  queryId_;
+    QString                                  nextCursor_;
+    QPointer<JT_PushMessage>                 push_;
+    bool                                     active_   = false;
+    bool                                     complete_ = false;
+    bool                                     stable_   = true;
 };
 
 } // namespace
@@ -288,24 +287,24 @@ private:
 class MAMTask::Private {
 public:
     struct Progress {
-        int fetched = 0;
-        bool complete = false;
-        bool stable = true;
-        bool started = false;
-        bool active = false;
-        QString cursor;
-        QString fromId;
-        QString toId;
-        QSet<QString> visitedCursors;
+        int                fetched  = 0;
+        bool               complete = false;
+        bool               stable   = true;
+        bool               started  = false;
+        bool               active   = false;
+        QString            cursor;
+        QString            fromId;
+        QString            toId;
+        QSet<QString>      visitedCursors;
         QList<QDomElement> archive;
-        MAMPageTask *currentPage = nullptr; // QObject child, not separately owned
+        MAMPageTask       *currentPage = nullptr; // QObject child, not separately owned
     };
 
-    Request request;
+    Request  request;
     Progress progress;
-    Jid archiveJid;
+    Jid      archiveJid;
     Features archiveFeatures;
-    bool collectResults = true;
+    bool     collectResults = true;
 };
 
 MAMTask::MAMTask(Task *parent) : Task(parent), d(std::make_unique<Private>())
@@ -349,42 +348,38 @@ void MAMTask::setArchiveFeatures(const Features &features)
 bool MAMTask::isComplete() const { return d->progress.complete; }
 bool MAMTask::isStable() const { return d->progress.stable; }
 
-void MAMTask::get(const Jid &with, const QDateTime &from, const QDateTime &to,
-                  const bool allowMUCArchives, int mamPageSize, int mamMaxMessages,
-                  bool flipPages, bool backwards)
+void MAMTask::get(const Jid &with, const QDateTime &from, const QDateTime &to, const bool allowMUCArchives,
+                  int mamPageSize, int mamMaxMessages, bool flipPages, bool backwards)
 {
     if (d->progress.started)
         return;
-    auto request = Request::create(with, allowMUCArchives, mamPageSize,
-                                   mamMaxMessages, flipPages, backwards);
+    auto request  = Request::create(with, allowMUCArchives, mamPageSize, mamMaxMessages, flipPages, backwards);
     request.range = TimeRange { from, to };
-    d->request = std::move(request);
+    d->request    = std::move(request);
 }
 
-void MAMTask::get(const Jid &with, const QString &fromID, const QString &toID,
-                  const bool allowMUCArchives, int mamPageSize, int mamMaxMessages,
-                  bool flipPages, bool backwards)
+void MAMTask::get(const Jid &with, const QString &fromID, const QString &toID, const bool allowMUCArchives,
+                  int mamPageSize, int mamMaxMessages, bool flipPages, bool backwards)
 {
     if (d->progress.started)
         return;
-    auto request = Request::create(with, allowMUCArchives, mamPageSize,
-                                   mamMaxMessages, flipPages, backwards);
+    auto request  = Request::create(with, allowMUCArchives, mamPageSize, mamMaxMessages, flipPages, backwards);
     request.range = IdRange { fromID, toID };
-    d->request = std::move(request);
+    d->request    = std::move(request);
 }
 
 void MAMTask::onGo()
 {
     if (d->progress.started)
         return; // Base Task is one-shot; a finished task cannot be restarted.
-    d->progress = Private::Progress {};
-    auto &progress = d->progress;
+    d->progress      = Private::Progress {};
+    auto &progress   = d->progress;
     progress.started = true;
-    progress.active = true;
+    progress.active  = true;
 
     if (const auto *ids = std::get_if<IdRange>(&d->request.range)) {
         progress.fromId = ids->from;
-        progress.toId = ids->to;
+        progress.toId   = ids->to;
         if (!d->archiveFeatures.test(QStringLiteral("urn:xmpp:mam:2#extended"))) {
             // Translate compatible ID boundaries to baseline RSM without
             // modifying the original request configuration.
@@ -408,23 +403,22 @@ void MAMTask::onGo()
 
 void MAMTask::startPage()
 {
-    auto &progress = d->progress;
-    const auto &request = d->request;
+    auto       &progress = d->progress;
+    const auto &request  = d->request;
     if (!progress.active || progress.currentPage)
         return;
 
     PageRequest page;
-    page.request = request;
-    page.archiveJid = d->archiveJid;
+    page.request         = request;
+    page.archiveJid      = d->archiveJid;
     page.archiveFeatures = d->archiveFeatures;
-    page.cursor = progress.cursor;
-    page.fromId = progress.fromId;
-    page.toId = progress.toId;
-    page.maxResults = request.maxMessages > 0
-        ? qMin(request.pageSize, request.maxMessages - progress.fetched)
-        : request.pageSize;
+    page.cursor          = progress.cursor;
+    page.fromId          = progress.fromId;
+    page.toId            = progress.toId;
+    page.maxResults
+        = request.maxMessages > 0 ? qMin(request.pageSize, request.maxMessages - progress.fetched) : request.pageSize;
 
-    auto *child = new MAMPageTask(this, std::move(page), [this](const QDomElement &result) {
+    auto *child          = new MAMPageTask(this, std::move(page), [this](const QDomElement &result) {
         auto &current = d->progress;
         if (!current.active || (d->request.maxMessages > 0 && current.fetched >= d->request.maxMessages))
             return;
@@ -444,22 +438,26 @@ void MAMTask::startPage()
             return;
         }
 
-        const bool ok = child->success();
-        const int errorCode = child->statusCode();
-        const QString errorText = child->statusString();
-        const bool complete = child->isComplete();
-        const bool stable = child->isStable();
-        const QString cursor = child->nextCursor();
+        const bool    ok            = child->success();
+        const int     errorCode     = child->statusCode();
+        const QString errorText     = child->statusString();
+        const auto    errorResponse = child->errorResponse();
+        const bool    complete      = child->isComplete();
+        const bool    stable        = child->isStable();
+        const QString cursor        = child->nextCursor();
 
         current.currentPage = nullptr;
         child->safeDelete();
         if (!ok) {
-            setError(errorCode, errorText.isEmpty() ? QStringLiteral("MAM page request failed") : errorText);
+            if (!errorResponse.isNull() && !errorResponse.firstChildElement(QStringLiteral("error")).isNull())
+                setError(errorResponse);
+            else
+                setError(errorCode, errorText.isEmpty() ? QStringLiteral("MAM page request failed") : errorText);
             return;
         }
 
         current.complete = complete;
-        current.stable = current.stable && stable;
+        current.stable   = current.stable && stable;
         if (current.complete || (d->request.maxMessages > 0 && current.fetched >= d->request.maxMessages)) {
             setSuccess();
             return;
