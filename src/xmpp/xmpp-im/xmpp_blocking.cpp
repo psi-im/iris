@@ -83,8 +83,15 @@ bool BlockingTask::take(const QDomElement &stanza)
         return true;
     }
     if (operation_ == QLatin1String("blocklist")) {
-        const auto list = stanza.firstChildElement(QStringLiteral("blocklist"));
-        if (list.isNull() || list.namespaceURI() != QLatin1String(BlockingNs)) {
+        QDomElement list;
+        for (auto child = stanza.firstChildElement(); !child.isNull(); child = child.nextSiblingElement()) {
+            if (child.namespaceURI() == QLatin1String(BlockingNs)
+                && localName(child) == QLatin1String("blocklist")) {
+                list = child;
+                break;
+            }
+        }
+        if (list.isNull()) {
             setError();
             return true;
         }
