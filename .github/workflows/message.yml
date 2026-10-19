@@ -74,6 +74,6 @@ jobs:
             message_stanzaids_test message_delay_test message_replies_test \
             message_occupantids_test message_mds_test message_moderation_test \
             message_moderation_metadata_test message_simsfallback_test \
-            message_displayedmarkers_test message_nativebookmarks_test
+            message_displayedmarkers_test message_nativebookmarks_test message_blocking_test
       - name: Test message regressions
         run: ctest --test-dir build-message --output-on-failure -R '^message_'
