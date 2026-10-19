@@ -48,6 +48,11 @@ int main(int argc, char **argv)
         "<block xmlns='urn:xmpp:blocking'><item jid='victim@example.test'/></block></iq>"));
     check(!listener.take(badSender.documentElement()) && notifications == 0,
           "Untrusted XEP-0191 push accepted");
+    auto forgedResource = parse(QStringLiteral(
+        "<iq type='set' from='alice@example.test/other-device' id='push-other'>"
+        "<block xmlns='urn:xmpp:blocking'><item jid='victim@example.test'/></block></iq>"));
+    check(!listener.take(forgedResource.documentElement()) && notifications == 0,
+          "XEP-0191 resource-originated spoofing accepted");
     auto badNamespace = parse(QStringLiteral(
         "<iq type='set' from='example.test' id='push2'>"
         "<block xmlns='urn:not:blocking'><item jid='victim@example.test'/></block></iq>"));
