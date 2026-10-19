@@ -3,7 +3,7 @@
 #define XMPP_BOOKMARKS_H
 
 #include <iris/xmpp-im/xmpp_pubsub.h>
-#include <iris/xmpp-im/xmpp_jid.h>
+#include <iris/xmpp_jid.h>
 
 namespace XMPP {
 
