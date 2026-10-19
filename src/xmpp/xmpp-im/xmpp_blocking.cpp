@@ -123,7 +123,7 @@ bool BlockingPushTask::take(const QDomElement &stanza)
     // another entity, even one supplying syntactically valid blocked items.
     const Jid from(stanza.attribute(QStringLiteral("from")));
     if (!from.isEmpty() && from.full() != client()->jid().domain()
-        && from.bare() != client()->jid().bare())
+        && !(from.resource().isEmpty() && from.bare() == client()->jid().bare()))
         return false;
 
     bool valid = false;
