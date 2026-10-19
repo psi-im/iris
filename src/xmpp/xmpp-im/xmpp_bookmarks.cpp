@@ -29,9 +29,20 @@ void setChild(QDomElement &parent, const QString &name, const QString &value)
         if (existing.isNull()) {
             existing = parent.ownerDocument().createElementNS(ns, name);
             // Order matters under the schema: nick, password, extensions.
-            const QDomElement extensions = parent.firstChildElement(QStringLiteral("extensions"));
-            if (!extensions.isNull())
-                parent.insertBefore(existing, extensions);
+            // XML namespace prefixes are arbitrary; never rely on tagName().
+            QDomElement before;
+            for (auto next = parent.firstChildElement(); !next.isNull(); next = next.nextSiblingElement()) {
+                const QString tag = next.localName().isEmpty()
+                    ? next.tagName().section(QLatin1Char(':'), -1) : next.localName();
+                if (next.namespaceURI() == ns
+                    && (tag == QLatin1String("extensions")
+                        || (name == QLatin1String("nick") && tag == QLatin1String("password")))) {
+                    before = next;
+                    break;
+                }
+            }
+            if (!before.isNull())
+                parent.insertBefore(existing, before);
             else
                 parent.appendChild(existing);
         }
