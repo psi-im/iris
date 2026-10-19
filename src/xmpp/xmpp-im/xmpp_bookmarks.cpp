@@ -8,7 +8,7 @@ const QString ns = QStringLiteral("urn:xmpp:bookmarks:1");
 QString childText(const QDomElement &parent, const QString &name)
 {
     for (QDomElement e = parent.firstChildElement(); !e.isNull(); e = e.nextSiblingElement()) {
-        if (e.namespaceURI() == ns && (e.localName().isEmpty() ? e.tagName() : e.localName()) == name)
+        if (e.namespaceURI() == ns && e.tagName() == name)
             return e.text();
     }
     return {};
@@ -18,7 +18,7 @@ void setChild(QDomElement &parent, const QString &name, const QString &value)
 {
     QDomElement existing;
     for (auto e = parent.firstChildElement(); !e.isNull(); e = e.nextSiblingElement())
-        if (e.namespaceURI() == ns && (e.localName().isEmpty() ? e.tagName() : e.localName()) == name) {
+        if (e.namespaceURI() == ns && e.tagName() == name) {
             existing = e;
             break;
         }
@@ -29,14 +29,11 @@ void setChild(QDomElement &parent, const QString &name, const QString &value)
         if (existing.isNull()) {
             existing = parent.ownerDocument().createElementNS(ns, name);
             // Order matters under the schema: nick, password, extensions.
-            // XML namespace prefixes are arbitrary; never rely on tagName().
             QDomElement before;
             for (auto next = parent.firstChildElement(); !next.isNull(); next = next.nextSiblingElement()) {
-                const QString tag = next.localName().isEmpty()
-                    ? next.tagName().section(QLatin1Char(':'), -1) : next.localName();
                 if (next.namespaceURI() == ns
-                    && (tag == QLatin1String("extensions")
-                        || (name == QLatin1String("nick") && tag == QLatin1String("password")))) {
+                    && (next.tagName() == QLatin1String("extensions")
+                        || (name == QLatin1String("nick") && next.tagName() == QLatin1String("password")))) {
                     before = next;
                     break;
                 }
@@ -70,7 +67,7 @@ NativeBookmark NativeBookmark::fromItem(const PubSubItem &item)
     const auto &payload = item.payload();
     if (!room.isValid() || room.isEmpty() || !room.resource().isEmpty()
         || payload.namespaceURI() != ns
-        || (payload.localName().isEmpty() ? payload.tagName() : payload.localName()) != QLatin1String("conference"))
+        || payload.tagName() != QLatin1String("conference"))
         return result;
     result.room_ = room;
     result.payload_ = result.payloadDocument_.importNode(payload, true).toElement();
