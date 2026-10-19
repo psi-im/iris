@@ -7,46 +7,8 @@ const QString ns = QStringLiteral("urn:xmpp:bookmarks:1");
 
 QString childText(const QDomElement &parent, const QString &name)
 {
-    for (QDomElement e = parent.firstChildElement(); !e.isNull(); e = e.nextSiblingElement()) {
-        if (e.namespaceURI() == ns && e.tagName() == name)
-            return e.text();
-    }
-    return {};
-}
-
-void setChild(QDomElement &parent, const QString &name, const QString &value)
-{
-    QDomElement existing;
-    for (auto e = parent.firstChildElement(); !e.isNull(); e = e.nextSiblingElement())
-        if (e.namespaceURI() == ns && e.tagName() == name) {
-            existing = e;
-            break;
-        }
-    if (value.isEmpty()) {
-        if (!existing.isNull())
-            parent.removeChild(existing);
-    } else {
-        if (existing.isNull()) {
-            existing = parent.ownerDocument().createElementNS(ns, name);
-            // Order matters under the schema: nick, password, extensions.
-            QDomElement before;
-            for (auto next = parent.firstChildElement(); !next.isNull(); next = next.nextSiblingElement()) {
-                if (next.namespaceURI() == ns
-                    && (next.tagName() == QLatin1String("extensions")
-                        || (name == QLatin1String("nick") && next.tagName() == QLatin1String("password")))) {
-                    before = next;
-                    break;
-                }
-            }
-            if (!before.isNull())
-                parent.insertBefore(existing, before);
-            else
-                parent.appendChild(existing);
-        }
-        while (!existing.firstChild().isNull())
-            existing.removeChild(existing.firstChild());
-        existing.appendChild(parent.ownerDocument().createTextNode(value));
-    }
+    const auto child = parent.firstChildElement(name);
+    return child.namespaceURI() == ns ? child.text() : QString();
 }
 } // namespace
 
@@ -64,14 +26,23 @@ NativeBookmark NativeBookmark::fromItem(const PubSubItem &item)
 {
     NativeBookmark result;
     const Jid room(item.id());
-    const auto &payload = item.payload();
+    const auto payload = item.payload();
     if (!room.isValid() || room.isEmpty() || !room.resource().isEmpty()
-        || payload.namespaceURI() != ns
-        || payload.tagName() != QLatin1String("conference"))
+        || payload.namespaceURI() != ns || payload.tagName() != QLatin1String("conference"))
         return result;
+
     result.room_ = room;
-    result.payload_ = result.payloadDocument_.importNode(payload, true).toElement();
-    result.payloadDocument_.appendChild(result.payload_);
+    result.name_ = payload.attribute(QStringLiteral("name"));
+    const QString join = payload.attribute(QStringLiteral("autojoin")); 
+    result.autoJoin_ = join == QLatin1String("true") || join == QLatin1String("1");
+    result.nick_ = childText(payload, QStringLiteral("nick"));
+    result.password_ = childText(payload, QStringLiteral("password"));
+
+    // Unknown client data may live under <extensions/>. Preserve only that
+    // subtree; known bookmark fields remain independent of the source DOM.
+    const auto extensions = payload.firstChildElement(QStringLiteral("extensions"));
+    if (!extensions.isNull() && extensions.namespaceURI() == ns)
+        result.extensions_.appendChild(result.extensions_.importNode(extensions, true));
     return result;
 }
 
@@ -79,40 +50,51 @@ NativeBookmark NativeBookmark::create(const Jid &room, const QString &name, bool
                                       const QString &nick, const QString &password)
 {
     NativeBookmark result;
-    if (!room.isValid() || room.isEmpty() || !room.resource().isEmpty())
-        return result;
-    result.room_ = room;
-    result.payload_ = result.payloadDocument_.createElementNS(ns, QStringLiteral("conference"));
-    result.payloadDocument_.appendChild(result.payload_);
-    result.setName(name);
-    result.setAutoJoin(autoJoin);
-    result.setNick(nick);
-    result.setPassword(password);
+    if (room.isValid() && !room.isEmpty() && room.resource().isEmpty()) {
+        result.room_ = room;
+        result.name_ = name;
+        result.autoJoin_ = autoJoin;
+        result.nick_ = nick;
+        result.password_ = password;
+    }
     return result;
 }
 
-bool NativeBookmark::isValid() const { return room_.isValid() && !room_.isEmpty() && !payload_.isNull(); }
+bool NativeBookmark::isValid() const
+{
+    return room_.isValid() && !room_.isEmpty() && room_.resource().isEmpty();
+}
 Jid NativeBookmark::room() const { return room_; }
-QString NativeBookmark::name() const { return payload_.attribute(QStringLiteral("name")); }
-QString NativeBookmark::nick() const { return childText(payload_, QStringLiteral("nick")); }
-QString NativeBookmark::password() const { return childText(payload_, QStringLiteral("password")); }
-bool NativeBookmark::autoJoin() const
-{
-    const auto value = payload_.attribute(QStringLiteral("autojoin"));
-    return value == QLatin1String("true") || value == QLatin1String("1");
-}
-void NativeBookmark::setName(const QString &name) { payload_.setAttribute(QStringLiteral("name"), name); }
-void NativeBookmark::setAutoJoin(bool enabled)
-{
-    payload_.setAttribute(QStringLiteral("autojoin"), enabled ? QStringLiteral("true") : QStringLiteral("false"));
-}
-void NativeBookmark::setNick(const QString &nick) { setChild(payload_, QStringLiteral("nick"), nick); }
-void NativeBookmark::setPassword(const QString &password) { setChild(payload_, QStringLiteral("password"), password); }
+QString NativeBookmark::name() const { return name_; }
+QString NativeBookmark::nick() const { return nick_; }
+QString NativeBookmark::password() const { return password_; }
+bool NativeBookmark::autoJoin() const { return autoJoin_; }
+void NativeBookmark::setName(const QString &name) { name_ = name; }
+void NativeBookmark::setAutoJoin(bool enabled) { autoJoin_ = enabled; }
+void NativeBookmark::setNick(const QString &nick) { nick_ = nick; }
+void NativeBookmark::setPassword(const QString &password) { password_ = password; }
 
 PubSubItem NativeBookmark::toItem(QDomDocument &document) const
 {
     if (!isValid())
         return {};
-    return PubSubItem(room_.bare(), document.importNode(payload_, true).toElement());
+
+    auto conference = document.createElementNS(ns, QStringLiteral("conference"));
+    conference.setAttribute(QStringLiteral("name"), name_);
+    conference.setAttribute(QStringLiteral("autojoin"), autoJoin_ ? QStringLiteral("true") : QStringLiteral("false"));
+
+    const auto appendText = [&document, &conference](const QString &tag, const QString &value) {
+        if (value.isEmpty())
+            return;
+        auto element = document.createElementNS(ns, tag);
+        element.appendChild(document.createTextNode(value));
+        conference.appendChild(element);
+    };
+    appendText(QStringLiteral("nick"), nick_);
+    appendText(QStringLiteral("password"), password_);
+
+    if (!extensions_.documentElement().isNull())
+        conference.appendChild(document.importNode(extensions_.documentElement(), true));
+    return PubSubItem(room_.bare(), conference);
 }
 } // namespace XMPP
