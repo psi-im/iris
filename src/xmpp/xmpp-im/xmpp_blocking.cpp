@@ -7,17 +7,12 @@ namespace XMPP {
 namespace {
 constexpr auto BlockingNs = "urn:xmpp:blocking";
 
-QString localName(const QDomElement &e)
-{
-    return e.localName().isEmpty() ? e.tagName().section(QLatin1Char(':'), -1) : e.localName();
-}
-
 QList<Jid> parseItems(const QDomElement &parent, bool *valid)
 {
     QList<Jid> jids;
     *valid = true;
     for (auto item = parent.firstChildElement(); !item.isNull(); item = item.nextSiblingElement()) {
-        if (item.namespaceURI() != QLatin1String(BlockingNs) || localName(item) != QLatin1String("item")) {
+        if (item.namespaceURI() != QLatin1String(BlockingNs) || item.tagName() != QLatin1String("item")) {
             *valid = false;
             return {};
         }
@@ -83,15 +78,8 @@ bool BlockingTask::take(const QDomElement &stanza)
         return true;
     }
     if (operation_ == QLatin1String("blocklist")) {
-        QDomElement list;
-        for (auto child = stanza.firstChildElement(); !child.isNull(); child = child.nextSiblingElement()) {
-            if (child.namespaceURI() == QLatin1String(BlockingNs)
-                && localName(child) == QLatin1String("blocklist")) {
-                list = child;
-                break;
-            }
-        }
-        if (list.isNull()) {
+        const auto list = stanza.firstChildElement(QStringLiteral("blocklist"));
+        if (list.isNull() || list.namespaceURI() != QLatin1String(BlockingNs)) {
             setError();
             return true;
         }
@@ -110,13 +98,13 @@ BlockingPushTask::BlockingPushTask(Task *parent) : Task(parent) { }
 
 bool BlockingPushTask::take(const QDomElement &stanza)
 {
-    if (localName(stanza) != QLatin1String("iq")
+    if (stanza.tagName() != QLatin1String("iq")
         || stanza.attribute(QStringLiteral("type")) != QLatin1String("set"))
         return false;
     const auto command = stanza.firstChildElement();
     if (command.isNull() || command.namespaceURI() != QLatin1String(BlockingNs))
         return false;
-    const QString operation = localName(command);
+    const QString operation = command.tagName();
     if (operation != QLatin1String("block") && operation != QLatin1String("unblock"))
         return false;
     // XEP-0191 pushes are sent by our own server; never accept a push from
