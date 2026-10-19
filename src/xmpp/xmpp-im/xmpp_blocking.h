@@ -3,7 +3,7 @@
 #define XMPP_BLOCKING_H
 
 #include <iris/xmpp-im/xmpp_task.h>
-#include <iris/xmpp-im/xmpp_jid.h>
+#include <iris/xmpp_jid.h>
 #include <QStringList>
 
 namespace XMPP {
