@@ -7,9 +7,8 @@
 
 namespace XMPP {
 
-// XEP-0402 is a PEP profile, not a second PubSub implementation. Reuse
-// PubSubManager's items/publish/retract tasks and events. Keep the original
-// XML to preserve extension data when editing a known conference field.
+// XEP-0402 PEP bookmark value. Serialize known fields only when publishing;
+// retain just the optional opaque <extensions/> element for roundtripping.
 class IRIS_EXPORT NativeBookmark {
 public:
     static QString node();
@@ -31,9 +30,12 @@ public:
     static NativeBookmark create(const Jid &room, const QString &name, bool autoJoin,
                                  const QString &nick = {}, const QString &password = {});
 private:
-    Jid room_;
-    QDomDocument payloadDocument_;
-    QDomElement payload_;
+    Jid          room_;
+    QString      name_;
+    QString      nick_;
+    QString      password_;
+    bool         autoJoin_ = false;
+    QDomDocument extensions_; // Optional <extensions/> subtree; never the whole conference.
 };
 } // namespace XMPP
 #endif // XMPP_BOOKMARKS_H
