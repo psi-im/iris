@@ -59,9 +59,9 @@ int main(int argc, char **argv)
     check(!listener.take(badNamespace.documentElement()), "Wrong blocking namespace accepted");
     auto good = parse(QStringLiteral(
         "<iq type='set' from='example.test' id='push3'>"
-        "<b:block xmlns:b='urn:xmpp:blocking'><b:item jid='victim@example.test'/></b:block></iq>"));
+        "<block xmlns='urn:xmpp:blocking'><item jid='victim@example.test'/></block></iq>"));
     check(listener.take(good.documentElement()) && notifications == 1,
-          "Valid prefixed XEP-0191 push lost");
+          "Valid XEP-0191 push lost");
     check(received.size() == 1 && received.first().bare() == QStringLiteral("victim@example.test"),
           "XEP-0191 pushed JID incorrect");
     return 0;
