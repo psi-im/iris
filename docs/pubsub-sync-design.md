@@ -28,8 +28,11 @@ IDs inside a single item must remain in OMEMO.
 5. Even one failing IQ makes a multi-item batch's server state uncertain:
    requeue unsuperseded intents, require a fresh authoritative `beginLoad()`,
    then retry. Never claim the batch was all-or-nothing.
-6. On disconnect/account switch, `reset()` increments the epoch and clears
-   the session state; late responses from an earlier epoch are rejected.
+6. On disconnect, `reset(true)` increments the epoch but preserves queued
+   and unconfirmed in-flight user intents. Those edits cannot be replayed until
+   a new authoritative snapshot is fetched. On account change, `reset()`
+   discards them to prevent writes crossing authentication scopes. Both
+   invalidate late responses from an earlier epoch.
 7. A purge/deletion invalidates the snapshot. Do not infer that earlier
    pending write IQs have failed or succeeded just from the notification.
 
