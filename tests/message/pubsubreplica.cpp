@@ -118,6 +118,56 @@ static void undoPendingChanges()
           "Original value not restored");
 }
 
+static void optimisticSequentialEditsAndOutcomes()
+{
+    Replica replica;
+    check(replica.finishLoad(replica.beginLoad(), {}), "Initial sync failed");
+
+    replica.put(QStringLiteral("roomA"), QStringLiteral("A"));
+    const auto first = replica.beginWrite(); // IQ remains in flight.
+    check(replica.optimisticItems().contains(QStringLiteral("roomA")),
+          "First unacknowledged room not visible");
+
+    // A second UI edit is built from optimistic state, not the stale server
+    // snapshot. Both rooms must survive despite the delayed first IQ.
+    auto visible = replica.optimisticItems();
+    visible.insert(QStringLiteral("roomB"), QStringLiteral("B"));
+    replica.put(QStringLiteral("roomB"), visible.value(QStringLiteral("roomB")));
+    check(replica.optimisticItems().size() == 2, "Second edit erased first pending room");
+
+    Replica::WriteResults firstResult;
+    firstResult.insert(QStringLiteral("roomA"), Replica::WriteResult::Success);
+    check(replica.finishWrite(first, firstResult), "First batch confirmation failed");
+    auto second = replica.beginWrite();
+    check(second.changes.size() == 1 && second.changes.contains(QStringLiteral("roomB")),
+          "Second room was lost while first was in flight");
+    check(replica.finishWrite(second, true), "Second batch failed");
+    check(replica.items().size() == 2, "Sequential publishes did not converge");
+
+    replica.put(QStringLiteral("bad"), QStringLiteral("invalid"));
+    replica.put(QStringLiteral("valid"), QStringLiteral("good"));
+    auto mixed = replica.beginWrite();
+    Replica::WriteResults results;
+    results.insert(QStringLiteral("bad"), Replica::WriteResult::Rejected);
+    results.insert(QStringLiteral("valid"), Replica::WriteResult::Success);
+    check(replica.finishWrite(mixed, results), "Mixed result not applied");
+    check(!replica.optimisticItems().contains(QStringLiteral("bad")),
+          "Permanent failure remained in optimistic state");
+    check(replica.items().value(QStringLiteral("valid")) == QStringLiteral("good"),
+          "One rejected item blocked an unrelated successful item");
+
+    replica.put(QStringLiteral("transient"), QStringLiteral("retry"));
+    auto retryBatch = replica.beginWrite();
+    Replica::WriteResults retry;
+    retry.insert(QStringLiteral("transient"), Replica::WriteResult::Retry);
+    check(replica.finishWrite(retryBatch, retry), "Transient failure not consumed");
+    check(replica.state() == Replica::State::ResyncRequired,
+          "Transient failure didn't force authoritative refresh");
+    check(replica.finishLoad(replica.beginLoad(), replica.items()), "Reload before retry failed");
+    check(replica.beginWrite().changes.contains(QStringLiteral("transient")),
+          "Failed transient item was lost");
+}
+
 static void reconnectPreservesUserIntent()
 {
     Replica replica;
@@ -178,5 +228,6 @@ int main(int argc, char **argv)
     invalidationAndLoadTokens();
     reconnectPreservesUserIntent();
     undoPendingChanges();
+    optimisticSequentialEditsAndOutcomes();
     return 0;
 }
