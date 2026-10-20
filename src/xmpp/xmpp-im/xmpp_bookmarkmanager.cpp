@@ -303,7 +303,7 @@ void BookmarksManager::maybeEnableNative()
     const bool compat = accountFeatures.test("urn:xmpp:bookmarks:1#compat");
     const bool publishOptions = accountFeatures.test("http://jabber.org/protocol/pubsub#publish-options")
         || server->serverFeatures().test("http://jabber.org/protocol/pubsub#publish-options");
-    if (compat && server->hasPEP() && publishOptions)
+    if (compat && server->hasPEP() && publishOptions && !d->legacyWriting)
         fetchNative();
 }
 
@@ -554,33 +554,41 @@ void BookmarksManager::saveLegacy(const QList<BookmarkUrl> &urls,
         d->queuedLegacyConferences = conferences;
         return;
     }
+    if (d->nativeWasActive || d->nativeActive) {
+        emit syncError(QStringLiteral("Private XML writes are prohibited with native bookmarks"));
+        return;
+    }
     d->legacyWriting = true;
+    // Optimistic legacy projection: a second edit must build on this snapshot,
+    // not on the previous in-flight IQ's result.
+    if (!same(d->conferences, conferences)) {
+        d->conferences = conferences;
+        emit conferencesChanged();
+    }
+    if (d->urls != urls) {
+        d->urls = urls;
+        emit urlsChanged();
+    }
     const auto gen = d->generation;
     auto *task = new PrivateBookmarksTask(d->client->rootTask());
     connect(task, &Task::finished, this, [this, task, gen] {
         if (gen != d->generation || !d->online)
             return;
         d->legacyWriting = false;
-        if (!task->success()) {
+        if (!task->success())
             emit syncError(QStringLiteral("Private XML bookmark save failed"));
-        } else {
-        if (d->urls != task->urls()) {
-            d->urls = task->urls();
-            emit urlsChanged();
-        }
-        if (!d->nativeWasActive && !same(d->conferences, task->conferences())) {
-            d->conferences = task->conferences();
-            emit conferencesChanged();
-        }
-        emit bookmarksSaved();
-        }
         if (d->legacyQueued) {
+            // A newer full snapshot was already displayed and queued. Do not
+            // overwrite it with an acknowledgement of the previous IQ.
             d->legacyQueued = false;
             const auto pendingUrls = d->queuedLegacyUrls;
             const auto pendingRooms = d->queuedLegacyConferences;
             saveLegacy(pendingUrls, pendingRooms);
+        } else if (task->success()) {
+            emit bookmarksSaved();
+            maybeEnableNative();
         } else {
-            flushNativeWrites();
+            fetchLegacy(); // Read authoritative data again after failure.
         }
     });
     task->set(urls, conferences);
@@ -592,16 +600,8 @@ void BookmarksManager::flushNativeWrites()
     if (!d->nativeActive || d->replica.state() != PubSubReplica<NativeBookmark>::State::Ready)
         return;
     const auto batch = d->replica.beginWrite();
-    if (!batch.isValid()) {
-        if (d->pendingUrlsValid && !d->legacyWriting) {
-            const auto urls = d->pendingUrls;
-            d->pendingUrlsValid = false;
-            // XEP-0402 doesn't define URLs. Keep them in legacy private XML,
-            // retaining the current conference projection for #compat servers.
-            saveLegacy(urls, d->conferences);
-        }
+    if (!batch.isValid())
         return;
-    }
     auto remaining = std::make_shared<int>(batch.changes.size());
     auto failed = std::make_shared<bool>(false);
     for (auto it = batch.changes.cbegin(); it != batch.changes.cend(); ++it) {
