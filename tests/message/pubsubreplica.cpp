@@ -89,6 +89,29 @@ static void failedWritesAndReconnect()
           "Account reset leaked old server state");
 }
 
+static void reconnectPreservesUserIntent()
+{
+    Replica replica;
+    check(replica.finishLoad(replica.beginLoad(), {}), "Initial sync failed");
+    replica.put(QStringLiteral("inflight"), QStringLiteral("one"));
+    auto oldBatch = replica.beginWrite();
+    replica.put(QStringLiteral("queued"), QStringLiteral("two"));
+    replica.put(QStringLiteral("inflight"), QStringLiteral("newer")); // User changed it again.
+    const auto oldEpoch = replica.epoch();
+    replica.reset(true);
+    check(replica.epoch() != oldEpoch, "Connection epoch was reused");
+    check(!replica.finishWrite(oldBatch, true), "Old connection write was acknowledged");
+    check(replica.finishLoad(replica.beginLoad(), {}), "Reconnect sync failed");
+    auto retry = replica.beginWrite();
+    check(retry.changes.size() == 2, "User intents disappeared on reconnect");
+    check(retry.changes.value(QStringLiteral("inflight"))
+              == Replica::Value(QStringLiteral("newer")), "Stale in-flight write erased newer edit");
+    check(retry.changes.value(QStringLiteral("queued"))
+              == Replica::Value(QStringLiteral("two")), "Unsent queued edit disappeared");
+    replica.reset(); // New account; never leak another account's pending operations.
+    check(!replica.hasPendingChanges(), "Account reset preserved old pending writes");
+}
+
 static void invalidationAndLoadTokens()
 {
     Replica replica;
@@ -124,5 +147,6 @@ int main(int argc, char **argv)
     queuedEditsAndStaleCallbacks();
     failedWritesAndReconnect();
     invalidationAndLoadTokens();
+    reconnectPreservesUserIntent();
     return 0;
 }
