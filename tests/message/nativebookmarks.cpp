@@ -2,7 +2,7 @@
 #include <iris/xmpp_bookmarks.h>
 #include <iris/xmpp_blocking.h>
 #include <iris/xmpp_pubsubitem.h>
-#include <iris/xmpp_pubsubreplica.h>
+#include "../../src/xmpp/xmpp-im/xmpp_pubsubreplica.h"
 
 #include <QCoreApplication>
 #include <QDomDocument>
