@@ -155,7 +155,7 @@ public:
     bool nativeWasActive = false;
     bool batchingEdits = false;
     bool legacyPending = false;
-    Jid accountJid;
+    QString accountJid;
     bool legacyWriting = false;
     bool pendingUrlsValid = false;
     bool legacyQueued = false;
