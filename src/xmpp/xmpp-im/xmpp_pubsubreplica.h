@@ -51,14 +51,19 @@ public:
     const Items &items() const { return items_; }
     bool hasPendingChanges() const { return !pending_.isEmpty(); }
 
-    // New account/connection generation: stale IQ callbacks must not mutate
-    // the next session. Callers may choose to re-add unsent intents themselves.
-    void reset()
+    // On reconnect preserve local user intents (including unconfirmed
+    // in-flight writes) for revalidation against a new server snapshot.
+    // On account changes discard them to avoid crossing authentication scopes.
+    // Both modes invalidate all asynchronous IQ tokens from the old session.
+    void reset(bool preservePending = false)
     {
+        if (preservePending)
+            restoreEdits(inFlight_);
         ++epoch_;
         state_ = State::Idle;
         items_.clear();
-        pending_.clear();
+        if (!preservePending)
+            pending_.clear();
         duringLoad_.clear();
         eventRevisions_.clear();
         eventSerial_ = 0;
