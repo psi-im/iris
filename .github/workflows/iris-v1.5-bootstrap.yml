@@ -1,0 +1,40 @@
+name: Bootstrap Iris v1.5 release
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - .github/workflows/iris-v1.5-bootstrap.yml
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  release:
+    if: github.event.head_commit.message == 'chore: start Iris v1.5 release'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Tag audited Iris source
+        env:
+          TARGET: 19d93ae978caae98dd31c3e65d07f2d2d29b61b0
+        run: |
+          set -euo pipefail
+          git cat-file -e "${TARGET}^{commit}"
+          if git rev-parse -q --verify refs/tags/v1.5 >/dev/null; then
+            echo "::error::v1.5 already exists; refusing to move it"
+            exit 1
+          fi
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            tag -a v1.5 "$TARGET" -m 'Iris 1.5'
+          git push origin refs/tags/v1.5
+      - name: Dispatch existing release packaging
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run packages.yml --ref master -f source_ref=v1.5
+          gh workflow run release.yml --ref master -f tag=v1.5
