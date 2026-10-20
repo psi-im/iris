@@ -161,6 +161,8 @@ public:
     QList<NativeBookmark> queuedLegacyConferences;
     QList<BookmarkUrl> queuedLegacyUrls;
     int retryDelayMs = 0;
+    bool nodeRepairAttempted = false;
+    QHash<QString, int> itemRetries;
     quint64 generation = 1;
     PubSubReplica<NativeBookmark> replica;
     QList<NativeBookmark> conferences;
@@ -241,6 +243,8 @@ void BookmarksManager::setOnline(bool online)
         d->queuedLegacyUrls.clear();
         d->queuedLegacyConferences.clear();
         d->retryDelayMs = 0;
+        d->nodeRepairAttempted = false;
+        d->itemRetries.clear();
         if (!d->urls.isEmpty()) {
             d->urls.clear();
             emit urlsChanged();
@@ -602,31 +606,92 @@ void BookmarksManager::flushNativeWrites()
     const auto batch = d->replica.beginWrite();
     if (!batch.isValid())
         return;
+    using Result = PubSubReplica<NativeBookmark>::WriteResult;
+    using Results = PubSubReplica<NativeBookmark>::WriteResults;
     auto remaining = std::make_shared<int>(batch.changes.size());
-    auto failed = std::make_shared<bool>(false);
+    auto results = std::make_shared<Results>();
+    auto repairNeeded = std::make_shared<bool>(false);
+    auto repairIds = std::make_shared<QStringList>();
+    const auto generation = d->generation;
+
     for (auto it = batch.changes.cbegin(); it != batch.changes.cend(); ++it) {
+        const QString id = it.key();
         Task *task = nullptr;
         if (it.value()) {
             QDomDocument xml;
             task = d->client->pubSubManager()->publish(Jid(), NativeBookmark::node(),
                        it.value()->toItem(xml), NativeBookmark::privatePublishOptions());
         } else {
-            task = d->client->pubSubManager()->retract(Jid(), NativeBookmark::node(), it.key());
+            task = d->client->pubSubManager()->retract(Jid(), NativeBookmark::node(), id);
         }
-        connect(task, &Task::finished, this, [this, task, batch, remaining, failed] {
-            if (!task->success())
-                *failed = true;
+        connect(task, &Task::finished, this,
+                [this, task, id, batch, generation, remaining, results, repairNeeded, repairIds] {
+            if (generation != d->generation)
+                return;
+            if (task->success()) {
+                results->insert(id, Result::Success);
+                d->itemRetries.remove(id);
+            } else {
+                const auto &error = task->error();
+                const bool precondition = error.appSpec.tagName() == QLatin1String("precondition-not-met")
+                    && error.appSpec.namespaceURI() == QLatin1String("http://jabber.org/protocol/pubsub#errors");
+                const bool retryable = task->statusCode() == Task::ErrTimeout
+                    || task->statusCode() == Task::ErrDisc || error.isWait()
+                    || error.condition == Stanza::Error::ErrorCond::RemoteServerTimeout
+                    || error.condition == Stanza::Error::ErrorCond::ServiceUnavailable;
+                if (precondition && !d->nodeRepairAttempted) {
+                    *repairNeeded = true;
+                    repairIds->append(id);
+                    results->insert(id, Result::Retry);
+                } else if (retryable && ++d->itemRetries[id] <= 3) {
+                    results->insert(id, Result::Retry);
+                } else {
+                    results->insert(id, Result::Rejected);
+                    d->itemRetries.remove(id);
+                    emit syncError(QStringLiteral("Bookmark %1 was rejected: %2").arg(id, error.toString()));
+                }
+            }
             if (--*remaining != 0)
                 return;
-            if (!d->replica.finishWrite(batch, !*failed))
-                return;
-            if (*failed) {
+            if (!d->replica.finishWrite(batch, *results))
+                return; // Discard callbacks invalidated by reconnect/purge.
+
+            rebuildNativeConferences(ChangeSource::Acknowledged);
+            const bool hasRetry = d->replica.state() == PubSubReplica<NativeBookmark>::State::ResyncRequired;
+            if (*repairNeeded) {
+                d->nodeRepairAttempted = true;
                 d->nativeActive = false;
-                fetchNative();
+                // XEP-0060 publish-options precondition failed. Attempt a
+                // single owner configuration repair; never loop indefinitely.
+                auto *config = d->client->pubSubManager()->configureNode(
+                    Jid(), NativeBookmark::node(), NativeBookmark::privatePublishOptions());
+                connect(config, &Task::finished, this,
+                        [this, config, generation, repairIds] {
+                    if (generation != d->generation)
+                        return;
+                    if (!config->success()) {
+                        for (const auto &id : *repairIds)
+                            d->replica.cancelPending(id);
+                        emit syncError(QStringLiteral("Bookmark PEP node configuration could not be repaired"));
+                    }
+                    // Re-fetch after changing the node config or discovering
+                    // that the pending item must be discarded.
+                    scheduleNativeRetry();
+                });
+                config->go(true);
                 return;
             }
-            rebuildNativeConferences();
-            emit bookmarksSaved();
+            if (hasRetry) {
+                d->nativeActive = false;
+                scheduleNativeRetry(); // Bounded exponential delay, not busy-loop.
+                return;
+            }
+            // Rejected items have been isolated; successful unrelated edits
+            // are no longer blocked and may proceed normally.
+            if (results->size() == batch.changes.size()
+                && std::all_of(results->cbegin(), results->cend(),
+                        [](Result result) { return result == Result::Success; }))
+                emit bookmarksSaved();
             flushNativeWrites();
         });
         task->go(true);
