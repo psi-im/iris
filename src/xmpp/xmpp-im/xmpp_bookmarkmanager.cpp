@@ -404,33 +404,39 @@ void BookmarksManager::setBookmarks(const QList<BookmarkUrl> &urls,
     setUrls(urls);
 }
 
-void BookmarksManager::setConferences(const QList<NativeBookmark> &conferences)
+bool BookmarksManager::setConferences(const QList<NativeBookmark> &conferences)
 {
-    if (!d->online)
-        return;
+    if (!d->online) {
+        emit syncError(QStringLiteral("Cannot edit bookmarks while offline"));
+        return false;
+    }
     QSet<QString> ids;
     for (const auto &room : conferences) {
-        if (!room.isValid() || ids.contains(room.room().bare()))
-            return;
+        if (!room.isValid() || ids.contains(room.room().bare())) {
+            emit syncError(QStringLiteral("Invalid or duplicate conference bookmark"));
+            return false;
+        }
         ids.insert(room.room().bare());
     }
 
     if (!d->nativeWasActive && !d->nativeActive) {
-        saveLegacy(d->urls, conferences);
-        return;
+        if (!same(d->conferences, conferences))
+            saveLegacy(d->urls, conferences);
+        return true;
     }
 
+    const auto current = d->replica.optimisticItems();
     for (const auto &room : conferences) {
-        const auto id = room.room().bare();
-        auto it = std::find_if(d->conferences.cbegin(), d->conferences.cend(),
-                              [&id](const NativeBookmark &v) { return v.room().bare() == id; });
-        if (it != d->conferences.cend() && same(*it, room)
-            && !d->replica.hasScheduledIntent(id))
-            continue; // An undo still has to supersede earlier unconfirmed edits.
-        auto native = d->replica.items().value(id);
+        const QString id = room.room().bare();
+        const auto old = current.constFind(id);
+        if (old != current.cend() && same(old.value(), room))
+            continue; // An untouched pending or in-flight change survives.
+        auto native = old != current.cend() ? old.value() : NativeBookmark();
         if (!native.isValid())
             native = NativeBookmark::create(room.room(), room.name(), room.autoJoin(), room.nick(), room.password());
         else {
+            // Preserve opaque <extensions/> when the caller has only the
+            // public conference fields (as the Psi GUI does).
             native.setName(room.name());
             native.setAutoJoin(room.autoJoin());
             native.setNick(room.nick());
@@ -438,66 +444,104 @@ void BookmarksManager::setConferences(const QList<NativeBookmark> &conferences)
         }
         d->replica.put(id, native);
     }
-    for (const auto &room : d->conferences)
-        if (!ids.contains(room.room().bare()))
-            d->replica.remove(room.room().bare());
-    // Undoing a newly added room before its publish begins should cancel
-    // the queued insertion outright. If its publish is already in flight,
-    // a later retract is necessary because the server may accept it.
-    for (const auto &id : d->replica.scheduledIds()) {
-        if (ids.contains(id) || d->replica.items().contains(id))
+    for (auto it = current.cbegin(); it != current.cend(); ++it) {
+        if (ids.contains(it.key()))
             continue;
-        if (d->replica.hasInFlightIntent(id))
-            d->replica.remove(id);
+        if (!d->replica.items().contains(it.key()) && !d->replica.hasInFlightIntent(it.key()))
+            d->replica.cancelPending(it.key()); // Undo of unsent addition.
         else
-            d->replica.cancelPending(id);
+            d->replica.remove(it.key()); // Existing or in-flight addition.
     }
-    flushNativeWrites();
-    if (!d->nativeActive && d->replica.state() != PubSubReplica<NativeBookmark>::State::Loading)
-        fetchNative();
+    rebuildNativeConferences(ChangeSource::LocalEdit);
+    if (!d->batchingEdits) {
+        flushNativeWrites();
+        if (!d->nativeActive && d->replica.state() != PubSubReplica<NativeBookmark>::State::Loading)
+            fetchNative();
+    }
+    return true;
 }
 
-void BookmarksManager::applyConferenceEdits(const QList<NativeBookmark> &baseline,
+bool BookmarksManager::upsertConference(const NativeBookmark &conference)
+{
+    if (!conference.isValid()) {
+        emit syncError(QStringLiteral("Invalid conference bookmark"));
+        return false;
+    }
+    QList<NativeBookmark> desired = d->conferences; // Optimistic projection.
+    auto it = std::find_if(desired.begin(), desired.end(), [&conference](const NativeBookmark &room) {
+        return room.room().bare() == conference.room().bare();
+    });
+    if (it == desired.end())
+        desired.append(conference);
+    else
+        *it = conference;
+    return setConferences(desired);
+}
+
+bool BookmarksManager::removeConference(const Jid &jid)
+{
+    if (!jid.isValid() || jid.isEmpty() || !jid.resource().isEmpty()) {
+        emit syncError(QStringLiteral("Invalid conference JID"));
+        return false;
+    }
+    auto desired = d->conferences; // Optimistic projection.
+    desired.erase(std::remove_if(desired.begin(), desired.end(), [&jid](const NativeBookmark &room) {
+        return room.room().bare() == jid.bare();
+    }), desired.end());
+    return setConferences(desired);
+}
+
+bool BookmarksManager::applyConferenceEdits(const QList<NativeBookmark> &baseline,
                                              const QList<NativeBookmark> &edited)
 {
     QHash<QString, NativeBookmark> before, after;
-    for (const auto &room : baseline)
+    for (const auto &room : baseline) {
+        if (!room.isValid() || before.contains(room.room().bare())) {
+            emit syncError(QStringLiteral("Invalid original bookmark list"));
+            return false;
+        }
         before.insert(room.room().bare(), room);
+    }
     for (const auto &room : edited) {
-        if (!room.isValid() || after.contains(room.room().bare()))
-            return;
+        if (!room.isValid() || after.contains(room.room().bare())) {
+            emit syncError(QStringLiteral("Invalid edited bookmark list"));
+            return false;
+        }
         after.insert(room.room().bare(), room);
     }
-    QList<NativeBookmark> merged = d->conferences;
+    auto desired = d->conferences; // Keep newer events and all local intents.
     for (const auto &old : baseline)
         if (!after.contains(old.room().bare()))
-            merged.erase(std::remove_if(merged.begin(), merged.end(),
-                [&old](const NativeBookmark &b) { return b.room().bare() == old.room().bare(); }), merged.end());
+            desired.erase(std::remove_if(desired.begin(), desired.end(),
+                [&old](const NativeBookmark &b) { return b.room().bare() == old.room().bare(); }), desired.end());
     for (const auto &next : edited) {
-        auto old = before.constFind(next.room().bare());
+        const auto old = before.constFind(next.room().bare());
         if (old != before.cend() && same(old.value(), next))
             continue;
-        merged.erase(std::remove_if(merged.begin(), merged.end(),
-            [&next](const NativeBookmark &b) { return b.room().bare() == next.room().bare(); }), merged.end());
-        merged.append(next);
+        desired.erase(std::remove_if(desired.begin(), desired.end(),
+            [&next](const NativeBookmark &b) { return b.room().bare() == next.room().bare(); }), desired.end());
+        desired.append(next);
     }
-    setConferences(merged);
+    return setConferences(desired);
 }
 
-void BookmarksManager::setUrls(const QList<BookmarkUrl> &urls)
+bool BookmarksManager::setUrls(const QList<BookmarkUrl> &urls)
 {
-    if (!d->online)
-        return;
-    // A second edit can undo a still queued or unacknowledged URL write.
-    if (urls == d->urls && !d->pendingUrlsValid && !d->legacyWriting && !d->legacyQueued)
-        return;
-    if (d->nativeWasActive) {
-        d->pendingUrls = urls;
-        d->pendingUrlsValid = true;
-        flushNativeWrites();
-    } else {
-        saveLegacy(urls, d->conferences);
+    if (!d->online) {
+        emit syncError(QStringLiteral("Cannot edit URL bookmarks while offline"));
+        return false;
     }
+    if (d->nativeWasActive || d->nativeActive) {
+        // Native bookmarks and Private XML may be bridged by the server.
+        // A Private XML URL-only update can overwrite the entire PEP node,
+        // deleting concurrent rooms and extensions. XEP-0402 has no URL
+        // items: expose URLs read-only rather than risk data loss.
+        emit syncError(QStringLiteral("URL bookmark editing is read-only with XEP-0402"));
+        return false;
+    }
+    if (urls != d->urls)
+        saveLegacy(urls, d->conferences);
+    return true;
 }
 
 void BookmarksManager::saveLegacy(const QList<BookmarkUrl> &urls,
