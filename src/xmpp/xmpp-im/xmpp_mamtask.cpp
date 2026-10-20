@@ -53,6 +53,7 @@ struct Request {
     int                              maxMessages      = 0;
     bool                             flipPages        = false;
     bool                             backwards        = true;
+    int                              rsmIndex         = -1;
 
     static Request create(const Jid &with, bool allowMUCArchives, int pageSize, int maxMessages, bool flipPages,
                           bool backwards)
@@ -78,6 +79,7 @@ struct PageRequest {
     QString  fromId; // effective #extended filter after baseline RSM fallback
     QString  toId;
     int      maxResults = 10;
+    int      rsmIndex = -1;
 };
 
 // One child Task per MAM page. It is the *only* task that recognizes its
@@ -96,6 +98,8 @@ public:
 
     bool           isComplete() const { return complete_; }
     bool           isStable() const { return stable_; }
+    int            resultCount() const { return resultCount_; }
+    int            firstResultIndex() const { return firstResultIndex_; }
     QDomElement    errorResponse() const { return errorResponse_; }
     const QString &nextCursor() const { return nextCursor_; }
     void           deactivate()
@@ -155,7 +159,10 @@ protected:
 
         SubsetsClientManager rsm;
         rsm.setMax(request_.maxResults);
-        if (request_.cursor.isNull()) {
+        if (request_.rsmIndex >= 0) {
+            rsm.setIndex(request_.rsmIndex);
+            rsm.getByIndex();
+        } else if (request_.cursor.isNull()) {
             if (request_.request.backwards)
                 rsm.getLast();
             else
@@ -262,6 +269,20 @@ private:
         // global maxMessages cap); this task exposes the cursor, if present.
         const auto rsm = firstChildElementByLocalName(fin, QLatin1String("set"));
         if (!rsm.isNull() && rsm.namespaceURI() == QLatin1String("http://jabber.org/protocol/rsm")) {
+            const auto count = firstChildElementByLocalName(rsm, QLatin1String("count"));
+            if (!count.isNull() && count.namespaceURI() == rsm.namespaceURI()) {
+                bool valid = false;
+                const int number = count.text().toInt(&valid);
+                if (valid && number >= 0)
+                    resultCount_ = number;
+            }
+            const auto first = firstChildElementByLocalName(rsm, QLatin1String("first"));
+            if (!first.isNull() && first.namespaceURI() == rsm.namespaceURI()) {
+                bool valid = false;
+                const int index = first.attribute(QLatin1String("index")).toInt(&valid);
+                if (valid && index >= 0)
+                    firstResultIndex_ = index;
+            }
             const auto edge = firstChildElementByLocalName(
                 rsm, request_.request.backwards ? QLatin1String("first") : QLatin1String("last"));
             if (!edge.isNull() && edge.namespaceURI() == QLatin1String("http://jabber.org/protocol/rsm"))
@@ -280,6 +301,8 @@ private:
     bool                                     active_   = false;
     bool                                     complete_ = false;
     bool                                     stable_   = true;
+    int                                      resultCount_ = -1;
+    int                                      firstResultIndex_ = -1;
 };
 
 } // namespace
@@ -293,6 +316,8 @@ public:
         bool               started  = false;
         bool               active   = false;
         QString            cursor;
+        int                resultCount = -1;
+        int                firstResultIndex = -1;
         QString            fromId;
         QString            toId;
         QSet<QString>      visitedCursors;
@@ -347,6 +372,8 @@ void MAMTask::setArchiveFeatures(const Features &features)
 
 bool MAMTask::isComplete() const { return d->progress.complete; }
 bool MAMTask::isStable() const { return d->progress.stable; }
+int MAMTask::resultCount() const { return d->progress.resultCount; }
+int MAMTask::firstResultIndex() const { return d->progress.firstResultIndex; }
 
 void MAMTask::get(const Jid &with, const QDateTime &from, const QDateTime &to, const bool allowMUCArchives,
                   int mamPageSize, int mamMaxMessages, bool flipPages, bool backwards)
@@ -366,6 +393,15 @@ void MAMTask::get(const Jid &with, const QString &fromID, const QString &toID, c
     auto request  = Request::create(with, allowMUCArchives, mamPageSize, mamMaxMessages, flipPages, backwards);
     request.range = IdRange { fromID, toID };
     d->request    = std::move(request);
+}
+
+void MAMTask::getAtIndex(const Jid &with, int index, int pageSize, bool allowMUCArchives)
+{
+    if (d->progress.started || index < 0)
+        return;
+    auto request = Request::create(with, allowMUCArchives, pageSize, pageSize, false, false);
+    request.rsmIndex = index;
+    d->request = std::move(request);
 }
 
 void MAMTask::onGo()
@@ -413,6 +449,7 @@ void MAMTask::startPage()
     page.archiveJid      = d->archiveJid;
     page.archiveFeatures = d->archiveFeatures;
     page.cursor          = progress.cursor;
+    page.rsmIndex        = request.rsmIndex;
     page.fromId          = progress.fromId;
     page.toId            = progress.toId;
     page.maxResults
@@ -445,6 +482,8 @@ void MAMTask::startPage()
         const bool    complete      = child->isComplete();
         const bool    stable        = child->isStable();
         const QString cursor        = child->nextCursor();
+        const int resultCount       = child->resultCount();
+        const int firstIndex        = child->firstResultIndex();
 
         current.currentPage = nullptr;
         child->safeDelete();
@@ -458,6 +497,10 @@ void MAMTask::startPage()
 
         current.complete = complete;
         current.stable   = current.stable && stable;
+        if (resultCount >= 0)
+            current.resultCount = resultCount;
+        if (firstIndex >= 0 && current.firstResultIndex < 0)
+            current.firstResultIndex = firstIndex;
         if (current.complete || (d->request.maxMessages > 0 && current.fetched >= d->request.maxMessages)) {
             setSuccess();
             return;
