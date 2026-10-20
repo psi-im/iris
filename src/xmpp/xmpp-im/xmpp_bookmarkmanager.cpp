@@ -153,7 +153,9 @@ public:
     bool available = false;
     bool nativeActive = false;
     bool nativeWasActive = false;
+    bool batchingEdits = false;
     bool legacyPending = false;
+    Jid accountJid;
     bool legacyWriting = false;
     bool pendingUrlsValid = false;
     bool legacyQueued = false;
@@ -183,7 +185,7 @@ BookmarksManager::BookmarksManager(Client *client, QObject *parent)
             return;
         d->replica.published(native.room().bare(), native);
         if (d->nativeActive)
-            rebuildNativeConferences();
+            rebuildNativeConferences(ChangeSource::Push);
     });
     connect(pubsub, &PubSubManager::itemRetracted, this,
             [this](const Jid &service, const QString &node, const QString &id) {
@@ -191,7 +193,7 @@ BookmarksManager::BookmarksManager(Client *client, QObject *parent)
             return;
         d->replica.retracted(id);
         if (d->nativeActive)
-            rebuildNativeConferences();
+            rebuildNativeConferences(ChangeSource::Push);
     });
     const auto invalidate = [this](const Jid &service, const QString &node) {
         if (!d->online || (service.bare() != d->client->jid().bare() || !service.resource().isEmpty()) || node != NativeBookmark::node()
@@ -222,11 +224,36 @@ void BookmarksManager::setAvailable(bool value)
 
 void BookmarksManager::setOnline(bool online)
 {
-    if (d->online == online)
+    const auto jid = d->client->jid().bare();
+    const bool changedAccount = online && !d->accountJid.isEmpty() && jid != d->accountJid;
+    if (d->online == online && !changedAccount)
         return;
     d->online = online;
     ++d->generation;
+    if (changedAccount) {
+        // A Client object can be reused with different credentials. Never
+        // replay the previous identity's pending data on the new account.
+        d->replica.reset();
+        d->nativeWasActive = false;
+        d->nativeActive = false;
+        d->pendingUrlsValid = false;
+        d->pendingUrls.clear();
+        d->legacyQueued = false;
+        d->queuedLegacyUrls.clear();
+        d->queuedLegacyConferences.clear();
+        d->retryDelayMs = 0;
+        if (!d->urls.isEmpty()) {
+            d->urls.clear();
+            emit urlsChanged();
+        }
+        if (!d->conferences.isEmpty()) {
+            d->conferences.clear();
+            emit conferencesChanged();
+        }
+        setAvailable(false);
+    }
     if (online) {
+        d->accountJid = jid;
         fetchLegacy();
     } else {
         d->replica.reset(d->nativeWasActive);
@@ -334,17 +361,34 @@ void BookmarksManager::fetchNative()
     task->go(true);
 }
 
-void BookmarksManager::rebuildNativeConferences()
+void BookmarksManager::rebuildNativeConferences(ChangeSource source)
 {
-    QStringList ids = d->replica.items().keys();
+    // Never expose the stale last IQ as the UI's authoritative state while
+    // a user intent remains queued or in-flight.
+    const auto optimistic = d->replica.optimisticItems();
+    QStringList ids = optimistic.keys();
     ids.sort(Qt::CaseInsensitive);
     QList<NativeBookmark> next;
     for (const auto &id : ids)
-        next.append(d->replica.items().value(id));
-    if (!same(d->conferences, next)) {
-        d->conferences = std::move(next);
-        emit conferencesChanged();
+        next.append(optimistic.value(id));
+    if (same(d->conferences, next))
+        return;
+
+    QHash<QString, NativeBookmark> before, after;
+    for (const auto &room : d->conferences)
+        before.insert(room.room().bare(), room);
+    for (const auto &room : next)
+        after.insert(room.room().bare(), room);
+    d->conferences = std::move(next);
+    for (auto it = before.cbegin(); it != before.cend(); ++it)
+        if (!after.contains(it.key()))
+            emit conferenceRemoved(it.value().room(), source);
+    for (auto it = after.cbegin(); it != after.cend(); ++it) {
+        const auto previous = before.constFind(it.key());
+        if (previous == before.cend() || !same(previous.value(), it.value()))
+            emit conferenceUpdated(it.value(), source);
     }
+    emit conferencesChanged();
 }
 
 void BookmarksManager::setBookmarks(const QList<BookmarkUrl> &urls,
