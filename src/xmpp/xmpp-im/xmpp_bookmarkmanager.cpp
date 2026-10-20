@@ -394,17 +394,31 @@ void BookmarksManager::rebuildNativeConferences(ChangeSource source)
     emit conferencesChanged();
 }
 
-void BookmarksManager::setBookmarks(const QList<BookmarkUrl> &urls,
+bool BookmarksManager::setBookmarks(const QList<BookmarkUrl> &urls,
                                     const QList<NativeBookmark> &conferences)
 {
-    if (!d->online)
-        return;
-    if (!d->nativeWasActive && !d->nativeActive) {
-        saveLegacy(urls, conferences);
-        return;
+    if (!d->online) {
+        emit syncError(QStringLiteral("Cannot edit bookmarks while offline"));
+        return false;
     }
-    setConferences(conferences);
-    setUrls(urls);
+    if (d->nativeWasActive || d->nativeActive) {
+        if (urls != d->urls) {
+            emit syncError(QStringLiteral("URL bookmark editing is read-only with XEP-0402"));
+            return false;
+        }
+        return setConferences(conferences);
+    }
+    // Validate before handing a full legacy IQ to the transport.
+    QSet<QString> ids;
+    for (const auto &room : conferences) {
+        if (!room.isValid() || ids.contains(room.room().bare())) {
+            emit syncError(QStringLiteral("Invalid conference bookmark list"));
+            return false;
+        }
+        ids.insert(room.room().bare());
+    }
+    saveLegacy(urls, conferences);
+    return true;
 }
 
 bool BookmarksManager::setConferences(const QList<NativeBookmark> &conferences)
