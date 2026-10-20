@@ -41,6 +41,9 @@ public:
     const QList<BookmarkUrl> &urls() const;
 
     void setOnline(bool online);
+    // Replace both legacy collections with one IQ; native PEP conferences
+    // remain item-scoped while URLs still use Private XML.
+    void setBookmarks(const QList<BookmarkUrl> &urls, const QList<NativeBookmark> &conferences);
     void setConferences(const QList<NativeBookmark> &conferences);
     // Intent-based edits: unrelated PEP changes made after baseline are kept.
     void applyConferenceEdits(const QList<NativeBookmark> &baseline,
