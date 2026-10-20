@@ -201,7 +201,8 @@ BookmarksManager::BookmarksManager(Client *client, QObject *parent)
         if (!d->online || (service.bare() != d->client->jid().bare() || !service.resource().isEmpty()) || node != NativeBookmark::node()
             || (!d->nativeActive && d->replica.state() != PubSubReplica<NativeBookmark>::State::Loading))
             return;
-        d->replica.invalidate();
+        d->replica.invalidate(true);
+        rebuildNativeConferences(ChangeSource::Push);
         d->nativeActive = false;
         fetchNative();
     };
@@ -263,6 +264,11 @@ void BookmarksManager::setOnline(bool online)
         d->replica.reset(d->nativeWasActive);
         d->nativeActive = false;
         d->legacyPending = false;
+        if (d->legacyWriting && !d->nativeWasActive) {
+            d->legacyQueued = true;
+            d->queuedLegacyUrls = d->urls;
+            d->queuedLegacyConferences = d->conferences;
+        }
         d->legacyWriting = false;
         setAvailable(false);
     }
@@ -284,7 +290,8 @@ void BookmarksManager::fetchLegacy()
                 d->urls = task->urls();
                 emit urlsChanged();
             }
-            if (!d->nativeWasActive && !d->nativeActive && !same(d->conferences, task->conferences())) {
+            if (!d->nativeWasActive && !d->nativeActive && !d->legacyQueued
+                && !same(d->conferences, task->conferences())) {
                 d->conferences = task->conferences();
                 emit conferencesChanged();
             }
@@ -292,7 +299,12 @@ void BookmarksManager::fetchLegacy()
         } else if (!d->nativeWasActive) {
             setAvailable(false);
         }
-        maybeEnableNative();
+        if (d->legacyQueued && !d->nativeWasActive) {
+            d->legacyQueued = false;
+            saveLegacy(d->queuedLegacyUrls, d->queuedLegacyConferences);
+        } else {
+            maybeEnableNative();
+        }
     });
     task->get();
     task->go(true);
@@ -370,11 +382,22 @@ void BookmarksManager::rebuildNativeConferences(ChangeSource source)
     // Never expose the stale last IQ as the UI's authoritative state while
     // a user intent remains queued or in-flight.
     const auto optimistic = d->replica.optimisticItems();
-    QStringList ids = optimistic.keys();
-    ids.sort(Qt::CaseInsensitive);
     QList<NativeBookmark> next;
-    for (const auto &id : ids)
-        next.append(optimistic.value(id));
+    QSet<QString> emitted;
+    // Preserve the user's existing ordering when switching between legacy
+    // and PEP; only newly discovered rooms need a deterministic position.
+    for (const auto &existing : d->conferences) {
+        const auto id = existing.room().bare();
+        if (optimistic.contains(id)) {
+            next.append(optimistic.value(id));
+            emitted.insert(id);
+        }
+    }
+    QStringList fresh = optimistic.keys();
+    fresh.sort(Qt::CaseInsensitive);
+    for (const auto &id : fresh)
+        if (!emitted.contains(id))
+            next.append(optimistic.value(id));
     if (same(d->conferences, next))
         return;
 
