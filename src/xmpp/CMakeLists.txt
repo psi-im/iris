@@ -86,7 +86,6 @@ set(XMPP_IM_HEADERS
     xmpp-im/xmpp_pubsubitem.h
     xmpp-im/xmpp_pubsubevent.h
     xmpp-im/xmpp_pubsub.h
-    xmpp-im/xmpp_pubsubreplica.h
     xmpp-im/xmpp_pubsubretraction.h
     xmpp-im/xmpp_omemostorage.h
     xmpp-im/xmpp_sce.h
