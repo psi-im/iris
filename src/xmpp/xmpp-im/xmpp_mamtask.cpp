@@ -79,7 +79,7 @@ struct PageRequest {
     QString  fromId; // effective #extended filter after baseline RSM fallback
     QString  toId;
     int      maxResults = 10;
-    int      rsmIndex = -1;
+    int      rsmIndex   = -1;
 };
 
 // One child Task per MAM page. It is the *only* task that recognizes its
@@ -271,14 +271,14 @@ private:
         if (!rsm.isNull() && rsm.namespaceURI() == QLatin1String("http://jabber.org/protocol/rsm")) {
             const auto count = firstChildElementByLocalName(rsm, QLatin1String("count"));
             if (!count.isNull() && count.namespaceURI() == rsm.namespaceURI()) {
-                bool valid = false;
+                bool      valid  = false;
                 const int number = count.text().toInt(&valid);
                 if (valid && number >= 0)
                     resultCount_ = number;
             }
             const auto first = firstChildElementByLocalName(rsm, QLatin1String("first"));
             if (!first.isNull() && first.namespaceURI() == rsm.namespaceURI()) {
-                bool valid = false;
+                bool      valid = false;
                 const int index = first.attribute(QLatin1String("index")).toInt(&valid);
                 if (valid && index >= 0)
                     firstResultIndex_ = index;
@@ -287,6 +287,12 @@ private:
                 rsm, request_.request.backwards ? QLatin1String("first") : QLatin1String("last"));
             if (!edge.isNull() && edge.namespaceURI() == QLatin1String("http://jabber.org/protocol/rsm"))
                 nextCursor_ = edge.text();
+        }
+        // XEP-0059 section 2.6: if supplied, the response index MUST match
+        // the requested index. An ignored index is not a successful seek.
+        if (request_.rsmIndex >= 0 && firstResultIndex_ >= 0 && firstResultIndex_ != request_.rsmIndex) {
+            setError(1, QStringLiteral("MAM response did not honor the requested RSM index"));
+            return true;
         }
         setSuccess();
         return true;
@@ -298,10 +304,10 @@ private:
     QString                                  queryId_;
     QString                                  nextCursor_;
     QPointer<JT_PushMessage>                 push_;
-    bool                                     active_   = false;
-    bool                                     complete_ = false;
-    bool                                     stable_   = true;
-    int                                      resultCount_ = -1;
+    bool                                     active_           = false;
+    bool                                     complete_         = false;
+    bool                                     stable_           = true;
+    int                                      resultCount_      = -1;
     int                                      firstResultIndex_ = -1;
 };
 
@@ -316,8 +322,9 @@ public:
         bool               started  = false;
         bool               active   = false;
         QString            cursor;
-        int                resultCount = -1;
-        int                firstResultIndex = -1;
+        int                resultCount          = -1;
+        int                firstResultIndex     = -1;
+        bool               receivedPageMetadata = false;
         QString            fromId;
         QString            toId;
         QSet<QString>      visitedCursors;
@@ -372,8 +379,8 @@ void MAMTask::setArchiveFeatures(const Features &features)
 
 bool MAMTask::isComplete() const { return d->progress.complete; }
 bool MAMTask::isStable() const { return d->progress.stable; }
-int MAMTask::resultCount() const { return d->progress.resultCount; }
-int MAMTask::firstResultIndex() const { return d->progress.firstResultIndex; }
+int  MAMTask::resultCount() const { return d->progress.resultCount; }
+int  MAMTask::firstResultIndex() const { return d->progress.firstResultIndex; }
 
 void MAMTask::get(const Jid &with, const QDateTime &from, const QDateTime &to, const bool allowMUCArchives,
                   int mamPageSize, int mamMaxMessages, bool flipPages, bool backwards)
@@ -402,7 +409,7 @@ void MAMTask::getAtIndex(const Jid &with, int index, int pageSize, bool allowMUC
     auto request = Request::create(with, allowMUCArchives, pageSize, pageSize, false, false);
     // A negative index is invalid; do not silently query the latest archive.
     request.rsmIndex = index < 0 ? -2 : index;
-    d->request = std::move(request);
+    d->request       = std::move(request);
 }
 
 void MAMTask::onGo()
@@ -487,8 +494,8 @@ void MAMTask::startPage()
         const bool    complete      = child->isComplete();
         const bool    stable        = child->isStable();
         const QString cursor        = child->nextCursor();
-        const int resultCount       = child->resultCount();
-        const int firstIndex        = child->firstResultIndex();
+        const int     resultCount   = child->resultCount();
+        const int     firstIndex    = child->firstResultIndex();
 
         current.currentPage = nullptr;
         child->safeDelete();
@@ -504,8 +511,9 @@ void MAMTask::startPage()
         current.stable   = current.stable && stable;
         if (resultCount >= 0)
             current.resultCount = resultCount;
-        if (firstIndex >= 0 && current.firstResultIndex < 0)
+        if (!current.receivedPageMetadata)
             current.firstResultIndex = firstIndex;
+        current.receivedPageMetadata = true;
         if (d->request.rsmIndex >= 0 || current.complete
             || (d->request.maxMessages > 0 && current.fetched >= d->request.maxMessages)) {
             setSuccess();

@@ -43,7 +43,7 @@ class MAMTask : public Task {
     Q_OBJECT
 public:
     explicit MAMTask(Task *);
-    MAMTask(const MAMTask &) = delete;
+    MAMTask(const MAMTask &)            = delete;
     MAMTask &operator=(const MAMTask &) = delete;
     ~MAMTask();
 
@@ -64,8 +64,11 @@ public:
     bool isComplete() const;
     // XEP-0313 'stable=false' means results need later confirmation.
     bool isStable() const;
-    // RSM metadata is optional. -1 means server did not provide it.
+    // Optional RSM metadata; -1 means unknown. Count describes matching
+    // archive events (possibly approximate), not visible chat messages.
     int resultCount() const;
+    // Index supplied for the first physical page. A later page cannot fill
+    // in missing metadata for the first page's results.
     int firstResultIndex() const;
 
     // Configuration is only valid before go(); Task is one-shot.
