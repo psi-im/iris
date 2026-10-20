@@ -195,7 +195,7 @@ BookmarksManager::BookmarksManager(Client *client, QObject *parent)
     });
     const auto invalidate = [this](const Jid &service, const QString &node) {
         if (!d->online || (service.bare() != d->client->jid().bare() || !service.resource().isEmpty()) || node != NativeBookmark::node()
-            || !d->nativeActive)
+            || (!d->nativeActive && d->replica.state() != PubSubReplica<NativeBookmark>::State::Loading))
             return;
         d->replica.invalidate();
         d->nativeActive = false;
