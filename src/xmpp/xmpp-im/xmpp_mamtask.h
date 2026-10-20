@@ -64,6 +64,9 @@ public:
     bool isComplete() const;
     // XEP-0313 'stable=false' means results need later confirmation.
     bool isStable() const;
+    // RSM metadata is optional. -1 means server did not provide it.
+    int resultCount() const;
+    int firstResultIndex() const;
 
     // Configuration is only valid before go(); Task is one-shot.
     // Time filter
@@ -75,6 +78,10 @@ public:
     void get(const Jid &j, const QString &fromID = QString(), const QString &toID = QString(),
              const bool allowMUCArchives = true, int mamPageSize = 10, int mamMaxMessages = 0, bool flipPages = true,
              bool backwards = true);
+
+    // Indexed random-access page (XEP-0059); servers may reject it.
+    // Returns one bounded page without moving the ordinary cursor.
+    void getAtIndex(const Jid &with, int index, int pageSize, bool allowMUCArchives = true);
 
     void onGo() override;
     bool take(const QDomElement &) override;
