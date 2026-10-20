@@ -89,6 +89,35 @@ static void failedWritesAndReconnect()
           "Account reset leaked old server state");
 }
 
+static void undoPendingChanges()
+{
+    Replica replica;
+    check(replica.finishLoad(replica.beginLoad(),
+          {{QStringLiteral("existing"), QStringLiteral("old")}}), "Initial fetch failed");
+
+    // A new item that was never sent should disappear from the pending queue
+    // rather than generating a useless and possibly rejected retract IQ.
+    replica.put(QStringLiteral("new"), QStringLiteral("draft"));
+    check(replica.hasScheduledIntent(QStringLiteral("new")), "New item not queued");
+    check(replica.cancelPending(QStringLiteral("new")), "Queued insertion not cancellable");
+    check(!replica.hasScheduledIntent(QStringLiteral("new")), "Cancelled insert stayed queued");
+
+    // Undo a write already in flight: the earlier IQ may succeed, so an
+    // explicit second intent must be sent after its acknowledgement.
+    replica.put(QStringLiteral("existing"), QStringLiteral("changed"));
+    const auto first = replica.beginWrite();
+    check(first.isValid() && replica.hasInFlightIntent(QStringLiteral("existing")),
+          "First write did not start");
+    replica.put(QStringLiteral("existing"), QStringLiteral("old"));
+    check(replica.finishWrite(first, true), "First write completion rejected");
+    const auto second = replica.beginWrite();
+    check(second.changes.value(QStringLiteral("existing"))
+              == Replica::Value(QStringLiteral("old")), "Undo did not override pending update");
+    check(replica.finishWrite(second, true), "Undo was not applied");
+    check(replica.items().value(QStringLiteral("existing")) == QStringLiteral("old"),
+          "Original value not restored");
+}
+
 static void reconnectPreservesUserIntent()
 {
     Replica replica;
@@ -148,5 +177,6 @@ int main(int argc, char **argv)
     failedWritesAndReconnect();
     invalidationAndLoadTokens();
     reconnectPreservesUserIntent();
+    undoPendingChanges();
     return 0;
 }
