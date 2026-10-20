@@ -35,6 +35,8 @@ public:
     using Value   = std::optional<T>; // empty = retract
     using Items   = QHash<QString, T>;
     using Changes = QHash<QString, Value>;
+    enum class WriteResult { Success, Retry, Rejected };
+    using WriteResults = QHash<QString, WriteResult>;
 
     enum class State { Idle, Loading, Ready, Writing, ResyncRequired };
 
@@ -51,6 +53,23 @@ public:
     bool isWriting() const { return state_ == State::Writing; }
     quint64 epoch() const { return epoch_; }
     const Items &items() const { return items_; }
+    // The user-visible model includes acknowledged data AND all local intents.
+    // A newer queued edit supersedes an older in-flight IQ for the same ID.
+    Items optimisticItems() const
+    {
+        Items snapshot = items_;
+        const auto apply = [&snapshot](const Changes &changes) {
+            for (auto it = changes.cbegin(); it != changes.cend(); ++it) {
+                if (it.value())
+                    snapshot.insert(it.key(), *it.value());
+                else
+                    snapshot.remove(it.key());
+            }
+        };
+        apply(inFlight_);
+        apply(pending_);
+        return snapshot;
+    }
     bool hasPendingChanges() const { return !pending_.isEmpty(); }
     bool hasScheduledIntent(const QString &id) const { return pending_.contains(id) || inFlight_.contains(id); }
     bool hasInFlightIntent(const QString &id) const { return inFlight_.contains(id); }
@@ -147,38 +166,54 @@ public:
         batch.changes = std::move(pending_);
         pending_.clear();
         inFlight_ = batch.changes;
+        eventRevisions_.clear(); // Only revisions newer than this batch matter.
         activeBatch_ = batch.serial;
         state_ = State::Writing;
         return batch;
     }
 
-    // A batch can succeed partly on the server. Treat *any* failure as an
-    // uncertain result: restore unsuperseded intents and demand fresh fetch.
-    // Never acknowledge only part of an aggregate multi-item update.
-    bool finishWrite(const WriteBatch &batch, bool success)
+    // Per-item results isolate permanent failures from successful/temporary
+    // operations. An absent outcome is conservative: retry after refresh.
+    // Partial success still requires an authoritative refresh before retrying.
+    bool finishWrite(const WriteBatch &batch, const WriteResults &results)
     {
         if (state_ != State::Writing || batch.epoch != epoch_ || !batch.isValid()
             || batch.serial != activeBatch_)
             return false;
         activeBatch_ = 0;
         inFlight_.clear();
-        if (!success) {
-            restoreEdits(batch.changes);
-            state_ = State::ResyncRequired;
-            return true;
-        }
+        bool needsRefresh = false;
         for (auto it = batch.changes.cbegin(); it != batch.changes.cend(); ++it) {
-            // Live events received after the batch began take precedence over
-            // its older callback, including the publish echo from our server.
-            if (eventRevisions_.value(it.key()) > batch.eventSerial)
-                continue;
-            if (it.value())
-                items_.insert(it.key(), *it.value());
-            else
-                items_.remove(it.key());
+            switch (results.value(it.key(), WriteResult::Retry)) {
+            case WriteResult::Success:
+                if (eventRevisions_.value(it.key()) > batch.eventSerial)
+                    break; // Newer server notification takes precedence.
+                if (it.value())
+                    items_.insert(it.key(), *it.value());
+                else
+                    items_.remove(it.key());
+                break;
+            case WriteResult::Retry:
+                if (!pending_.contains(it.key()))
+                    pending_.insert(it.key(), it.value());
+                needsRefresh = true;
+                break;
+            case WriteResult::Rejected:
+                // Never poison the entire queue with an invalid item.
+                break;
+            }
         }
-        state_ = State::Ready;
+        eventRevisions_.clear();
+        state_ = needsRefresh ? State::ResyncRequired : State::Ready;
         return true;
+    }
+
+    bool finishWrite(const WriteBatch &batch, bool success)
+    {
+        WriteResults results;
+        for (auto it = batch.changes.cbegin(); it != batch.changes.cend(); ++it)
+            results.insert(it.key(), success ? WriteResult::Success : WriteResult::Retry);
+        return finishWrite(batch, results);
     }
 
     // Node purge/delete cannot safely be interpreted as successful completion
