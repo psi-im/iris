@@ -7,6 +7,8 @@
 
 #include <QHash>
 #include <QString>
+#include <QStringList>
+#include <QSet>
 
 #include <optional>
 #include <utility>
@@ -50,6 +52,18 @@ public:
     quint64 epoch() const { return epoch_; }
     const Items &items() const { return items_; }
     bool hasPendingChanges() const { return !pending_.isEmpty(); }
+    bool hasScheduledIntent(const QString &id) const { return pending_.contains(id) || inFlight_.contains(id); }
+    bool hasInFlightIntent(const QString &id) const { return inFlight_.contains(id); }
+    bool cancelPending(const QString &id) { return pending_.remove(id) > 0; }
+    QStringList scheduledIds() const
+    {
+        QSet<QString> ids;
+        for (auto it = pending_.cbegin(); it != pending_.cend(); ++it)
+            ids.insert(it.key());
+        for (auto it = inFlight_.cbegin(); it != inFlight_.cend(); ++it)
+            ids.insert(it.key());
+        return ids.values();
+    }
 
     // On reconnect preserve local user intents (including unconfirmed
     // in-flight writes) for revalidation against a new server snapshot.
