@@ -5,8 +5,8 @@
 #include <iris/iris_export.h>
 #include <iris/xmpp-im/xmpp_bookmarks.h>
 
-#include <QObject>
 #include <QList>
+#include <QObject>
 #include <QString>
 #include <memory>
 
@@ -17,7 +17,7 @@ class Client;
 struct BookmarkUrl {
     QString name;
     QString url;
-    bool operator==(const BookmarkUrl &o) const { return name == o.name && url == o.url; }
+    bool    operator==(const BookmarkUrl &o) const { return name == o.name && url == o.url; }
 };
 
 /**
@@ -34,10 +34,10 @@ public:
     explicit BookmarksManager(Client *client, QObject *parent = nullptr);
     ~BookmarksManager() override;
 
-    bool isAvailable() const;
-    bool usesNativeBookmarks() const;
+    bool                         isAvailable() const;
+    bool                         usesNativeBookmarks() const;
     const QList<NativeBookmark> &conferences() const;
-    const QList<BookmarkUrl> &urls() const;
+    const QList<BookmarkUrl>    &urls() const;
 
     void setOnline(bool online);
     // Replace both legacy collections with one IQ; native PEP conferences
@@ -47,8 +47,7 @@ public:
     bool upsertConference(const NativeBookmark &conference);
     bool removeConference(const Jid &room);
     // Intent-based edits: unrelated PEP changes made after baseline are kept.
-    bool applyConferenceEdits(const QList<NativeBookmark> &baseline,
-                              const QList<NativeBookmark> &edited);
+    bool applyConferenceEdits(const QList<NativeBookmark> &baseline, const QList<NativeBookmark> &edited);
     bool setUrls(const QList<BookmarkUrl> &urls);
 
 public:
@@ -72,6 +71,9 @@ private:
     void rebuildNativeConferences(ChangeSource source = ChangeSource::Snapshot);
     void flushNativeWrites();
     void saveLegacy(const QList<BookmarkUrl> &urls, const QList<NativeBookmark> &conferences);
+    void deferEdits(const QList<NativeBookmark> &desired);
+    void applyDeferredEdits();
+    void fallBackToLegacy();
     void scheduleNativeRetry();
     void setAvailable(bool available);
 
