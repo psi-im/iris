@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #include "fixture.h"
 #include <iris/xmpp_bookmarkmanager.h>
+#include <QCoreApplication>
 #include <QtCrypto>
 
 using namespace XMPP;
