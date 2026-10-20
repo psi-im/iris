@@ -464,6 +464,31 @@ int main(int argc, char **argv)
     fin(c, latestIq, QStringLiteral("alice@example.test"), QString(), QString(), true);
     require(latest->success(), "Manager extended reverse query did not finish");
 
+    // XEP-0059 permits a scrollbar jump by RSM index if the server
+    // advertised a count. This is one page and does not change the normal
+    // opaque-UID pagination mode.
+    auto *indexed = manager.getArchiveAtIndex(Jid(), 371, 10, false);
+    indexed->go();
+    const auto indexedIq = stream.sent.last();
+    require(rsm(indexedIq).firstChildElement(QStringLiteral("index")).text()
+                == QStringLiteral("371"), "MAM indexed page sent no position");
+    require(rsm(indexedIq).firstChildElement(QStringLiteral("max")).text()
+                == QStringLiteral("10"), "MAM indexed page size changed");
+    result(c, indexedIq, QStringLiteral("alice@example.test"), QStringLiteral("indexed-371"));
+    const auto indexedFin = QStringLiteral(
+        "<iq from='alice@example.test' type='result' id='%1'>"
+        "<fin xmlns='urn:xmpp:mam:2' complete='false'>"
+        "<set xmlns='http://jabber.org/protocol/rsm'>"
+        "<first index='371'>indexed-371</first>"
+        "<last>indexed-371</last><count>800</count>"
+        "</set></fin></iq>").arg(indexedIq.attribute(QStringLiteral("id")));
+    require(c.rootTask()->take(xml(indexedFin)), "Indexed MAM result not consumed");
+    require(indexed->success() && indexed->archive().size() == 1
+            && indexed->resultCount() == 800 && indexed->firstResultIndex() == 371,
+            "RSM count / first index lost on the way to MAMTask");
+    require(baseline.resultCount() == -1 && baseline.firstResultIndex() == -1,
+            "Missing RSM metadata must remain unknown, not zero");
+
     // Bounded pagination must cap the final RSM page without claiming the
     // archive is exhausted. A streaming consumer must not retain results.
     MAMTask bounded(c.rootTask());
