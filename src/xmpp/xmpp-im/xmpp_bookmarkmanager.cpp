@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 #include "xmpp_bookmarkmanager.h"
+#include "xmpp_pubsubreplica.h"
 
 #include "xmpp_client.h"
 #include "xmpp_features.h"
