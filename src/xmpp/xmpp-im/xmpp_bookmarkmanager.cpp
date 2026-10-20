@@ -470,8 +470,17 @@ bool BookmarksManager::setConferences(const QList<NativeBookmark> &conferences)
     for (const auto &room : conferences) {
         const QString id = room.room().bare();
         const auto old = current.constFind(id);
-        if (old != current.cend() && same(old.value(), room))
-            continue; // An untouched pending or in-flight change survives.
+        // A UI caller may not know the opaque XEP-0402 <extensions/> subtree.
+        // Compare known editable fields when deciding whether to publish: a
+        // native value without extension data is NOT a request to erase it.
+        const bool sameEditable = old != current.cend()
+            && old.value().room().bare() == room.room().bare()
+            && old.value().name() == room.name()
+            && old.value().nick() == room.nick()
+            && old.value().password() == room.password()
+            && old.value().autoJoin() == room.autoJoin();
+        if (sameEditable)
+            continue; // Keep pending edits and any foreign extension data.
         auto native = old != current.cend() ? old.value() : NativeBookmark();
         if (!native.isValid())
             native = NativeBookmark::create(room.room(), room.name(), room.autoJoin(), room.nick(), room.password());
