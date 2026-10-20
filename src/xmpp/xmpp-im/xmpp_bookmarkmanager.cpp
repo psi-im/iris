@@ -153,6 +153,7 @@ public:
     bool available = false;
     bool nativeActive = false;
     bool nativeWasActive = false;
+    bool nativeFallback = false; // Initial empty PEP node while legacy data exists.
     bool batchingEdits = false;
     bool legacyPending = false;
     QString accountJid;
@@ -238,6 +239,7 @@ void BookmarksManager::setOnline(bool online)
         // replay the previous identity's pending data on the new account.
         d->replica.reset();
         d->nativeWasActive = false;
+        d->nativeFallback = false;
         d->nativeActive = false;
         d->pendingUrlsValid = false;
         d->pendingUrls.clear();
@@ -316,7 +318,8 @@ bool BookmarksManager::nativeCandidate() const
     const auto &accountFeatures = server->accountFeatures();
     const bool publishOptions = accountFeatures.test("http://jabber.org/protocol/pubsub#publish-options")
         || server->serverFeatures().test("http://jabber.org/protocol/pubsub#publish-options");
-    return server->hasPEP() && accountFeatures.test("urn:xmpp:bookmarks:1#compat") && publishOptions;
+    return !d->nativeFallback && server->hasPEP()
+        && accountFeatures.test("urn:xmpp:bookmarks:1#compat") && publishOptions;
 }
 
 void BookmarksManager::maybeEnableNative()
@@ -368,9 +371,14 @@ void BookmarksManager::fetchNative()
         // Do not silently replace an existing legacy collection by an empty
         // initially-unmigrated PEP node. This is a policy decision, not a merge.
         if (!d->nativeWasActive && d->replica.items().isEmpty() && !d->conferences.isEmpty()) {
+            // The server advertised #compat but hasn't migrated existing
+            // Private XML rooms. Keep the established legacy backend instead
+            // of presenting an empty list or trying unsafe PEP replacement.
+            d->nativeFallback = true;
             d->replica.invalidate();
             return;
         }
+        d->nativeFallback = false;
         d->nativeActive = true;
         d->nativeWasActive = true;
         d->retryDelayMs = 0;
