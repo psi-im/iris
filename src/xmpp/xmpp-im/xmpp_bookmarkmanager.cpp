@@ -590,19 +590,12 @@ void BookmarksManager::saveLegacy(const QList<BookmarkUrl> &urls,
 {
     if (!d->online)
         return;
-    if (d->legacyWriting) {
-        d->legacyQueued = true;
-        d->queuedLegacyUrls = urls;
-        d->queuedLegacyConferences = conferences;
-        return;
-    }
     if (d->nativeWasActive || d->nativeActive) {
         emit syncError(QStringLiteral("Private XML writes are prohibited with native bookmarks"));
         return;
     }
-    d->legacyWriting = true;
-    // Optimistic legacy projection: a second edit must build on this snapshot,
-    // not on the previous in-flight IQ's result.
+    // Update the optimistic projection even if an earlier legacy IQ is still
+    // outstanding: every subsequent UI action must include the last intent.
     if (!same(d->conferences, conferences)) {
         d->conferences = conferences;
         emit conferencesChanged();
@@ -611,6 +604,13 @@ void BookmarksManager::saveLegacy(const QList<BookmarkUrl> &urls,
         d->urls = urls;
         emit urlsChanged();
     }
+    if (d->legacyWriting) {
+        d->legacyQueued = true;
+        d->queuedLegacyUrls = urls;
+        d->queuedLegacyConferences = conferences;
+        return;
+    }
+    d->legacyWriting = true;
     const auto gen = d->generation;
     auto *task = new PrivateBookmarksTask(d->client->rootTask());
     connect(task, &Task::finished, this, [this, task, gen] {
