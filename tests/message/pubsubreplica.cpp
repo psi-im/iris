@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
-#include <iris/xmpp_pubsubreplica.h>
+#include "../../src/xmpp/xmpp-im/xmpp_pubsubreplica.h"
 
 #include <QCoreApplication>
 #include <QString>
