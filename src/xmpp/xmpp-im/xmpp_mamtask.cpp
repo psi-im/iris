@@ -397,10 +397,11 @@ void MAMTask::get(const Jid &with, const QString &fromID, const QString &toID, c
 
 void MAMTask::getAtIndex(const Jid &with, int index, int pageSize, bool allowMUCArchives)
 {
-    if (d->progress.started || index < 0)
+    if (d->progress.started)
         return;
     auto request = Request::create(with, allowMUCArchives, pageSize, pageSize, false, false);
-    request.rsmIndex = index;
+    // A negative index is invalid; do not silently query the latest archive.
+    request.rsmIndex = index < 0 ? -2 : index;
     d->request = std::move(request);
 }
 
@@ -408,6 +409,10 @@ void MAMTask::onGo()
 {
     if (d->progress.started)
         return; // Base Task is one-shot; a finished task cannot be restarted.
+    if (d->request.rsmIndex == -2) {
+        setError(1, QStringLiteral("Negative MAM RSM index"));
+        return;
+    }
     d->progress      = Private::Progress {};
     auto &progress   = d->progress;
     progress.started = true;
@@ -501,7 +506,8 @@ void MAMTask::startPage()
             current.resultCount = resultCount;
         if (firstIndex >= 0 && current.firstResultIndex < 0)
             current.firstResultIndex = firstIndex;
-        if (current.complete || (d->request.maxMessages > 0 && current.fetched >= d->request.maxMessages)) {
+        if (d->request.rsmIndex >= 0 || current.complete
+            || (d->request.maxMessages > 0 && current.fetched >= d->request.maxMessages)) {
             setSuccess();
             return;
         }
