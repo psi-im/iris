@@ -93,6 +93,15 @@ int main(int argc, char **argv)
                                                     QStringLiteral("state")).size() == 1,
           "PEP reconciliation stripped native bookmark extensions");
 
+    // An extension-only update must count as a changed item even when all
+    // standard fields are identical. This is important for PEP pushes.
+    NativeBookmark withoutExtension = NativeBookmark::create(
+        original.room(), original.name(), original.autoJoin(), original.nick(), original.password());
+    check(!original.hasSamePayload(withoutExtension),
+          "XEP-0402 extension-only change was invisible to comparison");
+    check(original.hasSamePayload(unchanged) == false,
+          "Edited bookmark unexpectedly matched its original value");
+
     const auto opts = NativeBookmark::privatePublishOptions();
     check(opts.value(QStringLiteral("pubsub#access_model")).contains(QStringLiteral("whitelist")),
           "PEP bookmarks could be published publicly");
