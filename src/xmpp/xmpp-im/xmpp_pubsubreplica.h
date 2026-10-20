@@ -218,7 +218,7 @@ public:
 
     // Node purge/delete cannot safely be interpreted as successful completion
     // of in-flight writes. Ask the owner to reload from the authoritative node.
-    void invalidate()
+    void invalidate(bool clearServerItems = false)
     {
         if (state_ == State::Idle)
             return;
@@ -234,6 +234,9 @@ public:
             inFlight_.clear();
             activeBatch_ = 0;
         }
+        if (clearServerItems)
+            items_.clear();
+        eventRevisions_.clear();
         state_ = State::ResyncRequired;
     }
 
@@ -253,7 +256,10 @@ private:
             duringLoad_.insert(id, std::move(value));
             return;
         }
-        eventRevisions_.insert(id, ++eventSerial_);
+        // Only write acknowledgements need per-ID event revisions; keeping
+        // them between batches would grow memory for every observed contact.
+        if (state_ == State::Writing)
+            eventRevisions_.insert(id, ++eventSerial_);
         if (value)
             items_.insert(id, *value);
         else
