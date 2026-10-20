@@ -310,17 +310,21 @@ void BookmarksManager::fetchLegacy()
     task->go(true);
 }
 
-void BookmarksManager::maybeEnableNative()
+bool BookmarksManager::nativeCandidate() const
 {
-    if (!d->online || d->legacyPending || d->nativeActive
-        || d->replica.state() == PubSubReplica<NativeBookmark>::State::Loading)
-        return;
-    auto *server = d->client->serverInfoManager();
+    const auto *server = d->client->serverInfoManager();
     const auto &accountFeatures = server->accountFeatures();
-    const bool compat = accountFeatures.test("urn:xmpp:bookmarks:1#compat");
     const bool publishOptions = accountFeatures.test("http://jabber.org/protocol/pubsub#publish-options")
         || server->serverFeatures().test("http://jabber.org/protocol/pubsub#publish-options");
-    if (compat && server->hasPEP() && publishOptions && !d->legacyWriting)
+    return server->hasPEP() && accountFeatures.test("urn:xmpp:bookmarks:1#compat") && publishOptions;
+}
+
+void BookmarksManager::maybeEnableNative()
+{
+    if (!d->online || d->legacyPending || d->legacyWriting || d->nativeActive
+        || d->replica.state() == PubSubReplica<NativeBookmark>::State::Loading)
+        return;
+    if (nativeCandidate())
         fetchNative();
 }
 
@@ -425,7 +429,7 @@ bool BookmarksManager::setBookmarks(const QList<BookmarkUrl> &urls,
         emit syncError(QStringLiteral("Cannot edit bookmarks while offline"));
         return false;
     }
-    if (d->nativeWasActive || d->nativeActive) {
+    if (d->nativeWasActive || d->nativeActive || nativeCandidate()) {
         if (urls != d->urls) {
             emit syncError(QStringLiteral("URL bookmark editing is read-only with XEP-0402"));
             return false;
@@ -460,7 +464,7 @@ bool BookmarksManager::setConferences(const QList<NativeBookmark> &conferences)
         ids.insert(room.room().bare());
     }
 
-    if (!d->nativeWasActive && !d->nativeActive) {
+    if (!d->nativeWasActive && !d->nativeActive && !nativeCandidate()) {
         if (!same(d->conferences, conferences))
             saveLegacy(d->urls, conferences);
         return true;
@@ -581,7 +585,7 @@ bool BookmarksManager::setUrls(const QList<BookmarkUrl> &urls)
         emit syncError(QStringLiteral("Cannot edit URL bookmarks while offline"));
         return false;
     }
-    if (d->nativeWasActive || d->nativeActive) {
+    if (d->nativeWasActive || d->nativeActive || nativeCandidate()) {
         // Native bookmarks and Private XML may be bridged by the server.
         // A Private XML URL-only update can overwrite the entire PEP node,
         // deleting concurrent rooms and extensions. XEP-0402 has no URL
@@ -599,7 +603,7 @@ void BookmarksManager::saveLegacy(const QList<BookmarkUrl> &urls,
 {
     if (!d->online)
         return;
-    if (d->nativeWasActive || d->nativeActive) {
+    if (d->nativeWasActive || d->nativeActive || nativeCandidate()) {
         emit syncError(QStringLiteral("Private XML writes are prohibited with native bookmarks"));
         return;
     }
