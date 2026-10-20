@@ -4,7 +4,6 @@
 
 #include <iris/iris_export.h>
 #include <iris/xmpp-im/xmpp_bookmarks.h>
-#include <iris/xmpp-im/xmpp_pubsubreplica.h>
 
 #include <QObject>
 #include <QList>
