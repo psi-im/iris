@@ -49,18 +49,33 @@ No local generation counter can provide a cross-device total order.
 Protocol-specific adapters must implement appropriate merge/reload policy
 and describe whether convergence is best effort or needs server support.
 
+## Bookmark protocol manager
+
+The first adopter is **`XMPP::BookmarksManager` in Iris**, which contains
+the legacy Private XML task, XEP-0402 capability selection and publish/retract
+coordination on top of `PubSubReplica<NativeBookmark>`. Its models are
+`NativeBookmark` for conferences and `BookmarkUrl` for legacy URL entries.
+It has no dependency on Psi, widgets, or per-device application settings.
+
+Psi's former 600-line `BookmarkManager` is now a compatibility adapter which
+translates models for existing GUI callers and applies local MUC autojoin
+exceptions. `OnlyThisComputer` and `ExceptThisComputer` remain client-local
+policies and are deliberately not exported as new protocol values.
+
+A URL bookmark does not have an XEP-0402 representation. It continues to use
+Private XML and inherits that format's weaker concurrent-update guarantees.
+The #compat-based PEP/Private XML interaction needs an external server
+interoperability test before either PR is merge-ready.
+
 ## Migration plan
 
-- Iris: introduce tested coordinator without changing existing OMEMO/JinglePub
-  paths or their tested transport workflows.
-- Psi bookmarks: replace local fetch-buffer, in-flight serials, queue of room
-  intents and generation checks with a `PubSubReplica<NativeBookmark>`.
-  Keep legacy Private XML, local-only MUC flags and XEP-0402 capability
-  selection in the existing `BookmarkManager`. URL bookmarks are not
-  part of XEP-0402 and remain a separate server compatibility concern.
-- Later, after interoperability testing, evaluate migrating the reusable
-  pieces of OMEMO or JinglePub. Do not fold their protocol-specific merge
-  semantics into a universal XML merger.
+- Iris: ship the coordinator plus BookmarksManager, leaving OMEMO/JinglePub
+  unchanged.
+- Psi: keep only the presentation / local MUC preference adapter and UI;
+  no application-level Private XML task, PEP subscription, or reconciliation.
+- Later, after interoperable bookmark testing, evaluate extracting the
+  analogous pieces of OMEMO/JinglePub. Never turn their protocol-specific
+  merge semantics into a universal XML merger.
 
 ## Required regression matrix
 
