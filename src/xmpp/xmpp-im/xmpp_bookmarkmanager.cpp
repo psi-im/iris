@@ -156,6 +156,9 @@ public:
     bool legacyPending = false;
     bool legacyWriting = false;
     bool pendingUrlsValid = false;
+    bool legacyQueued = false;
+    QList<NativeBookmark> queuedLegacyConferences;
+    QList<BookmarkUrl> queuedLegacyUrls;
     int retryDelayMs = 0;
     quint64 generation = 1;
     PubSubReplica<NativeBookmark> replica;
@@ -173,7 +176,7 @@ BookmarksManager::BookmarksManager(Client *client, QObject *parent)
             this, &BookmarksManager::maybeEnableNative);
     connect(pubsub, &PubSubManager::itemPublished, this,
             [this](const Jid &service, const QString &node, const PubSubItem &item) {
-        if (!d->online || service != d->client->jid().bare() || node != NativeBookmark::node())
+        if (!d->online || (service.bare() != d->client->jid().bare() || !service.resource().isEmpty()) || node != NativeBookmark::node())
             return;
         const auto native = NativeBookmark::fromItem(item);
         if (!native.isValid())
@@ -184,14 +187,14 @@ BookmarksManager::BookmarksManager(Client *client, QObject *parent)
     });
     connect(pubsub, &PubSubManager::itemRetracted, this,
             [this](const Jid &service, const QString &node, const QString &id) {
-        if (!d->online || service != d->client->jid().bare() || node != NativeBookmark::node())
+        if (!d->online || (service.bare() != d->client->jid().bare() || !service.resource().isEmpty()) || node != NativeBookmark::node())
             return;
         d->replica.retracted(id);
         if (d->nativeActive)
             rebuildNativeConferences();
     });
     const auto invalidate = [this](const Jid &service, const QString &node) {
-        if (!d->online || service != d->client->jid().bare() || node != NativeBookmark::node()
+        if (!d->online || (service.bare() != d->client->jid().bare() || !service.resource().isEmpty()) || node != NativeBookmark::node()
             || !d->nativeActive)
             return;
         d->replica.invalidate();
@@ -344,6 +347,19 @@ void BookmarksManager::rebuildNativeConferences()
     }
 }
 
+void BookmarksManager::setBookmarks(const QList<BookmarkUrl> &urls,
+                                    const QList<NativeBookmark> &conferences)
+{
+    if (!d->online)
+        return;
+    if (!d->nativeWasActive && !d->nativeActive) {
+        saveLegacy(urls, conferences);
+        return;
+    }
+    setConferences(conferences);
+    setUrls(urls);
+}
+
 void BookmarksManager::setConferences(const QList<NativeBookmark> &conferences)
 {
     if (!d->online)
@@ -428,8 +444,14 @@ void BookmarksManager::setUrls(const QList<BookmarkUrl> &urls)
 void BookmarksManager::saveLegacy(const QList<BookmarkUrl> &urls,
                                   const QList<NativeBookmark> &conferences)
 {
-    if (!d->online || d->legacyWriting)
+    if (!d->online)
         return;
+    if (d->legacyWriting) {
+        d->legacyQueued = true;
+        d->queuedLegacyUrls = urls;
+        d->queuedLegacyConferences = conferences;
+        return;
+    }
     d->legacyWriting = true;
     const auto gen = d->generation;
     auto *task = new PrivateBookmarksTask(d->client->rootTask());
@@ -439,8 +461,7 @@ void BookmarksManager::saveLegacy(const QList<BookmarkUrl> &urls,
         d->legacyWriting = false;
         if (!task->success()) {
             emit syncError(QStringLiteral("Private XML bookmark save failed"));
-            return;
-        }
+        } else {
         if (d->urls != task->urls()) {
             d->urls = task->urls();
             emit urlsChanged();
@@ -450,7 +471,15 @@ void BookmarksManager::saveLegacy(const QList<BookmarkUrl> &urls,
             emit conferencesChanged();
         }
         emit bookmarksSaved();
-        flushNativeWrites();
+        }
+        if (d->legacyQueued) {
+            d->legacyQueued = false;
+            const auto pendingUrls = d->queuedLegacyUrls;
+            const auto pendingRooms = d->queuedLegacyConferences;
+            saveLegacy(pendingUrls, pendingRooms);
+        } else {
+            flushNativeWrites();
+        }
     });
     task->set(urls, conferences);
     task->go(true);
