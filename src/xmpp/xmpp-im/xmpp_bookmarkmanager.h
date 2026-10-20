@@ -44,15 +44,23 @@ public:
     // Replace both legacy collections with one IQ; native PEP conferences
     // remain item-scoped while URLs still use Private XML.
     void setBookmarks(const QList<BookmarkUrl> &urls, const QList<NativeBookmark> &conferences);
-    void setConferences(const QList<NativeBookmark> &conferences);
+    bool setConferences(const QList<NativeBookmark> &conferences);
+    bool upsertConference(const NativeBookmark &conference);
+    bool removeConference(const Jid &room);
     // Intent-based edits: unrelated PEP changes made after baseline are kept.
-    void applyConferenceEdits(const QList<NativeBookmark> &baseline,
+    bool applyConferenceEdits(const QList<NativeBookmark> &baseline,
                               const QList<NativeBookmark> &edited);
-    void setUrls(const QList<BookmarkUrl> &urls);
+    bool setUrls(const QList<BookmarkUrl> &urls);
+
+public:
+    enum class ChangeSource { Snapshot, Push, LocalEdit, Acknowledged };
+    Q_ENUM(ChangeSource)
 
 signals:
     void availabilityChanged(bool available);
     void conferencesChanged();
+    void conferenceUpdated(const XMPP::NativeBookmark &bookmark, ChangeSource source);
+    void conferenceRemoved(const XMPP::Jid &room, ChangeSource source);
     void urlsChanged();
     void bookmarksSaved();
     void syncError(const QString &message);
@@ -61,7 +69,7 @@ private:
     void fetchLegacy();
     void maybeEnableNative();
     void fetchNative();
-    void rebuildNativeConferences();
+    void rebuildNativeConferences(ChangeSource source = ChangeSource::Snapshot);
     void flushNativeWrites();
     void saveLegacy(const QList<BookmarkUrl> &urls, const QList<NativeBookmark> &conferences);
     void scheduleNativeRetry();
