@@ -57,15 +57,31 @@ coordination on top of `PubSubReplica<NativeBookmark>`. Its models are
 `NativeBookmark` for conferences and `BookmarkUrl` for legacy URL entries.
 It has no dependency on Psi, widgets, or per-device application settings.
 
+`PubSubReplica<T>` is intentionally **internal** to Iris until a second real
+protocol consumer validates the abstraction; external clients use
+`XMPP::BookmarksManager` and its source-aware item events. Applications must
+advertise `urn:xmpp:bookmarks:1+notify` in their XMPP caps. The library does
+not overwrite the application's full advertised feature set.
+
+The visible conference list is an *optimistic projection*: confirmed server
+items, then in-flight IQ intents, then newer queued intents. Consecutive GUI
+edits therefore cannot accidentally retract an unacknowledged earlier edit.
+`upsertConference()` / `removeConference()` are preferred to replacing the
+whole list. Per-item write outcomes distinguish success, transient retry and
+permanent rejection; retries use bounded backoff and a single configuration
+repair for PubSub `precondition-not-met`.
+
 Psi's former 600-line `BookmarkManager` is now a compatibility adapter which
 translates models for existing GUI callers and applies local MUC autojoin
 exceptions. `OnlyThisComputer` and `ExceptThisComputer` remain client-local
 policies and are deliberately not exported as new protocol values.
 
-A URL bookmark does not have an XEP-0402 representation. It continues to use
-Private XML and inherits that format's weaker concurrent-update guarantees.
-The #compat-based PEP/Private XML interaction needs an external server
-interoperability test before either PR is merge-ready.
+A URL bookmark does not have an XEP-0402 representation. To avoid
+destructive `storage:bookmarks` replacement on a #compat server, URL entries
+are **read-only when native bookmarks are active or were activated earlier in
+the session**. Editing remains supported only by the legacy backend.
+This limitation must be presented to end users rather than silently ignored.
+Full server interoperability tests are still required before merge.
 
 ## Migration plan
 
