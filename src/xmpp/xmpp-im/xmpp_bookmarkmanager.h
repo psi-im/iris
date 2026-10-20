@@ -67,6 +67,7 @@ signals:
 private:
     void fetchLegacy();
     void maybeEnableNative();
+    bool nativeCandidate() const;
     void fetchNative();
     void rebuildNativeConferences(ChangeSource source = ChangeSource::Snapshot);
     void flushNativeWrites();
