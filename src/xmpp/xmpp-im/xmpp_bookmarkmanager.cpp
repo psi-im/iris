@@ -380,8 +380,9 @@ void BookmarksManager::setConferences(const QList<NativeBookmark> &conferences)
         const auto id = room.room().bare();
         auto it = std::find_if(d->conferences.cbegin(), d->conferences.cend(),
                               [&id](const NativeBookmark &v) { return v.room().bare() == id; });
-        if (it != d->conferences.cend() && same(*it, room))
-            continue;
+        if (it != d->conferences.cend() && same(*it, room)
+            && !d->replica.hasScheduledIntent(id))
+            continue; // An undo still has to supersede earlier unconfirmed edits.
         auto native = d->replica.items().value(id);
         if (!native.isValid())
             native = NativeBookmark::create(room.room(), room.name(), room.autoJoin(), room.nick(), room.password());
@@ -396,6 +397,17 @@ void BookmarksManager::setConferences(const QList<NativeBookmark> &conferences)
     for (const auto &room : d->conferences)
         if (!ids.contains(room.room().bare()))
             d->replica.remove(room.room().bare());
+    // Undoing a newly added room before its publish begins should cancel
+    // the queued insertion outright. If its publish is already in flight,
+    // a later retract is necessary because the server may accept it.
+    for (const auto &id : d->replica.scheduledIds()) {
+        if (ids.contains(id) || d->replica.items().contains(id))
+            continue;
+        if (d->replica.hasInFlightIntent(id))
+            d->replica.remove(id);
+        else
+            d->replica.cancelPending(id);
+    }
     flushNativeWrites();
     if (!d->nativeActive && d->replica.state() != PubSubReplica<NativeBookmark>::State::Loading)
         fetchNative();
@@ -430,7 +442,10 @@ void BookmarksManager::applyConferenceEdits(const QList<NativeBookmark> &baselin
 
 void BookmarksManager::setUrls(const QList<BookmarkUrl> &urls)
 {
-    if (!d->online || urls == d->urls)
+    if (!d->online)
+        return;
+    // A second edit can undo a still queued or unacknowledged URL write.
+    if (urls == d->urls && !d->pendingUrlsValid && !d->legacyWriting && !d->legacyQueued)
         return;
     if (d->nativeWasActive) {
         d->pendingUrls = urls;
