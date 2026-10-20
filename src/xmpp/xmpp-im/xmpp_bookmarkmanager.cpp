@@ -21,8 +21,7 @@ const QString legacyNs = QStringLiteral("storage:bookmarks");
 
 bool same(const NativeBookmark &a, const NativeBookmark &b)
 {
-    return a.room().bare() == b.room().bare() && a.name() == b.name()
-        && a.nick() == b.nick() && a.password() == b.password() && a.autoJoin() == b.autoJoin();
+    return a.hasSamePayload(b);
 }
 
 bool same(const QList<NativeBookmark> &a, const QList<NativeBookmark> &b)
