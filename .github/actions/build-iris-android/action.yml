@@ -59,6 +59,12 @@ runs:
         install-mode: sdk
         qca-directory: qca-sdk
 
+    - name: Require an exactly matched Qt 6.12 QCA SDK
+      shell: bash
+      run: |
+        test -f qca-sdk/QT-SDK-VERSION.txt
+        test "$(tr -d '\r\n' < qca-sdk/QT-SDK-VERSION.txt)" = "${{ inputs.qt-version }}"
+
     - name: Configure, build and install Iris
       shell: bash
       env:
