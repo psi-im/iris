@@ -27,6 +27,8 @@ runs:
       uses: jurplel/install-qt-action@v4
       with:
         version: ${{ inputs.qt-version }}
+        # Windows Qt >=6.11 needs the new architecture-specific repo layout.
+        aqtsource: ${{ runner.os == 'Windows' && 'git+https://github.com/miurahr/aqtinstall.git@8c3695d4a4e1ceabf6a74dc6c79681656dc6b74b' || '' }}
         cache: true
 
     - name: Set up MSVC environment for Ninja
