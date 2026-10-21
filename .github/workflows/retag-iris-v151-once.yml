@@ -1,0 +1,52 @@
+name: Retag Iris v1.5.1 for Qt 6.12 release
+on:
+  push:
+    branches: [master]
+    paths: ['.github/workflows/retag-iris-v151-once.yml']
+permissions:
+  contents: write
+  actions: write
+jobs:
+  retag:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Move Iris v1.5.1 with tag ref lease
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          old_tag=5c2f72922d81f5d2fd7406ff6f8e558f05832f00
+          target=955e325aeda3ea0c9feffd2fe7ce7a3939dab34b
+          test "$(gh api "repos/$GITHUB_REPOSITORY/pulls/133" --jq .merge_commit_sha)" = "$target"
+          git cat-file -e "$target^{commit}"
+          git merge-base --is-ancestor "$target" HEAD
+          git fetch --force --tags origin
+          current="$(git rev-parse refs/tags/v1.5.1)"
+          if [[ "$current" == "$old_tag" ]]; then
+            old_peeled="$(git rev-parse 'v1.5.1^{}')"
+            test "$old_peeled" = 962f7294b26d51858ca15c141bac17582607a8ae
+            git config user.name github-actions
+            git config user.email github-actions@users.noreply.github.com
+            git tag -fa v1.5.1 "$target" -m "Iris 1.5.1: Qt 6.12, QCA v3.0.12 Windows/macOS/Android SDKs"
+            git push --force-with-lease="refs/tags/v1.5.1:$old_tag" origin refs/tags/v1.5.1:refs/tags/v1.5.1
+          else
+            test "$(git rev-parse 'v1.5.1^{}')" = "$target" || {
+              echo "::error::Iris v1.5.1 changed unexpectedly; refusing to overwrite"
+              exit 1
+            }
+          fi
+          remote="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v1.5.1" --jq .object.sha)"
+          resolved="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$remote" --jq .object.sha)"
+          test "$resolved" = "$target"
+      - name: Trigger packaging and release via existing workflow
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run release.yml --ref master --repo "$GITHUB_REPOSITORY" -f tag=v1.5.1 -f rebuild_assets=true
+          echo "Started release verification for Iris v1.5.1 at 955e325aeda3ea0c9feffd2fe7ce7a3939dab34b."
