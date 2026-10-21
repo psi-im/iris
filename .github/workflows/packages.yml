@@ -15,8 +15,8 @@ permissions:
   contents: read
 
 env:
-  QT_VERSION: 6.10.2
-  ANDROID_QT_VERSION: 6.11.2
+  QT_VERSION: 6.12.0
+  ANDROID_QT_VERSION: 6.12.0
   ANDROID_NDK_VERSION: r27c
   ANDROID_API: 28
 
