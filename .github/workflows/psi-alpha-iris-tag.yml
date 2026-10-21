@@ -1,0 +1,46 @@
+name: Tag Iris v1.5.1 for Psi alpha
+# One-off, isolated release-candidate branch: never changes Iris master.
+on:
+  push:
+    branches: ['release/iris-v1.5.1-psi-alpha']
+permissions:
+  contents: write
+jobs:
+  tag:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Tag exact Iris gitlink in Psi master
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git fetch --tags --force origin
+          git fetch origin master
+          # Publish exactly the Iris source currently consumed by Psi, not an
+          # unreviewed Iris HEAD that could differ from the Psi submodule.
+          iris_sha="$(gh api repos/psi-im/psi/git/trees/master --jq '.tree[] | select(.path == "iris" and .mode == "160000") | .sha')"
+          [[ "$iris_sha" =~ ^[a-f0-9]{40}$ ]] || { echo "::error::Could not resolve Psi's Iris gitlink"; exit 1; }
+          if ! git cat-file -e "$iris_sha^{commit}" 2>/dev/null; then
+            git fetch origin "$iris_sha"
+          fi
+          git cat-file -e "$iris_sha^{commit}"
+          git merge-base --is-ancestor v1.5 "$iris_sha" || {
+            echo "::error::Psi's Iris gitlink is not descended from v1.5"; exit 1;
+          }
+          if git show-ref --verify --quiet refs/tags/v1.5.1; then
+            existing="$(git rev-parse 'v1.5.1^{}')"
+            [[ "$existing" == "$iris_sha" ]] || {
+              echo "::error::v1.5.1 already exists at $existing, not $iris_sha"; exit 1;
+            }
+            echo "Iris v1.5.1 already points to the intended gitlink $iris_sha"
+            exit 0
+          fi
+          git config user.name github-actions
+          git config user.email github-actions@users.noreply.github.com
+          git tag -a v1.5.1 "$iris_sha" -m "Iris 1.5.1 for Psi 2.0 alpha"
+          git push origin refs/tags/v1.5.1
+          echo "Published Iris v1.5.1 at Psi gitlink $iris_sha"
