@@ -27,6 +27,8 @@ runs:
       uses: jurplel/install-qt-action@v4
       with:
         version: ${{ inputs.qt-version }}
+        # Windows Qt >=6.11 needs the new architecture-specific repo layout.
+        aqtsource: ${{ runner.os == 'Windows' && 'git+https://github.com/miurahr/aqtinstall.git@8c3695d4a4e1ceabf6a74dc6c79681656dc6b74b' || '' }}
         cache: true
 
     - name: Set up MSVC environment for Ninja
@@ -41,6 +43,12 @@ runs:
         qca-asset: qca3-qt6-${{ inputs.platform }}.zip
         install-mode: sdk
         qca-directory: qca-sdk
+
+    - name: Require an exactly matched Qt 6.12 QCA SDK
+      shell: bash
+      run: |
+        test -f qca-sdk/QT-SDK-VERSION.txt
+        test "$(tr -d '\r\n' < qca-sdk/QT-SDK-VERSION.txt)" = "${{ inputs.qt-version }}"
 
     - name: Resolve Windows vcpkg cache key
       if: runner.os == 'Windows'
