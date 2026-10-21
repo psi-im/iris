@@ -1,0 +1,70 @@
+name: Finish Iris Qt6.12 release after upstream QCA
+on:
+  push:
+    branches: [release/qt-6.12-unification]
+permissions:
+  actions: write
+  contents: write
+jobs:
+  tag:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Wait for matching QCA Qt6.12 SDK release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag=$(python3 -c 'import json;print(json.load(open("dependencies.lock.json"))["qca"]["tag"])')
+          for i in $(seq 1 240); do
+            assets=$(gh release view "$tag" --repo psi-im/qca --json assets --jq '.assets[].name' 2>/dev/null || true)
+            if grep -Fxq 'qca3-qt6-windows-x64.zip' <<< "$assets" &&
+               grep -Fxq 'qca3-qt6-macos-arm64.zip' <<< "$assets" &&
+               grep -Fxq 'qca3-qt6-android-arm64-v8a.zip' <<< "$assets"; then
+              echo "Verified QCA $tag release artifacts"; break
+            fi
+            if (( i == 240 )); then echo "::error::Timed out awaiting QCA SDKs"; exit 1; fi
+            sleep 60
+          done
+      - name: Dispatch full Iris regression suite against QCA SDKs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git fetch origin release/qt-6.12-unification --no-tags
+          test "$(git rev-parse FETCH_HEAD)" = "$GITHUB_SHA"
+          gh workflow run ci.yml --ref release/qt-6.12-unification --repo "$GITHUB_REPOSITORY"
+          for i in $(seq 1 240); do
+            runs=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --limit 30 --json event,headSha,status,conclusion,databaseId,createdAt)
+            state=$(jq -r --arg sha "$GITHUB_SHA" '
+              [.[] | select(.event == "workflow_dispatch" and .headSha == $sha)]
+              | sort_by(.createdAt) | last | [.status, (.conclusion // "")] | @tsv
+            ' <<< "$runs")
+            if [[ "$state" == $'completed\tsuccess' ]]; then
+              echo "Full Iris test suite passed"; break
+            fi
+            if [[ "$state" == completed$'\t'* ]]; then
+              echo "::error::Iris tests failed ($state)"; exit 1
+            fi
+            if (( i == 240 )); then echo "::error::Timed out awaiting Iris CI"; exit 1; fi
+            sleep 30
+          done
+      - name: Tag verified Iris Qt6.12 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag=v1.5.2
+          git fetch origin release/qt-6.12-unification --no-tags
+          test "$(git rev-parse FETCH_HEAD)" = "$GITHUB_SHA"
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
+            echo "::error::Tag exists; refusing to change it"; exit 1
+          fi
+          git config user.name github-actions
+          git config user.email github-actions@users.noreply.github.com
+          git tag -a "$tag" "$GITHUB_SHA" -m 'Iris 1.5.2 / QCA 3.0.12 / Qt 6.12.0'
+          git push origin "refs/tags/$tag"
