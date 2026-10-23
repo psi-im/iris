@@ -30,5 +30,5 @@ replace_deprecated_qca_macro(
     "#if defined(Q_OS_MACOS) && defined(F_NOCACHE)")
 replace_deprecated_qca_macro(
     "plugins/qca-ossl/basetlscontext.cpp"
-    "#ifdef Q_OS_MAC"
-    "#ifdef Q_OS_MACOS")
+    "#ifdef Q_OS_MAC\\n"
+    "#ifdef Q_OS_MACOS\\n")
