@@ -154,8 +154,19 @@ if(IRIS_BUNDLED_QCA)
     endif()
     list(APPEND QCA_BUILD_OPTIONS -DQCA_SUFFIX=qt${QT_DEFAULT_MAJOR_VERSION})
     file(MAKE_DIRECTORY "${Qca_INCLUDE_DIR}")
+    # Keep the exact locked QCA revision; apply these two source-only macOS
+    # Qt6 compatibility fixes until they are included in a released QCA tag.
+    # Never rewrite a caller-supplied local QCA source tree.
+    set(_iris_qca_patch_args)
+    if(APPLE AND NOT EXISTS "${QCA_SOURCE_DIR}")
+        list(APPEND _iris_qca_patch_args
+            PATCH_COMMAND "${CMAKE_COMMAND}"
+            "-DQCA_SOURCE_DIR=<SOURCE_DIR>"
+            -P "${CMAKE_CURRENT_LIST_DIR}/patch-qca-macos-warnings.cmake")
+    endif()
     ExternalProject_Add(QcaProject
         ${_qca_source_args}
+        ${_iris_qca_patch_args}
         UPDATE_COMMAND ""
         PREFIX ${QCA_PREFIX}
         BINARY_DIR "${_qca_binary_dir}"
