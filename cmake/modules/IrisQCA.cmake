@@ -192,6 +192,12 @@ if(IRIS_BUNDLED_QCA)
     )
     if(WIN32 OR USE_MXE)
         set_property(TARGET Qca3::Qca APPEND PROPERTY INTERFACE_LINK_LIBRARIES crypt32 ws2_32)
+    elseif(APPLE)
+        # The static QCA system-store backend calls SecCertificateCopyData and
+        # SecTrustCopyAnchorCertificates. Export this dependency to Iris and
+        # applications consuming Qca3::Qca, not just Qca_LIBRARY's legacy list.
+        set_property(TARGET Qca3::Qca APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+            "-framework Security" "-framework CoreFoundation")
     endif()
     set_property(TARGET Qca3::Qca PROPERTY INTERFACE_INCLUDE_DIRECTORIES "${Qca_INCLUDE_DIR}")
     set(IRIS_QCA_TARGET Qca3::Qca)
