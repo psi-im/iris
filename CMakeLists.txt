@@ -209,6 +209,7 @@ if(IRIS_BUILD_TESTS)
     add_subdirectory(tests/jingle)
     add_subdirectory(tests/mam)
     add_subdirectory(tests/message)
+    add_subdirectory(tests/net)
 endif()
 
 if(NOT IS_SUBPROJECT)
