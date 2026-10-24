@@ -861,8 +861,20 @@ bool RemoteNameProvider::isSupported()
 
 bool RemoteNameProvider::isValidServer(const QUrl &server)
 {
-    return server.isValid() && !server.host().isEmpty()
-        && (server.scheme() == QLatin1String("tcp") || server.scheme() == QLatin1String("https"));
+    if (!server.isValid() || server.host().isEmpty() || !server.userInfo().isEmpty() || server.hasFragment())
+        return false;
+
+    const int port = server.port(-1);
+    if (port == 0 || port > 65535)
+        return false;
+
+    if (server.scheme() == QLatin1String("https"))
+        return true;
+
+    // DNS-over-TCP has no HTTP-style path or query: accepting one would
+    // silently discard configuration the caller might expect to be used.
+    return server.scheme() == QLatin1String("tcp")
+        && (server.path().isEmpty() || server.path() == QLatin1String("/")) && !server.hasQuery();
 }
 
 int RemoteNameProvider::connectionError() const { return d->connectionError; }
