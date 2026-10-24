@@ -705,6 +705,30 @@ void testWithoutJdns()
     check(proxy.targets == QList<QByteArray> { "example.test:5222" }, "the proxy was not given the domain");
 }
 
+void testRemoteDnsEndpointValidation()
+{
+    check(RemoteNameProvider::isValidServer(QUrl(QStringLiteral("tcp://1.1.1.1"))),
+          "DNS over TCP without a port should be accepted");
+    check(RemoteNameProvider::isValidServer(QUrl(QStringLiteral("tcp://dns.example:853"))),
+          "explicit DNS over TCP port should be accepted");
+    check(RemoteNameProvider::isValidServer(QUrl(QStringLiteral("https://dns.example/dns-query?token=abc"))),
+          "DoH path and query should be accepted");
+
+    for (const QString &url : {
+             QStringLiteral("http://dns.example/dns-query"),
+             QStringLiteral("tcp://dns.example/ignored/path"),
+             QStringLiteral("tcp://dns.example/?ignored=1"),
+             QStringLiteral("https://user:password@dns.example/dns-query"),
+             QStringLiteral("https://dns.example/dns-query#fragment"),
+             QStringLiteral("tcp://dns.example:0"),
+             QStringLiteral("https://dns.example:0/dns-query"),
+             QStringLiteral("https:///dns-query"),
+         }) {
+        check(!RemoteNameProvider::isValidServer(QUrl(url)),
+              "invalid DNS endpoint URL was accepted");
+    }
+}
+
 void testHttpConnectIpv6Authority()
 {
     FakeXmppServer target;
@@ -734,6 +758,7 @@ int main(int argc, char **argv)
         testWithoutJdns();
     }
     testServiceResolverProtocolFallback();
+    testRemoteDnsEndpointValidation();
     testNoSystemFallback();
     testHttpConnectIpv6Authority();
     return 0;
