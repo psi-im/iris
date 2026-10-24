@@ -65,7 +65,7 @@ public:
     QList<quint16>                                   ids;     // message IDs of the queries
     int                                              connections = 0;
     int                                              open        = 0;
-    bool dropFirstQuery = false; // close the first connection instead of answering
+    bool dropFirstQuery   = false; // close the first connection instead of answering
     bool ignoreFirstQuery = false; // leave the first request in flight on the same connection
 
     FakeDnsServer()
@@ -91,7 +91,7 @@ public:
                             ignoreFirstQuery = false;
                             continue; // backend stays alive but sends no reply
                         }
-                        QByteArray       frame;
+                        QByteArray frame;
                         appendUInt16(frame, quint16(reply.size()));
                         socket->write(frame + reply);
                     }
@@ -520,14 +520,12 @@ void testCancelledLookupDoesNotBlockFollowingQueries()
     dns.addAddress("still-working.example.test", QHostAddress::LocalHost);
 
     RemoteNameProvider provider(QUrl(QStringLiteral("tcp://127.0.0.1:%1").arg(dns.port())));
-    Lookup abandoned(&provider, "abandoned.example.test", NameRecord::A);
-    check(waitFor([&]() { return dns.queries.size() == 1; }),
-          "the first in-flight DNS lookup was not dispatched");
+    Lookup             abandoned(&provider, "abandoned.example.test", NameRecord::A);
+    check(waitFor([&]() { return dns.queries.size() == 1; }), "the first in-flight DNS lookup was not dispatched");
     abandoned.resolver.stop();
 
     Lookup fresh(&provider, "still-working.example.test", NameRecord::A);
-    check(waitFor([&]() { return fresh.done; }),
-          "the DNS lookup after cancellation did not finish");
+    check(waitFor([&]() { return fresh.done; }), "the DNS lookup after cancellation did not finish");
     check(fresh.records.size() == 1 && fresh.records.first().address() == QHostAddress::LocalHost,
           "cancelling a DNS lookup incorrectly marked a live DNS server unavailable");
     check(!abandoned.done, "a cancelled DNS lookup emitted a late result");
@@ -753,8 +751,7 @@ void testRemoteDnsEndpointValidation()
              QStringLiteral("https://dns.example:0/dns-query"),
              QStringLiteral("https:///dns-query"),
          }) {
-        check(!RemoteNameProvider::isValidServer(QUrl(url)),
-              "invalid DNS endpoint URL was accepted");
+        check(!RemoteNameProvider::isValidServer(QUrl(url)), "invalid DNS endpoint URL was accepted");
     }
 }
 

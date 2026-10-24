@@ -236,7 +236,7 @@ public:
     QCA::TLS                *tls        = nullptr;
     Channel                  channel    = Channel::Closed;
     QByteArray               tcpBuffer;
-    std::optional<HttpReply> reply;           // to the DNS over HTTPS request in flight
+    std::optional<HttpReply> reply;            // to the DNS over HTTPS request in flight
     int                      httpRequest = -1; // -1 if no HTTP query (JDNS request ID 0 is valid)
     QTimer                   idleTimer;
     int                      connectionError = ByteStream::ErrOk;
@@ -452,8 +452,7 @@ private:
             errorString = RemoteNameProvider::tr("DNS server %1 did not answer in time").arg(host);
             unreachable.setRemainingTime(IdleTimeout);
             failLater(id, NameResolver::ErrorTimeout);
-        }
-        else
+        } else
             failLater(id, NameResolver::ErrorGeneric);
     }
 
@@ -886,8 +885,8 @@ bool RemoteNameProvider::isValidServer(const QUrl &server)
 
     // DNS-over-TCP has no HTTP-style path or query: accepting one would
     // silently discard configuration the caller might expect to be used.
-    return server.scheme() == QLatin1String("tcp")
-        && (server.path().isEmpty() || server.path() == QLatin1String("/")) && !server.hasQuery();
+    return server.scheme() == QLatin1String("tcp") && (server.path().isEmpty() || server.path() == QLatin1String("/"))
+        && !server.hasQuery();
 }
 
 int RemoteNameProvider::connectionError() const { return d->connectionError; }
