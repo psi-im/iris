@@ -208,7 +208,7 @@ public:
 
     // A DNS message from JDNS, see QJDnsExternalTransport::queryRequested().
     struct Request {
-        quint64    id;
+        int        id;
         QByteArray message;
         quint16    wireId  = 0; // message ID on the current connection
         bool       sent    = false;
@@ -237,7 +237,7 @@ public:
     Channel                  channel    = Channel::Closed;
     QByteArray               tcpBuffer;
     std::optional<HttpReply> reply;           // to the DNS over HTTPS request in flight
-    quint64                  httpRequest = 0; // id of that request, 0 if none
+    int                      httpRequest = -1; // -1 if no HTTP query (JDNS request ID 0 is valid)
     QTimer                   idleTimer;
     int                      connectionError = ByteStream::ErrOk;
     QString                  errorString;
@@ -342,8 +342,14 @@ private:
         connect(dnsTransport, &QJDnsExternalTransport::queryRequested, this, &Private::onQueryRequested);
         connect(dnsTransport, &QJDnsExternalTransport::requestCancelled, this, &Private::onRequestCancelled);
         dns = new QJDns(this);
-        dns->setTransport(dnsTransport);
-        if (!dns->init(QJDns::Unicast, QHostAddress::AnyIPv4)) {
+        if (!dns->setQueryTransport(dnsTransport)) {
+            delete dnsTransport;
+            dnsTransport = nullptr;
+            delete dns;
+            dns = nullptr;
+            return;
+        }
+        if (!dns->init(QJDns::Unicast)) {
             delete dns; // and the transport
             dns          = nullptr;
             dnsTransport = nullptr;
@@ -438,7 +444,7 @@ private:
             failLater(id, NameResolver::ErrorGeneric);
     }
 
-    int indexOfRequest(quint64 id) const
+    int indexOfRequest(int id) const
     {
         for (int i = 0; i < requests.size(); ++i) {
             if (requests[i].id == id)
@@ -456,7 +462,7 @@ private:
         return -1;
     }
 
-    void onQueryRequested(quint64 id, const QByteArray &message)
+    void onQueryRequested(int id, const QByteArray &message)
     {
         if (!unreachable.hasExpired()) {
             dnsTransport->failRequest(id, errorString);
@@ -467,7 +473,7 @@ private:
     }
 
     // The request timed out.
-    void onRequestCancelled(quint64 id)
+    void onRequestCancelled(int id)
     {
         const int index = indexOfRequest(id);
         if (index < 0)
@@ -526,7 +532,7 @@ private:
                 if (!request.sent)
                     sendTcp(request);
             }
-        } else if (!httpRequest) {
+        } else if (httpRequest < 0) {
             for (Request &request : requests) {
                 if (!request.sent) {
                     sendHttp(request);
@@ -585,7 +591,7 @@ private:
     {
         idleTimer.stop();
         channel     = Channel::Closed;
-        httpRequest = 0;
+        httpRequest = -1;
         reply.reset();
         tcpBuffer.clear();
         if (tls) {
@@ -747,7 +753,7 @@ private:
         const HttpReply finished = *reply;
         const int       index    = indexOfRequest(httpRequest);
         reply.reset();
-        httpRequest = 0;
+        httpRequest = -1;
 
         if (result == HttpReply::Invalid) {
             errorString = RemoteNameProvider::tr("Invalid HTTP reply from DNS server %1").arg(host);
