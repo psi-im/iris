@@ -318,6 +318,13 @@ public:
         }
 
         const int query = dns->queryStart(name, type);
+        if (query < 0) {
+            // Native JDNS can refuse an invalid query synchronously. There
+            // will be no resultsReady/error signal for a negative query ID.
+            errorString = RemoteNameProvider::tr("Could not start the DNS lookup");
+            failLater(id, NameResolver::ErrorGeneric);
+            return id;
+        }
         lookups.insert(id, { query, asked, type });
         lookupIds.insert(query, id);
         return id;
