@@ -39,7 +39,14 @@ public:
     //! Returns true if Iris was built with JDNS, which remote lookups need.
     static bool isSupported();
 
-    //! Returns true if \a server is a \c tcp:// or \c https:// URL with a host.
+    /*!
+       \brief Validate a DNS-over-TCP or DNS-over-HTTPS server URL
+
+       Accepts \c tcp://host[:port] (without query parameters or a path
+       other than \c /) or \c https://host[:port]/path?query.
+       Rejects credentials, fragments, port zero, and unsupported schemes.
+       In particular, unencrypted HTTP is never used for DoH.
+    */
     static bool isValidServer(const QUrl &server);
 
     /*!
