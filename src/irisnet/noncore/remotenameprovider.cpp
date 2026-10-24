@@ -438,8 +438,14 @@ private:
             return;
         if (error == QJDns::ErrorNXDomain)
             failLater(id, NameResolver::ErrorNoName);
-        else if (error == QJDns::ErrorTimeout)
+        else if (error == QJDns::ErrorTimeout) {
+            // Only a real timeout marks the remote resolver temporarily
+            // unreachable. requestCancelled() is also emitted for ordinary
+            // consumer cancellation and must not poison later lookups.
+            errorString = RemoteNameProvider::tr("DNS server %1 did not answer in time").arg(host);
+            unreachable.setRemainingTime(IdleTimeout);
             failLater(id, NameResolver::ErrorTimeout);
+        }
         else
             failLater(id, NameResolver::ErrorGeneric);
     }
@@ -472,17 +478,17 @@ private:
         pump();
     }
 
-    // The request timed out.
+    // Called both on timeout and when the final consumer cancels. Do not
+    // interpret normal cancellation as upstream DNS failure.
     void onRequestCancelled(int id)
     {
         const int index = indexOfRequest(id);
         if (index < 0)
             return;
         const bool lostHttpRequest = requests.takeAt(index).id == httpRequest;
-        errorString                = RemoteNameProvider::tr("DNS server %1 did not answer in time").arg(host);
-        unreachable.setRemainingTime(IdleTimeout);
         if (lostHttpRequest) {
-            // The HTTP connection is out of step with the remaining requests.
+            // HTTP replies are sequential: discard the in-flight response
+            // rather than accidentally treating it as a later query.
             closeChannel();
         }
         pump();
