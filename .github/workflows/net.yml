@@ -1,0 +1,87 @@
+name: Name resolution regressions
+
+on:
+  pull_request:
+    paths:
+      - 'src/irisnet/corelib/irisnetplugin.*'
+      - 'src/irisnet/corelib/jdnsrecord*'
+      - 'src/irisnet/corelib/netnames*'
+      - 'src/irisnet/noncore/cutestuff/**'
+      - 'src/irisnet/noncore/remotenameprovider.*'
+      - 'src/irisnet/CMakeLists.txt'
+      - 'src/xmpp/xmpp-core/connector.cpp'
+      - 'src/xmpp/xmpp-core/xmpp.h'
+      - 'cmake/modules/IrisJDns.cmake'
+      - 'tests/net/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/net.yml'
+  push:
+    paths:
+      - 'src/irisnet/corelib/irisnetplugin.*'
+      - 'src/irisnet/corelib/jdnsrecord*'
+      - 'src/irisnet/corelib/netnames*'
+      - 'src/irisnet/noncore/cutestuff/**'
+      - 'src/irisnet/noncore/remotenameprovider.*'
+      - 'src/irisnet/CMakeLists.txt'
+      - 'src/xmpp/xmpp-core/connector.cpp'
+      - 'src/xmpp/xmpp-core/xmpp.h'
+      - 'cmake/modules/IrisJDns.cmake'
+      - 'tests/net/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/net.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: iris-net-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  net:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # JDNS resolves through proxies; without it the connector keeps the
+          # old behaviour and remote lookups fail.
+          - name: qt5-qca2-jdns
+            deps: qtbase5-dev libqca-qt5-2-dev libb2-dev
+            cmake: -DIRIS_SYSTEM_QCA=2 -DIRIS_ENABLE_JDNS=ON
+          - name: qt6-qca3-jdns
+            deps: qt6-base-dev
+            cmake: -DUSE_QT6=ON -DIRIS_SYSTEM_QCA=3 -DIRIS_ENABLE_JDNS=ON
+          - name: qt6-qca3
+            deps: qt6-base-dev
+            cmake: -DUSE_QT6=ON -DIRIS_SYSTEM_QCA=3
+    name: Net (${{ matrix.name }})
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build zlib1g-dev ${{ matrix.deps }}
+      - uses: ./.github/actions/load-dependencies
+        if: startsWith(matrix.name, 'qt6-qca3')
+        with:
+          qca-asset: qca3-deb-ubuntu-24.04.zip
+          install-mode: apt
+          qca-directory: qca-release
+      - name: Configure
+        run: |
+          cmake -S . -B build-net -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DIRIS_BUILD_TESTS=ON \
+            -DIRIS_ENABLE_OMEMO=OFF \
+            -DIRIS_BUNDLED_QCA=OFF \
+            -DIRIS_BUNDLED_USRSCTP=OFF \
+            -DIRIS_ENABLE_JINGLE_SCTP=OFF \
+            ${{ matrix.cmake }}
+      - name: Build name resolution regressions
+        run: cmake --build build-net --parallel 4 --target net_remotedns_test
+      - name: Test name resolution regressions
+        run: ctest --test-dir build-net --output-on-failure -R '^net_'
