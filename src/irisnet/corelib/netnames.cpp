@@ -452,6 +452,7 @@ public:
     Protocol               requestedProtocol;      //!< IP protocol requested by user
     QPointer<NameProvider> provider;               //!< Set by setNameProvider(), null for the system resolver
     bool                   customProvider = false; //!< setNameProvider() was given a provider
+    bool                   resolveTargets = true;  //!< see setResolveTargets()
 
     /* state trackers */
     QString                               domain;   //!< Domain we are currently looking up
@@ -1241,6 +1242,8 @@ void ServiceResolver::setNameProvider(NameProvider *provider)
     d->customProvider = provider != nullptr;
 }
 
+void ServiceResolver::setResolveTargets(bool resolve) { d->resolveTargets = resolve; }
+
 /* DNS-SD lookup */
 void ServiceResolver::start(const QByteArray &name) { NameManager::instance()->resolve_instance_start(d, name); }
 
@@ -1450,7 +1453,14 @@ void ServiceResolver::try_next_srv()
 
     /* if there are still hosts we did not try */
     auto record = d->srvList.takeNext();
-    if (!record.record.isNull()) {
+    if (!record.record.isNull() && !d->resolveTargets) {
+        /* the caller resolves the target, e.g. a proxy; "." means no service there (RFC 2782) */
+        if (record.record.name().isEmpty() || record.record.name() == ".")
+            try_next_srv();
+        else
+            emit resultReady(QHostAddress(), quint16(record.record.port()), QString::fromLatin1(record.record.name()),
+                             record.service);
+    } else if (!record.record.isNull()) {
         /* lookup host by name and specify port for later use */
         start(record.record.name(), quint16(record.record.port()), record.service);
     } else {
@@ -1462,6 +1472,12 @@ void ServiceResolver::try_next_srv()
 
 void ServiceResolver::tryNext()
 {
+    /* without address lookups every result is an SRV target */
+    if (!d->resolveTargets) {
+        try_next_srv();
+        return;
+    }
+
     /* if the host list cannot help, try the SRV list */
     if (!try_next_host()) {
         try_next_srv();

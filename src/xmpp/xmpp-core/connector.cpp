@@ -234,11 +234,14 @@ void AdvancedConnector::releaseResolver()
 }
 
 /*
-   Discover the server like a direct connection does - SRV records, the
-   addresses of their targets, finally the domain itself - but with a DNS server
-   reached through the proxy, and connect through the proxy to every address in
-   turn. Other proxy users of netnames get the same behaviour from
-   ServiceResolver::setNameProvider().
+   Discover the server like a direct connection does - SRV records, their
+   targets, finally the domain itself - and connect through the proxy to every
+   candidate in turn. By default only the SRV records are looked up here, and
+   the proxy resolves the targets. With remote DNS a DNS server reached through
+   the proxy looks up the SRV records and the target addresses; should that
+   find nothing, the proxy is given the domain. Other proxy users of netnames
+   get the same behaviour from ServiceResolver::setNameProvider() and
+   ServiceResolver::setResolveTargets().
 */
 void AdvancedConnector::resolveThroughProxy()
 {
@@ -249,27 +252,41 @@ void AdvancedConnector::resolveThroughProxy()
     if (d->opt_directtls)
         d->port = XMPP_LEGACY_PORT;
 
-    d->dnsProvider = new RemoteNameProvider(d->remoteDns, d->proxy, this);
-    d->resolver    = new ServiceResolver(this);
-    d->resolver->setNameProvider(d->dnsProvider);
-    // The proxy makes the connections, so the local network's IPv6 support is
-    // irrelevant. IPv4 is what proxies reach most reliably; IPv6 comes next.
-    d->resolver->setProtocol(ServiceResolver::IPv4_IPv6);
+    d->resolver = new ServiceResolver(this);
+    if (!d->remoteDns.isEmpty() && RemoteNameProvider::isSupported()) {
+        d->dnsProvider = new RemoteNameProvider(d->remoteDns, d->proxy, this);
+        d->resolver->setNameProvider(d->dnsProvider);
+        // The proxy makes the connections, so the local network's IPv6 support is
+        // irrelevant. IPv4 is what proxies reach most reliably; IPv6 comes next.
+        d->resolver->setProtocol(ServiceResolver::IPv4_IPv6);
+    } else {
+        d->resolver->setResolveTargets(false);
+    }
 
     connect(d->resolver, &ServiceResolver::resultReady, this,
             [this](const QHostAddress &address, quint16 port, const QString &hostname, const QString &service) {
                 d->service    = service;
                 d->targetHost = hostname;
-                connectThroughProxy(address.toString(), port);
+                connectThroughProxy(address.isNull() ? hostname : address.toString(), port);
             });
     connect(d->resolver, &ServiceResolver::error, this, [this](ServiceResolver::Error) {
+        if (d->dnsProvider) {
+            const int dnsError = d->dnsProvider->connectionError();
+            if (dnsError != SocksClient::ErrProxyConnect && dnsError != SocksClient::ErrProxyAuth) {
+                // Nothing the DNS server found was reachable: as a last resort
+                // the proxy resolves the domain, as it does without SRV.
+                releaseResolver();
+                connectThroughProxy(d->host, quint16(d->port));
+                return;
+            }
+        }
         // Report why the last address failed through the proxy. Without any,
         // the DNS server was not reachable, possibly because of the proxy.
         int err = ErrHostNotFound;
         if (d->lastTargetError >= 0) {
             err = d->lastTargetError;
         } else {
-            switch (d->dnsProvider->connectionError()) {
+            switch (d->dnsProvider ? d->dnsProvider->connectionError() : ByteStream::ErrOk) {
             case SocksClient::ErrProxyConnect:
                 err = ErrProxyConnect;
                 break;
@@ -400,11 +417,11 @@ void AdvancedConnector::connectToServer(const QString &server)
             // an explicit host is handed to the proxy, which resolves it
             d->host = d->opt_host;
             d->port = d->opt_port;
-        } else if (!d->remoteDns.isEmpty() && RemoteNameProvider::isSupported() && QHostAddress(d->host).isNull()) {
+        } else if (QHostAddress(d->host).isNull()) {
             resolveThroughProxy();
             return;
         }
-        // without remote DNS the proxy resolves the bare domain
+        // an explicit host or an address: no SRV lookup
         connectThroughProxy(d->host, quint16(d->port));
     } else {
         BSocket *s = new BSocket;

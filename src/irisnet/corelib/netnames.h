@@ -641,6 +641,13 @@ public:
     void setNameProvider(NameProvider *provider);
 
     /*!
+     * Whether the addresses of SRV targets are looked up, which is the default. Without it, an SRV lookup
+     * (start() with services) reports every target and finally the domain itself by name, with a null address,
+     * for a proxy that resolves names itself.
+     */
+    void setResolveTargets(bool resolve);
+
+    /*!
      * Start a DNS-SD lookup
      * \param name Instance to lookup
      */

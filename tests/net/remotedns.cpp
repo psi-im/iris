@@ -228,6 +228,7 @@ public:
     enum class Kind { Socks5, HttpConnect };
 
     QHash<QByteArray, QHostAddress> hosts;
+    QHash<quint16, quint16>         ports;          // requested port -> port connected to, e.g. 5222 -> a test server
     QByteArray                      user, password; // SOCKS5 credentials, empty for none
     QList<QByteArray>               targets;        // "host:port" as requested, IPv6 in brackets
 
@@ -374,7 +375,7 @@ private:
                 client->disconnectFromHost();
             }
         });
-        upstream->connectToHost(address, port);
+        upstream->connectToHost(address, ports.value(port, port));
     }
 };
 
@@ -718,7 +719,8 @@ void testWithoutJdns()
     check(waitFor([&]() { return lookup.done; }), "lookup without JDNS did not finish");
     check(lookup.error == NameResolver::ErrorGeneric && lookup.records.isEmpty(), "lookup without JDNS did not fail");
 
-    // The connector hands the proxy the bare domain, as without remote DNS.
+    // The connector ignores remote DNS: the system resolver finds no SRV
+    // records for the .invalid domain (RFC 6761), so the proxy gets the domain.
     FakeProxy                proxy(FakeProxy::Kind::Socks5);
     AdvancedConnector        connector;
     AdvancedConnector::Proxy settings;
@@ -727,9 +729,94 @@ void testWithoutJdns()
     connector.setRemoteDns(QUrl(QStringLiteral("tcp://127.0.0.1:1")));
     bool failed = false;
     QObject::connect(&connector, &Connector::error, &connector, [&]() { failed = true; });
-    connector.connectToServer(QStringLiteral("example.test"));
+    connector.connectToServer(QStringLiteral("example.invalid"));
     check(waitFor([&]() { return failed; }), "connector did not finish");
-    check(proxy.targets == QList<QByteArray> { "example.test:5222" }, "the proxy was not given the domain");
+    check(proxy.targets == QList<QByteArray> { "example.invalid:5222" }, "the proxy was not given the domain");
+}
+
+void testServiceResolverTargetsByName()
+{
+    // For a proxy that resolves names: SRV targets in order, then the domain,
+    // all by name; no address is looked up.
+    TableNameProvider provider;
+    NameRecord        backup(QByteArray("_xmpp-client._tcp.example.test."), 300);
+    backup.setSrv("backup.example.test", 5269, 10, 0);
+    NameRecord primary(QByteArray("_xmpp-client._tcp.example.test."), 300);
+    primary.setSrv("primary.example.test", 5222, 0, 0);
+    provider.records.insert({ "_xmpp-client._tcp.example.test.", 33 }, { backup, primary });
+
+    ServiceResolver resolver;
+    resolver.setNameProvider(&provider);
+    resolver.setResolveTargets(false);
+    QList<QByteArray> targets;
+    bool              done = false;
+    QObject::connect(&resolver, &ServiceResolver::resultReady, &resolver,
+                     [&](const QHostAddress &address, quint16 port, const QString &host, const QString &service) {
+                         check(address.isNull(), "an SRV target was resolved to an address");
+                         targets += host.toLatin1() + ':' + QByteArray::number(port) + '/' + service.toLatin1();
+                         QMetaObject::invokeMethod(&resolver, [&]() { resolver.tryNext(); }, Qt::QueuedConnection);
+                     });
+    QObject::connect(&resolver, &ServiceResolver::error, &resolver, [&]() { done = true; });
+    resolver.start({ QStringLiteral("xmpps-client"), QStringLiteral("xmpp-client") }, QStringLiteral("tcp"),
+                   QStringLiteral("example.test"), 5222);
+    check(waitFor([&]() { return done; }), "SRV targets were not all reported");
+    check(targets
+              == QList<QByteArray> { "primary.example.test:5222/xmpp-client", "backup.example.test:5269/xmpp-client",
+                                     "example.test:5222/" },
+          "SRV targets were not reported by name in order, followed by the domain");
+    check(provider.queries
+              == QList<QByteArray> { "_xmpps-client._tcp.example.test./33", "_xmpp-client._tcp.example.test./33" },
+          "addresses were looked up although the proxy resolves them");
+}
+
+void testConnectorLocalSrvThroughProxy()
+{
+    // Without remote DNS only SRV records are looked up, with the system
+    // resolver; the proxy resolves what it is given. Here SRV finds nothing
+    // (.invalid, RFC 6761), so the proxy gets the domain and the default port.
+    FakeXmppServer xmpp;
+    FakeProxy      proxy(FakeProxy::Kind::HttpConnect);
+    proxy.hosts.insert("example.invalid", QHostAddress(QHostAddress::LocalHost));
+    proxy.ports.insert(5222, xmpp.port());
+
+    AdvancedConnector        connector;
+    AdvancedConnector::Proxy settings;
+    settings.setHttpConnect(QStringLiteral("127.0.0.1"), proxy.port());
+    connector.setProxy(settings);
+    bool connected = false, failed = false;
+    QObject::connect(&connector, &Connector::connected, &connector, [&]() { connected = true; });
+    QObject::connect(&connector, &Connector::error, &connector, [&]() { failed = true; });
+    connector.connectToServer(QStringLiteral("example.invalid"));
+    check(waitFor([&]() { return connected || failed; }), "connector did not finish");
+    check(connected && proxy.targets == QList<QByteArray> { "example.invalid:5222" },
+          "the proxy was not given the domain after SRV found nothing");
+    check(connector.host() == QLatin1String("example.invalid"), "host is not the domain");
+}
+
+void testConnectorRemoteDnsLastResort()
+{
+    // The DNS server cannot be reached through the proxy: the proxy is given
+    // the domain, as without SRV.
+    FakeXmppServer xmpp;
+    FakeProxy      proxy(FakeProxy::Kind::Socks5);
+    const quint16  deadPort = closedPort();
+    proxy.hosts.insert("dns.test", QHostAddress(QHostAddress::LocalHost));
+    proxy.hosts.insert("example.test", QHostAddress(QHostAddress::LocalHost));
+    proxy.ports.insert(5222, xmpp.port());
+
+    AdvancedConnector        connector;
+    AdvancedConnector::Proxy settings;
+    settings.setSocks(QStringLiteral("127.0.0.1"), proxy.port());
+    connector.setProxy(settings);
+    connector.setRemoteDns(QUrl(QStringLiteral("tcp://dns.test:%1").arg(deadPort)));
+    bool connected = false, failed = false;
+    QObject::connect(&connector, &Connector::connected, &connector, [&]() { connected = true; });
+    QObject::connect(&connector, &Connector::error, &connector, [&]() { failed = true; });
+    connector.connectToServer(QStringLiteral("example.test"));
+    check(waitFor([&]() { return connected || failed; }), "connector did not finish");
+    check(connected, "the connector gave up instead of handing the proxy the domain");
+    check(proxy.targets == QList<QByteArray> { "dns.test:" + QByteArray::number(deadPort), "example.test:5222" },
+          "the proxy was not given the domain after the DNS server failed");
 }
 
 void testRemoteDnsEndpointValidation()
@@ -781,10 +868,13 @@ int main(int argc, char **argv)
         testThroughProxies();
         testConnectorResolvesThroughProxy();
         testConnectorReportsProxyErrors();
+        testConnectorRemoteDnsLastResort();
     } else {
         testWithoutJdns();
     }
     testServiceResolverProtocolFallback();
+    testServiceResolverTargetsByName();
+    testConnectorLocalSrvThroughProxy();
     testRemoteDnsEndpointValidation();
     testNoSystemFallback();
     testHttpConnectIpv6Authority();
