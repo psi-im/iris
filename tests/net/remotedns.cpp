@@ -66,6 +66,7 @@ public:
     int                                              connections = 0;
     int                                              open        = 0;
     bool dropFirstQuery = false; // close the first connection instead of answering
+    bool ignoreFirstQuery = false; // leave the first request in flight on the same connection
 
     FakeDnsServer()
     {
@@ -86,6 +87,10 @@ public:
                             return;
                         }
                         const QByteArray reply = answer(query);
+                        if (ignoreFirstQuery) {
+                            ignoreFirstQuery = false;
+                            continue; // backend stays alive but sends no reply
+                        }
                         QByteArray       frame;
                         appendUInt16(frame, quint16(reply.size()));
                         socket->write(frame + reply);
@@ -505,6 +510,30 @@ void testDnsOverTcp()
     check(invalid.error >= 0 && dns.queries.size() == 4, "an invalid name was not failed locally");
 }
 
+void testCancelledLookupDoesNotBlockFollowingQueries()
+{
+    // Native JDNS cancels an external request after the final consumer
+    // stops. This does NOT imply the DNS server timed out or went offline.
+    FakeDnsServer dns;
+    dns.ignoreFirstQuery = true;
+    dns.addAddress("abandoned.example.test", QHostAddress::LocalHost);
+    dns.addAddress("still-working.example.test", QHostAddress::LocalHost);
+
+    RemoteNameProvider provider(QUrl(QStringLiteral("tcp://127.0.0.1:%1").arg(dns.port())));
+    Lookup abandoned(&provider, "abandoned.example.test", NameRecord::A);
+    check(waitFor([&]() { return dns.queries.size() == 1; }),
+          "the first in-flight DNS lookup was not dispatched");
+    abandoned.resolver.stop();
+
+    Lookup fresh(&provider, "still-working.example.test", NameRecord::A);
+    check(waitFor([&]() { return fresh.done; }),
+          "the DNS lookup after cancellation did not finish");
+    check(fresh.records.size() == 1 && fresh.records.first().address() == QHostAddress::LocalHost,
+          "cancelling a DNS lookup incorrectly marked a live DNS server unavailable");
+    check(!abandoned.done, "a cancelled DNS lookup emitted a late result");
+    check(dns.queries.size() == 2, "the second DNS query was not sent upstream");
+}
+
 void testReconnectsOnce()
 {
     // A server may close a connection with queries in flight (RFC 7766
@@ -750,6 +779,7 @@ int main(int argc, char **argv)
     QCA::Initializer qca;
     if (RemoteNameProvider::isSupported()) {
         testDnsOverTcp();
+        testCancelledLookupDoesNotBlockFollowingQueries();
         testReconnectsOnce();
         testThroughProxies();
         testConnectorResolvesThroughProxy();
