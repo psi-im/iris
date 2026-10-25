@@ -10,6 +10,11 @@ on:
       - 'src/irisnet/noncore/remotenameprovider.*'
       - 'src/irisnet/CMakeLists.txt'
       - 'src/xmpp/xmpp-core/connector.cpp'
+      - 'src/xmpp/xmpp-core/*linklocal*'
+      - 'src/xmpp/xmpp-core/parser.*'
+      - 'src/xmpp/CMakeLists.txt'
+      - 'tools/linklocal/**'
+      - 'tests/linklocal/**'
       - 'src/xmpp/xmpp-core/xmpp.h'
       - 'cmake/modules/IrisJDns.cmake'
       - 'dependencies.lock.json'
@@ -25,6 +30,11 @@ on:
       - 'src/irisnet/noncore/remotenameprovider.*'
       - 'src/irisnet/CMakeLists.txt'
       - 'src/xmpp/xmpp-core/connector.cpp'
+      - 'src/xmpp/xmpp-core/*linklocal*'
+      - 'src/xmpp/xmpp-core/parser.*'
+      - 'src/xmpp/CMakeLists.txt'
+      - 'tools/linklocal/**'
+      - 'tests/linklocal/**'
       - 'src/xmpp/xmpp-core/xmpp.h'
       - 'cmake/modules/IrisJDns.cmake'
       - 'dependencies.lock.json'
@@ -51,10 +61,10 @@ jobs:
           # old behaviour and remote lookups fail.
           - name: qt5-qca2-jdns
             deps: qtbase5-dev libqca-qt5-2-dev libb2-dev
-            cmake: -DIRIS_SYSTEM_QCA=2 -DIRIS_ENABLE_JDNS=ON
+            cmake: -DIRIS_SYSTEM_QCA=2 -DIRIS_ENABLE_JDNS=ON -DIRIS_BUILD_LINKLOCAL_EXAMPLE=ON
           - name: qt6-qca3-jdns
             deps: qt6-base-dev
-            cmake: -DUSE_QT6=ON -DIRIS_SYSTEM_QCA=3 -DIRIS_ENABLE_JDNS=ON
+            cmake: -DUSE_QT6=ON -DIRIS_SYSTEM_QCA=3 -DIRIS_ENABLE_JDNS=ON -DIRIS_BUILD_LINKLOCAL_EXAMPLE=ON
           - name: qt6-qca3
             deps: qt6-base-dev
             cmake: -DUSE_QT6=ON -DIRIS_SYSTEM_QCA=3
@@ -66,24 +76,33 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build zlib1g-dev ${{ matrix.deps }}
+          sudo apt-get install -y cmake ninja-build ccache zlib1g-dev ${{ matrix.deps }}
       - uses: ./.github/actions/load-dependencies
         if: startsWith(matrix.name, 'qt6-qca3')
         with:
           qca-asset: qca3-deb-ubuntu-24.04.zip
           install-mode: apt
           qca-directory: qca-release
+      - uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: iris-net-${{ matrix.name }}
       - name: Configure
         run: |
           cmake -S . -B build-net -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DIRIS_BUILD_TESTS=ON \
             -DIRIS_ENABLE_OMEMO=OFF \
             -DIRIS_BUNDLED_QCA=OFF \
             -DIRIS_BUNDLED_USRSCTP=OFF \
             -DIRIS_ENABLE_JINGLE_SCTP=OFF \
             ${{ matrix.cmake }}
-      - name: Build name resolution regressions
-        run: cmake --build build-net --parallel 4 --target net_remotedns_test
+      - name: Build name resolution and link-local regressions
+        run: |
+          cmake --build build-net --parallel 4 --target net_remotedns_test linklocal_stream_test
+          if [[ "${{ matrix.name }}" == *-jdns ]]; then
+            cmake --build build-net --parallel 4 --target iris-linklocal
+          fi
       - name: Test name resolution regressions
-        run: ctest --test-dir build-net --output-on-failure -R '^net_'
+        run: ctest --test-dir build-net --output-on-failure -R '^(net_|linklocal_)'
