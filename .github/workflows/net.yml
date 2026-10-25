@@ -100,7 +100,7 @@ jobs:
             ${{ matrix.cmake }}
       - name: Build name resolution and link-local regressions
         run: |
-          cmake --build build-net --parallel 4 --target net_remotedns_test linklocal_stream_test
+          cmake --build build-net --parallel 4 --target net_remotedns_test linklocal_stream_test linklocal_service_test
           if [[ "${{ matrix.name }}" == *-jdns ]]; then
             cmake --build build-net --parallel 4 --target iris-linklocal
           fi
