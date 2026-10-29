@@ -337,10 +337,13 @@ public:
         opts.setInfo(info);
 
 #if QT_VERSION >= QT_VERSION_CHECK(5, 10, 0)
-        QCA::BigInteger sn(QRandomGenerator::global()->generate());
+        // Avoid narrowing an unsigned serial to BigInteger's signed int constructor.
+        QCA::BigInteger sn(QString::number(QRandomGenerator::global()->generate()));
 #else
         QCA::BigInteger sn(qrand());
 #endif
+        if (sn == QCA::BigInteger(0))
+            sn = QCA::BigInteger(1);
         opts.setSerialNumber(sn);
 
         auto nowUTC = QDateTime::currentDateTimeUtc();
