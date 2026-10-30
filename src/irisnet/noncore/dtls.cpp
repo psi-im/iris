@@ -20,12 +20,11 @@
 #include "xmpp_xmlcommon.h"
 
 #include <array>
+#include <limits>
 #include <utility>
 
 #include <QtCrypto>
-#if QT_VERSION >= QT_VERSION_CHECK(5, 10, 0)
 #include <QRandomGenerator>
-#endif
 #include <QAbstractSocket>
 #include <QList>
 
@@ -336,15 +335,7 @@ public:
             info.insert(QCA::XMPP, localJid);
         opts.setInfo(info);
 
-#if QT_VERSION >= QT_VERSION_CHECK(5, 10, 0)
-        // Avoid narrowing an unsigned serial to BigInteger's signed int constructor.
-        QCA::BigInteger sn(QString::number(QRandomGenerator::global()->generate()));
-#else
-        QCA::BigInteger sn(qrand());
-#endif
-        if (sn == QCA::BigInteger(0))
-            sn = QCA::BigInteger(1);
-        opts.setSerialNumber(sn);
+        opts.setSerialNumber(QCA::BigInteger(QRandomGenerator::global()->bounded(1, std::numeric_limits<int>::max())));
 
         auto nowUTC = QDateTime::currentDateTimeUtc();
         opts.setValidityPeriod(nowUTC, nowUTC.addDays(30));
