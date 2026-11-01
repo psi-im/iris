@@ -69,6 +69,7 @@ jobs:
             -DCMAKE_INSTALL_PREFIX="$PWD/sdk" \
             -DIRIS_BUNDLED_USRSCTP=OFF \
             ${{ matrix.options }}
+          grep -Fxq 'IRIS_ENABLE_JDNS:BOOL=ON' build/CMakeCache.txt
 
       - name: Build and install
         shell: bash
@@ -89,10 +90,11 @@ jobs:
           CMAKE
           cat > consumer/main.cpp <<'CPP'
           #include <iris/jid/jid.h>
+          #include <iris/irisnet/noncore/remotenameprovider.h>
           int main()
           {
               XMPP::Jid jid(QStringLiteral("ci@example.org"));
-              return jid.isValid() ? 0 : 1;
+              return jid.isValid() && XMPP::RemoteNameProvider::isSupported() ? 0 : 1;
           }
           CPP
           cmake -S consumer -B consumer-build -G Ninja \
