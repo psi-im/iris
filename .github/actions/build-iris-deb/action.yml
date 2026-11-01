@@ -48,6 +48,7 @@ runs:
         -DIRIS_SYSTEM_QCA=3 -DIRIS_BUNDLED_QCA=OFF \
         -DIRIS_ENABLE_OMEMO=ON -DIRIS_BUNDLED_OMEMO_C=OFF \
         -DIRIS_BUNDLED_USRSCTP=OFF
+      grep -Fxq 'IRIS_ENABLE_JDNS:BOOL=ON' build/CMakeCache.txt
       cmake --build build --parallel 4
       DESTDIR="$PWD/stage" cmake --install build
   - name: Build split deb packages
@@ -152,11 +153,13 @@ runs:
       CMAKE
       cat > consumer/main.cpp <<'CPP'
       #include <iris/jid/jid.h>
+      #include <iris/irisnet/noncore/remotenameprovider.h>
       #include <iris/xmpp_omemo.h>
       int main()
       {
           XMPP::Jid jid(QStringLiteral("package@example.org"));
-          return jid.isValid() && !XMPP::OmemoEncryption::methodId().isEmpty() ? 0 : 1;
+          return jid.isValid() && !XMPP::OmemoEncryption::methodId().isEmpty()
+            && XMPP::RemoteNameProvider::isSupported() ? 0 : 1;
       }
       CPP
       cmake -S consumer -B consumer-build -G Ninja
