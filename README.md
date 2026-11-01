@@ -46,6 +46,9 @@ without QJDns 3 packages need no additional system dependency. Use
 `-DIRIS_SYSTEM_JDNS=ON` to require a system package or
 `-DIRIS_SYSTEM_JDNS=OFF` to always bundle it. Non-Android builds can
 explicitly disable the functionality with `-DIRIS_ENABLE_JDNS=OFF`.
+Build directories previously configured with Iris 1.6.0 may have
+`IRIS_ENABLE_JDNS=OFF` cached; set `-DIRIS_ENABLE_JDNS=ON` or remove that cache
+entry when upgrading to restore the new default.
 
 ## DTLS packet diagnostics
 
