@@ -27,12 +27,17 @@ class QcaMinimumVersion(unittest.TestCase):
         module.parent.mkdir(parents=True)
         shutil.copyfile(ROOT / 'cmake/modules/IrisQCA.cmake', module)
         (self.root / 'dependencies.lock.json').write_text(json.dumps(
-            {'qca': {'tag': 'v3.0.10', 'commit': 'a' * 40, 'minimum_version': '3.0.10'}}))
+            {'qca': {'tag': 'v3.1.2', 'commit': 'a' * 40, 'minimum_version': '3.0.10',
+                     'minimum_version_windows': '3.1.2'}}))
         (self.root / 'CMakeLists.txt').write_text('''cmake_minimum_required(VERSION 3.11)
 project(qca_minimum LANGUAGES NONE)
 set(QT_DEFAULT_MAJOR_VERSION 6)
 set(IRIS_BUNDLED_QCA OFF)
 set(IRIS_SYSTEM_QCA 3 CACHE STRING "QCA generation")
+# Simulate Windows policy without needing a Windows SDK on Linux CI.
+if(IRIS_TEST_PLATFORM_WIN32)
+    set(WIN32 TRUE)
+endif()
 if(PRELOAD_QCA)
     find_package(Qca3-qt6 CONFIG REQUIRED)
 endif()
@@ -73,10 +78,12 @@ endif()
                                 capture_output=True, text=True, timeout=30)
         if success:
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertEqual((self.build / 'iris-qca-min-version.txt').read_text().strip(), '3.0.10')
+            expected = '3.1.2' if '-DIRIS_TEST_PLATFORM_WIN32=ON' in options else '3.0.10'
+            self.assertEqual((self.build / 'iris-qca-min-version.txt').read_text().strip(), expected)
         else:
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn('>= 3.0.10', result.stdout + result.stderr)
+            minimum = '3.1.2' if '-DIRIS_TEST_PLATFORM_WIN32=ON' in options else '3.0.10'
+            self.assertIn('>= ' + minimum, result.stdout + result.stderr)
 
     def test_qca_306_rejected(self):
         self.configure('3.0.6', False)
@@ -89,6 +96,15 @@ endif()
 
     def test_newer_qca_accepted(self):
         self.configure('3.0.11')
+
+    def test_windows_311_rejected(self):
+        self.configure('3.1.1', False, '-DIRIS_TEST_PLATFORM_WIN32=ON')
+
+    def test_windows_312_accepted(self):
+        self.configure('3.1.2', True, '-DIRIS_TEST_PLATFORM_WIN32=ON')
+
+    def test_linux_3010_still_accepted(self):
+        self.configure('3.0.10', True)
 
     def test_preloaded_old_target_rejected(self):
         self.configure('3.0.9', False, '-DPRELOAD_QCA=ON')
