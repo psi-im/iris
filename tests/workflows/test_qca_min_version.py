@@ -109,8 +109,11 @@ endif()
     def test_preloaded_old_target_rejected(self):
         self.configure('3.0.9', False, '-DPRELOAD_QCA=ON')
 
-    def check_sdk(self, version, preload=False):
-        self.configure('3.0.10', True, '-DGENERATE_SDK=ON')
+    def check_sdk(self, version, preload=False, windows=False):
+        options = ['-DGENERATE_SDK=ON']
+        if windows:
+            options.append('-DIRIS_TEST_PLATFORM_WIN32=ON')
+        self.configure('3.1.2' if windows else '3.0.10', True, *options)
         # Change the consumer's installed QCA after building the Iris SDK.
         (self.package / 'Qca3-qt6ConfigVersion.cmake').write_text(f"""
 set(PACKAGE_VERSION "{version}")
@@ -137,9 +140,10 @@ endif()
                                  '-DCMAKE_FIND_ROOT_PATH=' + str(self.root),
                                  '-DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY'],
                                 capture_output=True, text=True, timeout=30)
-        if version == '3.0.9':
+        minimum = '3.1.2' if windows else '3.0.10'
+        if tuple(map(int, version.split('.'))) < tuple(map(int, minimum.split('.'))):
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn('3.0.10', result.stdout + result.stderr)
+            self.assertIn(minimum, result.stdout + result.stderr)
         else:
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
@@ -151,6 +155,12 @@ endif()
 
     def test_sdk_accepts_newer_qca(self):
         self.check_sdk('3.0.11')
+
+    def test_windows_sdk_rejects_311(self):
+        self.check_sdk('3.1.1', windows=True)
+
+    def test_windows_sdk_accepts_312(self):
+        self.check_sdk('3.1.2', windows=True)
 
     @unittest.skipUnless(all(shutil.which(name) for name in ('cc', 'dpkg-deb', 'dpkg-shlibdeps')),
                          'C compiler and Debian packaging tools are required')
