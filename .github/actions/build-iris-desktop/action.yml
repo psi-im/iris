@@ -133,6 +133,7 @@ runs:
     - name: Build and install Iris
       shell: bash
       run: |
+        grep -Fxq 'IRIS_ENABLE_JDNS:BOOL=ON' build/CMakeCache.txt
         cmake --build build --config Release --parallel "${{ inputs.build-parallel }}"
         cmake --install build --config Release
 
@@ -152,6 +153,7 @@ runs:
         #include <iris/jingle-ft.h>
         #include <iris/jingle-pub.h>
         #include <iris/jid/jid.h>
+        #include <iris/irisnet/noncore/remotenameprovider.h>
         #include <iris/tcpportreserver.h>
         #include <iris/xmpp.h>
         #include <iris/xmpp_features.h>
@@ -182,7 +184,8 @@ runs:
                 && !publication.isValid()
                 && !sharing.isValid()
                 && features.test(QStringLiteral("urn:example:iris-consumer"));
-            return jid.isValid() && !XMPP::OmemoEncryption::methodId().isEmpty() && publicApiAvailable ? 0 : 1;
+            return jid.isValid() && !XMPP::OmemoEncryption::methodId().isEmpty()
+                && XMPP::RemoteNameProvider::isSupported() && publicApiAvailable ? 0 : 1;
         }
         CPP
         if [ "$RUNNER_OS" = "Windows" ]; then
