@@ -36,20 +36,29 @@ runs:
 
         lock_path = Path(os.environ["GITHUB_WORKSPACE"]) / os.environ["QCA_LOCK_PATH"]
         data = json.loads(lock_path.read_text(encoding="utf-8"))["qca"]
+        # All platforms build the exact same pinned release, but Windows
+        # requires the newer native Schannel/WinCrypto implementation.
+        base_minimum = data["minimum_version"]
+        windows_minimum = data.get("minimum_version_windows", base_minimum)
         values = {
             "QCA_TAG": data["tag"],
             "QCA_COMMIT": data["commit"],
-            "QCA_MIN_VERSION": data["minimum_version"],
+            "QCA_MIN_VERSION": (windows_minimum if os.environ.get("RUNNER_OS") == "Windows"
+                                else base_minimum),
         }
         if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", values["QCA_TAG"]):
             raise SystemExit("Invalid QCA release tag")
         if not re.fullmatch(r"[0-9a-f]{40}", values["QCA_COMMIT"]):
             raise SystemExit("Invalid QCA commit SHA")
-        if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", values["QCA_MIN_VERSION"]):
-            raise SystemExit("Invalid minimum QCA version")
+        for minimum in (base_minimum, windows_minimum):
+            if not isinstance(minimum, str) or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", minimum):
+                raise SystemExit("Invalid minimum QCA version")
         selected = tuple(map(int, values["QCA_TAG"][1:].split(".")))
-        minimum = tuple(map(int, values["QCA_MIN_VERSION"].split(".")))
-        if selected < minimum:
+        base = tuple(map(int, base_minimum.split(".")))
+        windows = tuple(map(int, windows_minimum.split(".")))
+        if windows < base:
+            raise SystemExit("Windows QCA minimum cannot be lower than the generic minimum")
+        if selected < windows:
             raise SystemExit("Locked QCA release is older than the supported runtime minimum")
 
         with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env:
