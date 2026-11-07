@@ -93,8 +93,11 @@ iris_configure_jdns()
     def test_system_required_is_not_silently_bundled(self):
         result = self.configure(mode="ON")
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("System QJDns >= " + MIN_VERSION, result.stdout)
-        self.assertIn("QJDnsConfig.cmake was not found", result.stdout)
+        # CMake formats fatal diagnostics at terminal width, inserting line breaks.
+        # Check the message rather than its incidental whitespace.
+        normalized = " ".join(result.stdout.split())
+        self.assertIn("System QJDns >= " + MIN_VERSION, normalized)
+        self.assertIn("QJDnsConfig.cmake was not found", normalized)
 
     def test_system_same_qt(self):
         result = self.configure(mode="ON", version=MIN_VERSION)
