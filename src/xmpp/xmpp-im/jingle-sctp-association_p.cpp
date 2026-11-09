@@ -119,11 +119,15 @@ namespace XMPP { namespace Jingle { namespace SCTP {
         Q_UNUSED(sctpAssociation);
         Q_UNUSED(len);
         // Processing the send queue can synchronously call usrsctp again. Do
-        // not do that from the buffered-amount callback.
-        QMetaObject::invokeMethod(this, [this] {
-            if (!dumpingOutogingBuffer)
-                procesOutgoingMessageQueue();
-        }, Qt::QueuedConnection);
+        // not do that from the buffered-amount callback. A burst of SCTP
+        // notifications needs just one queued wakeup, not one per packet.
+        if (!outgoingDrainScheduled.exchange(true)) {
+            QMetaObject::invokeMethod(this, [this] {
+                outgoingDrainScheduled = false;
+                if (!dumpingOutogingBuffer)
+                    procesOutgoingMessageQueue();
+            }, Qt::QueuedConnection);
+        }
         // TODO control buffering to reduce memory consumption
     }
 
