@@ -29,8 +29,7 @@ jobs:
             echo "::error::Master moved since verification ($current_master != $SOURCE_SHA)"
             exit 1
           fi
-          existing="$(gh api "repos/$REPOSITORY/git/ref/tags/$TAG" --jq '.object.sha' 2>/dev/null || true)"
-          if [[ -n "$existing" ]]; then
+          if existing="$(gh api "repos/$REPOSITORY/git/ref/tags/$TAG" --jq '.object.sha' 2>/dev/null)"; then
             if [[ "$existing" != "$SOURCE_SHA" ]]; then
               echo "::error::Tag $TAG already exists at another commit: $existing"
               exit 1
