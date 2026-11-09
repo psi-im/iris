@@ -1,0 +1,44 @@
+# One-shot release dispatcher. The tag always points at the validated Iris
+# master commit, NOT at this branch's workflow-only commit.
+name: Publish Iris v1.6.2 tag
+on:
+  push:
+    branches:
+      - release/iris-v1.6.2
+    paths:
+      - .github/workflows/iris-v1.6.2-tag.yml
+permissions:
+  contents: write
+  actions: write
+jobs:
+  publish-tag:
+    if: github.repository == 'psi-im/iris' && github.ref == 'refs/heads/release/iris-v1.6.2'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify validated source and dispatch the official release workflow
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          TAG: v1.6.2
+          SOURCE_SHA: 21ded8c0818a7c5d7b6f862efeb2b4eb7f13a02c
+        run: |
+          set -euo pipefail
+          current_master="$(gh api "repos/$REPOSITORY/git/ref/heads/master" --jq '.object.sha')"
+          if [[ "$current_master" != "$SOURCE_SHA" ]]; then
+            echo "::error::Master moved since verification ($current_master != $SOURCE_SHA)"
+            exit 1
+          fi
+          existing="$(gh api "repos/$REPOSITORY/git/ref/tags/$TAG" --jq '.object.sha' 2>/dev/null || true)"
+          if [[ -n "$existing" ]]; then
+            if [[ "$existing" != "$SOURCE_SHA" ]]; then
+              echo "::error::Tag $TAG already exists at another commit: $existing"
+              exit 1
+            fi
+            echo "Tag $TAG already exists at expected source"
+          else
+            gh api -X POST "repos/$REPOSITORY/git/refs" -f "ref=refs/tags/$TAG" -f "sha=$SOURCE_SHA"
+            echo "Created $TAG at $SOURCE_SHA"
+          fi
+          gh workflow run release.yml --repo "$REPOSITORY" --ref master -f "tag=$TAG"
+          echo "Dispatched the official release workflow for $TAG"
