@@ -961,6 +961,18 @@ public:
 #endif
         pacTimer.reset();
         state = Active;
+        // Final nomination stops all other candidate transports. Their unfinished
+        // STUN/TURN transactions can no longer produce candidates, so gathering
+        // is effectively complete even if those requests never responded.
+        // Trickle peers still need the explicit end-of-candidates notification.
+        if (!localGatheringComplete) {
+            localGatheringComplete = true;
+            iceDebug("ICE selected final pairs: completing local gathering despite pending discovery");
+            QPointer<Ice176> guard(q);
+            emit q->localGatheringComplete();
+            if (!guard)
+                return;
+        }
         emit q->iceFinished();
     }
 
