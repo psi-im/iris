@@ -968,10 +968,12 @@ public:
         if (!localGatheringComplete) {
             localGatheringComplete = true;
             iceDebug("ICE selected final pairs: completing local gathering despite pending discovery");
-            QPointer<Ice176> guard(q);
-            emit q->localGatheringComplete();
-            if (!guard)
-                return;
+            if (localFeatures & Trickle) {
+                QPointer<Ice176> guard(q);
+                emit q->localGatheringComplete();
+                if (!guard)
+                    return;
+            }
         }
         emit q->iceFinished();
     }
