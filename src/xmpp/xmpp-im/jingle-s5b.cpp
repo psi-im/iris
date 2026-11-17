@@ -245,7 +245,13 @@ namespace XMPP { namespace Jingle { namespace S5B {
             for (auto it = clients.begin(); it != clients.end(); ++it) {
                 QString      name   = it.key();
                 SocksClient *client = it.value();
-                connect(client, &SocksClient::connected, this, [this, name, client]() {
+                // A link-local address may require probing many interfaces. Each
+                // attempt must be bounded independently of the OS TCP timeout.
+                auto timeout = new QTimer(client);
+                timeout->setSingleShot(true);
+                timeout->setInterval(S5B_CONNECT_TIMEOUT_MS);
+                connect(client, &SocksClient::connected, this, [this, name, client, timeout]() {
+                    timeout->stop();
                     this->client = client;
                     clients.remove(name);
                     qDeleteAll(clients);
@@ -253,8 +259,9 @@ namespace XMPP { namespace Jingle { namespace S5B {
                 });
                 connect(
                     client, &SocksClient::error, this,
-                    [this, name, client](int error) {
+                    [this, name, client, timeout](int error) {
                         Q_UNUSED(error)
+                        timeout->stop();
                         clients.remove(name);
                         client->deleteLater();
                         if (clients.isEmpty()) {
@@ -262,11 +269,6 @@ namespace XMPP { namespace Jingle { namespace S5B {
                         }
                     },
                     Qt::QueuedConnection);
-                // A link-local address may require probing many interfaces. Each
-                // attempt must be bounded independently of the OS TCP timeout.
-                auto timeout = new QTimer(client);
-                timeout->setSingleShot(true);
-                timeout->setInterval(S5B_CONNECT_TIMEOUT_MS);
                 connect(timeout, &QTimer::timeout, this, [this, name, client]() {
                     if (clients.value(name) != client)
                         return;
