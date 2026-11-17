@@ -1,7 +1,7 @@
 #include "jingle-ice-udp.h"
-#include <iris/xmpp_xmlcommon.h>
 #include <QCoreApplication>
 #include <QDebug>
+#include <iris/xmpp_xmlcommon.h>
 
 using XMPP::Jingle::ICE::iceUdpToInternal;
 using XMPP::Jingle::ICE::internalToIceUdp;
@@ -91,13 +91,12 @@ int main(int argc, char **argv)
     // Trickle ICE can exchange only ufrag/pwd initially. Preserve them even
     // without candidate elements, so PAC can authenticate peer-reflexive checks.
     const auto credentialsOnly = parse("");
-    check(credentialsOnly && credentialsOnly->candidates.isEmpty()
-              && credentialsOnly->ufrag == QLatin1String("frag")
+    check(credentialsOnly && credentialsOnly->candidates.isEmpty() && credentialsOnly->ufrag == QLatin1String("frag")
               && credentialsOnly->pwd == QLatin1String("secret"),
           "credentials-only ICE-UDP transport rejected");
     QDomDocument credentialsDoc;
-    const auto credentialsXml = UdpTransportCodec::toXml(credentialsDoc, *credentialsOnly);
-    const auto credentialsInternal
+    const auto   credentialsXml = UdpTransportCodec::toXml(credentialsDoc, *credentialsOnly);
+    const auto   credentialsInternal
         = iceUdpToInternal(credentialsDoc, credentialsXml, QStringLiteral("urn:xmpp:jingle:transports:ice:0"));
     check(!credentialsInternal.isNull()
               && credentialsInternal.attribute(QLatin1String("ufrag")) == QLatin1String("frag")
