@@ -807,8 +807,9 @@ namespace XMPP { namespace Jingle { namespace S5B {
             auto m     = static_cast<Manager *>(q->_pad->manager());
             Jid  proxy = m->userProxy();
             proxyDiscoveryInProgress = true;
-            qDebug() << "S5B proxy discovery started (in parallel with local TCP port discovery), configured proxy:"
-                     << proxy.full();
+            qDebug() << "S5B proxy discovery started on account server"
+                     << q->_pad->session()->manager()->client()->jid().domain()
+                     << "(parallel to local TCP port discovery), configured proxy:" << proxy.full();
             if (proxy.isValid()) {
                 Candidate c(q, proxy, generateCid());
                 if (!isDup(c)) {
