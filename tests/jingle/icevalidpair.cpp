@@ -6,6 +6,7 @@
 #include <QDebug>
 #include <QEventLoop>
 #include <QTimer>
+#include <QUdpSocket>
 #include <QtCrypto>
 
 using namespace XMPP;
@@ -16,10 +17,18 @@ static void check(bool ok, const char *message)
         qFatal("%s", message);
 }
 
-static void runPair(bool usingProtocolSignalsIce2, bool omitRemoteCandidatesOnInitiator = false)
+static void runPair(bool usingProtocolSignalsIce2, bool omitRemoteCandidatesOnInitiator = false,
+                    bool unfinishedStunDiscovery = false)
 {
     Ice176 first;
     Ice176 second;
+    // Keep a STUN endpoint silent on purpose: final ICE nomination must end
+    // trickle gathering even while a discovery transaction is still pending.
+    QUdpSocket silentStun;
+    if (unfinishedStunDiscovery) {
+        check(silentStun.bind(QHostAddress::LocalHost), "Cannot bind silent STUN endpoint");
+        first.setStunBindService(QHostAddress::LocalHost, silentStun.localPort());
+    }
     int    firstActivity  = 0;
     int    secondActivity = 0;
     QObject::connect(&first, &Ice176::peerActivity, [&] { ++firstActivity; });
@@ -77,6 +86,12 @@ static void runPair(bool usingProtocolSignalsIce2, bool omitRemoteCandidatesOnIn
 
     bool firstSelected              = false;
     bool secondSelected             = false;
+    int  firstGatherCompletions      = 0;
+    bool firstGatherBeforeSelection = false;
+    QObject::connect(&first, &Ice176::localGatheringComplete, [&]() {
+        ++firstGatherCompletions;
+        firstGatherBeforeSelection = !firstSelected;
+    });
     bool firstReady                 = false;
     bool secondReady                = false;
     bool firstReadyBeforeSelection  = false;
@@ -150,6 +165,13 @@ static void runPair(bool usingProtocolSignalsIce2, bool omitRemoteCandidatesOnIn
     check(firstSelected && secondSelected, "ICE nomination did not eventually select a pair");
     check(selectedSent && selectedReceived, "data did not cross the selected pair");
 
+    if (unfinishedStunDiscovery) {
+        check(firstGatherCompletions == 1 && first.isLocalGatheringComplete(),
+              "Final nomination failed to complete local ICE gathering exactly once");
+        check(!firstGatherBeforeSelection,
+              "Unresponsive STUN discovery unexpectedly finished before ICE nomination");
+    }
+
     if (usingProtocolSignalsIce2) {
         check(firstReadyBeforeSelection && secondReadyBeforeSelection,
               "ice2-signaled ICE did not expose the valid pair before nomination");
@@ -169,7 +191,8 @@ int main(int argc, char **argv)
     runPair(false);
     runPair(true);
     runPair(true, true); // RFC 8863: credentials with no signaled remote candidates
+    runPair(true, false, true); // Trickle end-of-candidates must survive an unanswered STUN discovery.
 
-    qInfo("ICE valid-pair compatibility regressions passed");
+    qInfo("ICE valid-pair and unfinished discovery regressions passed");
     return 0;
 }
