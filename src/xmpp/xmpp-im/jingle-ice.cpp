@@ -854,10 +854,12 @@ namespace XMPP { namespace Jingle { namespace ICE {
         if (pad->ns() == NS)
             localFeatures |= Ice176::NotNominatedData;
         ice->setLocalFeatures(localFeatures);
-        if (!runtime->remoteCandidates.isEmpty()) {
+        // Trickle ICE can announce credentials before any candidates. Keep them
+        // available for authenticated peer-reflexive checks during PAC (RFC 8863).
+        if (!runtime->remoteUfrag.isEmpty() && !runtime->remotePassword.isEmpty())
             ice->setRemoteCredentials(runtime->remoteUfrag, runtime->remotePassword);
+        if (!runtime->remoteCandidates.isEmpty())
             ice->addRemoteCandidates(runtime->remoteCandidates);
-        }
         if (runtime->remoteGatheringComplete)
             ice->setRemoteGatheringComplete();
         if (!runtime->remoteSelectedCandidates.isEmpty())
@@ -1359,10 +1361,12 @@ namespace XMPP { namespace Jingle { namespace ICE {
         void setupRemoteICE(const Element &e)
         {
             Q_ASSERT(network->ice != nullptr);
-            if (!e.candidates.isEmpty()) {
+            // Credentials may arrive without candidates and must not be lost.
+            // Candidate-only trickle updates must preserve previous credentials.
+            if (!e.ufrag.isEmpty() && !e.pwd.isEmpty())
                 network->ice->setRemoteCredentials(e.ufrag, e.pwd);
+            if (!e.candidates.isEmpty())
                 network->ice->addRemoteCandidates(e.candidates);
-            }
             if (e.gatheringComplete) {
                 network->ice->setRemoteGatheringComplete();
             }

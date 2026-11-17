@@ -218,7 +218,9 @@ public:
     UdpPortReserver                        *portReserver = nullptr;
     std::unique_ptr<QTimer>                 pacTimer;
     int                                     nominationTimeout = 3000; // 3s
-    int                                     pacTimeout = 30000; // 30s todo: compute from rto. see draft-ietf-ice-pac-06
+    // RFC 8863 recommends the STUN transaction timeout with default RTO/Rc:
+    // 39.5 s. Do not fail earlier: a peer may still discover a prflx pair.
+    int                                     pacTimeout = 39500;
     int                                     componentCount = 0;
     QList<Ice176::LocalAddress>             localAddrs;
     QList<Ice176::ExternalAddress>          extAddrs;
