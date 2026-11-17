@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 
 #include <iris/ice176.h>
+#include "../../src/irisnet/noncore/stunmessage.h"
 
 #include <QCoreApplication>
 #include <QDebug>
 #include <QEventLoop>
+#include <QNetworkDatagram>
 #include <QTimer>
 #include <QUdpSocket>
 #include <QtCrypto>
@@ -170,6 +172,33 @@ static void runPair(bool usingProtocolSignalsIce2, bool omitRemoteCandidatesOnIn
               "Final nomination failed to complete local ICE gathering exactly once");
         check(!firstGatherBeforeSelection,
               "Unresponsive STUN discovery unexpectedly finished before ICE nomination");
+
+        // Reply only after final nomination. The STUN transaction was already
+        // pending, so a real srflx discovery may finish after end-of-candidates.
+        // RFC 8838 requires us not to trickle it to the remote agent.
+        int lateCandidateSignals = 0;
+        QObject::connect(&first, &Ice176::localCandidatesReady,
+                         [&](const QList<Ice176::Candidate> &) { ++lateCandidateSignals; });
+        check(silentStun.hasPendingDatagrams(), "The fake STUN server received no discovery request");
+        auto datagram = silentStun.receiveDatagram();
+        auto request  = StunMessage::fromBinary(datagram.data());
+        check(!request.isNull() && request.mclass() == StunMessage::Request && request.method() == 1,
+              "The fake STUN server received an invalid binding request");
+        StunMessage reply;
+        reply.setClass(StunMessage::SuccessResponse);
+        reply.setMethod(request.method());
+        reply.setMagic(request.magic());
+        reply.setId(request.id());
+        // MAPPED-ADDRESS = 127.0.0.42:60000, distinct from the host candidate.
+        reply.setAttributes({ StunMessage::Attribute { 0x0001, QByteArray::fromHex("0001ea607f00002a") } });
+        const auto packet = reply.toBinary(StunMessage::Fingerprint);
+        check(silentStun.writeDatagram(packet, datagram.senderAddress(), datagram.senderPort()) == packet.size(),
+              "Cannot return the delayed STUN response");
+        QEventLoop lateResponseLoop;
+        QTimer::singleShot(200, &lateResponseLoop, &QEventLoop::quit);
+        lateResponseLoop.exec();
+        check(lateCandidateSignals == 0, "ICE trickled a late candidate after end-of-candidates");
+        check(firstGatherCompletions == 1, "Late STUN completion duplicated end-of-candidates");
     }
 
     if (usingProtocolSignalsIce2) {
