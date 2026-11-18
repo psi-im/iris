@@ -20,6 +20,7 @@
 #include "stundisco.h"
 
 #include "netnames.h"
+#include "stunserviceaddress_p.h"
 #include "xmpp_client.h"
 #include "xmpp_externalservicediscovery.h"
 
@@ -85,8 +86,12 @@ private:
             QHostAddress addr(l->host);
             if (addr.isNull())
                 needResolve.append(s);
-            else
+            else if (isUsableStunServiceAddress(addr))
                 s->addresses.append(addr);
+            else {
+                qWarning("stundisco: ignoring unusable STUN/TURN address %s", qPrintable(l->host));
+                continue;
+            }
             if (l->needsNewCreds()) {
                 needCreds.append(s);
             } else if (!s->addresses.isEmpty()) {
@@ -134,8 +139,12 @@ private:
 
             connect(dns, &NameResolver::resultsReady, this, [this, name](const QList<XMPP::NameRecord> &records) {
                 QList<QHostAddress> addresses;
-                for (const auto &r : records)
-                    addresses.append(r.address());
+                for (const auto &r : records) {
+                    if (isUsableStunServiceAddress(r.address()))
+                        addresses.append(r.address());
+                }
+                if (addresses.isEmpty())
+                    qWarning("stundisco: no usable DNS addresses for STUN/TURN host %s", qPrintable(name));
                 setAddresses(name, addresses);
             });
             connect(dns, &NameResolver::error, this,
