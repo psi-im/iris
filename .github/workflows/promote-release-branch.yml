@@ -43,6 +43,10 @@ jobs:
             "transport-sanitizers"
             "qca3-srtp"
             "durable-jinglepub"
+            "Net (qt5-qca2-jdns)"
+            "Net (qt6-qca3-jdns)"
+            "Net (qt6-qca3)"
+            "protocol-errors"
           )
 
           # Release exactly the tip of master, only after the corresponding
