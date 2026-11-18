@@ -552,6 +552,13 @@ void ClientStream::cr_connected()
     d->client.setAllowPlain(d->allowPlain == AllowPlain || (d->allowPlain == AllowPlainOverTLS && d->conn->useSSL()));
     d->client.setLang(d->lang);
 
+    if (d->conn->useSSL() && !d->tlsHandler) {
+        reset();
+        d->errCond = TLSFail;
+        emit error(ErrTLS);
+        return;
+    }
+
     /*d->client.jid = d->jid;
     d->client.server = d->server;
     d->client.allowPlain = d->allowPlain;
@@ -1110,6 +1117,12 @@ bool ClientStream::handleNeed()
 #ifdef XMPP_DEBUG
         qDebug("Need StartTLS\n");
 #endif
+        if (!d->tlsHandler) {
+            reset();
+            d->errCond = TLSFail;
+            emit error(ErrTLS);
+            return false;
+        }
         d->using_tls = true;
         d->ss->startTLSClient(d->tlsHandler, d->server, d->client.spare);
         return false;
