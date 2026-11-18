@@ -773,14 +773,35 @@ namespace XMPP { namespace Jingle { namespace ICE {
                     ice->flagComponentAsLowOverhead(component.componentIndex);
             }
         });
-        QObject::connect(ice, &Ice176::error, network, [network, currentIce](Ice176::Error error) {
+        QObject::connect(ice, &Ice176::error, network, [network, ice, currentIce](Ice176::Error error) {
             if (!currentIce() || !network->runtime)
                 return;
+            const auto id = associationDebugId(network);
+            const auto runtime = network->runtime.get();
+            qWarning("jingle-ice[%s] ICE failed error=%d checks-started=%d local-candidates=%d remote-candidates=%d "
+                     "local-gathering-complete=%d remote-gathering-complete=%d selected-local-components=%d",
+                     id.constData(), int(error), int(runtime->checksStarted), int(runtime->localCandidateHistory.size()),
+                     int(runtime->remoteCandidates.size()), int(ice->isLocalGatheringComplete()),
+                     int(runtime->remoteGatheringComplete), int(ice->selectedCandidates().size()));
             network->runtime->pruneParticipants();
             const auto participants = network->runtime->participants;
             for (const auto &participant : participants)
                 if (participant.onError)
                     participant.onError(error);
+        });
+        QObject::connect(ice, &Ice176::iceFinished, network, [network, ice, currentIce]() {
+            if (!currentIce())
+                return;
+            const auto id = associationDebugId(network);
+            const auto selected = ice->selectedCandidates();
+            qInfo("jingle-ice[%s] ICE nomination finished selected-local-components=%d", id.constData(),
+                  int(selected.size()));
+            // Ice176::selectedCandidates() currently reports the LOCAL half of
+            // each selected pair. Label it explicitly rather than implying
+            // that these are the remote endpoints.
+            for (const auto &candidate : selected)
+                qInfo("jingle-ice[%s] selected LOCAL component=%d address=%s port=%d", id.constData(),
+                      candidate.componentId, qPrintable(candidate.ip.toString()), candidate.port);
         });
         QObject::connect(ice, &Ice176::localCandidatesReady, network,
                          [network, currentIce](const QList<Ice176::Candidate> &candidates) {
