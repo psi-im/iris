@@ -308,6 +308,13 @@ jobs:
               tail -n 140 /tmp/iris-jingle-arch-dtls.log
               exit 1
             }
+          echo "DTLS test exited successfully; diagnostic trace:"
+          wc -c /tmp/iris-jingle-arch-dtls.log
+          grep -E 'Iris/QCA3|qca-ossl|libssl[.]so[.]4|libcrypto[.]so[.]4' \
+            /tmp/iris-jingle-arch-dtls.log | tail -n 35 || true
+          echo "Compiled DTLS success marker:"
+          strings ./build-jingle-arch/jingle_dtlssrtp_test | \
+            grep -F 'Iris/QCA3 DTLS-SRTP key-export and SCTP mux integration passed' || true
           grep -F 'Iris/QCA3 DTLS-SRTP key-export and SCTP mux integration passed' \
             /tmp/iris-jingle-arch-dtls.log
           grep -F '/usr/lib/libssl.so.4' /tmp/iris-jingle-arch-dtls.log
