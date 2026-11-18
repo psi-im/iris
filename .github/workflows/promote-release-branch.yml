@@ -1,11 +1,10 @@
 name: Promote Iris release branch
 
-# A release/vX.Y.Z branch is an explicit request to tag the current master
-# commit. Keep tag creation separate from ordinary development pushes.
+# Creating a release/vX.Y.Z branch explicitly requests promotion of the
+# current master commit. The GitHub create event also fires for REST-created
+# branches, which do not necessarily generate a push event.
 on:
-  push:
-    branches:
-      - 'release/v1*'
+  create:
 
 permissions:
   contents: write
@@ -14,6 +13,7 @@ permissions:
 
 jobs:
   promote:
+    if: github.event.ref_type == 'branch' && startsWith(github.event.ref, 'release/v1')
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -21,8 +21,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_BRANCH: ${{ github.ref_name }}
-          RELEASE_SHA: ${{ github.sha }}
+          RELEASE_BRANCH: ${{ github.event.ref }}
         run: |
           set -euo pipefail
           tag="${RELEASE_BRANCH#release/}"
@@ -31,6 +30,8 @@ jobs:
             exit 1
           fi
 
+          release_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$RELEASE_BRANCH" --jq '.object.sha')
+          RELEASE_SHA="$release_sha"
           required=(
             "Linux (qt5-qca2)"
             "Linux (qt6-qca3-omemo)"
