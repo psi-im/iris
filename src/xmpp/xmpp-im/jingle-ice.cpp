@@ -1171,7 +1171,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
                 // Standalone and initial/unnegotiated transports still receive
                 // the snapshot so their first offer remains self-contained.
                 const bool establishedBundleFollower
-                    = groupManagedNetwork && pad->session()->state() == State::Active
+                    = groupManagedNetwork && pad->ns() == NS && pad->session()->state() == State::Active
                     && network->runtime->gatheringComplete && network->runtime->participants.size() > 1;
                 if (!establishedBundleFollower && !network->runtime->localCandidateHistory.isEmpty())
                     network->runtime->participants.last().onLocalCandidates(network->runtime->localCandidateHistory);
