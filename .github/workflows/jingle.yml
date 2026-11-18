@@ -199,7 +199,7 @@ jobs:
           ctest --test-dir build-jingle-sanitize --output-on-failure -j1 -R jingle_rtpnegotiation
           ctest --test-dir build-jingle-sanitize --output-on-failure -j1 -R jingle_dtlssrtp
 
-archlinux-jingle-dtls:
+  archlinux-jingle-dtls:
     name: archlinux-jingle-dtls
     needs: select-tests
     if: needs.select-tests.outputs.run == 'true'
@@ -298,7 +298,7 @@ archlinux-jingle-dtls:
         run: |
           set -euo pipefail
           export QCA_PLUGIN_PATH="$QCA_ARCH_PREFIX/lib/qca3-qt6"
-          export LD_LIBRARY_PATH="$QCA_ARCH_PREFIX/lib:\${LD_LIBRARY_PATH:-}"
+          export LD_LIBRARY_PATH="$QCA_ARCH_PREFIX/lib:${LD_LIBRARY_PATH:-}"
           QT_DEBUG_PLUGINS=1 LD_DEBUG=libs \
             ./build-jingle-arch/jingle_dtlssrtp_test \
             > /tmp/iris-jingle-arch-dtls.log 2>&1 || {
