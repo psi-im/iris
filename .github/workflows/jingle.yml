@@ -274,7 +274,7 @@ jobs:
 
           provider=$(find "$qca_prefix/lib/qca3-qt6" -type f -name '*qca-ossl*.so' -print -quit)
           test -n "$provider"
-          ldd "$provider" | tee /tmp/iris-qca-provider-ldd.log
+          LD_LIBRARY_PATH="$qca_prefix/lib" ldd "$provider" | tee /tmp/iris-qca-provider-ldd.log
           # Verify the provider's actual ELF dependencies, not just headers.
           grep -E 'libssl\.so\.4 => /usr/lib/libssl\.so\.4' /tmp/iris-qca-provider-ldd.log
           grep -E 'libcrypto\.so\.4 => /usr/lib/libcrypto\.so\.4' /tmp/iris-qca-provider-ldd.log
@@ -283,7 +283,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          iris_version=$(git -c safe.directory="$GITHUB_WORKSPACE" tag --list 'v[0-9]*' --sort=-version:refname | head -n 1)
+          test -n "$iris_version"
           cmake -S tests/jingle -B build-jingle-arch -G Ninja \
+            -DIRIS_VERSION="${iris_version#v}" \
             -DCMAKE_BUILD_TYPE=Release \
             -DUSE_QT6=ON -DIRIS_SYSTEM_QCA=3 -DIRIS_BUNDLED_QCA=OFF \
             -DIRIS_ENABLE_OMEMO=OFF -DIRIS_ENABLE_JINGLE_SCTP=ON \
