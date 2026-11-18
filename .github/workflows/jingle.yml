@@ -302,22 +302,11 @@ jobs:
           set -euo pipefail
           export QCA_PLUGIN_PATH="$QCA_ARCH_PREFIX/lib/qca3-qt6"
           export LD_LIBRARY_PATH="$QCA_ARCH_PREFIX/lib:${LD_LIBRARY_PATH:-}"
-          QT_DEBUG_PLUGINS=1 LD_DEBUG=libs \
-            ./build-jingle-arch/jingle_dtlssrtp_test \
-            > /tmp/iris-jingle-arch-dtls.log 2>&1 || {
-              tail -n 140 /tmp/iris-jingle-arch-dtls.log
-              exit 1
-            }
-          echo "DTLS test exited successfully; diagnostic trace:"
-          wc -c /tmp/iris-jingle-arch-dtls.log
-          grep -E 'Iris/QCA3|qca-ossl|libssl[.]so[.]4|libcrypto[.]so[.]4' \
-            /tmp/iris-jingle-arch-dtls.log | tail -n 35 || true
-          echo "Compiled DTLS success marker:"
-          strings ./build-jingle-arch/jingle_dtlssrtp_test | \
-            grep -F 'Iris/QCA3 DTLS-SRTP key-export and SCTP mux integration passed' || true
-          grep -F 'Iris/QCA3 DTLS-SRTP key-export and SCTP mux integration passed' \
-            /tmp/iris-jingle-arch-dtls.log
-          grep -F '/usr/lib/libssl.so.4' /tmp/iris-jingle-arch-dtls.log
-          grep -F '/usr/lib/libcrypto.so.4' /tmp/iris-jingle-arch-dtls.log
-          grep -E 'loaded library.*qca-ossl|qca-ossl.*loaded' \
-            /tmp/iris-jingle-arch-dtls.log | head -n 3
+          # The executable asserts provider support and all real DTLS/SRTP/
+          # SCTP scenarios itself; Qt's qInfo() logging is not a test oracle.
+          # Confirm that the executable uses our freshly built QCA 3.2.0.
+          ldd ./build-jingle-arch/jingle_dtlssrtp_test | tee /tmp/iris-jingle-dtls-ldd.log
+          grep -F "libqca3-qt6.so.3 => $QCA_ARCH_PREFIX/lib/libqca3-qt6.so.3" \
+            /tmp/iris-jingle-dtls-ldd.log
+          ctest --test-dir build-jingle-arch --output-on-failure \
+            -R '^jingle_dtlssrtp$'
