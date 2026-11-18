@@ -15,6 +15,7 @@
 #include <iris/jingle-ice.h>
 #undef private
 
+#include <iris/ice176.h>
 #include <iris/jingle-ft.h>
 #include <iris/jingle-rtp.h>
 #include <iris/xmpp_caps.h>
