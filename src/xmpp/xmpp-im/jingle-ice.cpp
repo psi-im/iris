@@ -283,6 +283,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
         bool remoteFingerprintApplied  = false;
         bool gatheringComplete         = false;
         bool checksStarted             = false;
+        quint64 peerBindingActivity     = 0;
 
         QList<Participant> participants;
 #ifdef JINGLE_SCTP
@@ -779,10 +780,12 @@ namespace XMPP { namespace Jingle { namespace ICE {
             const auto id = associationDebugId(network);
             const auto runtime = network->runtime.get();
             qWarning("jingle-ice[%s] ICE failed error=%d checks-started=%d local-candidates=%d remote-candidates=%d "
-                     "local-gathering-complete=%d remote-gathering-complete=%d selected-local-components=%d",
+                     "local-gathering-complete=%d remote-gathering-complete=%d selected-local-components=%d "
+                     "authenticated-peer-bindings=%llu",
                      id.constData(), int(error), int(runtime->checksStarted), int(runtime->localCandidateHistory.size()),
                      int(runtime->remoteCandidates.size()), int(ice->isLocalGatheringComplete()),
-                     int(runtime->remoteGatheringComplete), int(ice->selectedCandidates().size()));
+                     int(runtime->remoteGatheringComplete), int(ice->selectedCandidates().size()),
+                     static_cast<unsigned long long>(runtime->peerBindingActivity));
             network->runtime->pruneParticipants();
             const auto participants = network->runtime->participants;
             for (const auto &participant : participants)
@@ -844,7 +847,13 @@ namespace XMPP { namespace Jingle { namespace ICE {
             },
             Qt::QueuedConnection);
         QObject::connect(ice, &Ice176::peerActivity, network, [network, currentIce]() {
-            if (currentIce() && network->runtime->pad)
+            if (!currentIce() || !network->runtime)
+                return;
+            // Authenticated peer STUN Binding request/response, not TURN server
+            // allocation or STUN discovery. Count it to distinguish unreachable
+            // peers from post-connect ICE/DTLS failures.
+            ++network->runtime->peerBindingActivity;
+            if (network->runtime->pad)
                 network->runtime->pad->noteIncomingActivity();
         });
         QObject::connect(ice, &Ice176::readyRead, network, [network, ice, currentIce](int componentIndex) {
