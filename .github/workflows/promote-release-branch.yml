@@ -1,0 +1,107 @@
+name: Promote Iris release branch
+
+# A release/vX.Y.Z branch is an explicit request to tag the current master
+# commit. Keep tag creation separate from ordinary development pushes.
+on:
+  push:
+    branches:
+      - 'release/v1*'
+
+permissions:
+  contents: write
+  actions: write
+  checks: read
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Verify master checks and publish release tag
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_BRANCH: ${{ github.ref_name }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          tag="${RELEASE_BRANCH#release/}"
+          if [[ ! "$tag" =~ ^v1\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Invalid Iris release branch $RELEASE_BRANCH"
+            exit 1
+          fi
+
+          required=(
+            "Linux (qt5-qca2)"
+            "Linux (qt6-qca3-omemo)"
+            "Desktop (windows-x64)"
+            "Desktop (macos-arm64)"
+            "Desktop (macos-x86_64)"
+            "Android (arm64-v8a)"
+            "Android (x86_64)"
+            "transport-sanitizers"
+            "qca3-srtp"
+            "durable-jinglepub"
+          )
+
+          # Release exactly the tip of master, only after the corresponding
+          # complete CI matrix is green. Never retarget an existing version tag.
+          success=false
+          for attempt in $(seq 1 120); do
+            master_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/master" --jq '.object.sha')
+            if [[ "$master_sha" != "$RELEASE_SHA" ]]; then
+              echo "::error::Release branch $RELEASE_BRANCH is not at the current master commit"
+              exit 1
+            fi
+
+            checks=$(gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE_SHA/check-runs?per_page=100")
+            missing=()
+            for name in "${required[@]}"; do
+              status=$(jq -r --arg name "$name" '
+                ([.check_runs[] | select(.name == $name)] | sort_by(.id) | last)
+                | if . == null then "missing"
+                  elif .status != "completed" then "pending"
+                  else (.conclusion // "pending") end
+              ' <<< "$checks")
+              if [[ "$status" == failure || "$status" == cancelled || "$status" == timed_out || "$status" == action_required ]]; then
+                echo "::error::Required check $name concluded $status"
+                exit 1
+              fi
+              [[ "$status" == success ]] || missing+=("$name: $status")
+            done
+            if (( ${#missing[@]} == 0 )); then
+              success=true
+              break
+            fi
+            printf 'Waiting for release checks (%s/120): %s\n' "$attempt" "${missing[*]}"
+            sleep 30
+          done
+
+          if [[ "$success" != true ]]; then
+            echo "::error::Release CI did not complete successfully"
+            exit 1
+          fi
+
+          # A second concurrent release attempt may already have created it.
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" > "$RUNNER_TEMP/existing-tag.json" 2>/dev/null; then
+            existing_sha=$(jq -r '.object.sha' "$RUNNER_TEMP/existing-tag.json")
+            if [[ "$existing_sha" != "$RELEASE_SHA" ]]; then
+              echo "::error::Existing $tag points at a different revision"
+              exit 1
+            fi
+            echo "Release tag $tag already exists at expected SHA"
+          else
+            gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" \
+              -f "ref=refs/tags/$tag" -f "sha=$RELEASE_SHA"
+            echo "Created release tag $tag at $RELEASE_SHA"
+          fi
+
+          # GITHUB_TOKEN-authored ref creation does not trigger push workflows.
+          # Dispatch the existing release pipeline explicitly; it orchestrates
+          # packaging, verifies source/artifact parity, and publishes the release.
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $tag already published"
+          else
+            gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref master -f tag="$tag"
+            echo "Dispatched Iris release workflow for $tag"
+          fi
