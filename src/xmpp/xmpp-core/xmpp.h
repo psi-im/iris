@@ -100,7 +100,15 @@ private:
 class IRIS_EXPORT AdvancedConnector : public Connector {
     Q_OBJECT
 public:
-    enum Error { ErrConnectionRefused, ErrHostNotFound, ErrProxyConnect, ErrProxyNeg, ErrProxyAuth, ErrStream };
+    enum Error {
+        ErrConnectionRefused,
+        ErrHostNotFound,
+        ErrProxyConnect,
+        ErrProxyNeg,
+        ErrProxyAuth,
+        ErrStream,
+        ErrProxyProtocol
+    };
     AdvancedConnector(QObject *parent = nullptr);
     virtual ~AdvancedConnector();
 
@@ -152,6 +160,7 @@ public:
     void setRemoteDns(const QUrl &server);
     void setOptSSL(bool);
     void setOptTlsSrv(bool);
+    void setOptProxyProtocol(bool);
 
     void changePollInterval(int secs);
 

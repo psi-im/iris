@@ -54,6 +54,7 @@ set(XMPP_CORE_HEADERS
 set(XMPP_CORE_PRIVATE_HEADERS
     xmpp-core/parser.h
     xmpp-core/protocol.h
+    xmpp-core/proxyprotocol.h
     xmpp-core/sm.h
     xmpp-core/td.h
     xmpp-core/xmlprotocol.h
@@ -170,6 +171,7 @@ target_sources(iris PRIVATE
     xmpp-core/connector.cpp
     xmpp-core/parser.cpp
     xmpp-core/protocol.cpp
+    xmpp-core/proxyprotocol.cpp
     xmpp-core/sm.cpp
     xmpp-core/stream.cpp
     xmpp-core/linklocalstream.cpp

@@ -32,6 +32,7 @@
 #include "httpconnect.h"
 #include "httppoll.h"
 #include "netnames.h"
+#include "proxyprotocol.h"
 #include "remotenameprovider.h"
 #include "socks.h"
 #include "xmpp.h"
@@ -162,6 +163,7 @@ public:
     quint16 opt_port;              //!< explicit port from config
     bool    opt_directtls = false; //!< Whether to use direct TLS support
     bool    opt_srvtls    = true;  //!< Whether to lookup tls port from SRV
+    bool    opt_proxyProtocol = false;
     Proxy   proxy;                 //!< Proxy configuration
     QUrl    remoteDns;             //!< DNS server queried through the proxy, see setRemoteDns()
 
@@ -373,6 +375,13 @@ void AdvancedConnector::setOptTlsSrv(bool value)
     d->opt_srvtls = value;
 }
 
+void AdvancedConnector::setOptProxyProtocol(bool value)
+{
+    if (d->mode != Idle)
+        return;
+    d->opt_proxyProtocol = value;
+}
+
 void AdvancedConnector::connectToServer(const QString &server)
 {
 #ifdef XMPP_DEBUG
@@ -386,6 +395,12 @@ void AdvancedConnector::connectToServer(const QString &server)
 
     d->errorCode = 0;
     d->mode      = Connecting;
+    if (d->opt_proxyProtocol && d->proxy.type() != Proxy::None) {
+        cleanup();
+        d->errorCode = ErrProxyProtocol;
+        emit error();
+        return;
+    }
 
     // Encode the servername
     d->host = QUrl::toAce(server);
@@ -482,6 +497,19 @@ void AdvancedConnector::bs_connected()
 #ifdef XMPP_DEBUG
     XDEBUG;
 #endif
+    if (d->opt_proxyProtocol) {
+        auto *socket = qobject_cast<BSocket *>(d->bs);
+        QByteArray header;
+        if (!socket
+            || !createProxyProtocolV1Header(socket->address(), socket->port(), socket->peerAddress(),
+                                            socket->peerPort(), header)
+            || socket->write(header) != header.size()) {
+            cleanup();
+            d->errorCode = ErrProxyProtocol;
+            emit error();
+            return;
+        }
+    }
     if (d->proxy.type() == Proxy::None) {
         QHostAddress h = (static_cast<BSocket *>(d->bs))->peerAddress();
         quint16      p = (static_cast<BSocket *>(d->bs))->peerPort();
