@@ -108,7 +108,7 @@ public:
     bool                               localFinished   = false;
     // bool                               stunFinished      = false;
     bool gatheringComplete = false;
-    int  debugLevel        = DL_Packet;
+    int  debugLevel        = DL_None; // The ICE owner opts in to diagnostics.
 
     Private(IceComponent *_q) : QObject(_q), q(_q), sess(this) { }
 
