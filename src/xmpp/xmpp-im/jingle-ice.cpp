@@ -436,8 +436,9 @@ namespace XMPP { namespace Jingle { namespace ICE {
         void onOneFinished()
         {
             if (!--counter) {
-                callback();
+                auto done = std::move(callback);
                 deleteLater();
+                done();
             }
         }
 
