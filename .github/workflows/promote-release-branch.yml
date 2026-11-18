@@ -51,7 +51,33 @@ jobs:
             "Android (x86_64)"
             "transport-sanitizers"
             "qca3-srtp"
-            "openssl41-jingle-dtls"
+            "archlinux-jingle-dtls"
+            "durable-jinglepub"
+            "Net (qt5-qca2-jdns)"
+            "Net (qt6-qca3-jdns)"
+            "Net (qt6-qca3)"
+            "protocol-errors"
+          )
+
+          # Path-filtered workflows can legitimately report "skipped" on a
+          # CI-only master commit. Explicitly re-run all release-critical suites
+          # on this exact revision rather than accepting a skipped check.
+          # workflow_dispatch bypasses the Jingle path-selection heuristic.
+          master_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/master" --jq '.object.sha')
+          if [[ "$master_sha" != "$RELEASE_SHA" ]]; then
+            echo "::error::Release branch $RELEASE_BRANCH is not at current master"
+            exit 1
+          fi
+          baseline_id=$(gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE_SHA/check-runs?per_page=100" \
+            --jq '[.check_runs[].id] | max // 0')
+          for workflow in jingle.yml jinglepub-prosody.yml net.yml core-protocol-errors.yml; do
+            echo "Dispatching full release validation: $workflow"
+            gh workflow run "$workflow" --repo "$GITHUB_REPOSITORY" --ref master
+          done
+          fresh_checks=(
+            "transport-sanitizers"
+            "qca3-srtp"
+            "archlinux-jingle-dtls"
             "durable-jinglepub"
             "Net (qt5-qca2-jdns)"
             "Net (qt6-qca3-jdns)"
@@ -72,8 +98,15 @@ jobs:
             checks=$(gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE_SHA/check-runs?per_page=100")
             missing=()
             for name in "${required[@]}"; do
-              status=$(jq -r --arg name "$name" '
-                ([.check_runs[] | select(.name == $name)] | sort_by(.id) | last)
+              threshold=0
+              for fresh in "${fresh_checks[@]}"; do
+                if [[ "$fresh" == "$name" ]]; then
+                  threshold=$baseline_id
+                  break
+                fi
+              done
+              status=$(jq -r --arg name "$name" --argjson threshold "$threshold" '
+                ([.check_runs[] | select(.name == $name and .id > $threshold)] | sort_by(.id) | last)
                 | if . == null then "missing"
                   elif .status != "completed" then "pending"
                   else (.conclusion // "pending") end
