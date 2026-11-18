@@ -24,6 +24,8 @@
 #include "xmpp_client.h"
 #include "xmpp_externalservicediscovery.h"
 
+#include <QPointer>
+
 #include <chrono>
 
 namespace XMPP {
@@ -57,6 +59,10 @@ private:
 
     void disco()
     {
+        // ICE takes ownership of the monitor, so it can outlive the Client
+        // and the manager that created it.
+        if (!manager_)
+            return;
         using namespace std::chrono_literals;
         manager_->client()->externalServiceDiscovery()->services(
             this, [this](auto const &list) { addNewServices(list); }, 5min, supportedServiceTypes());
@@ -169,6 +175,8 @@ private:
 
     void getCreds(const StunList &services)
     {
+        if (!manager_)
+            return;
         QSet<ExternalServiceId> ids;
         for (auto const &s : services) {
             ExternalServiceId id;
@@ -227,7 +235,7 @@ private:
         }
     }
 
-    StunDiscoManager                      *manager_;
+    QPointer<StunDiscoManager>               manager_;
     bool                                   inProgress_ = false; // initial disco
     QList<AbstractStunDisco::Service::Ptr> pendingWork_;
 };
