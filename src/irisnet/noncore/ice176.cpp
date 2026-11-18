@@ -1430,10 +1430,13 @@ private slots:
 
     void ic_candidateAdded(const XMPP::IceComponent::Candidate &_cc)
     {
-        // RFC 8838 section 13: no new candidates may be trickled after
-        // end-of-candidates or final nomination, even if a slow STUN/TURN
-        // transaction on an unused interface eventually completes.
-        if (localGatheringComplete || state == Active) {
+        // RFC 8838 section 13 prohibits signaling newly gathered candidates
+        // after end-of-candidates or final nomination. However RFC 8445
+        // section 7.2.5.3.1 still requires us to register an internally
+        // discovered peer-reflexive candidate to form the valid pair from a
+        // Binding success. It must not be trickled to the remote peer.
+        const bool gatheringClosed = localGatheringComplete || state == Active;
+        if (gatheringClosed && _cc.info->type != IceComponent::PeerReflexiveType) {
             iceDebug("C%d: ignoring candidate discovered after end-of-candidates", _cc.info->componentId);
             return;
         }
@@ -1457,7 +1460,7 @@ private slots:
         if (!localHostGatheringFinished)
             return; // all local IPs will be reported at once
 
-        if (localFeatures & Trickle) {
+        if ((localFeatures & Trickle) && !gatheringClosed) {
             QList<Ice176::Candidate> list;
 
             Ice176::Candidate c;
