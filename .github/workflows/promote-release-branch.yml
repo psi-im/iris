@@ -98,9 +98,12 @@ jobs:
             missing=()
             for name in "${required[@]}"; do
               threshold=0
-              if printf '%s\\n' "${fresh_checks[@]}" | grep -Fxq "$name"; then
-                threshold=$baseline_id
-              fi
+              for fresh in "${fresh_checks[@]}"; do
+                if [[ "$fresh" == "$name" ]]; then
+                  threshold=$baseline_id
+                  break
+                fi
+              done
               status=$(jq -r --arg name "$name" --argjson threshold "$threshold" '
                 ([.check_runs[] | select(.name == $name and .id > $threshold)] | sort_by(.id) | last)
                 | if . == null then "missing"
