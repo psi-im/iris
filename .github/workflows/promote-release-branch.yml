@@ -5,6 +5,13 @@ name: Promote Iris release branch
 # branches, which do not necessarily generate a push event.
 on:
   create:
+  push:
+    branches:
+      - 'release/v1*'
+
+concurrency:
+  group: iris-release-promotion-${{ github.ref_name }}
+  cancel-in-progress: true
 
 permissions:
   contents: write
@@ -13,7 +20,9 @@ permissions:
 
 jobs:
   promote:
-    if: github.event.ref_type == 'branch' && startsWith(github.event.ref, 'release/v1')
+    if: >-
+      (github.event_name == 'create' && github.event.ref_type == 'branch' && startsWith(github.event.ref, 'release/v1'))
+      || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/v1'))
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -21,7 +30,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_BRANCH: ${{ github.event.ref }}
+          RELEASE_BRANCH: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           tag="${RELEASE_BRANCH#release/}"
