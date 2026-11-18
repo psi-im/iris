@@ -1587,7 +1587,10 @@ private slots:
         Q_ASSERT(it != components.end());
 
         // FIXME: components are always sorted?
-        iceDebug("C%d: %s", it->id, qPrintable(line));
+        if (irisIcePacket().isDebugEnabled())
+            qCDebug(irisIcePacket, "C%d: %s", it->id, qPrintable(line));
+        else
+            iceDebug("C%d: %s", it->id, qPrintable(line));
 #else
         Q_UNUSED(line)
 #endif
