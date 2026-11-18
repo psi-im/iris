@@ -42,6 +42,7 @@ jobs:
             "Android (x86_64)"
             "transport-sanitizers"
             "qca3-srtp"
+            "openssl41-jingle-dtls"
             "durable-jinglepub"
             "Net (qt5-qca2-jdns)"
             "Net (qt6-qca3-jdns)"
