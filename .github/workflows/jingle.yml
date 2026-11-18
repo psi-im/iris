@@ -247,7 +247,7 @@ jobs:
               return version.startsWith(QStringLiteral("OpenSSL 4.")) ? 0 : 3;
           }
           CPP
-          c++ /tmp/iris-qt-system-tls.cpp $(pkg-config --cflags --libs Qt6Network) \
+          c++ -fPIC /tmp/iris-qt-system-tls.cpp $(pkg-config --cflags --libs Qt6Network) \
             -o /tmp/iris-qt-system-tls
           /tmp/iris-qt-system-tls
 
