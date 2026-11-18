@@ -198,3 +198,116 @@ jobs:
           ctest --test-dir build-jingle-sanitize --output-on-failure -j1 -R 'jingle_(ibblifecycle|bundlesignaling)'
           ctest --test-dir build-jingle-sanitize --output-on-failure -j1 -R jingle_rtpnegotiation
           ctest --test-dir build-jingle-sanitize --output-on-failure -j1 -R jingle_dtlssrtp
+
+archlinux-jingle-dtls:
+    name: archlinux-jingle-dtls
+    needs: select-tests
+    if: needs.select-tests.outputs.run == 'true'
+    runs-on: ubuntu-24.04
+    container:
+      image: archlinux:latest
+    timeout-minutes: 55
+    steps:
+      - name: Install matching system Qt, OpenSSL and build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          pacman -Syu --noconfirm --needed
+          pacman -S --noconfirm --needed \
+            base-devel cmake ninja git jq pkgconf \
+            qt6-base openssl libusrsctp
+          pacman -Q qt6-base openssl
+          openssl version
+          # Test system OpenSSL 4.x, not an SDK grafted onto another Qt.
+          openssl version | grep -E '^OpenSSL 4\.[1-9][0-9]*\.'
+          test -e /usr/lib/libssl.so.4
+          test -e /usr/lib/libcrypto.so.4
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify system Qt TLS backend loads system OpenSSL
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/iris-qt-system-tls.cpp <<'CPP'
+          #include <QCoreApplication>
+          #include <QSslSocket>
+          #include <QDebug>
+          int main(int argc, char **argv)
+          {
+              QCoreApplication app(argc, argv);
+              if (!QSslSocket::setActiveBackend(QStringLiteral("openssl")))
+                  return 1;
+              if (!QSslSocket::supportsSsl())
+                  return 2;
+              const QString version = QSslSocket::sslLibraryVersionString();
+              qInfo().noquote() << "Qt TLS runtime:" << version;
+              return version.startsWith(QStringLiteral("OpenSSL 4.")) ? 0 : 3;
+          }
+          CPP
+          c++ /tmp/iris-qt-system-tls.cpp $(pkg-config --cflags --libs Qt6Network) \
+            -o /tmp/iris-qt-system-tls
+          /tmp/iris-qt-system-tls
+
+      - name: Build locked QCA3 with Arch system OpenSSL
+        shell: bash
+        run: |
+          set -euo pipefail
+          qca_tag=$(jq -r '.qca.tag' dependencies.lock.json)
+          qca_commit=$(jq -r '.qca.commit' dependencies.lock.json)
+          test "$qca_tag" = v3.2.0
+          git clone --depth 1 --branch "$qca_tag" https://github.com/psi-im/qca.git qca-arch-src
+          test "$(git -C qca-arch-src rev-parse HEAD)" = "$qca_commit"
+
+          qca_prefix="$GITHUB_WORKSPACE/qca-arch-sdk"
+          echo "QCA_ARCH_PREFIX=$qca_prefix" >> "$GITHUB_ENV"
+          cmake -S qca-arch-src -B qca-arch-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_WITH_QT6=ON -DQCA_SUFFIX=qt6 \
+            -DBUILD_TESTS=OFF -DBUILD_TOOLS=OFF -DBUILD_PLUGINS=ossl \
+            -DQCA_INSTALL_IN_QT_PREFIX=OFF \
+            -DCMAKE_INSTALL_PREFIX="$qca_prefix"
+          cmake --build qca-arch-build --parallel 4
+          cmake --install qca-arch-build
+
+          provider=$(find "$qca_prefix/lib/qca3-qt6" -type f -name '*qca-ossl*.so' -print -quit)
+          test -n "$provider"
+          ldd "$provider" | tee /tmp/iris-qca-provider-ldd.log
+          # Verify the provider's actual ELF dependencies, not just headers.
+          grep -E 'libssl\.so\.4 => /usr/lib/libssl\.so\.4' /tmp/iris-qca-provider-ldd.log
+          grep -E 'libcrypto\.so\.4 => /usr/lib/libcrypto\.so\.4' /tmp/iris-qca-provider-ldd.log
+
+      - name: Build Jingle DTLS-SRTP and SCTP integration test
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S tests/jingle -B build-jingle-arch -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DUSE_QT6=ON -DIRIS_SYSTEM_QCA=3 -DIRIS_BUNDLED_QCA=OFF \
+            -DIRIS_ENABLE_OMEMO=OFF -DIRIS_ENABLE_JINGLE_SCTP=ON \
+            -DIRIS_BUNDLED_USRSCTP=OFF \
+            -DCMAKE_PREFIX_PATH="$QCA_ARCH_PREFIX" \
+            -DQca3-qt6_DIR="$QCA_ARCH_PREFIX/lib/cmake/Qca3-qt6"
+          cmake --build build-jingle-arch --parallel 4 \
+            --target jingle_dtlssrtp_test
+
+      - name: Verify Jingle DTLS handshake and SRTP key export
+        shell: bash
+        run: |
+          set -euo pipefail
+          export QCA_PLUGIN_PATH="$QCA_ARCH_PREFIX/lib/qca3-qt6"
+          export LD_LIBRARY_PATH="$QCA_ARCH_PREFIX/lib:\${LD_LIBRARY_PATH:-}"
+          QT_DEBUG_PLUGINS=1 LD_DEBUG=libs \
+            ./build-jingle-arch/jingle_dtlssrtp_test \
+            > /tmp/iris-jingle-arch-dtls.log 2>&1 || {
+              tail -n 140 /tmp/iris-jingle-arch-dtls.log
+              exit 1
+            }
+          grep -F 'Iris/QCA3 DTLS-SRTP key-export and SCTP mux integration passed' \
+            /tmp/iris-jingle-arch-dtls.log
+          grep -F '/usr/lib/libssl.so.4' /tmp/iris-jingle-arch-dtls.log
+          grep -F '/usr/lib/libcrypto.so.4' /tmp/iris-jingle-arch-dtls.log
+          grep -E 'loaded library.*qca-ossl|qca-ossl.*loaded' \
+            /tmp/iris-jingle-arch-dtls.log | head -n 3
