@@ -213,6 +213,12 @@ int main(int argc, char **argv)
 
     onStanza = nullptr;
     QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    // Destroying the encryption method must unregister its Jingle adapters,
+    // even if a Jingle session remains alive in the manager.
+    delete alice.omemo;
+    alice.omemo = nullptr;
+    check(!alice.client.jingleManager()->discoFeatures().contains(J::JetOmemo::ns()),
+          "Jingle encryption adapter survived its method");
     qInfo("JET-OMEMO tests passed");
     pep.clear();
     return 0;
