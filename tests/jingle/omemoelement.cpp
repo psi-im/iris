@@ -302,6 +302,67 @@ void exercise(Endpoint &alice, Endpoint &bob, OmemoProtocol protocol, const char
     }
     qInfo("OMEMO %s element encryption passed", name);
 }
+
+// A MUC service rewrites the outer from/to addresses. The OMEMO 2 SCE
+// envelope must still authenticate the *real* sender and the *room*.
+// Unknown occupant mappings must never be interpreted as an OMEMO identity.
+void exerciseMuc(Endpoint &alice, Endpoint &bob)
+{
+    const Jid room(QStringLiteral("garden@conference.example.test"));
+    const Jid occupant(room.full() + QStringLiteral("/Alice"));
+
+    const auto encryptMessage = [&]() {
+        QDomDocument doc;
+        auto stanza = doc.createElement(QStringLiteral("message"));
+        stanza.setAttribute(QStringLiteral("type"), QStringLiteral("groupchat"));
+        stanza.setAttribute(QStringLiteral("from"), alice.jid.full());
+        stanza.setAttribute(QStringLiteral("to"), room.bare());
+        doc.appendChild(stanza);
+        auto body = doc.createElementNS(QStringLiteral("jabber:client"), QStringLiteral("body"));
+        body.appendChild(doc.createTextNode(QStringLiteral("Private MUC message")));
+        stanza.appendChild(body);
+
+        EncryptionContext send;
+        send.recipients = { bob.jid.bare() };
+        send.options.insert(QStringLiteral("omemoProtocol"), QStringLiteral("omemo2"));
+        auto job = wait(alice.client.encryptionManager()->encrypt(OmemoEncryption::methodId(), stanza, send),
+                        alice, bob);
+        check(job->success(), "MUC OMEMO 2 encryption failed");
+
+        QDomDocument incomingDoc;
+        auto incoming = incomingDoc.importNode(job->stanza(), true).toElement();
+        incomingDoc.appendChild(incoming);
+        incoming.setAttribute(QStringLiteral("from"), occupant.full());
+        incoming.setAttribute(QStringLiteral("to"), bob.jid.full());
+        return incomingDoc;
+    };
+
+    QDomDocument incomingDoc = encryptMessage();
+    auto incoming = incomingDoc.documentElement();
+    auto unknown = wait(bob.client.encryptionManager()->decrypt(incoming), alice, bob);
+    check(!unknown->success() && unknown->error() == EncryptionJob::Error::AuthenticationFailed,
+          "MUC ciphertext without a real sender mapping was accepted");
+
+    EncryptionContext receive;
+    receive.options.insert(QStringLiteral("mucRealSender"), alice.jid.bare());
+    auto opened = wait(bob.client.encryptionManager()->decrypt(incoming, receive), alice, bob);
+    check(opened->success(), "MUC message with authenticated real sender failed");
+    check(opened->metadata().sender.bare() == alice.jid.bare()
+              && opened->stanza().attribute(QStringLiteral("from")) == occupant.full()
+              && opened->stanza().attribute(QStringLiteral("to")) == bob.jid.full()
+              && opened->stanza().firstChildElement(QStringLiteral("body")).text()
+                     == QStringLiteral("Private MUC message"),
+          "MUC identity, original addresses or decrypted body were not preserved");
+
+    auto wrongRoomDoc = encryptMessage();
+    auto wrongRoom = wrongRoomDoc.documentElement();
+    wrongRoom.setAttribute(QStringLiteral("from"), QStringLiteral("other@conference.example.test/Alice"));
+    auto roomAttack = wait(bob.client.encryptionManager()->decrypt(wrongRoom, receive), alice, bob);
+    check(!roomAttack->success() && roomAttack->error() == EncryptionJob::Error::AuthenticationFailed,
+          "MUC SCE <to/> did not bind ciphertext to the original room");
+
+    qInfo("OMEMO 2 authenticated MUC sender and room binding passed");
+}
 }
 
 int main(int argc, char **argv)
@@ -326,6 +387,8 @@ int main(int argc, char **argv)
         exercise(alice, bob, OmemoProtocol::Legacy, "legacy");
     if (protocols.testFlag(OmemoProtocol::Omemo2))
         exercise(alice, bob, OmemoProtocol::Omemo2, "2");
+    if (protocols.testFlag(OmemoProtocol::Omemo2))
+        exerciseMuc(alice, bob);
     qInfo("OMEMO element tests passed");
     pep.clear(); // the elements must not outlive their document at static destruction
     return 0;
