@@ -107,6 +107,9 @@ public:
     EncryptionContext     context;
     QSet<EncryptionJob *> activeJobs;
     bool                  closing = false;
+    bool                  streamBusy = false;
+    bool                  streamFinished = false;
+    std::optional<bool>   streamEncrypting;
 };
 
 EncryptedSession::EncryptedSession(const QString &methodId, const EncryptionContext &context, QObject *parent) :
@@ -162,6 +165,8 @@ EncryptionJob *EncryptedSession::encrypt(const QDomElement &) { return unsupport
 EncryptionJob *EncryptedSession::decrypt(const QDomElement &) { return unsupportedJob(this); }
 EncryptionJob *EncryptedSession::encrypt(const QByteArray &) { return unsupportedJob(this); }
 EncryptionJob *EncryptedSession::decrypt(const QByteArray &) { return unsupportedJob(this); }
+EncryptionJob *EncryptedSession::encryptChunk(const QByteArray &, bool) { return unsupportedJob(this); }
+EncryptionJob *EncryptedSession::decryptChunk(const QByteArray &, bool) { return unsupportedJob(this); }
 
 EncryptionMethod::EncryptionMethod(QObject *parent) : QObject(parent) { }
 EncryptionMethod::~EncryptionMethod() = default;
@@ -396,6 +401,48 @@ EncryptionJob *EncryptionManager::encrypt(EncryptedSession *session, const QByte
 EncryptionJob *EncryptionManager::decrypt(EncryptedSession *session, const QByteArray &data)
 {
     return run(session, [&data](EncryptedSession *current) { return current->decrypt(data); });
+}
+
+EncryptionJob *EncryptionManager::runStream(EncryptedSession *session, const QByteArray &chunk, bool final,
+                                            bool encrypting)
+{
+    if (!session || !d->sessions.contains(session) || session->isClosing())
+        return unsupported(QStringLiteral("Encryption stream session is unavailable"));
+    auto *method = this->method(session->methodId());
+    if (!method || !method->capabilities().testFlag(EncryptionMethod::DataStream))
+        return unsupported(QStringLiteral("Encryption method does not support streams"));
+    if (session->d->streamBusy || session->d->streamFinished)
+        return unsupported(QStringLiteral("Encryption stream is busy or already finalized"));
+    if (session->d->streamEncrypting && *session->d->streamEncrypting != encrypting)
+        return unsupported(QStringLiteral("Cannot switch encryption stream direction"));
+
+    session->d->streamBusy = true;
+    session->d->streamEncrypting = encrypting;
+    auto *job = run(session, [&chunk, final, encrypting](EncryptedSession *current) {
+        return encrypting ? current->encryptChunk(chunk, final) : current->decryptChunk(chunk, final);
+    });
+    const auto finished = [guard = QPointer<EncryptedSession>(session), jobGuard = QPointer<EncryptionJob>(job), final]() {
+        if (!guard)
+            return;
+        guard->d->streamBusy = false;
+        if (final || !jobGuard || !jobGuard->success())
+            guard->d->streamFinished = true;
+    };
+    if (job->isFinished())
+        finished();
+    else
+        connect(job, &EncryptionJob::finished, this, finished);
+    return job;
+}
+
+EncryptionJob *EncryptionManager::encryptChunk(EncryptedSession *session, const QByteArray &chunk, bool final)
+{
+    return runStream(session, chunk, final, true);
+}
+
+EncryptionJob *EncryptionManager::decryptChunk(EncryptedSession *session, const QByteArray &chunk, bool final)
+{
+    return runStream(session, chunk, final, false);
 }
 
 } // namespace XMPP

@@ -183,6 +183,21 @@ public:
     virtual EncryptionJob *encrypt(const QByteArray &data);
     virtual EncryptionJob *decrypt(const QByteArray &data);
 
+    /**
+     * Incremental encryption/decryption (DataStream capability). A session owns exactly one
+     * stream: submit the next chunk only after the preceding job succeeds. The final chunk
+     * must be submitted with final=true, even for an empty stream. A failed or finalized
+     * stream cannot be reused; start a new session instead.
+     *
+     * Unlike DataMessage, a successful non-final decryption does not authenticate the
+     * whole stream. Consumers MUST hold decrypted bytes as untrusted until the final
+     * job succeeds, and must discard them on failure (for example, an invalid GCM tag).
+     * Implementations can emit the authentication tag as part of the final encrypted
+     * result, or validate it in the final decrypted result.
+     */
+    virtual EncryptionJob *encryptChunk(const QByteArray &chunk, bool final);
+    virtual EncryptionJob *decryptChunk(const QByteArray &chunk, bool final);
+
 private:
     void track(EncryptionJob *job);
     void operationFinished(EncryptionJob *job);
@@ -265,12 +280,18 @@ public:
     EncryptionJob *encrypt(EncryptedSession *session, const QByteArray &data);
     EncryptionJob *decrypt(EncryptedSession *session, const QByteArray &data);
 
+    // Incremental stream jobs require an explicitly owned DataStream session.
+    // No transient session is created for individual chunks.
+    EncryptionJob *encryptChunk(EncryptedSession *session, const QByteArray &chunk, bool final = false);
+    EncryptionJob *decryptChunk(EncryptedSession *session, const QByteArray &chunk, bool final = false);
+
 signals:
     void methodRegistered(const QString &id);
     void methodUnregistered(const QString &id);
 
 private:
     EncryptionJob *unsupported(const QString &message) const;
+    EncryptionJob *runStream(EncryptedSession *session, const QByteArray &chunk, bool final, bool encrypting);
     EncryptionJob *run(EncryptedSession *session, const std::function<EncryptionJob *(EncryptedSession *)> &operation);
     EncryptionJob *runTransient(EncryptionMethod *method, EncryptionMethod::Capability capability,
                                 const EncryptionContext                                  &context,
