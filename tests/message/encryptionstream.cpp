@@ -144,6 +144,14 @@ int main(int argc, char **argv)
     stanzaOnly->close();
     check(!manager.startSession(method.id(), EncryptionMethod::DataMessage),
           "Unsupported data-message capability accepted");
+    // Methods also create short-lived sessions directly (e.g. OMEMO for Jingle elements).
+    // They must retain the same public encrypt() API without a registry-owned session.
+    auto *directSession = method.startSession(EncryptionMethod::XmppStanza, {});
+    check(directSession != nullptr, "Direct method session creation failed");
+    auto *directResult = await(directSession->encrypt(signaling));
+    check(directResult->success(), "Direct method session encryption failed");
+    directSession->close();
+
     auto *registrySession = manager.startSession(method.id(), EncryptionMethod::DataStream);
     check(registrySession != nullptr, "Manager failed to create a session for unload test");
     manager.unregisterMethod(&method);
