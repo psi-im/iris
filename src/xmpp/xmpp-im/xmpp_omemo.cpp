@@ -2800,17 +2800,23 @@ public:
             job->fail(EncryptionJob::Error::ProtocolError, QStringLiteral("Malformed OMEMO encrypted stanza"));
             return job;
         }
-        const Jid outerSender(xml.attribute(QStringLiteral("from")));
+        const Jid  outerSender(xml.attribute(QStringLiteral("from")));
         const bool isMuc = xml.attribute(QStringLiteral("type")) == QLatin1String("groupchat");
-        const Jid realMucSender(context().options.value(QStringLiteral("mucRealSender")).toString());
-        if (!outerSender.isValid()
-            || (isMuc && (outerSender.resource().isEmpty() || !realMucSender.isValid()
-                          || realMucSender.node().isEmpty() || !realMucSender.resource().isEmpty()))) {
+        if (!outerSender.isValid()) {
             job->fail(EncryptionJob::Error::AuthenticationFailed,
-                      QStringLiteral("OMEMO groupchat sender has no verified real bare JID"));
+                      QStringLiteral("OMEMO stanza has no valid sender"));
             return job;
         }
-        const Jid sender = isMuc ? realMucSender : outerSender;
+        Jid sender = outerSender;
+        if (isMuc) {
+            sender = Jid(context().options.value(QStringLiteral("mucRealSender")).toString());
+            if (outerSender.resource().isEmpty() || !sender.isValid() || sender.node().isEmpty()
+                || !sender.resource().isEmpty()) {
+                job->fail(EncryptionJob::Error::AuthenticationFailed,
+                          QStringLiteral("OMEMO groupchat sender has no verified real bare JID"));
+                return job;
+            }
+        }
 
         QDomElement ourKey;
         if (protocol == OmemoProtocol::Legacy) {
