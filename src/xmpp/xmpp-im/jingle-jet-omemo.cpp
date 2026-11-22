@@ -148,7 +148,8 @@ void JetOmemo::decryptSecret(const Jid &peer, const QDomElement &security, const
 {
     const auto wireProfile = security.attribute(QStringLiteral("type"));
     const bool omemo2 = wireProfile == OmemoEncryption::namespaceUri();
-    const auto keySize = JET::keySize(security.attribute(QStringLiteral("cipher")));
+    const auto cipher  = security.attribute(QStringLiteral("cipher"));
+    const auto keySize = JET::keySize(cipher);
     if (!d->omemo || !accepts(wireProfile)
         || keySize != std::optional<int>(omemo2 ? 32 : 16)) {
         done({}, QStringLiteral("Unsupported JET-OMEMO profile or cipher"));
@@ -161,7 +162,7 @@ void JetOmemo::decryptSecret(const Jid &peer, const QDomElement &security, const
         return;
     }
     QPointer<JetOmemo> guard(this);
-    const auto finish = [guard, job, wireProfile, omemo2, done]() {
+    const auto finish = [guard, job, wireProfile, cipher, omemo2, done]() {
         if (!guard) {
             job->deleteLater();
             return;
@@ -186,7 +187,7 @@ void JetOmemo::decryptSecret(const Jid &peer, const QDomElement &security, const
             result.iv = valid ? QByteArray::fromBase64(secret.attribute(QStringLiteral("iv")).toLatin1())
                               : QByteArray();
         }
-        result.cipher = security.attribute(QStringLiteral("cipher"));
+        result.cipher = cipher;
         result.type = wireProfile;
         result.authentication.method = OmemoEncryption::methodId();
         result.authentication.deviceId = metadata.senderDeviceId;
