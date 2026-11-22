@@ -81,6 +81,7 @@ void sequence(int count, const std::function<void(int, std::function<void()>)> &
 }
 
 struct StoredSecret {
+    QString methodId;
     Origin creator = Origin::None;
     ProtectedSecret secret;
 };
@@ -116,6 +117,10 @@ public:
         if (it == pending.end())
             return;
         for (auto entry = it->begin(); entry != it->end();) {
+            if (!forMethod(entry->methodId) || !session->allowsEncryptionMethod(entry->methodId)) {
+                entry = it->erase(entry);
+                continue;
+            }
             auto *transfer = qobject_cast<FileTransfer::Application *>(
                 session->content(entry.key(), entry->creator));
             if (!transfer) {
@@ -186,7 +191,21 @@ bool Jet::registerKeyTransport(KeyTransport *transport)
 
 void Jet::unregisterKeyTransport(KeyTransport *transport)
 {
-    d->transports.removeAll(transport);
+    if (!transport || !d->transports.removeAll(transport))
+        return;
+    // Do not retain uninstalled key material after its encryption method dies.
+    for (auto pending = d->pending.begin(); pending != d->pending.end();) {
+        for (auto entry = pending->begin(); entry != pending->end();) {
+            if (entry->methodId == transport->methodId())
+                entry = pending->erase(entry);
+            else
+                ++entry;
+        }
+        if (pending->isEmpty())
+            pending = d->pending.erase(pending);
+        else
+            ++pending;
+    }
     // Without a key transport this must not count as a Jingle security filter:
     // Manager's no-filter path rejects required E2EE for all content types.
     if (d->transports.isEmpty() && d->manager)
@@ -336,7 +355,8 @@ bool Jet::filterIncoming(const Jid &from, const QDomElement &jingle, const Done 
                 next();
                 return;
             }
-            transport->decryptSecret(from, security, [guard, content, wireProfile, cipherSize, failure, secrets, next](
+            transport->decryptSecret(from, security, [guard, content, methodId = transport->methodId(),
+                                                       wireProfile, cipherSize, failure, secrets, next](
                                                  const std::optional<ProtectedSecret> &secret, const QString &error) {
                 if (!guard)
                     return;
@@ -346,7 +366,7 @@ bool Jet::filterIncoming(const Jid &from, const QDomElement &jingle, const Done 
                         *failure = error.isEmpty() ? QStringLiteral("Invalid JET key exchange") : error;
                 } else {
                     secrets->insert(content.attribute(QStringLiteral("name")),
-                                    { creatorOf(content), *secret });
+                                    { methodId, creatorOf(content), *secret });
                 }
                 next();
             });
