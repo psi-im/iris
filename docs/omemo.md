@@ -33,6 +33,30 @@ making cryptographic session objects own network state. Psi may adapt plugin-pro
 methods into this Iris registry and expose UI controls; encryption protocol policy
 and processing belong in Iris.
 
+### Lifetime and peer identity
+
+`Client::encryptedSession(methodId, peer)` retains a stanza encryption session
+for each encryption method and peer **full JID**. Repeated incoming and outgoing
+stanzas use that same object. A bare JID is keyed separately only when the caller
+has no resource (for example, a message to a bare chat address).
+
+The client retires sessions on resource-unavailable presence, MUC leave/rejoin,
+disconnect/restart and method unregistration. A session must not be reused for
+another resource or a later occupant claiming the same MUC nickname.
+
+A long-lived session's `context()` identifies its peer and defaults, but
+`encrypt(stanza, operationContext)` and `decrypt(stanza, operationContext)`
+merge a separate immutable context for **each** stanza. This is essential for
+overlapping asynchronous work: replies (`replyTo`), MUC sender identity, and
+forwarded carbons cannot mutate a shared session-wide context or leak into
+subsequent messages. Method and plugin implementations receive the merged
+context for that operation.
+
+OMEMO's actual Double Ratchet sessions remain in the libsignal storage by
+bare JID **and device ID** (separate for legacy and OMEMO 2). They survive
+the lifetime of a `Client::encryptedSession`; the latter is a higher-level
+XMPP peer session and must neither replace nor reset those underlying ratchets.
+
 OMEMO does **not** claim `DataMessage` or `DataStream`: using the Double Ratchet to
 bulk-encrypt a file or media stream is the wrong layer. A file-encryption method (for
 example an XEP-0454 implementation) can later implement `DataMessage`/`DataStream`,
