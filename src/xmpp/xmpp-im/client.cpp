@@ -149,6 +149,8 @@ public:
     HttpFileUploadManager    *httpFileUploadManager    = nullptr;
     Jingle::Manager          *jingleManager            = nullptr;
     MucManager              *mucManager               = nullptr;
+    EncryptionManager       *encryptionManager         = nullptr;
+    const EncryptionMetadata *currentEncryptionMetadata = nullptr;
     JT_PushMessage           *pushMessage               = nullptr;
 };
 
