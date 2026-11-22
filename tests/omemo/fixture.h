@@ -67,6 +67,7 @@ struct Endpoint {
     MemoryEncryptionTrustStorage trust;
     OmemoEncryption             *omemo = nullptr;
     QHash<QString, QPointer<EncryptedSession>> conversationSessions;
+    int incomingFallbacks = 0;
 
     explicit Endpoint(const QString &user)
     {
@@ -89,10 +90,26 @@ struct Endpoint {
                 conversationSessions.insert(key, session);
             return session;
         });
+        client.setIncomingEncryptedStanzaHandler(
+            [this](const QDomElement &stanza, const QString &methodId, const EncryptionContext &context,
+                   Client::EncryptionSessionPurpose purpose) -> EncryptionJob * {
+                ++incomingFallbacks;
+                const Jid from(stanza.attribute(QStringLiteral("from")));
+                const Jid to(stanza.attribute(QStringLiteral("to")));
+                const Jid peer = purpose == Client::EncryptionSessionPurpose::Carbon
+                        && from.bare() == client.jid().bare() ? to : from;
+                auto *session = client.encryptedSession(methodId, peer, purpose);
+                if (!session)
+                    return nullptr;
+                if (purpose == Client::EncryptionSessionPurpose::Groupchat)
+                    client.registerIncomingSession(methodId, peer, purpose, session);
+                return session->decrypt(stanza, context);
+            });
     }
     // The method uses the storages, which are destroyed before the client.
     ~Endpoint()
     {
+        client.setIncomingEncryptedStanzaHandler({});
         client.setEncryptionSessionResolver({});
         for (auto session : std::as_const(conversationSessions))
             if (session)
