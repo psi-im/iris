@@ -2876,10 +2876,10 @@ namespace XMPP { namespace Jingle {
 
     bool Session::setEncryptionMethod(const QString &methodId)
     {
-        if (d->state != State::Created)
-            return false;
         if (d->encryptionMethodId == methodId)
             return methodId.isEmpty() || d->encryptionSession;
+        if (d->state != State::Created)
+            return false;
 
         if (d->encryptionSession) {
             d->encryptionSession->close();
