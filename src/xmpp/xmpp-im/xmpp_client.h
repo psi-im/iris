@@ -249,7 +249,6 @@ private slots:
 private:
     void cleanup();
     void distribute(const QDomElement &);
-    void rememberEncryptedMucEcho(const QDomElement &plaintext, const QString &methodId);
     bool distributeEncryptedCarbon(const QDomElement &);
     void distributeDecrypted(const QDomElement &, const EncryptionMetadata *metadata);
     void importRoster(const Roster &);
