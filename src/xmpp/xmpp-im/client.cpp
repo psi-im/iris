@@ -728,11 +728,14 @@ void Client::distribute(const QDomElement &x)
                     root.setAttribute(QStringLiteral("to"), x.attribute(QStringLiteral("to")));
                 else
                     root.removeAttribute(QStringLiteral("to"));
-                // Copy only server-assigned stanza IDs needed for MAM identity.
-                // Do not accept injected plaintext content from the echo.
+                // Preserve the server's stanza ID and EME marker. The latter
+                // makes normal message parsing mark the local echo encrypted;
+                // never accept server-provided plaintext body or extensions.
                 for (auto child = x.firstChildElement(); !child.isNull(); child = child.nextSiblingElement()) {
-                    if (child.namespaceURI() == QLatin1String("urn:xmpp:sid:0")
-                        && localName(child) == QLatin1String("stanza-id"))
+                    const auto ns = child.namespaceURI();
+                    const auto name = localName(child);
+                    if ((ns == QLatin1String("urn:xmpp:sid:0") && name == QLatin1String("stanza-id"))
+                        || (ns == QLatin1String("urn:xmpp:eme:0") && name == QLatin1String("encryption")))
                         root.appendChild(delivered.importNode(child, true));
                 }
                 EncryptionMetadata metadata;
