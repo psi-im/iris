@@ -153,6 +153,7 @@ public:
     Client::EncryptionSessionResolver encryptionSessionResolver;
     Client::IncomingEncryptedStanzaHandler incomingEncryptedStanzaHandler;
     QHash<QString, QPointer<EncryptedSession>> incomingSessions;
+    quint64 encryptionDeliveryGeneration = 0;
     const EncryptionMetadata *currentEncryptionMetadata = nullptr;
     JT_PushMessage           *pushMessage               = nullptr;
 };
@@ -439,6 +440,7 @@ void Client::cleanup()
 {
     d->active = false;
     // d->authed = false;
+    ++d->encryptionDeliveryGeneration;
     d->incomingSessions.clear();
     d->mucManager->clear();
 }
@@ -566,10 +568,20 @@ void Client::registerIncomingSession(const QString &methodId, const Jid &peer,
     if (methodId.isEmpty() || !peer.isValid())
         return;
     const auto key = incomingSessionKey(methodId, peer, purpose);
-    if (!session || session->isClosing() || session->methodId() != methodId)
+    if (!session || session->isClosing() || session->methodId() != methodId) {
         d->incomingSessions.remove(key);
-    else
-        d->incomingSessions.insert(key, session);
+        return;
+    }
+    // Re-registering the same session is common on outgoing messages. Do not
+    // accumulate one QObject connection per stanza.
+    if (d->incomingSessions.value(key).data() == session)
+        return;
+    d->incomingSessions.insert(key, session);
+    connect(session, &QObject::destroyed, this, [this, key] {
+        auto it = d->incomingSessions.find(key);
+        if (it != d->incomingSessions.end() && it.value().isNull())
+            d->incomingSessions.erase(it);
+    });
 }
 
 EncryptedSession *Client::encryptedSession(const QString &methodId, const Jid &peer,
@@ -658,7 +670,12 @@ void Client::distribute(const QDomElement &x)
         if (!job)
             job = missingEncryptionSession(d->encryptionManager, method->id());
         const QString     methodId = method->id();
-        auto              finish = [this, job, methodId, peer]() {
+        const auto generation = d->encryptionDeliveryGeneration;
+        auto finish = [this, job, methodId, peer, generation]() {
+            if (generation != d->encryptionDeliveryGeneration) {
+                job->deleteLater();
+                return;
+            }
             if (job->success()) {
                 distributeDecrypted(job->stanza(), &job->metadata());
             } else {
@@ -714,7 +731,12 @@ bool Client::distributeEncryptedCarbon(const QDomElement &x)
         job = missingEncryptionSession(d->encryptionManager, method->id());
     const QString     methodId = method->id();
     const QDomElement original = x;
-    auto              finish = [this, job, methodId, original, peer]() {
+    const auto generation = d->encryptionDeliveryGeneration;
+    auto finish = [this, job, methodId, original, peer, generation]() {
+        if (generation != d->encryptionDeliveryGeneration) {
+            job->deleteLater();
+            return;
+        }
         if (!job->success()) {
             debug(
                 QStringLiteral("Client: %1 forwarded carbon decryption failed: %2").arg(methodId, job->errorString()));
