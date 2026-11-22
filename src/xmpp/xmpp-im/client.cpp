@@ -891,8 +891,13 @@ EncryptionJob *Client::sendEncrypted(const QDomElement &stanza, const QString &m
     // Bind to the addressed conversation, not to an arbitrary OMEMO key
     // recipient (a MUC message may encrypt its key for many different JIDs).
     Jid peer(stanza.attribute(QStringLiteral("to")));
-    if (!peer.isValid() && !context.recipients.isEmpty())
-        peer = context.recipients.first();
+    if (context.recipients.size() == 1) {
+        const auto &recipient = context.recipients.first();
+        if (!peer.isValid()
+            || (peer.resource().isEmpty() && !recipient.resource().isEmpty()
+                && recipient.bare() == peer.bare()))
+            peer = recipient;
+    }
     auto *session = encryptedSession(methodId, peer);
     return session ? sendEncrypted(stanza, session, context)
                    : missingEncryptionSession(d->encryptionManager, methodId);
