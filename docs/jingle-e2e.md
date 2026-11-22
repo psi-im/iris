@@ -27,6 +27,26 @@ SXE and DTLS-verification adapters in their required order and tears them
 down with the method. Applications no longer create or retain those filter
 objects. Registration is optional for clients without a Jingle UI.
 
+An application passes its selected method ID to
+`Jingle::Session::setEncryptionMethod(methodId)` **before** starting the
+negotiation, along with its desired preferred/required E2EE policy. Iris
+creates and holds the associated `EncryptedSession` via the registry,
+and releases it when Jingle terminates. A method that is unregistered
+while the session is active cannot be silently replaced by OMEMO.
+
+JET-OMEMO and DTLS verification operate only for an OMEMO-selected (or
+legacy unselected) Jingle session. SXE selects its payload protector
+from the registered set by the session's method ID and dispatches
+incoming ciphertext by the negotiated wire-method identifier. Multiple
+SXE protectors can coexist. When E2EE is required, an unavailable or
+mismatched method fails negotiation, and the SXE message transport must
+not transmit unprotected payload.
+
+The existing OMEMO element wrapping for JET keys and DTLS fingerprints
+remains method-specific. Binding those element operations directly to
+the long-lived Jingle encryption session is the next step; this stage
+does not change the JET-OMEMO or Conversations-compatible wire format.
+
 ## Specifications
 
 | Specification | Status | Relevance |
