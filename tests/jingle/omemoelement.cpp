@@ -385,10 +385,10 @@ int main(int argc, char **argv)
     }
     if (protocols.testFlag(OmemoProtocol::Legacy))
         exercise(alice, bob, OmemoProtocol::Legacy, "legacy");
-    if (protocols.testFlag(OmemoProtocol::Omemo2))
+    if (protocols.testFlag(OmemoProtocol::Omemo2)) {
         exercise(alice, bob, OmemoProtocol::Omemo2, "2");
-    if (protocols.testFlag(OmemoProtocol::Omemo2))
         exerciseMuc(alice, bob);
+    }
     qInfo("OMEMO element tests passed");
     pep.clear(); // the elements must not outlive their document at static destruction
     return 0;
