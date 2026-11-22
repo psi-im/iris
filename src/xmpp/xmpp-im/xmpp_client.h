@@ -246,9 +246,6 @@ private slots:
     void handleSMAckResponse(int);
     void parseUnhandledStreamFeatures();
 
-public:
-    class GroupChat;
-
 private:
     void cleanup();
     void distribute(const QDomElement &);
