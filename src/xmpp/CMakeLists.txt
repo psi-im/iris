@@ -178,6 +178,8 @@ target_sources(iris PRIVATE
     xmpp-core/xmpp_stanza.cpp
 
     xmpp-im/client.cpp
+    xmpp-im/mucmanager.h
+    xmpp-im/mucmanager.cpp
     xmpp-im/filetransfer.cpp
     xmpp-im/httpfileupload.cpp
     xmpp-im/types.cpp
