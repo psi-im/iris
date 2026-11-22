@@ -26,7 +26,7 @@ void exerciseIncomingFastPath(Endpoint &alice, Endpoint &bob)
         message.setAttribute(QStringLiteral("from"), alice.jid.full());
         message.setAttribute(QStringLiteral("to"), bob.jid.full());
         message.setAttribute(QStringLiteral("type"), QStringLiteral("chat"));
-        const auto bodyElement = doc.createElementNS(QStringLiteral("jabber:client"), QStringLiteral("body"));
+        auto bodyElement = doc.createElementNS(QStringLiteral("jabber:client"), QStringLiteral("body"));
         bodyElement.appendChild(doc.createTextNode(body));
         message.appendChild(bodyElement);
         EncryptionContext context;
