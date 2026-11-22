@@ -26,7 +26,7 @@ void exerciseMuc(Endpoint &alice, Endpoint &bob)
         auto *session = alice.client.encryptionManager()->startSession(
             OmemoEncryption::methodId(), EncryptionMethod::XmppStanza, send);
         check(session != nullptr, "Cannot create OMEMO sender session");
-        auto *job = session->run(stanza, EncryptedSession::Direction::Encrypt);
+        auto *job = session->encrypt(stanza);
         session->close();
         wait(job, alice, bob);
         check(job->success(), "MUC OMEMO 2 encryption failed");
@@ -45,7 +45,7 @@ void exerciseMuc(Endpoint &alice, Endpoint &bob)
         auto *session = bob.client.encryptionManager()->startSession(
             OmemoEncryption::methodId(), EncryptionMethod::XmppStanza, context);
         check(session != nullptr, "Cannot create OMEMO receiver session");
-        auto *job = session->run(stanza, EncryptedSession::Direction::Decrypt);
+        auto *job = session->decrypt(stanza);
         session->close();
         return wait(job, alice, bob);
     };

@@ -177,18 +177,11 @@ public:
     bool                     isClosing() const;
     void                     close();
 
-    enum class Direction { Encrypt, Decrypt };
-
-    // The session owns operation validation, job lifetime, and stream state.
-    // Protocol implementations override the encrypt/decrypt operations below.
-    EncryptionJob *run(const QDomElement &stanza, Direction direction);
-    EncryptionJob *run(const QByteArray &data, Direction direction);
-    EncryptionJob *run(const QByteArray &chunk, Direction direction, bool final);
-
-    virtual EncryptionJob *encrypt(const QDomElement &xml);
-    virtual EncryptionJob *decrypt(const QDomElement &xml);
-    virtual EncryptionJob *encrypt(const QByteArray &data);
-    virtual EncryptionJob *decrypt(const QByteArray &data);
+    // Validate session state, track jobs, and dispatch to protocol implementations.
+    EncryptionJob *encrypt(const QDomElement &xml);
+    EncryptionJob *decrypt(const QDomElement &xml);
+    EncryptionJob *encrypt(const QByteArray &data);
+    EncryptionJob *decrypt(const QByteArray &data);
 
     /**
      * Incremental encryption/decryption (DataStream capability). A session owns exactly one
@@ -202,10 +195,19 @@ public:
      * Implementations can emit the authentication tag as part of the final encrypted
      * result, or validate it in the final decrypted result.
      */
-    virtual EncryptionJob *encryptChunk(const QByteArray &chunk, bool final);
-    virtual EncryptionJob *decryptChunk(const QByteArray &chunk, bool final);
+    EncryptionJob *encryptChunk(const QByteArray &chunk, bool final = false);
+    EncryptionJob *decryptChunk(const QByteArray &chunk, bool final = false);
+
+protected:
+    virtual EncryptionJob *doEncrypt(const QDomElement &xml);
+    virtual EncryptionJob *doDecrypt(const QDomElement &xml);
+    virtual EncryptionJob *doEncrypt(const QByteArray &data);
+    virtual EncryptionJob *doDecrypt(const QByteArray &data);
+    virtual EncryptionJob *doEncryptChunk(const QByteArray &chunk, bool final);
+    virtual EncryptionJob *doDecryptChunk(const QByteArray &chunk, bool final);
 
 private:
+    EncryptionJob *runStream(const QByteArray &chunk, bool encrypting, bool final);
     EncryptionJob *track(EncryptionJob *job);
     void operationFinished(EncryptionJob *job);
 

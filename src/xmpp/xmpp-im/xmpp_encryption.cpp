@@ -111,6 +111,7 @@ public:
     bool                  streamFinished = false;
     std::optional<bool>   streamEncrypting;
     EncryptionMethod::Capabilities requestedCapabilities;
+    bool capabilitiesConfigured = false;
 };
 
 EncryptedSession::EncryptedSession(const QString &methodId, const EncryptionContext &context, QObject *parent) :
@@ -170,39 +171,62 @@ static EncryptionJob *unsupportedJob(QObject *parent)
     return job;
 }
 
-EncryptionJob *EncryptedSession::encrypt(const QDomElement &) { return unsupportedJob(this); }
-EncryptionJob *EncryptedSession::decrypt(const QDomElement &) { return unsupportedJob(this); }
-EncryptionJob *EncryptedSession::encrypt(const QByteArray &) { return unsupportedJob(this); }
-EncryptionJob *EncryptedSession::decrypt(const QByteArray &) { return unsupportedJob(this); }
-EncryptionJob *EncryptedSession::encryptChunk(const QByteArray &, bool) { return unsupportedJob(this); }
-EncryptionJob *EncryptedSession::decryptChunk(const QByteArray &, bool) { return unsupportedJob(this); }
+EncryptionJob *EncryptedSession::doEncrypt(const QDomElement &) { return unsupportedJob(this); }
+EncryptionJob *EncryptedSession::doDecrypt(const QDomElement &) { return unsupportedJob(this); }
+EncryptionJob *EncryptedSession::doEncrypt(const QByteArray &) { return unsupportedJob(this); }
+EncryptionJob *EncryptedSession::doDecrypt(const QByteArray &) { return unsupportedJob(this); }
+EncryptionJob *EncryptedSession::doEncryptChunk(const QByteArray &, bool) { return unsupportedJob(this); }
+EncryptionJob *EncryptedSession::doDecryptChunk(const QByteArray &, bool) { return unsupportedJob(this); }
 
-EncryptionJob *EncryptedSession::run(const QDomElement &stanza, Direction direction)
+EncryptionJob *EncryptedSession::encrypt(const QDomElement &xml)
 {
-    if (d->closing || !d->requestedCapabilities.testFlag(EncryptionMethod::XmppStanza))
+    if (d->closing || (d->capabilitiesConfigured && !d->requestedCapabilities.testFlag(EncryptionMethod::XmppStanza)))
         return unsupportedJob(parent() ? parent() : this);
-    return track(direction == Direction::Encrypt ? encrypt(stanza) : decrypt(stanza));
+    return track(doEncrypt(xml));
 }
 
-EncryptionJob *EncryptedSession::run(const QByteArray &data, Direction direction)
+EncryptionJob *EncryptedSession::decrypt(const QDomElement &xml)
 {
-    if (d->closing || !d->requestedCapabilities.testFlag(EncryptionMethod::DataMessage))
+    if (d->closing || (d->capabilitiesConfigured && !d->requestedCapabilities.testFlag(EncryptionMethod::XmppStanza)))
         return unsupportedJob(parent() ? parent() : this);
-    return track(direction == Direction::Encrypt ? encrypt(data) : decrypt(data));
+    return track(doDecrypt(xml));
 }
 
-EncryptionJob *EncryptedSession::run(const QByteArray &chunk, Direction direction, bool final)
+EncryptionJob *EncryptedSession::encrypt(const QByteArray &data)
 {
-    if (d->closing || !d->requestedCapabilities.testFlag(EncryptionMethod::DataStream)
+    if (d->closing || (d->capabilitiesConfigured && !d->requestedCapabilities.testFlag(EncryptionMethod::DataMessage)))
+        return unsupportedJob(parent() ? parent() : this);
+    return track(doEncrypt(data));
+}
+
+EncryptionJob *EncryptedSession::decrypt(const QByteArray &data)
+{
+    if (d->closing || (d->capabilitiesConfigured && !d->requestedCapabilities.testFlag(EncryptionMethod::DataMessage)))
+        return unsupportedJob(parent() ? parent() : this);
+    return track(doDecrypt(data));
+}
+
+EncryptionJob *EncryptedSession::encryptChunk(const QByteArray &chunk, bool final)
+{
+    return runStream(chunk, true, final);
+}
+
+EncryptionJob *EncryptedSession::decryptChunk(const QByteArray &chunk, bool final)
+{
+    return runStream(chunk, false, final);
+}
+
+EncryptionJob *EncryptedSession::runStream(const QByteArray &chunk, bool encrypting, bool final)
+{
+    if (d->closing || (d->capabilitiesConfigured && !d->requestedCapabilities.testFlag(EncryptionMethod::DataStream))
         || d->streamBusy || d->streamFinished)
         return unsupportedJob(parent() ? parent() : this);
-    const bool encrypting = direction == Direction::Encrypt;
     if (d->streamEncrypting && *d->streamEncrypting != encrypting)
         return unsupportedJob(parent() ? parent() : this);
 
     d->streamBusy = true;
     d->streamEncrypting = encrypting;
-    auto *job = encrypting ? encryptChunk(chunk, final) : decryptChunk(chunk, final);
+    auto *job = encrypting ? doEncryptChunk(chunk, final) : doDecryptChunk(chunk, final);
     if (!job) {
         d->streamBusy = false;
         d->streamFinished = true;
@@ -345,7 +369,8 @@ EncryptedSession *EncryptionManager::startSession(const QString &methodId,
         return nullptr;
     }
     session->setParent(this);
-    session->d->requestedCapabilities = capabilities;
+    session->d->requestedCapabilities  = capabilities;
+    session->d->capabilitiesConfigured = true;
     return session;
 }
 

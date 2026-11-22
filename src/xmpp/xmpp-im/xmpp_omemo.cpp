@@ -2499,7 +2499,7 @@ public:
     {
     }
 
-    EncryptionJob *encrypt(const QDomElement &xml) override
+    EncryptionJob *doEncrypt(const QDomElement &xml) override
     {
         const auto &context = this->context();
         auto        job     = new EncryptionJob(this);
@@ -2795,7 +2795,7 @@ public:
             });
     }
 
-    EncryptionJob *decrypt(const QDomElement &xml) override
+    EncryptionJob *doDecrypt(const QDomElement &xml) override
     {
         auto job = new EncryptionJob(this);
         auto d   = method_->d.get();

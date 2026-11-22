@@ -21,10 +21,11 @@ a specific use. A session can support multiple capabilities simultaneously, e.g.
 protecting Jingle signaling and the stream tied to it.
 
 `EncryptedSession` owns the requested operation capabilities, active jobs, session
-closing, and stream state. `run()` executes stanza, complete-data, or stream-chunk
-operations using method-specific virtual primitives; chunk calls are sequential, and
-a final successful decryption is required for stream authentication. Until then,
-decrypted bytes must not be exposed as verified content.
+closing, and stream state. Its public `encrypt()`, `decrypt()`, `encryptChunk()`,
+and `decryptChunk()` methods validate and track operations, delegating cryptography
+to protected virtual `doEncrypt*` and `doDecrypt*` implementations. Chunk calls
+are sequential; a final successful decryption is required for authentication, and
+intermediate decrypted bytes must not be exposed as verified content.
 
 Network-dependent methods may return an unfinished `EncryptionJob` while they
 fetch key material. This keeps XMPP `Task` as the network primitive and avoids

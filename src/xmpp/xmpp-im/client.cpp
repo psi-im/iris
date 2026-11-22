@@ -552,7 +552,7 @@ static EncryptionJob *decryptWithSession(EncryptionManager *registry, Encryption
                   QStringLiteral("Cannot start a decryption session for method %1").arg(method->id()));
         return job;
     }
-    auto *job = session->run(stanza, EncryptedSession::Direction::Decrypt);
+    auto *job = session->decrypt(stanza);
     session->close();
     return job;
 }
@@ -806,7 +806,7 @@ EncryptionJob *Client::sendEncrypted(const QDomElement &stanza, EncryptedSession
     if (stanza.attribute(QStringLiteral("type")) == QLatin1String("groupchat"))
         original.appendChild(original.importNode(stanza, true));
     const QString methodId = session ? session->methodId() : QString();
-    auto *job = session ? session->run(stanza, EncryptedSession::Direction::Encrypt) : nullptr;
+    auto *job = session ? session->encrypt(stanza) : nullptr;
     if (!job) {
         job = new EncryptionJob(d->encryptionManager);
         job->fail(EncryptionJob::Error::NoSession, QStringLiteral("Encryption session is unavailable"));
