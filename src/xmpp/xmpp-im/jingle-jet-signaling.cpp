@@ -262,7 +262,8 @@ bool Jet::filterOutgoing(const Jid &to, const QDomElement &jingle, const Done &d
                     security.setAttribute(QStringLiteral("cipher"), secret->cipher);
                     security.setAttribute(QStringLiteral("type"), secret->type);
                     security.appendChild(document.importNode(secret->envelope, true));
-                    content.appendChild(security);
+                    auto target = content;
+                    target.appendChild(security);
                     secrets->append(*secret);
                 }
                 next();
