@@ -7,12 +7,30 @@ runtime `EncryptionMethod` objects and advertise one or more capabilities:
 
 - `XmppStanza` — XMPP stanza encryption. OMEMO implements this capability.
 - `DataMessage` — an independent byte message processed at once.
-- `DataStream` — reserved for incremental/file/media encryption adapters.
+- `DataStream` — incremental encryption/decryption with explicit finalization
+  and stream authentication.
 
-`EncryptedSession` is deliberately protocol-neutral. Network-dependent methods may
-return an unfinished `EncryptionJob` while they fetch key material. This keeps XMPP
-`Task` as the network primitive and avoids making cryptographic session objects own
-network state.
+`EncryptionManager` is the authoritative registry of encryption methods and a session
+factory. It selects methods by the **entire** requested set of capabilities, reports
+method-specific peer availability, and closes sessions when their methods are
+unregistered. It does not execute cryptographic operations or own stream state.
+
+`EncryptionMethod` implements one protocol (such as OMEMO) and advertises its
+capabilities and availability. Its `startSession()` creates an `EncryptedSession` for
+a specific use. A session can support multiple capabilities simultaneously, e.g.
+protecting Jingle signaling and the stream tied to it.
+
+`EncryptedSession` owns the requested operation capabilities, active jobs, session
+closing, and stream state. `run()` executes stanza, complete-data, or stream-chunk
+operations using method-specific virtual primitives; chunk calls are sequential, and
+a final successful decryption is required for stream authentication. Until then,
+decrypted bytes must not be exposed as verified content.
+
+Network-dependent methods may return an unfinished `EncryptionJob` while they
+fetch key material. This keeps XMPP `Task` as the network primitive and avoids
+making cryptographic session objects own network state. Psi may adapt plugin-provided
+methods into this Iris registry and expose UI controls; encryption protocol policy
+and processing belong in Iris.
 
 OMEMO does **not** claim `DataMessage` or `DataStream`: using the Double Ratchet to
 bulk-encrypt a file or media stream is the wrong layer. A file-encryption method (for
