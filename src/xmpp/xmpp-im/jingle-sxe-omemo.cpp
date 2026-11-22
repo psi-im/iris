@@ -30,15 +30,15 @@ namespace XMPP { namespace Jingle { namespace SXE {
     SxeOmemo::SxeOmemo(XMPP::Jingle::Manager *manager, OmemoEncryption *omemo, QObject *parent) :
         QObject(parent), manager_(manager), omemo_(omemo)
     {
-        if (auto transports = TransportManager::of(manager))
-            transports->setPayloadProtector(this);
+        if (auto *transports = TransportManager::of(manager))
+            transports->registerPayloadProtector(this);
     }
 
     SxeOmemo::~SxeOmemo()
     {
         auto transports = TransportManager::of(manager_);
-        if (transports && transports->payloadProtector() == this)
-            transports->setPayloadProtector(nullptr);
+        if (transports)
+            transports->unregisterPayloadProtector(this);
     }
 
     QString SxeOmemo::methodId() const { return OmemoEncryption::methodId(); }

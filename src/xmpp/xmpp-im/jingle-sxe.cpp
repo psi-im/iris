@@ -165,10 +165,15 @@ namespace XMPP { namespace Jingle { namespace SXE {
             QString    encryption;
         };
 
-        PayloadProtector *protectorOf(TransportManagerPad *pad)
+        TransportManager *protectorManager(TransportManagerPad *pad)
         {
-            auto manager = pad ? qobject_cast<TransportManager *>(pad->manager()) : nullptr;
-            return manager ? manager->payloadProtector() : nullptr;
+            return pad ? qobject_cast<TransportManager *>(pad->manager()) : nullptr;
+        }
+
+        PayloadProtector *protectorForWire(TransportManagerPad *pad, const QString &wire)
+        {
+            auto *manager = protectorManager(pad);
+            return manager ? manager->payloadProtectorForWire(wire) : nullptr;
         }
     }
 
@@ -184,13 +189,29 @@ namespace XMPP { namespace Jingle { namespace SXE {
         if (isLocal()) {
             d->hosts           = { _pad->session()->manager()->client()->jid() };
             const auto session = _pad->session();
-            if (auto protector = protectorOf(_pad);
-                protector && session->isEndToEndPreferred()
-                && session->allowsEncryptionMethod(protector->methodId())
-                && protector->canProtect(session->peer()))
-                d->encryption = protector->method();
+            if (session->isEndToEndPreferred()) {
+                if (auto *manager = protectorManager(_pad)) {
+                    for (auto *protector : manager->payloadProtectors()) {
+                        if (session->allowsEncryptionMethod(protector->methodId())
+                            && protector->canProtect(session->peer())) {
+                            d->encryption = protector->method();
+                            break;
+                        }
+                    }
+                }
+            }
         } else if (d->hosts.isEmpty()) {
             onFinish(Reason::FailedTransport, QStringLiteral("SXE transport without a host"));
+            return;
+        }
+        if (!d->encryption.isEmpty()) {
+            auto *protector = protectorForWire(_pad, d->encryption);
+            if (!protector || !_pad->session()->allowsEncryptionMethod(protector->methodId())) {
+                onFinish(Reason::SecurityError, QStringLiteral("SXE encryption method does not match the session"));
+                return;
+            }
+        } else if (_pad->session()->isEndToEndRequired()) {
+            onFinish(Reason::SecurityError, QStringLiteral("Required end-to-end protection is unavailable for SXE"));
             return;
         }
         setState(State::ApprovedToSend);
@@ -209,8 +230,9 @@ namespace XMPP { namespace Jingle { namespace SXE {
             return { PrepareUpdateStatus::Invalid, {}, {} }; // XEP-0284 requires at least one host
         // Payload protection both sides know; an answer must keep the offered one.
         const auto encryption = transportEl.attribute(QStringLiteral("encryption"));
-        auto       protector  = protectorOf(_pad);
-        if (!encryption.isEmpty() && (!protector || protector->method() != encryption))
+        auto *protector = encryption.isEmpty() ? nullptr : protectorForWire(_pad, encryption);
+        if (!encryption.isEmpty()
+            && (!protector || !_pad->session()->allowsEncryptionMethod(protector->methodId())))
             return { PrepareUpdateStatus::Invalid, {}, {} };
         if (isLocal() && _state >= State::Unacked && encryption != d->encryption)
             return { PrepareUpdateStatus::Invalid, {}, {} };
@@ -298,17 +320,21 @@ namespace XMPP { namespace Jingle { namespace SXE {
         auto client  = session->manager()->client();
         auto doc     = client->doc();
         if (!d->encryption.isEmpty()) {
-            auto protector = protectorOf(_pad);
-            if (!protector || protector->method() != d->encryption) {
+            if (!protectorForWire(_pad, d->encryption)) {
                 qWarning("jingle-sxe: dropping payload: its protection is unavailable");
                 return;
             }
             // The protected payload travels next to an empty marker that routes the message.
             const auto          copy = d->document().importNode(sxe, true).toElement();
             QPointer<Transport> guard(this);
-            d->outgoing.run([guard, protector, copy](std::function<void()> finished) {
+            d->outgoing.run([guard, copy](std::function<void()> finished) {
                 if (!guard) {
                     finished();
+                    return;
+                }
+                auto *protector = protectorForWire(guard->_pad, guard->d->encryption);
+                if (!protector || !guard->_pad->session()->allowsEncryptionMethod(protector->methodId())) {
+                    finished(); // The method was unregistered before this queued operation.
                     return;
                 }
                 const auto peer = guard->_pad->session()->peer();
@@ -332,6 +358,10 @@ namespace XMPP { namespace Jingle { namespace SXE {
                     finished();
                 });
             });
+            return;
+        }
+        if (session->isEndToEndRequired()) {
+            qWarning("jingle-sxe: dropping unprotected payload of a session requiring end-to-end encryption");
             return;
         }
         auto message = doc->createElement(QStringLiteral("message"));
@@ -358,13 +388,21 @@ namespace XMPP { namespace Jingle { namespace SXE {
             qWarning("jingle-sxe: dropping unprotected payload of a protected session");
             return;
         }
-        auto protector = protectorOf(_pad);
-        if (!protector || protector->method() != d->encryption)
+        if (!protectorForWire(_pad, d->encryption))
             return;
         const auto          copy = d->document().importNode(message, true).toElement();
         const auto          sid  = sxe.attribute(QStringLiteral("session"));
         QPointer<Transport> guard(this);
-        d->incoming.run([guard, protector, copy, sid, from](std::function<void()> finished) {
+        d->incoming.run([guard, copy, sid, from](std::function<void()> finished) {
+            if (!guard) {
+                finished();
+                return;
+            }
+            auto *protector = protectorForWire(guard->_pad, guard->d->encryption);
+            if (!protector || !guard->_pad->session()->allowsEncryptionMethod(protector->methodId())) {
+                finished();
+                return;
+            }
             protector->unprotect(from, copy, [guard, sid, from, finished](const QDomElement &inner) {
                 if (guard && guard->_state != State::Finished && !inner.isNull() && inner.namespaceURI() == NS
                     && inner.localName() == QLatin1String("sxe") && inner.attribute(QStringLiteral("session")) == sid)
@@ -453,7 +491,7 @@ namespace XMPP { namespace Jingle { namespace SXE {
     public:
         XMPP::Jingle::Manager *jingleManager = nullptr;
         QPointer<Task>         incomingTask;
-        PayloadProtector      *protector = nullptr;
+        QList<PayloadProtector *> protectors;
     };
 
     TransportManager::TransportManager(QObject *parent) :
@@ -498,8 +536,9 @@ namespace XMPP { namespace Jingle { namespace SXE {
     QStringList TransportManager::discoFeatures() const
     {
         QStringList features { NS, NS_TRANSPORT };
-        if (d->protector)
-            features += d->protector->discoFeatures();
+        for (auto *protector : std::as_const(d->protectors))
+            features += protector->discoFeatures();
+        features.removeDuplicates();
         return features;
     }
 
@@ -508,9 +547,42 @@ namespace XMPP { namespace Jingle { namespace SXE {
         return manager ? manager->findChild<TransportManager *>(QString(), Qt::FindDirectChildrenOnly) : nullptr;
     }
 
-    void TransportManager::setPayloadProtector(PayloadProtector *protector) { d->protector = protector; }
+    bool TransportManager::registerPayloadProtector(PayloadProtector *protector)
+    {
+        if (!protector || protector->methodId().isEmpty() || protector->method().isEmpty())
+            return false;
+        for (auto *existing : std::as_const(d->protectors)) {
+            if (existing == protector)
+                return true;
+            if (existing->methodId() == protector->methodId() || existing->method() == protector->method())
+                return false;
+        }
+        d->protectors.append(protector);
+        return true;
+    }
 
-    PayloadProtector *TransportManager::payloadProtector() const { return d->protector; }
+    void TransportManager::unregisterPayloadProtector(PayloadProtector *protector)
+    {
+        d->protectors.removeAll(protector);
+    }
+
+    QList<PayloadProtector *> TransportManager::payloadProtectors() const { return d->protectors; }
+
+    PayloadProtector *TransportManager::payloadProtector(const QString &methodId) const
+    {
+        for (auto *protector : std::as_const(d->protectors))
+            if (protector->methodId() == methodId)
+                return protector;
+        return nullptr;
+    }
+
+    PayloadProtector *TransportManager::payloadProtectorForWire(const QString &wireMethod) const
+    {
+        for (auto *protector : std::as_const(d->protectors))
+            if (protector->method() == wireMethod)
+                return protector;
+        return nullptr;
+    }
 
     //----------------------------------------------------------------------------
     // Pad

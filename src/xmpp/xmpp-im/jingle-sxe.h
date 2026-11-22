@@ -132,9 +132,12 @@ namespace XMPP { namespace Jingle { namespace SXE {
 
         /// The SXE transport manager registered with @a manager, if any.
         static TransportManager *of(XMPP::Jingle::Manager *manager);
-        /// Not owned; remove it before it is destroyed.
-        void                 setPayloadProtector(PayloadProtector *protector);
-        PayloadProtector    *payloadProtector() const;
+        /// Method-specific protectors are not owned by the transport manager.
+        bool registerPayloadProtector(PayloadProtector *protector);
+        void unregisterPayloadProtector(PayloadProtector *protector);
+        QList<PayloadProtector *> payloadProtectors() const;
+        PayloadProtector *payloadProtector(const QString &methodId) const;
+        PayloadProtector *payloadProtectorForWire(const QString &wireMethod) const;
         TransportManagerPad *pad(Session *session) override;
         QStringList          ns() const override;
         QStringList          discoFeatures() const override;
