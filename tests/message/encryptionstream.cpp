@@ -261,12 +261,13 @@ int main(int argc, char **argv)
     check(signaled->success() && signaled->stanza().tagName() == QLatin1String("jingle"),
           "Shared session cannot protect signaling");
     auto *first = tx->encryptChunk(QByteArray("ab"));
-    check(!first->isFinished(), "Expected asynchronous chunk");
+    check(!first->isFinished() && tx->hasActiveOperations(), "Expected an active asynchronous chunk");
     auto *overlap = tx->encryptChunk(QByteArray("cd"));
     check(overlap->isFinished() && !overlap->success(), "Overlapping chunks accepted");
     auto *wrongDirection = tx->decryptChunk(QByteArray("ab"));
     check(wrongDirection->isFinished() && !wrongDirection->success(), "Direction switch accepted");
-    check(await(first)->success() && first->data() == "AB", "First chunk failed");
+    check(await(first)->success() && first->data() == "AB" && !tx->hasActiveOperations(),
+          "First chunk failed or left the session active");
     auto *last = await(tx->encryptChunk(QByteArray("cd"), true));
     check(last->success() && last->data() == "CDTAG", "Final encryption chunk failed");
     check(!tx->encryptChunk(QByteArray("extra"))->success(), "Finalized stream reused");

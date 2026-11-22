@@ -128,6 +128,7 @@ QString EncryptedSession::methodId() const { return d->methodId; }
 const EncryptionContext &EncryptedSession::context() const { return d->context; }
 
 bool EncryptedSession::isClosing() const { return d->closing; }
+bool EncryptedSession::hasActiveOperations() const { return !d->activeJobs.isEmpty(); }
 
 void EncryptedSession::close()
 {

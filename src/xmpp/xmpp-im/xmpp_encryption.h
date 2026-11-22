@@ -175,6 +175,7 @@ public:
     QString                  methodId() const;
     const EncryptionContext &context() const;
     bool                     isClosing() const;
+    bool                     hasActiveOperations() const;
     void                     close();
 
     // Validate session state, track jobs, and dispatch to protocol implementations.
