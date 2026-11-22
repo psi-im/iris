@@ -156,6 +156,25 @@ int main(int argc, char **argv)
     SXE::SxeOmemo            aliceSxe(alice.client.jingleManager(), alice.omemo);
     SXE::SxeOmemo            bobSxe(bob.client.jingleManager(), bob.omemo);
     J::OmemoDtlsVerification aliceVerification(alice.client.jingleManager(), alice.omemo);
+
+    struct UnavailableProtector : SXE::PayloadProtector {
+        QString methodId() const override { return QStringLiteral("test-other"); }
+        QString method() const override { return QStringLiteral("urn:test:other-sxe:0"); }
+        bool canProtect(const Jid &) const override { return false; }
+        QStringList discoFeatures() const override { return { method() }; }
+        void protect(const Jid &, const QDomElement &, const Done &done) override { done({}); }
+        void unprotect(const Jid &, const QDomElement &, const Done &done) override { done({}); }
+    } alternative;
+    auto *transportManager = SXE::TransportManager::of(alice.client.jingleManager());
+    check(transportManager && transportManager->registerPayloadProtector(&alternative),
+          "Could not register another SXE encryption protector");
+    check(transportManager->payloadProtector(alternative.methodId()) == &alternative
+              && transportManager->payloadProtectorForWire(alternative.method()) == &alternative
+              && transportManager->discoFeatures().contains(alternative.method()),
+          "SXE protector lookup by method and wire format failed");
+    check(transportManager->payloadProtector(OmemoEncryption::methodId()) == &aliceSxe,
+          "Registering another protector replaced OMEMO");
+
     J::OmemoDtlsVerification bobVerification(bob.client.jingleManager(), bob.omemo);
     const QStringList        omemo2 { OmemoEncryption::namespaceUri() };
     check(alice.client.jingleManager()->discoFeatures().contains(SXE::SxeOmemo::feature()),
@@ -228,6 +247,11 @@ int main(int argc, char **argv)
     run  = start(alice, bob, true, true, wire, {}, QStringLiteral("unsupported-method"));
     check(!run.peerSession && wire.plain == 0 && wire.encryption.isEmpty(),
           "a selected alternative encryption method was silently replaced for SXE");
+
+    transportManager->unregisterPayloadProtector(&alternative);
+    check(!transportManager->payloadProtector(alternative.methodId())
+              && !transportManager->discoFeatures().contains(alternative.method()),
+          "Unregistered SXE protector remained discoverable");
 
     onStanza = nullptr;
     QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
