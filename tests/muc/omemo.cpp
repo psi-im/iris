@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 // XEP-0384 encrypted MUC identity/SCE and own-message echo regressions.
 #include "../omemo/fixture.h"
+#include <iris/xmpp_message.h>
 
 namespace {
 void exerciseMuc(Endpoint &alice, Endpoint &bob)
@@ -88,12 +89,12 @@ void exerciseMucSelfEcho(Endpoint &alice, Endpoint &bob)
                      [&](const QString &, const Jid &, EncryptionJob::Error, const QString &,
                          const EncryptionMetadata &) { ++decryptionFailures; });
     QString receivedBody;
-    bool encrypted = false;
+    bool wasEncrypted = false;
     QObject::connect(&alice.client, &Client::messageReceived, &alice.client, [&](const Message &m) {
         if (m.type() == Message::Type::Groupchat) {
             ++ownMessages;
             receivedBody = m.body();
-            encrypted = m.wasEncrypted();
+            wasEncrypted = m.wasEncrypted();
         }
     });
 
@@ -126,15 +127,15 @@ void exerciseMucSelfEcho(Endpoint &alice, Endpoint &bob)
     QDomDocument forgedDoc;
     auto forged = forgedDoc.importNode(stanza, true).toElement();
     forgedDoc.appendChild(forged);
-    auto encrypted = forged.firstChildElement(QStringLiteral("encrypted"));
-    check(!encrypted.isNull(), "OMEMO encrypted element missing in echo test");
-    encrypted.setAttribute(QStringLiteral("tampered"), QStringLiteral("yes"));
+    auto encryptedElement = forged.firstChildElement(QStringLiteral("encrypted"));
+    check(!encryptedElement.isNull(), "OMEMO encrypted element missing in echo test");
+    encryptedElement.setAttribute(QStringLiteral("tampered"), QStringLiteral("yes"));
     alice.stream.inject(forged);
     check(ownMessages == 0 && decryptionFailures == 1,
           "MUC echoed a ciphertext not matching the locally sent message");
 
     alice.stream.inject(stanza);
-    check(ownMessages == 1 && receivedBody == QStringLiteral("A protected groupchat message") && encrypted,
+    check(ownMessages == 1 && receivedBody == QStringLiteral("A protected groupchat message") && wasEncrypted,
           "The outgoing OMEMO MUC echo was not delivered locally as an encrypted message");
 
     // A duplicate echo has no remaining local plaintext mapping and must not
