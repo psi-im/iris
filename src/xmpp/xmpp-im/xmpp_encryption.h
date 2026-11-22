@@ -266,6 +266,9 @@ public:
 
     EncryptedSession *startSession(const QString &methodId, EncryptionMethod::Capability capability,
                                    const EncryptionContext &context = {});
+    /** A single session can combine stanza signaling and incremental data, e.g. for Jingle. */
+    EncryptedSession *startSession(const QString &methodId, EncryptionMethod::Capabilities capabilities,
+                                   const EncryptionContext &context = {});
 
     EncryptionJob *encrypt(const QString &methodId, const QDomElement &stanza, const EncryptionContext &context = {});
     EncryptionJob *decrypt(const QDomElement &stanza, const EncryptionContext &context = {});

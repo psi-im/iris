@@ -110,6 +110,7 @@ public:
     bool                  streamBusy = false;
     bool                  streamFinished = false;
     std::optional<bool>   streamEncrypting;
+    EncryptionMethod::Capabilities requestedCapabilities;
 };
 
 EncryptedSession::EncryptedSession(const QString &methodId, const EncryptionContext &context, QObject *parent) :
@@ -276,11 +277,19 @@ EncryptionJob *EncryptionManager::unsupported(const QString &message) const
 EncryptedSession *EncryptionManager::startSession(const QString &methodId, EncryptionMethod::Capability capability,
                                                   const EncryptionContext &context)
 {
+    return startSession(methodId, EncryptionMethod::Capabilities(capability), context);
+}
+
+EncryptedSession *EncryptionManager::startSession(const QString &methodId,
+                                                  EncryptionMethod::Capabilities capabilities,
+                                                  const EncryptionContext &context)
+{
     auto *method = this->method(methodId);
-    if (!method || !method->capabilities().testFlag(capability))
+    if (!method || capabilities == EncryptionMethod::Capabilities()
+        || (method->capabilities() & capabilities) != capabilities)
         return nullptr;
 
-    auto *session = method->startSession(EncryptionMethod::Capabilities(capability), context);
+    auto *session = method->startSession(capabilities, context);
     if (!session)
         return nullptr;
     if (session->methodId() != methodId) {
@@ -288,6 +297,7 @@ EncryptedSession *EncryptionManager::startSession(const QString &methodId, Encry
         return nullptr;
     }
     session->setParent(this);
+    session->d->requestedCapabilities = capabilities;
     d->sessions.insert(session);
     connect(session, &QObject::destroyed, this, [this, session]() { d->sessions.remove(session); });
     return session;
@@ -409,8 +419,9 @@ EncryptionJob *EncryptionManager::runStream(EncryptedSession *session, const QBy
     if (!session || !d->sessions.contains(session) || session->isClosing())
         return unsupported(QStringLiteral("Encryption stream session is unavailable"));
     auto *method = this->method(session->methodId());
-    if (!method || !method->capabilities().testFlag(EncryptionMethod::DataStream))
-        return unsupported(QStringLiteral("Encryption method does not support streams"));
+    if (!method || !method->capabilities().testFlag(EncryptionMethod::DataStream)
+        || !session->d->requestedCapabilities.testFlag(EncryptionMethod::DataStream))
+        return unsupported(QStringLiteral("Encryption session does not support streams"));
     if (session->d->streamBusy || session->d->streamFinished)
         return unsupported(QStringLiteral("Encryption stream is busy or already finalized"));
     if (session->d->streamEncrypting && *session->d->streamEncrypting != encrypting)

@@ -22,6 +22,13 @@ class StreamSession final : public EncryptedSession {
 public:
     explicit StreamSession(const EncryptionContext &ctx) : EncryptedSession(QStringLiteral("test-stream"), ctx) { }
 
+    EncryptionJob *encrypt(const QDomElement &xml) override
+    {
+        auto *job = new EncryptionJob(this);
+        job->complete(xml);
+        return job;
+    }
+
     EncryptionJob *encryptChunk(const QByteArray &chunk, bool final) override
     {
         auto *job = new EncryptionJob(this);
@@ -48,10 +55,10 @@ class StreamMethod final : public EncryptionMethod {
 public:
     QString id() const override { return QStringLiteral("test-stream"); }
     QString name() const override { return QStringLiteral("Test stream"); }
-    Capabilities capabilities() const override { return DataStream; }
+    Capabilities capabilities() const override { return XmppStanza | DataStream; }
     EncryptedSession *startSession(Capabilities caps, const EncryptionContext &ctx) override
     {
-        return caps.testFlag(DataStream) ? new StreamSession(ctx) : nullptr;
+        return caps ? new StreamSession(ctx) : nullptr;
     }
     Features features() const override { return {}; }
     bool canDecrypt(const QDomElement &) const override { return false; }
@@ -74,8 +81,17 @@ int main(int argc, char **argv)
     StreamMethod method;
     check(manager.registerMethod(&method), "Cannot register stream method");
 
-    auto *tx = manager.startSession(method.id(), EncryptionMethod::DataStream);
-    check(tx != nullptr, "Cannot start stream session");
+    // Jingle can use one encryption session both for signaling XML and for payload chunks.
+    auto *tx = manager.startSession(method.id(),
+                                    EncryptionMethod::Capabilities(EncryptionMethod::XmppStanza
+                                                                   | EncryptionMethod::DataStream));
+    check(tx != nullptr, "Cannot start combined signaling/stream session");
+    QDomDocument doc;
+    auto signaling = doc.createElement(QStringLiteral("jingle"));
+    doc.appendChild(signaling);
+    auto *signaled = await(manager.encrypt(tx, signaling));
+    check(signaled->success() && signaled->stanza().tagName() == QLatin1String("jingle"),
+          "Shared session cannot protect signaling");
     auto *first = manager.encryptChunk(tx, QByteArray("ab"));
     check(!first->isFinished(), "Expected asynchronous chunk");
     auto *overlap = manager.encryptChunk(tx, QByteArray("cd"));
@@ -102,8 +118,14 @@ int main(int argc, char **argv)
     check(verified->success() && verified->data() == "xyz", "Valid stream not finalized");
     ok->close();
 
-    check(!manager.startSession(method.id(), EncryptionMethod::XmppStanza),
-          "Unsupported stanza capability accepted");
+    auto *stanzaOnly = manager.startSession(method.id(), EncryptionMethod::XmppStanza);
+    check(stanzaOnly != nullptr, "Stanza-only session not created");
+    auto *wrongCapability = manager.encryptChunk(stanzaOnly, QByteArray("plain"));
+    check(wrongCapability->isFinished() && !wrongCapability->success(),
+          "Stream operation accepted on a stanza-only session");
+    stanzaOnly->close();
+    check(!manager.startSession(method.id(), EncryptionMethod::DataMessage),
+          "Unsupported data-message capability accepted");
     qInfo("Stream session routing and final authentication passed");
     return 0;
 }
