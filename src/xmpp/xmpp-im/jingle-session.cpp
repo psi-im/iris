@@ -3320,8 +3320,8 @@ namespace XMPP { namespace Jingle {
         // Incoming initial signaling is filtered before the application selects
         // its method. Do not accept a previously authenticated offer from
         // another method, or an unavailable required method.
-        if (d->endToEndRequired && !d->encryptionMethodId.isEmpty()
-            && (!d->encryptionSession
+        if (!d->encryptionMethodId.isEmpty()
+            && ((d->endToEndRequired && !d->encryptionSession)
                 || (d->peerAuthentication.isValid()
                     && d->peerAuthentication.method != d->encryptionMethodId))) {
             terminate(Reason::SecurityError, QStringLiteral("Selected Jingle encryption method unavailable or mismatched"));

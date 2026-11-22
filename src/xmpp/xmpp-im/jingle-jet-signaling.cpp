@@ -252,8 +252,11 @@ bool Jet::filterOutgoing(const Jid &to, const QDomElement &jingle, const Done &d
     KeyTransport *transport = nullptr;
     if (!session->encryptionMethodId().isEmpty()) {
         transport = d->forMethod(session->encryptionMethodId());
-    } else if (!d->transports.isEmpty()) {
-        transport = d->transports.first(); // Historical unselected-session behavior.
+    } else if (d->transports.size() == 1) {
+        // An unselected session may use the sole available provider as before.
+        // With multiple providers, require an explicit choice rather than
+        // silently picking whichever happened to register first.
+        transport = d->transports.first();
     }
     if (!transport || !session->allowsEncryptionMethod(transport->methodId()) || !transport->canEncrypt(to)) {
         if (!required)
