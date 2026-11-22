@@ -91,6 +91,7 @@
 #include "xmpp_tasks.h"
 #include "xmpp_xmlcommon.h"
 
+#include <QHash>
 #include <QList>
 #include <QMap>
 #include <QObject>
@@ -115,6 +116,9 @@ public:
     Jid     j;
     int     status = 0;
     QString password;
+    // Only occupant JIDs announced in presence for the current MUC join.
+    // Never cache these aliases across room disconnects or nickname reuse.
+    QHash<QString, Jid> realJids;
 };
 
 class Client::ClientPrivate {
@@ -470,6 +474,7 @@ void Client::groupChatLeave(const QString &host, const QString &room, const QStr
             continue;
 
         i.status = GroupChat::Closing;
+        i.realJids.clear();
         debug(QString("Client: Leaving: [%1]\n").arg(i.j.full()));
 
         JT_Presence *j = new JT_Presence(rootTask());
@@ -487,6 +492,7 @@ void Client::groupChatLeaveAll(const QString &statusStr)
         for (QList<GroupChat>::Iterator it = d->groupChatList.begin(); it != d->groupChatList.end(); it++) {
             GroupChat &i = *it;
             i.status     = GroupChat::Closing;
+            i.realJids.clear();
 
             JT_Presence *j = new JT_Presence(rootTask());
             Status       s;
@@ -657,6 +663,25 @@ void Client::distribute(const QDomElement &x)
 
     if (auto method = d->encryptionManager->methodForStanza(x)) {
         EncryptionContext context;
+        if (x.attribute(QStringLiteral("type")) == QLatin1String("groupchat")) {
+            const Jid occupant(x.attribute(QStringLiteral("from")));
+            // Incoming MUC 'from' is room/nick, never the cryptographic
+            // sender. Use only a current real JID supplied by MUC presence.
+            // Never infer an identity from the nick or from an old room join.
+            for (const auto &gc : std::as_const(d->groupChatList)) {
+                if (gc.status == GroupChat::Closing || !gc.j.compare(occupant, false))
+                    continue;
+                const Jid real = gc.realJids.value(occupant.resource());
+                if (!real.isValid() || real.node().isEmpty() || occupant.resource().isEmpty()) {
+                    emit stanzaDecryptionFailed(
+                        method->id(), occupant, EncryptionJob::Error::AuthenticationFailed,
+                        QStringLiteral("No authenticated real JID for MUC sender %1").arg(occupant.full()), {});
+                    return;
+                }
+                context.options.insert(QStringLiteral("mucRealSender"), real.bare());
+                break;
+            }
+        }
         auto              job      = d->encryptionManager->decrypt(x, context);
         const QString     methodId = method->id();
         const Jid         peer(x.attribute(QStringLiteral("from")));
@@ -955,6 +980,16 @@ void Client::ppPresence(const Jid &j, const Status &s)
         GroupChat &i = *it;
 
         if (i.j.compare(j, false)) {
+            // MUC nicknames are transient. Only map the current occupant
+            // presence to its actual JID, and forget it on any unavailable
+            // or identity-less update. A later occupant can reuse that nick.
+            if (!j.resource().isEmpty()) {
+                if (i.status != GroupChat::Closing && s.isAvailable() && !s.hasError() && s.hasMUCItem()
+                    && s.mucItem().jid().isValid() && !s.mucItem().jid().node().isEmpty())
+                    i.realJids.insert(j.resource(), Jid(s.mucItem().jid().bare()));
+                else
+                    i.realJids.remove(j.resource());
+            }
             bool us = i.j.resource() == j.resource() || j.resource().isEmpty();
 
             debug(QString("for groupchat i=[%1] pres=[%2], [us=%3].\n").arg(i.j.full(), j.full()).arg(us));

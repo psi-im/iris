@@ -2823,10 +2823,22 @@ public:
             job->fail(EncryptionJob::Error::ProtocolError, QStringLiteral("Malformed OMEMO encrypted stanza"));
             return job;
         }
-        const Jid sender(xml.attribute(QStringLiteral("from")));
-        if (!sender.isValid()) {
-            job->fail(EncryptionJob::Error::ProtocolError, QStringLiteral("OMEMO stanza has no valid sender"));
+        const Jid  outerSender(xml.attribute(QStringLiteral("from")));
+        const bool isMuc = xml.attribute(QStringLiteral("type")) == QLatin1String("groupchat");
+        if (!outerSender.isValid()) {
+            job->fail(EncryptionJob::Error::AuthenticationFailed,
+                      QStringLiteral("OMEMO stanza has no valid sender"));
             return job;
+        }
+        Jid sender = outerSender;
+        if (isMuc) {
+            sender = Jid(context().options.value(QStringLiteral("mucRealSender")).toString());
+            if (outerSender.resource().isEmpty() || !sender.isValid() || sender.node().isEmpty()
+                || !sender.resource().isEmpty()) {
+                job->fail(EncryptionJob::Error::AuthenticationFailed,
+                          QStringLiteral("OMEMO groupchat sender has no verified real bare JID"));
+                return job;
+            }
         }
 
         QDomElement ourKey;
@@ -2992,18 +3004,40 @@ public:
 
             StanzaContentEncryption::Profile profile;
             profile.affixes = StanzaContentEncryption::RandomPadding | StanzaContentEncryption::From;
-            if (!xml.attribute(QStringLiteral("to")).isEmpty())
+            // OMEMO §5.5.1 requires <to/> for MUC, even when the MUC
+            // service rewrites the stanza's outer 'to' to our full JID.
+            if (isMuc || !xml.attribute(QStringLiteral("to")).isEmpty())
                 profile.affixes |= StanzaContentEncryption::To;
             profile.minimumEnvelopeSize = d->minimumEnvelopeSize;
+
+            // The MUC server rewrites the sender to room/nick. For SCE
+            // verification we must compare the authenticated real sender
+            // and the original room address. Keep the actual outer stanza
+            // for delivery after verifying BOTH affixes.
+            QDomDocument checkedDocument;
+            QDomElement  checkedOuter = xml;
+            if (isMuc) {
+                checkedOuter = checkedDocument.importNode(xml, true).toElement();
+                checkedDocument.appendChild(checkedOuter);
+                checkedOuter.setAttribute(QStringLiteral("from"), sender.bare());
+                checkedOuter.setAttribute(QStringLiteral("to"), outerSender.bare());
+            }
             QString sceError;
-            auto    restored
-                = StanzaContentEncryption::restore(xml, envelopeDocument.documentElement(), profile, &sceError);
+            auto    restored = StanzaContentEncryption::restore(checkedOuter, envelopeDocument.documentElement(),
+                                                                profile, &sceError);
             if (!restored) {
                 job->fail(EncryptionJob::Error::AuthenticationFailed, sceError);
                 return job;
             }
             restoredDocument = std::move(*restored);
             restoredStanza   = restoredDocument.documentElement();
+            if (isMuc) {
+                restoredStanza.setAttribute(QStringLiteral("from"), outerSender.full());
+                if (xml.hasAttribute(QStringLiteral("to")))
+                    restoredStanza.setAttribute(QStringLiteral("to"), xml.attribute(QStringLiteral("to")));
+                else
+                    restoredStanza.removeAttribute(QStringLiteral("to"));
+            }
         }
 
         auto       device          = d->data.devices.value(sender.bare()).value(senderDevice);
