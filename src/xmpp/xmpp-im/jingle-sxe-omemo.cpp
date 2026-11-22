@@ -41,6 +41,8 @@ namespace XMPP { namespace Jingle { namespace SXE {
             transports->setPayloadProtector(nullptr);
     }
 
+    QString SxeOmemo::methodId() const { return OmemoEncryption::methodId(); }
+
     QString SxeOmemo::method() const { return OmemoEncryption::namespaceUri(); }
 
     bool SxeOmemo::canProtect(const Jid &peer) const

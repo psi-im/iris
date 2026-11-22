@@ -184,6 +184,13 @@ namespace XMPP { namespace Jingle {
         const auto session  = d->manager ? d->manager->session(from, sid) : nullptr;
         const bool required = session && session->isEndToEndRequired();
         const auto found    = scan(jingle);
+        if (session && !session->allowsEncryptionMethod(OmemoEncryption::methodId())) {
+            if (!found.encrypted.isEmpty() || (required && (found.unprotected || !found.plain.isEmpty()))) {
+                done({}, refusal(QStringLiteral("DTLS verification uses a different encryption method")));
+                return true;
+            }
+            return false;
+        }
         if (found.encrypted.isEmpty()) {
             if (required && (found.unprotected || !found.plain.isEmpty())) {
                 done({}, refusal(QStringLiteral("This session requires end-to-end encryption")));
@@ -283,6 +290,13 @@ namespace XMPP { namespace Jingle {
         const auto session  = d->manager ? d->manager->session(to, sid) : nullptr;
         const bool required = session && session->isEndToEndRequired();
         const auto found    = scan(jingle);
+        if (session && !session->allowsEncryptionMethod(OmemoEncryption::methodId())) {
+            if (required && (found.unprotected || !found.plain.isEmpty())) {
+                done({}, refusal(QStringLiteral("The selected encryption method cannot verify DTLS")));
+                return true;
+            }
+            return false;
+        }
         if (required && found.unprotected) {
             done({}, refusal(QStringLiteral("This session requires end-to-end encryption")));
             return true;

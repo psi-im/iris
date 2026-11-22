@@ -51,6 +51,7 @@ namespace XMPP { namespace Jingle { namespace SXE {
         using Done = std::function<void(const QDomElement &result)>;
 
         virtual ~PayloadProtector();
+        virtual QString     methodId() const = 0; // Identifier in EncryptionManager.
         virtual QString     method() const                    = 0; // e.g. urn:xmpp:omemo:2
         virtual bool        canProtect(const Jid &peer) const = 0;
         virtual QStringList discoFeatures() const             = 0;

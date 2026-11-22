@@ -26,6 +26,7 @@
 #include "xmpp/jid/jid.h"
 #include "xmpp_caps.h"
 #include "xmpp_client.h"
+#include "xmpp_encryption.h"
 #include "xmpp_stream.h"
 #include "xmpp_task.h"
 #include "xmpp_xmlcommon.h"
@@ -226,6 +227,8 @@ namespace XMPP { namespace Jingle {
         Jid     otherParty; // either "from" or initiator/responder. it's where to send all requests.
         Jid     localParty; // that one will be set as initiator/responder if provided
         Session::PeerAuthentication peerAuthentication;
+        QString                     encryptionMethodId;
+        QPointer<EncryptedSession>   encryptionSession;
         bool                        endToEndRequired         = false;
         bool                        endToEndPreferred        = false;
         bool                        waitingAck               = false;
@@ -243,6 +246,10 @@ namespace XMPP { namespace Jingle {
             state = State::Finished;
             stepTimer.stop();
             peerUnavailableTimer.stop();
+            if (encryptionSession) {
+                encryptionSession->close();
+                encryptionSession = nullptr;
+            }
             waitingAck = false;
             q->tieBreaker()->clear();
             if (!guard)
@@ -2801,6 +2808,8 @@ namespace XMPP { namespace Jingle {
 
     Session::~Session()
     {
+        if (d->encryptionSession)
+            d->encryptionSession->close();
         setParent(nullptr);
         d->manager->detachSession(this);
         d->state = State::Finished;
@@ -2864,6 +2873,45 @@ namespace XMPP { namespace Jingle {
     void Session::setEndToEndPreferred(bool preferred) { d->endToEndPreferred = preferred; }
 
     bool Session::isEndToEndPreferred() const { return d->endToEndPreferred || d->endToEndRequired; }
+
+    bool Session::setEncryptionMethod(const QString &methodId)
+    {
+        if (d->state != State::Created)
+            return false;
+        if (d->encryptionMethodId == methodId)
+            return methodId.isEmpty() || d->encryptionSession;
+
+        if (d->encryptionSession) {
+            d->encryptionSession->close();
+            d->encryptionSession = nullptr;
+        }
+        d->encryptionMethodId = methodId;
+        if (methodId.isEmpty())
+            return true;
+
+        auto *registry = d->manager->client()->encryptionManager();
+        auto *method   = registry->method(methodId);
+        if (!method || !method->capabilities().testFlag(EncryptionMethod::XmppStanza))
+            return false;
+
+        EncryptionContext context;
+        context.recipients = { peer() };
+        const auto capabilities
+            = method->capabilities() & EncryptionMethod::Capabilities(EncryptionMethod::XmppStanza
+                                                                      | EncryptionMethod::DataStream);
+        d->encryptionSession = registry->startSession(methodId, capabilities, context);
+        return d->encryptionSession != nullptr;
+    }
+
+    QString Session::encryptionMethodId() const { return d->encryptionMethodId; }
+
+    EncryptedSession *Session::encryptionSession() const { return d->encryptionSession; }
+
+    bool Session::allowsEncryptionMethod(const QString &methodId) const
+    {
+        return d->encryptionMethodId.isEmpty()
+            || (d->encryptionMethodId == methodId && d->encryptionSession);
+    }
 
     bool Session::checkPeerCaps(const QString &ns) const
     {

@@ -185,6 +185,12 @@ namespace XMPP { namespace Jingle {
         const auto session = d->manager ? d->manager->session(to, sid) : nullptr;
         if (!session || !session->isEndToEndPreferred())
             return false;
+        if (!session->allowsEncryptionMethod(OmemoEncryption::methodId())) {
+            if (!session->isEndToEndRequired())
+                return false;
+            done({}, refusal(QStringLiteral("The selected encryption method cannot protect JET files")));
+            return true;
+        }
 
         auto               copy = d->document.importNode(jingle, true).toElement();
         QList<QDomElement> contents;
@@ -294,7 +300,14 @@ namespace XMPP { namespace Jingle {
             return true;
         }
 
-        const auto         sid = jingle.attribute(QStringLiteral("sid"));
+        const auto sid     = jingle.attribute(QStringLiteral("sid"));
+        const auto session = d->manager ? d->manager->session(from, sid) : nullptr;
+        if (session && !session->allowsEncryptionMethod(OmemoEncryption::methodId())) {
+            done({}, refusal(QStringLiteral("JET uses a different encryption method than this session")));
+            return true;
+        }
+
+
         QPointer<JetOmemo> guard(this);
         auto               failure = std::make_shared<std::optional<QString>>();
         auto               secrets = std::make_shared<QHash<QString, Secret>>();

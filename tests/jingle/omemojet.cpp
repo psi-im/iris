@@ -97,6 +97,13 @@ std::unique_ptr<Transfer> send(Endpoint &alice, Endpoint &bob, const QByteArray 
     file.addHash(Hash::from(Hash::Sha256, data));
 
     t->session = alice.client.jingleManager()->newSession(bob.jid);
+    if (preferred) {
+        check(t->session->setEncryptionMethod(OmemoEncryption::methodId()),
+              "A Jingle session could not select OMEMO");
+        check(t->session->encryptionSession() != nullptr
+                  && t->session->encryptionSession()->methodId() == OmemoEncryption::methodId(),
+              "Jingle did not retain a method-specific encryption session");
+    }
     t->session->setEndToEndPreferred(preferred);
     t->session->setEndToEndRequired(required);
     t->sending = qobject_cast<FT::Application *>(t->session->newContent(FT::NS, J::Origin::Initiator));

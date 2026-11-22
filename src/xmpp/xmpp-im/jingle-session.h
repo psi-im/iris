@@ -32,7 +32,9 @@
 #include <functional>
 #include <memory>
 
-namespace XMPP { namespace Jingle {
+namespace XMPP {
+class EncryptedSession;
+namespace Jingle {
 
     // class Manager;
     class Application;
@@ -97,6 +99,17 @@ namespace XMPP { namespace Jingle {
         /// A session that requires end-to-end encryption prefers it as well.
         void setEndToEndPreferred(bool preferred);
         bool isEndToEndPreferred() const;
+
+        /**
+         * Select the encryption method for this Jingle negotiation before it starts.
+         * The requested method remains explicit even when it is unavailable, so
+         * required end-to-end encryption can never silently choose another method.
+         * The associated encryption session lives in Iris's encryption registry.
+         */
+        bool setEncryptionMethod(const QString &methodId);
+        QString encryptionMethodId() const;
+        EncryptedSession *encryptionSession() const;
+        bool allowsEncryptionMethod(const QString &methodId) const;
 
         TieBreaker       *tieBreaker();
         const TieBreaker *tieBreaker() const;

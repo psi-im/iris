@@ -44,6 +44,7 @@ namespace Jingle { namespace SXE {
         SxeOmemo(XMPP::Jingle::Manager *manager, OmemoEncryption *omemo, QObject *parent = nullptr);
         ~SxeOmemo() override;
 
+        QString     methodId() const override;
         QString     method() const override;
         bool        canProtect(const Jid &peer) const override;
         QStringList discoFeatures() const override;

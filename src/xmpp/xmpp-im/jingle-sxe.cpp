@@ -185,7 +185,9 @@ namespace XMPP { namespace Jingle { namespace SXE {
             d->hosts           = { _pad->session()->manager()->client()->jid() };
             const auto session = _pad->session();
             if (auto protector = protectorOf(_pad);
-                protector && session->isEndToEndPreferred() && protector->canProtect(session->peer()))
+                protector && session->isEndToEndPreferred()
+                && session->allowsEncryptionMethod(protector->methodId())
+                && protector->canProtect(session->peer()))
                 d->encryption = protector->method();
         } else if (d->hosts.isEmpty()) {
             onFinish(Reason::FailedTransport, QStringLiteral("SXE transport without a host"));
