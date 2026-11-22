@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #include <iris/xmpp_encryption.h>
+#include <iris/xmpp_client.h>
 
 #include <QCoreApplication>
 #include <QEventLoop>
@@ -21,9 +22,22 @@ static void check(bool condition, const char *message)
 class StreamSession final : public EncryptedSession {
 public:
     explicit StreamSession(const EncryptionContext &ctx) : EncryptedSession(QStringLiteral("test-stream"), ctx) { }
+    int stanzaCalls = 0;
+    EncryptionContext lastContext;
 
-    EncryptionJob *doEncrypt(const QDomElement &xml, const EncryptionContext &) override
+    EncryptionJob *doEncrypt(const QDomElement &xml, const EncryptionContext &ctx) override
     {
+        ++stanzaCalls;
+        lastContext = ctx;
+        auto *job = new EncryptionJob(this);
+        job->complete(xml);
+        return job;
+    }
+
+    EncryptionJob *doDecrypt(const QDomElement &xml, const EncryptionContext &ctx) override
+    {
+        ++stanzaCalls;
+        lastContext = ctx;
         auto *job = new EncryptionJob(this);
         job->complete(xml);
         return job;
@@ -98,6 +112,64 @@ int main(int argc, char **argv)
           "Method supporting all required capabilities was not selected");
     check(manager.methods(EncryptionMethod::XmppStanza | EncryptionMethod::DataMessage).empty(),
           "Registry selected a method supporting only part of the required capabilities");
+
+    // The client maintains long-lived sessions per peer and method, not per
+    // stanza. Different full JIDs must not accidentally share session state.
+    {
+        Client client;
+        StreamMethod registeredMethod;
+        check(client.encryptionManager()->registerMethod(&registeredMethod),
+              "Could not register a peer-specific method");
+        const Jid peerA(QStringLiteral("alice@example.test/desktop"));
+        const Jid peerB(QStringLiteral("alice@example.test/mobile"));
+        auto *sessionA = client.encryptedSession(registeredMethod.id(), peerA);
+        auto *sessionB = client.encryptedSession(registeredMethod.id(), peerB);
+        check(sessionA && sessionB && sessionA != sessionB,
+              "Full-JID resource sessions were combined");
+        check(client.encryptedSession(registeredMethod.id(), peerA) == sessionA,
+              "Client created a new session for an existing peer");
+
+        QDomDocument testDoc;
+        auto testStanza = testDoc.createElement(QStringLiteral("message"));
+        testDoc.appendChild(testStanza);
+        EncryptionContext operation;
+        operation.options.insert(QStringLiteral("perMessage"), QStringLiteral("first"));
+        operation.replyTo = EncryptionMetadata {};
+        operation.replyTo->methodId = registeredMethod.id();
+        auto *session = dynamic_cast<StreamSession *>(sessionA);
+        check(session, "Test session implementation not returned");
+        check(await(sessionA->encrypt(testStanza, operation))->success(),
+              "The peer session could not encrypt its first stanza");
+        check(session->lastContext.options.value(QStringLiteral("perMessage")).toString()
+                  == QStringLiteral("first") && session->lastContext.replyTo.has_value()
+                  && session->lastContext.recipients == QList<Jid> { peerA },
+              "The per-stanza context or bound peer was lost");
+        check(await(sessionA->decrypt(testStanza))->success() && session->stanzaCalls == 2,
+              "The peer session was not reused for incoming messages");
+        check(!session->lastContext.options.contains(QStringLiteral("perMessage"))
+                  && !session->lastContext.replyTo.has_value(),
+              "An earlier stanza's context leaked into the next operation");
+
+        client.closeEncryptedSession(registeredMethod.id(), peerA);
+        check(sessionA->isClosing(), "Explicit close did not retire the peer session");
+        auto *replacement = client.encryptedSession(registeredMethod.id(), peerA);
+        check(replacement && replacement != sessionA, "Closed session was returned from the peer cache");
+
+        Status unavailable;
+        unavailable.setIsAvailable(false);
+        client.presenceReceived(peerA, unavailable);
+        check(replacement->isClosing() && !sessionB->isClosing(),
+              "Resource departure did not close only its own encryption session");
+
+        const Jid roomPeer(QStringLiteral("room@conference.example.test/nick"));
+        auto *occupant = client.encryptedSession(registeredMethod.id(), roomPeer);
+        check(occupant, "Cannot create MUC occupant encryption session");
+        client.groupChatLeft(Jid(QStringLiteral("room@conference.example.test")));
+        check(occupant->isClosing(), "Leaving a MUC retained an ephemeral occupant session");
+
+        client.close();
+        check(sessionB->isClosing(), "Disconnect did not close the remaining peer session");
+    }
 
     // Jingle can use one encryption session both for signaling XML and for payload chunks.
     auto *tx = manager.startSession(method.id(),
