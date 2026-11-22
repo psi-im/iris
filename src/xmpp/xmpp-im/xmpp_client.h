@@ -103,8 +103,13 @@ public:
 
     void           send(const QDomElement &);
     void           send(const QString &);
+    // The client keeps one stanza session per encryption method and peer JID.
+    // A bare JID is used only when the caller does not have a resource.
+    EncryptedSession *encryptedSession(const QString &methodId, const Jid &peer);
+    void closeEncryptedSession(const QString &methodId, const Jid &peer);
     EncryptionJob *sendEncrypted(const QDomElement &, const QString &methodId, const EncryptionContext &);
-    EncryptionJob *sendEncrypted(const QDomElement &, EncryptedSession *session);
+    EncryptionJob *sendEncrypted(const QDomElement &, EncryptedSession *session,
+                                 const EncryptionContext &operation = {});
     EncryptionJob *replyEncrypted(const QDomElement &, const EncryptionMetadata &);
     void           clearSendQueue();
 
@@ -248,6 +253,8 @@ private slots:
 
 private:
     void cleanup();
+    void closeEncryptedSessionsForPeer(const Jid &peer, bool allResources = false);
+    void closeAllEncryptedSessions();
     void distribute(const QDomElement &);
     bool distributeEncryptedCarbon(const QDomElement &);
     void distributeDecrypted(const QDomElement &, const EncryptionMetadata *metadata);

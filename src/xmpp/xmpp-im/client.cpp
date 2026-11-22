@@ -150,6 +150,7 @@ public:
     Jingle::Manager          *jingleManager            = nullptr;
     MucManager              *mucManager               = nullptr;
     EncryptionManager       *encryptionManager         = nullptr;
+    QHash<QString, QHash<QString, QPointer<EncryptedSession>>> encryptedSessions;
     const EncryptionMetadata *currentEncryptionMetadata = nullptr;
     JT_PushMessage           *pushMessage               = nullptr;
 };
@@ -172,6 +173,23 @@ Client::Client(QObject *par) : QObject(par)
     const auto encryptionFeaturesChanged = [this](const QString &) { d->caps.resetVersion(); };
     connect(d->encryptionManager, &EncryptionManager::methodRegistered, this, encryptionFeaturesChanged);
     connect(d->encryptionManager, &EncryptionManager::methodUnregistered, this, encryptionFeaturesChanged);
+    connect(d->encryptionManager, &EncryptionManager::methodUnregistered, this, [this](const QString &id) {
+        const auto sessions = d->encryptedSessions.take(id);
+        for (auto session : sessions)
+            if (session)
+                session->close();
+    });
+    // A full JID can be reused by another resource or MUC occupant. Never
+    // retain its live stanza context after the resource goes away.
+    connect(this, &Client::presenceReceived, this, [this](const Jid &peer, const Status &status) {
+        if (!status.isAvailable() && !peer.resource().isEmpty())
+            closeEncryptedSessionsForPeer(peer);
+    });
+    const auto clearMuc = [this](const Jid &room) {
+        closeEncryptedSessionsForPeer(room, true);
+    };
+    connect(this, &Client::groupChatJoined, this, clearMuc);
+    connect(this, &Client::groupChatLeft, this, clearMuc);
 
     d->s5bman = new S5BManager(this);
     connect(d->s5bman, SIGNAL(incomingReady()), SLOT(s5b_incomingReady()));
@@ -276,6 +294,7 @@ void Client::start(const QString &host, const QString &user, const QString &pass
         delete task.data();
     d->sessionTasks.clear();
     d->resourceList.clear();
+    closeAllEncryptedSessions();
     // TODO
     d->host     = host;
     d->user     = user;
@@ -434,6 +453,7 @@ void Client::close(bool)
 
 void Client::cleanup()
 {
+    closeAllEncryptedSessions();
     d->active = false;
     // d->authed = false;
     d->mucManager->clear();
@@ -540,20 +560,73 @@ Task *Client::rootTask() { return d->root; }
 
 QDomDocument *Client::doc() const { return &d->doc; }
 
-// A single received stanza uses a transient encryption session.  Session
-// operation validation and job ownership stay in EncryptedSession.
-static EncryptionJob *decryptWithSession(EncryptionManager *registry, EncryptionMethod *method,
-                                         const QDomElement &stanza, const EncryptionContext &context)
+EncryptedSession *Client::encryptedSession(const QString &methodId, const Jid &peer)
 {
-    auto *session = registry->startSession(method->id(), EncryptionMethod::XmppStanza, context);
-    if (!session) {
-        auto *job = new EncryptionJob(registry);
-        job->fail(EncryptionJob::Error::NoSession,
-                  QStringLiteral("Cannot start a decryption session for method %1").arg(method->id()));
-        return job;
+    if (methodId.isEmpty() || !peer.isValid())
+        return nullptr;
+
+    auto &sessions = d->encryptedSessions[methodId];
+    const QString fullJid = peer.full();
+    if (auto existing = sessions.value(fullJid); existing && !existing->isClosing())
+        return existing;
+
+    EncryptionContext context;
+    context.recipients = { peer };
+    auto *session = d->encryptionManager->startSession(methodId, EncryptionMethod::XmppStanza, context);
+    if (session)
+        sessions.insert(fullJid, session);
+    else
+        sessions.remove(fullJid);
+    return session;
+}
+
+void Client::closeEncryptedSession(const QString &methodId, const Jid &peer)
+{
+    auto it = d->encryptedSessions.find(methodId);
+    if (it == d->encryptedSessions.end())
+        return;
+    auto *session = it->take(peer.full()).data();
+    if (it->isEmpty())
+        d->encryptedSessions.erase(it);
+    if (session)
+        session->close();
+}
+
+void Client::closeEncryptedSessionsForPeer(const Jid &peer, bool allResources)
+{
+    for (auto byMethod = d->encryptedSessions.begin(); byMethod != d->encryptedSessions.end();) {
+        for (auto byPeer = byMethod->begin(); byPeer != byMethod->end();) {
+            const Jid cached(byPeer.key());
+            if (cached == peer || (allResources && cached.bare() == peer.bare())) {
+                if (byPeer.value())
+                    byPeer.value()->close();
+                byPeer = byMethod->erase(byPeer);
+            } else {
+                ++byPeer;
+            }
+        }
+        if (byMethod->isEmpty())
+            byMethod = d->encryptedSessions.erase(byMethod);
+        else
+            ++byMethod;
     }
-    auto *job = session->decrypt(stanza);
-    session->close();
+}
+
+void Client::closeAllEncryptedSessions()
+{
+    auto sessions = std::move(d->encryptedSessions);
+    d->encryptedSessions.clear();
+    for (const auto &byPeer : std::as_const(sessions))
+        for (auto session : byPeer)
+            if (session)
+                session->close();
+}
+
+static EncryptionJob *missingEncryptionSession(EncryptionManager *registry, const QString &methodId)
+{
+    auto *job = new EncryptionJob(registry);
+    job->fail(EncryptionJob::Error::NoSession,
+              QStringLiteral("Cannot start an encryption session for method %1").arg(methodId));
     return job;
 }
 
@@ -603,9 +676,10 @@ void Client::distribute(const QDomElement &x)
             }
             context.options.insert(QStringLiteral("mucRealSender"), real.bare());
         }
-        auto *job = decryptWithSession(d->encryptionManager, method, x, context);
+        const Jid peer(x.attribute(QStringLiteral("from")));
+        auto *session = encryptedSession(method->id(), peer);
+        auto *job     = session ? session->decrypt(x, context) : missingEncryptionSession(d->encryptionManager, method->id());
         const QString     methodId = method->id();
-        const Jid         peer(x.attribute(QStringLiteral("from")));
         auto              finish = [this, job, methodId, peer]() {
             if (job->success()) {
                 distributeDecrypted(job->stanza(), &job->metadata());
@@ -641,14 +715,16 @@ bool Client::distributeEncryptedCarbon(const QDomElement &x)
     if (!method)
         return false;
 
+    const Jid forwardedFrom(forwarded.attribute(QStringLiteral("from")));
+    const Jid forwardedTo(forwarded.attribute(QStringLiteral("to")));
+    const Jid peer = forwardedFrom.bare() == jid().bare() ? forwardedTo : forwardedFrom;
     EncryptionContext context;
     context.options.insert(QStringLiteral("forwardedCarbon"), true);
-    auto *job = decryptWithSession(d->encryptionManager, method, forwarded, context);
+    auto *session = encryptedSession(method->id(), peer);
+    auto *job = session ? session->decrypt(forwarded, context)
+                        : missingEncryptionSession(d->encryptionManager, method->id());
     const QString     methodId = method->id();
     const QDomElement original = x;
-    const Jid         forwardedFrom(forwarded.attribute(QStringLiteral("from")));
-    const Jid         forwardedTo(forwarded.attribute(QStringLiteral("to")));
-    const Jid         peer   = forwardedFrom.bare() == jid().bare() ? forwardedTo : forwardedFrom;
     auto              finish = [this, job, methodId, original, peer]() {
         if (!job->success()) {
             debug(
@@ -788,25 +864,21 @@ void Client::send(const QString &str)
 EncryptionJob *Client::sendEncrypted(const QDomElement &stanza, const QString &methodId,
                                      const EncryptionContext &context)
 {
-    auto *session = d->encryptionManager->startSession(methodId, EncryptionMethod::XmppStanza, context);
-    if (!session) {
-        auto *job = new EncryptionJob(d->encryptionManager);
-        job->fail(EncryptionJob::Error::NoSession,
-                  QStringLiteral("Cannot start an encryption session for method %1").arg(methodId));
-        return job;
-    }
-    auto *job = sendEncrypted(stanza, session);
-    session->close();
-    return job;
+    const Jid peer = !context.recipients.isEmpty()
+        ? context.recipients.first() : Jid(stanza.attribute(QStringLiteral("to")));
+    auto *session = encryptedSession(methodId, peer);
+    return session ? sendEncrypted(stanza, session, context)
+                   : missingEncryptionSession(d->encryptionManager, methodId);
 }
 
-EncryptionJob *Client::sendEncrypted(const QDomElement &stanza, EncryptedSession *session)
+EncryptionJob *Client::sendEncrypted(const QDomElement &stanza, EncryptedSession *session,
+                                     const EncryptionContext &operation)
 {
     QDomDocument original;
     if (stanza.attribute(QStringLiteral("type")) == QLatin1String("groupchat"))
         original.appendChild(original.importNode(stanza, true));
     const QString methodId = session ? session->methodId() : QString();
-    auto *job = session ? session->encrypt(stanza) : nullptr;
+    auto *job = session ? session->encrypt(stanza, operation) : nullptr;
     if (!job) {
         job = new EncryptionJob(d->encryptionManager);
         job->fail(EncryptionJob::Error::NoSession, QStringLiteral("Encryption session is unavailable"));
