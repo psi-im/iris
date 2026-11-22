@@ -18,6 +18,8 @@
 #include <QHash>
 #include <QPointer>
 
+#include <utility>
+
 namespace XMPP { namespace Jingle { namespace JET {
 namespace {
 const QString JetNs(QStringLiteral("urn:xmpp:jingle:jet:0"));
@@ -136,11 +138,13 @@ public:
             if (known == session)
                 return;
         watched.append(session);
+        const auto id = pendingKey(session->peer(), session->sid());
         QObject::connect(session, &Session::newContentReceived, owner,
                          [this, session]() { install(session); });
-        QObject::connect(session, &QObject::destroyed, owner, [this, session]() {
-            watched.removeAll(session);
-            pending.remove(pendingKey(session->peer(), session->sid()));
+        QObject::connect(session, &QObject::destroyed, owner, [this, id]() {
+            // QObject has already invalidated QPointers during destruction.
+            watched.removeAll(QPointer<Session>());
+            pending.remove(id);
         });
     }
 };
@@ -243,11 +247,12 @@ bool Jet::filterOutgoing(const Jid &to, const QDomElement &jingle, const Done &d
                 next();
                 return;
             }
-            transport->encryptSecret(to, [guard, content = contents.at(index), failure, secrets, next](
+            transport->encryptSecret(to, [guard, transport, content = contents.at(index), failure, secrets, next](
                                                const std::optional<ProtectedSecret> &secret, const QString &error) {
                 if (!guard)
                     return;
-                if (!secret || !validSecret(*secret) || secret->type.isEmpty() || secret->envelope.isNull()) {
+                if (!secret || !validSecret(*secret) || secret->type.isEmpty() || secret->envelope.isNull()
+                    || !transport->accepts(secret->type)) {
                     if (!*failure)
                         *failure = error.isEmpty() ? QStringLiteral("Invalid JET transport secret") : error;
                 } else {
