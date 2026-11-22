@@ -78,7 +78,8 @@ QString dump(const QDomDocument &doc)
 }
 
 Run start(Endpoint &alice, Endpoint &bob, bool preferred, bool required, Wire &wire,
-          const std::function<void(QDomElement &)> &tamper = {})
+          const std::function<void(QDomElement &)> &tamper = {},
+          const QString &methodId = OmemoEncryption::methodId())
 {
     Run run;
     onStanza = [&wire, tamper](const Endpoint &, QDomElement &stanza) {
@@ -101,6 +102,11 @@ Run start(Endpoint &alice, Endpoint &bob, bool preferred, bool required, Wire &w
     auto connection = QObject::connect(bob.client.jingleManager(), &J::Manager::incomingSession, &bob.client,
                                        [&run](J::Session *session) { run.peerSession = session; });
     run.session     = alice.client.jingleManager()->newSession(bob.jid);
+    if (preferred) {
+        const bool available = run.session->setEncryptionMethod(methodId);
+        check(available == (methodId == OmemoEncryption::methodId()),
+              "The SXE Jingle session selected an unexpected encryption method");
+    }
     run.session->setEndToEndPreferred(preferred);
     run.session->setEndToEndRequired(required);
     run.local = qobject_cast<SXE::Application *>(run.session->newContent(SXE::NS_SVG_WHITEBOARD));
@@ -215,6 +221,13 @@ int main(int argc, char **argv)
     run  = start(alice, bob, true, true, wire);
     check(!run.peerSession && wire.plain == 0 && (!run.session || run.session->state() == J::State::Finished),
           "a required protection started a whiteboard in clear");
+
+    // Selected non-OMEMO encryption must not be replaced with OMEMO or plaintext.
+    setPeerFeatures(alice.client, bob.jid, bob.client.jingleManager()->discoFeatures() + omemo2);
+    wire = {};
+    run  = start(alice, bob, true, true, wire, {}, QStringLiteral("unsupported-method"));
+    check(!run.peerSession && wire.plain == 0 && wire.encryption.isEmpty(),
+          "a selected alternative encryption method was silently replaced for SXE");
 
     onStanza = nullptr;
     QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
