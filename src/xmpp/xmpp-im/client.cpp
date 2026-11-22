@@ -151,6 +151,9 @@ public:
     MucManager              *mucManager               = nullptr;
     EncryptionManager       *encryptionManager         = nullptr;
     QHash<QString, QHash<QString, QPointer<EncryptedSession>>> encryptedSessions;
+    // MUC occupant JIDs are ephemeral. Remember only the current presence's
+    // authenticated bare JID to detect a nickname claimed by another account.
+    QHash<QString, Jid> mucPeerIdentities;
     const EncryptionMetadata *currentEncryptionMetadata = nullptr;
     JT_PushMessage           *pushMessage               = nullptr;
 };
@@ -187,9 +190,28 @@ Client::Client(QObject *par) : QObject(par)
     });
     const auto clearMuc = [this](const Jid &room) {
         closeEncryptedSessionsForPeer(room, true);
+        for (auto it = d->mucPeerIdentities.begin(); it != d->mucPeerIdentities.end();) {
+            if (Jid(it.key()).bare() == room.bare())
+                it = d->mucPeerIdentities.erase(it);
+            else
+                ++it;
+        }
     };
     connect(this, &Client::groupChatJoined, this, clearMuc);
     connect(this, &Client::groupChatLeft, this, clearMuc);
+    connect(this, &Client::groupChatPresence, this, [this](const Jid &occupant, const Status &status) {
+        if (occupant.resource().isEmpty())
+            return;
+        const auto key = occupant.full();
+        const Jid current = status.isAvailable() ? d->mucManager->realJid(occupant) : Jid();
+        const Jid previous = d->mucPeerIdentities.value(key);
+        if (previous.isValid() && previous != current)
+            closeEncryptedSessionsForPeer(occupant);
+        if (current.isValid())
+            d->mucPeerIdentities.insert(key, current);
+        else
+            d->mucPeerIdentities.remove(key);
+    });
 
     d->s5bman = new S5BManager(this);
     connect(d->s5bman, SIGNAL(incomingReady()), SLOT(s5b_incomingReady()));
@@ -295,6 +317,7 @@ void Client::start(const QString &host, const QString &user, const QString &pass
     d->sessionTasks.clear();
     d->resourceList.clear();
     closeAllEncryptedSessions();
+    d->mucPeerIdentities.clear();
     // TODO
     d->host     = host;
     d->user     = user;
@@ -454,6 +477,7 @@ void Client::close(bool)
 void Client::cleanup()
 {
     closeAllEncryptedSessions();
+    d->mucPeerIdentities.clear();
     d->active = false;
     // d->authed = false;
     d->mucManager->clear();
