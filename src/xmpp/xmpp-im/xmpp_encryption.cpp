@@ -301,7 +301,7 @@ EncryptionManager::MethodsMap EncryptionManager::methods(EncryptionMethod::Capab
     for (const auto &entry : std::as_const(d->methods)) {
         if (!entry)
             continue;
-        if (caps == EncryptionMethod::Capabilities() || (caps & entry->capabilities()))
+        if (caps == EncryptionMethod::Capabilities() || (entry->capabilities() & caps) == caps)
             ret[entry->id()] = entry->name();
     }
     return ret;

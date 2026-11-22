@@ -80,6 +80,12 @@ int main(int argc, char **argv)
     EncryptionManager manager;
     StreamMethod method;
     check(manager.registerMethod(&method), "Cannot register stream method");
+    const auto signalingAndStream = EncryptionMethod::Capabilities(EncryptionMethod::XmppStanza
+                                                                  | EncryptionMethod::DataStream);
+    check(manager.methods(signalingAndStream).count(method.id()) == 1,
+          "Method supporting all required capabilities was not selected");
+    check(manager.methods(EncryptionMethod::XmppStanza | EncryptionMethod::DataMessage).empty(),
+          "Registry selected a method supporting only part of the required capabilities");
 
     // Jingle can use one encryption session both for signaling XML and for payload chunks.
     auto *tx = manager.startSession(method.id(),
