@@ -106,7 +106,7 @@ public:
     void           send(const QString &);
     // The application owns conversation sessions. Protocol operations (Jingle,
     // transfers, Task-bound IQs) pass their explicitly bound session instead.
-    enum class EncryptionSessionPurpose { Message, Groupchat, Carbon, Reply, ArchiveReplay };
+    enum class EncryptionSessionPurpose { Message, Groupchat, Carbon, Reply, ArchiveReplay, Protocol };
     using EncryptionSessionResolver
         = std::function<EncryptedSession *(const QString &, const Jid &, EncryptionSessionPurpose)>;
     void setEncryptionSessionResolver(EncryptionSessionResolver resolver);

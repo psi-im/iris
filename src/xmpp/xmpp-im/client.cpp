@@ -613,8 +613,10 @@ void Client::distribute(const QDomElement &x)
             context.options.insert(QStringLiteral("mucRealSender"), real.bare());
         }
         const Jid peer(x.attribute(QStringLiteral("from")));
-        const auto purpose = x.attribute(QStringLiteral("type")) == QLatin1String("groupchat")
-            ? EncryptionSessionPurpose::Groupchat : EncryptionSessionPurpose::Message;
+        const auto purpose = x.tagName() != QLatin1String("message")
+            ? EncryptionSessionPurpose::Protocol
+            : x.attribute(QStringLiteral("type")) == QLatin1String("groupchat")
+                ? EncryptionSessionPurpose::Groupchat : EncryptionSessionPurpose::Message;
         auto *session = encryptedSession(method->id(), peer, purpose);
         auto *job     = session ? session->decrypt(x, context) : missingEncryptionSession(d->encryptionManager, method->id());
         const QString     methodId = method->id();
@@ -812,9 +814,12 @@ EncryptionJob *Client::sendEncrypted(const QDomElement &stanza, const QString &m
                 && recipient.bare() == peer.bare()))
             peer = recipient;
     }
-    if (purpose == EncryptionSessionPurpose::Message
-        && stanza.attribute(QStringLiteral("type")) == QLatin1String("groupchat"))
-        purpose = EncryptionSessionPurpose::Groupchat;
+    if (purpose == EncryptionSessionPurpose::Message) {
+        if (stanza.tagName() != QLatin1String("message"))
+            purpose = EncryptionSessionPurpose::Protocol;
+        else if (stanza.attribute(QStringLiteral("type")) == QLatin1String("groupchat"))
+            purpose = EncryptionSessionPurpose::Groupchat;
+    }
     auto *session = encryptedSession(methodId, peer, purpose);
     return session ? sendEncrypted(stanza, session, context)
                    : missingEncryptionSession(d->encryptionManager, methodId);

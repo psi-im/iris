@@ -224,6 +224,11 @@ int main(int argc, char **argv)
         check(client.encryptedSession(methodId, peerA, Client::EncryptionSessionPurpose::ArchiveReplay)
                   && lastPurpose == Client::EncryptionSessionPurpose::ArchiveReplay,
               "The archive-specific purpose was lost");
+        auto protocolIq = testDoc.createElement(QStringLiteral("iq"));
+        protocolIq.setAttribute(QStringLiteral("to"), peerB.full());
+        check(await(client.sendEncrypted(protocolIq, methodId, {}))->success()
+                  && lastPurpose == Client::EncryptionSessionPurpose::Protocol,
+              "An encrypted IQ was incorrectly routed as a chat message");
 
         // The application owns the sessions and retires them on resource
         // removal, MUC departure and account logout. Client never owns them.
