@@ -150,6 +150,14 @@ int main(int argc, char **argv)
                   && !session->lastContext.replyTo.has_value(),
               "An earlier stanza's context leaked into the next operation");
 
+        testStanza.setAttribute(QStringLiteral("to"), peerA.full());
+        const int previousCalls = session->stanzaCalls;
+        check(await(client.sendEncrypted(testStanza, registeredMethod.id(), {}))->success()
+                  && await(client.sendEncrypted(testStanza, registeredMethod.id(), {}))->success()
+                  && client.encryptedSession(registeredMethod.id(), peerA) == sessionA
+                  && session->stanzaCalls == previousCalls + 2,
+              "Client::sendEncrypted created a temporary session instead of reusing the peer session");
+
         client.closeEncryptedSession(registeredMethod.id(), peerA);
         check(sessionA->isClosing(), "Explicit close did not retire the peer session");
         auto *replacement = client.encryptedSession(registeredMethod.id(), peerA);
