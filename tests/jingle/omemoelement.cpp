@@ -45,9 +45,17 @@ public:
     {
         written.append(document.importNode(stanza.element(), true).toElement());
     }
+    bool stanzaAvailable() const override { return !incoming.isEmpty(); }
+    Stanza read() override { return incoming.takeFirst(); }
+    void inject(const QDomElement &stanza)
+    {
+        incoming.append(createStanza(stanza));
+        emit readyRead();
+    }
 
     QDomDocument       document;
     QList<QDomElement> written;
+    QList<Stanza>      incoming;
 };
 
 struct Endpoint {
@@ -363,6 +371,73 @@ void exerciseMuc(Endpoint &alice, Endpoint &bob)
 
     qInfo("OMEMO 2 authenticated MUC sender and room binding passed");
 }
+
+void exerciseMucSelfEcho(Endpoint &alice, Endpoint &bob)
+{
+    const Jid room(QStringLiteral("garden@conference.example.test"));
+    const QString nick(QStringLiteral("Alice"));
+    const QString selfOccupant = room.full() + QLatin1Char('/') + nick;
+
+    check(alice.client.groupChatJoin(room.domain(), room.node(), nick), "Could not join test MUC");
+
+    QDomDocument doc;
+    auto presence = doc.createElement(QStringLiteral("presence"));
+    presence.setAttribute(QStringLiteral("from"), selfOccupant);
+    doc.appendChild(presence);
+    auto x = doc.createElementNS(QStringLiteral("http://jabber.org/protocol/muc#user"), QStringLiteral("x"));
+    auto item = doc.createElementNS(QStringLiteral("http://jabber.org/protocol/muc#user"), QStringLiteral("item"));
+    item.setAttribute(QStringLiteral("jid"), alice.jid.full());
+    item.setAttribute(QStringLiteral("affiliation"), QStringLiteral("member"));
+    item.setAttribute(QStringLiteral("role"), QStringLiteral("participant"));
+    x.appendChild(item);
+    presence.appendChild(x);
+    alice.stream.inject(presence);
+
+    int ownMessages = 0;
+    QString receivedBody;
+    bool encrypted = false;
+    QObject::connect(&alice.client, &Client::messageReceived, &alice.client, [&](const Message &m) {
+        if (m.type() == Message::Type::Groupchat) {
+            ++ownMessages;
+            receivedBody = m.body();
+            encrypted = m.wasEncrypted();
+        }
+    });
+
+    QDomDocument captured;
+    onStanza = [&](const Endpoint &source, QDomElement &stanza) {
+        if (source.jid == alice.jid && stanza.attribute(QStringLiteral("type")) == QLatin1String("groupchat")) {
+            captured.appendChild(captured.importNode(stanza, true));
+        }
+    };
+
+    Message outgoing(room);
+    outgoing.setType(Message::Type::Groupchat);
+    outgoing.setId(QStringLiteral("muc-echo-test-1"));
+    outgoing.setBody(QStringLiteral("A protected groupchat message"));
+    EncryptionContext context;
+    context.recipients = { bob.jid.bare() };
+    context.options.insert(QStringLiteral("omemoProtocol"), QStringLiteral("omemo2"));
+    auto *job = wait(alice.client.sendMessageEncrypted(outgoing, OmemoEncryption::methodId(), context), alice, bob);
+    check(job->success(), "Could not send a MUC encrypted stanza");
+    check(!captured.documentElement().isNull(), "The encrypted groupchat stanza was not emitted");
+
+    QDomDocument echoed;
+    auto stanza = echoed.importNode(captured.documentElement(), true).toElement();
+    echoed.appendChild(stanza);
+    stanza.setAttribute(QStringLiteral("from"), selfOccupant);
+    stanza.setAttribute(QStringLiteral("to"), alice.jid.full());
+    alice.stream.inject(stanza);
+    check(ownMessages == 1 && receivedBody == QStringLiteral("A protected groupchat message") && encrypted,
+          "The outgoing OMEMO MUC echo was not delivered locally as an encrypted message");
+
+    // A duplicate echo has no remaining local plaintext mapping and must not
+    // be shown again; neither may a message with the wrong stanza ID.
+    alice.stream.inject(stanza);
+    check(ownMessages == 1, "An OMEMO MUC self echo was shown more than once");
+    onStanza = {};
+    qInfo("OMEMO 2 MUC self echo reconciliation passed");
+}
 }
 
 int main(int argc, char **argv)
@@ -388,6 +463,7 @@ int main(int argc, char **argv)
     if (protocols.testFlag(OmemoProtocol::Omemo2)) {
         exercise(alice, bob, OmemoProtocol::Omemo2, "2");
         exerciseMuc(alice, bob);
+        exerciseMucSelfEcho(alice, bob);
     }
     qInfo("OMEMO element tests passed");
     pep.clear(); // the elements must not outlive their document at static destruction
