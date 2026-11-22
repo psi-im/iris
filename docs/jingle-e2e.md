@@ -20,6 +20,13 @@ DTLS alone is not end-to-end: its fingerprint travels in Jingle signaling throug
 a server can replace it and sit in the middle. It becomes end-to-end once the fingerprint is
 authenticated with the peer's OMEMO identity.
 
+
+The OMEMO method owns its Jingle integration: applications that use Jingle call
+`OmemoEncryption::enableJingleEncryption()` once. Iris registers the JET,
+SXE and DTLS-verification adapters in their required order and tears them
+down with the method. Applications no longer create or retain those filter
+objects. Registration is optional for clients without a Jingle UI.
+
 ## Specifications
 
 | Specification | Status | Relevance |
@@ -195,12 +202,12 @@ Conversations `Content.setSecurity()/getSecurity()`, `JingleFileTransferConnecti
    end-to-end. Transport selection and fallback skip transports that cannot reach end-to-end
    under the policy; a content that ends up without protection is rejected or removed with
    `security-error`, and the application shows why.
-3. **OMEMO-verified DTLS** (done in Iris; Psi has to create the filter and show the result). Compatible with Conversations and Dino: the device id in XEP-0353
+3. **OMEMO-verified DTLS** (done in Iris; Psi supplies its UI policy and shows the result). Compatible with Conversations and Dino: the device id in XEP-0353
    `<proceed/>`, encrypted fingerprints in `session-initiate`, `session-accept`, `content-add`,
    `content-accept` and `transport-replace` of ICE transports. Iris also applies it to `ice:0`
    transports and to SCTP data channels (file transfer, whiteboards), which share the DTLS
    association; Conversations and Dino only look at `ice-udp:1`.
-4. **JET-OMEMO for files** (done in Iris, on any transport; Psi has to create the filter). Compatible format and whole-stream AES-128-GCM, with the
+4. **JET-OMEMO for files** (done in Iris, on any transport). Compatible format and whole-stream AES-128-GCM, with the
    received file kept unverified until the tag matches.
 5. **SXE payload in messages** (done in Iris): `SXE::SxeOmemo` protects every `<sxe/>` with OMEMO 2
    and SCE when both sides advertise `urn:xmpp:sxe:0#omemo`; the SXE transport then carries
