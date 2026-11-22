@@ -151,6 +151,8 @@ public:
     MucManager              *mucManager               = nullptr;
     EncryptionManager       *encryptionManager         = nullptr;
     Client::EncryptionSessionResolver encryptionSessionResolver;
+    Client::IncomingEncryptedStanzaHandler incomingEncryptedStanzaHandler;
+    QHash<QString, QPointer<EncryptedSession>> incomingSessions;
     const EncryptionMetadata *currentEncryptionMetadata = nullptr;
     JT_PushMessage           *pushMessage               = nullptr;
 };
@@ -437,6 +439,7 @@ void Client::cleanup()
 {
     d->active = false;
     // d->authed = false;
+    d->incomingSessions.clear();
     d->mucManager->clear();
 }
 
@@ -546,6 +549,29 @@ void Client::setEncryptionSessionResolver(EncryptionSessionResolver resolver)
     d->encryptionSessionResolver = std::move(resolver);
 }
 
+void Client::setIncomingEncryptedStanzaHandler(IncomingEncryptedStanzaHandler handler)
+{
+    d->incomingEncryptedStanzaHandler = std::move(handler);
+}
+
+static QString incomingSessionKey(const QString &methodId, const Jid &peer,
+                                  Client::EncryptionSessionPurpose purpose)
+{
+    return methodId + QLatin1Char('\n') + QString::number(int(purpose)) + QLatin1Char('\n') + peer.full();
+}
+
+void Client::registerIncomingSession(const QString &methodId, const Jid &peer,
+                                     EncryptionSessionPurpose purpose, EncryptedSession *session)
+{
+    if (methodId.isEmpty() || !peer.isValid())
+        return;
+    const auto key = incomingSessionKey(methodId, peer, purpose);
+    if (!session || session->isClosing() || session->methodId() != methodId)
+        d->incomingSessions.remove(key);
+    else
+        d->incomingSessions.insert(key, session);
+}
+
 EncryptedSession *Client::encryptedSession(const QString &methodId, const Jid &peer,
                                            EncryptionSessionPurpose purpose)
 {
@@ -555,6 +581,8 @@ EncryptedSession *Client::encryptedSession(const QString &methodId, const Jid &p
     // A stale, revoked or incorrectly selected method must never be used.
     if (!session || session->isClosing() || session->methodId() != methodId)
         return nullptr;
+    if (purpose == EncryptionSessionPurpose::Message || purpose == EncryptionSessionPurpose::Carbon)
+        registerIncomingSession(methodId, peer, purpose, session);
     return session;
 }
 
@@ -617,8 +645,18 @@ void Client::distribute(const QDomElement &x)
             ? EncryptionSessionPurpose::Protocol
             : x.attribute(QStringLiteral("type")) == QLatin1String("groupchat")
                 ? EncryptionSessionPurpose::Groupchat : EncryptionSessionPurpose::Message;
-        auto *session = encryptedSession(method->id(), peer, purpose);
-        auto *job     = session ? session->decrypt(x, context) : missingEncryptionSession(d->encryptionManager, method->id());
+        auto *session = d->incomingSessions.value(incomingSessionKey(method->id(), peer, purpose)).data();
+        if (session && (session->isClosing() || session->methodId() != method->id()))
+            session = nullptr;
+        EncryptionJob *job = nullptr;
+        if (session)
+            job = session->decrypt(x, context);
+        else if (d->incomingEncryptedStanzaHandler)
+            job = d->incomingEncryptedStanzaHandler(x, method->id(), context, purpose);
+        else if (auto *resolved = encryptedSession(method->id(), peer, purpose))
+            job = resolved->decrypt(x, context);
+        if (!job)
+            job = missingEncryptionSession(d->encryptionManager, method->id());
         const QString     methodId = method->id();
         auto              finish = [this, job, methodId, peer]() {
             if (job->success()) {
@@ -660,9 +698,20 @@ bool Client::distributeEncryptedCarbon(const QDomElement &x)
     const Jid peer = forwardedFrom.bare() == jid().bare() ? forwardedTo : forwardedFrom;
     EncryptionContext context;
     context.options.insert(QStringLiteral("forwardedCarbon"), true);
-    auto *session = encryptedSession(method->id(), peer, EncryptionSessionPurpose::Carbon);
-    auto *job = session ? session->decrypt(forwarded, context)
-                        : missingEncryptionSession(d->encryptionManager, method->id());
+    auto *session = d->incomingSessions.value(incomingSessionKey(method->id(), peer,
+                                                                 EncryptionSessionPurpose::Carbon)).data();
+    if (session && (session->isClosing() || session->methodId() != method->id()))
+        session = nullptr;
+    EncryptionJob *job = nullptr;
+    if (session)
+        job = session->decrypt(forwarded, context);
+    else if (d->incomingEncryptedStanzaHandler)
+        job = d->incomingEncryptedStanzaHandler(forwarded, method->id(), context,
+                                               EncryptionSessionPurpose::Carbon);
+    else if (auto *resolved = encryptedSession(method->id(), peer, EncryptionSessionPurpose::Carbon))
+        job = resolved->decrypt(forwarded, context);
+    if (!job)
+        job = missingEncryptionSession(d->encryptionManager, method->id());
     const QString     methodId = method->id();
     const QDomElement original = x;
     auto              finish = [this, job, methodId, original, peer]() {
