@@ -29,6 +29,7 @@
 #include <QCryptographicHash>
 #include <QObject>
 #include <QStringList>
+#include <functional>
 
 class ByteStream;
 class QDomDocument;
@@ -103,11 +104,16 @@ public:
 
     void           send(const QDomElement &);
     void           send(const QString &);
-    // The client keeps one stanza session per encryption method and peer JID.
-    // A bare JID is used only when the caller does not have a resource.
-    EncryptedSession *encryptedSession(const QString &methodId, const Jid &peer);
-    void closeEncryptedSession(const QString &methodId, const Jid &peer);
-    EncryptionJob *sendEncrypted(const QDomElement &, const QString &methodId, const EncryptionContext &);
+    // The application owns conversation sessions. Protocol operations (Jingle,
+    // transfers, Task-bound IQs) pass their explicitly bound session instead.
+    enum class EncryptionSessionPurpose { Message, Groupchat, Carbon, Reply, ArchiveReplay };
+    using EncryptionSessionResolver
+        = std::function<EncryptedSession *(const QString &, const Jid &, EncryptionSessionPurpose)>;
+    void setEncryptionSessionResolver(EncryptionSessionResolver resolver);
+    EncryptedSession *encryptedSession(const QString &methodId, const Jid &peer,
+                                       EncryptionSessionPurpose purpose = EncryptionSessionPurpose::Message);
+    EncryptionJob *sendEncrypted(const QDomElement &, const QString &methodId, const EncryptionContext &,
+                                 EncryptionSessionPurpose purpose = EncryptionSessionPurpose::Message);
     EncryptionJob *sendEncrypted(const QDomElement &, EncryptedSession *session,
                                  const EncryptionContext &operation = {});
     EncryptionJob *replyEncrypted(const QDomElement &, const EncryptionMetadata &);
@@ -253,8 +259,6 @@ private slots:
 
 private:
     void cleanup();
-    void closeEncryptedSessionsForPeer(const Jid &peer, bool allResources = false);
-    void closeAllEncryptedSessions();
     void distribute(const QDomElement &);
     bool distributeEncryptedCarbon(const QDomElement &);
     void distributeDecrypted(const QDomElement &, const EncryptionMetadata *metadata);

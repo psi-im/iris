@@ -150,10 +150,7 @@ public:
     Jingle::Manager          *jingleManager            = nullptr;
     MucManager              *mucManager               = nullptr;
     EncryptionManager       *encryptionManager         = nullptr;
-    QHash<QString, QHash<QString, QPointer<EncryptedSession>>> encryptedSessions;
-    // MUC occupant JIDs are ephemeral. Remember only the current presence's
-    // authenticated bare JID to detect a nickname claimed by another account.
-    QHash<QString, Jid> mucPeerIdentities;
+    Client::EncryptionSessionResolver encryptionSessionResolver;
     const EncryptionMetadata *currentEncryptionMetadata = nullptr;
     JT_PushMessage           *pushMessage               = nullptr;
 };
@@ -176,42 +173,6 @@ Client::Client(QObject *par) : QObject(par)
     const auto encryptionFeaturesChanged = [this](const QString &) { d->caps.resetVersion(); };
     connect(d->encryptionManager, &EncryptionManager::methodRegistered, this, encryptionFeaturesChanged);
     connect(d->encryptionManager, &EncryptionManager::methodUnregistered, this, encryptionFeaturesChanged);
-    connect(d->encryptionManager, &EncryptionManager::methodUnregistered, this, [this](const QString &id) {
-        const auto sessions = d->encryptedSessions.take(id);
-        for (auto session : sessions)
-            if (session)
-                session->close();
-    });
-    // A full JID can be reused by another resource or MUC occupant. Never
-    // retain its live stanza context after the resource goes away.
-    connect(this, &Client::presenceReceived, this, [this](const Jid &peer, const Status &status) {
-        if (!status.isAvailable() && !peer.resource().isEmpty())
-            closeEncryptedSessionsForPeer(peer);
-    });
-    const auto clearMuc = [this](const Jid &room) {
-        closeEncryptedSessionsForPeer(room, true);
-        for (auto it = d->mucPeerIdentities.begin(); it != d->mucPeerIdentities.end();) {
-            if (Jid(it.key()).bare() == room.bare())
-                it = d->mucPeerIdentities.erase(it);
-            else
-                ++it;
-        }
-    };
-    connect(this, &Client::groupChatJoined, this, clearMuc);
-    connect(this, &Client::groupChatLeft, this, clearMuc);
-    connect(this, &Client::groupChatPresence, this, [this](const Jid &occupant, const Status &status) {
-        if (occupant.resource().isEmpty())
-            return;
-        const auto key = occupant.full();
-        const Jid current = status.isAvailable() ? d->mucManager->realJid(occupant) : Jid();
-        const Jid previous = d->mucPeerIdentities.value(key);
-        if (previous.isValid() && previous != current)
-            closeEncryptedSessionsForPeer(occupant);
-        if (current.isValid())
-            d->mucPeerIdentities.insert(key, current);
-        else
-            d->mucPeerIdentities.remove(key);
-    });
 
     d->s5bman = new S5BManager(this);
     connect(d->s5bman, SIGNAL(incomingReady()), SLOT(s5b_incomingReady()));
@@ -316,8 +277,6 @@ void Client::start(const QString &host, const QString &user, const QString &pass
         delete task.data();
     d->sessionTasks.clear();
     d->resourceList.clear();
-    closeAllEncryptedSessions();
-    d->mucPeerIdentities.clear();
     // TODO
     d->host     = host;
     d->user     = user;
@@ -476,8 +435,6 @@ void Client::close(bool)
 
 void Client::cleanup()
 {
-    closeAllEncryptedSessions();
-    d->mucPeerIdentities.clear();
     d->active = false;
     // d->authed = false;
     d->mucManager->clear();
@@ -584,66 +541,21 @@ Task *Client::rootTask() { return d->root; }
 
 QDomDocument *Client::doc() const { return &d->doc; }
 
-EncryptedSession *Client::encryptedSession(const QString &methodId, const Jid &peer)
+void Client::setEncryptionSessionResolver(EncryptionSessionResolver resolver)
 {
-    if (methodId.isEmpty() || !peer.isValid())
+    d->encryptionSessionResolver = std::move(resolver);
+}
+
+EncryptedSession *Client::encryptedSession(const QString &methodId, const Jid &peer,
+                                           EncryptionSessionPurpose purpose)
+{
+    if (methodId.isEmpty() || !peer.isValid() || !d->encryptionSessionResolver)
         return nullptr;
-
-    auto &sessions = d->encryptedSessions[methodId];
-    const QString fullJid = peer.full();
-    if (auto existing = sessions.value(fullJid); existing && !existing->isClosing())
-        return existing;
-
-    EncryptionContext context;
-    context.recipients = { peer };
-    auto *session = d->encryptionManager->startSession(methodId, EncryptionMethod::XmppStanza, context);
-    if (session)
-        sessions.insert(fullJid, session);
-    else
-        sessions.remove(fullJid);
+    auto *session = d->encryptionSessionResolver(methodId, peer, purpose);
+    // A stale, revoked or incorrectly selected method must never be used.
+    if (!session || session->isClosing() || session->methodId() != methodId)
+        return nullptr;
     return session;
-}
-
-void Client::closeEncryptedSession(const QString &methodId, const Jid &peer)
-{
-    auto it = d->encryptedSessions.find(methodId);
-    if (it == d->encryptedSessions.end())
-        return;
-    auto *session = it->take(peer.full()).data();
-    if (it->isEmpty())
-        d->encryptedSessions.erase(it);
-    if (session)
-        session->close();
-}
-
-void Client::closeEncryptedSessionsForPeer(const Jid &peer, bool allResources)
-{
-    for (auto byMethod = d->encryptedSessions.begin(); byMethod != d->encryptedSessions.end();) {
-        for (auto byPeer = byMethod->begin(); byPeer != byMethod->end();) {
-            const Jid cached(byPeer.key());
-            if (cached == peer || (allResources && cached.bare() == peer.bare())) {
-                if (byPeer.value())
-                    byPeer.value()->close();
-                byPeer = byMethod->erase(byPeer);
-            } else {
-                ++byPeer;
-            }
-        }
-        if (byMethod->isEmpty())
-            byMethod = d->encryptedSessions.erase(byMethod);
-        else
-            ++byMethod;
-    }
-}
-
-void Client::closeAllEncryptedSessions()
-{
-    auto sessions = std::move(d->encryptedSessions);
-    d->encryptedSessions.clear();
-    for (const auto &byPeer : std::as_const(sessions))
-        for (auto session : byPeer)
-            if (session)
-                session->close();
 }
 
 static EncryptionJob *missingEncryptionSession(EncryptionManager *registry, const QString &methodId)
@@ -701,7 +613,9 @@ void Client::distribute(const QDomElement &x)
             context.options.insert(QStringLiteral("mucRealSender"), real.bare());
         }
         const Jid peer(x.attribute(QStringLiteral("from")));
-        auto *session = encryptedSession(method->id(), peer);
+        const auto purpose = x.attribute(QStringLiteral("type")) == QLatin1String("groupchat")
+            ? EncryptionSessionPurpose::Groupchat : EncryptionSessionPurpose::Message;
+        auto *session = encryptedSession(method->id(), peer, purpose);
         auto *job     = session ? session->decrypt(x, context) : missingEncryptionSession(d->encryptionManager, method->id());
         const QString     methodId = method->id();
         auto              finish = [this, job, methodId, peer]() {
@@ -744,7 +658,7 @@ bool Client::distributeEncryptedCarbon(const QDomElement &x)
     const Jid peer = forwardedFrom.bare() == jid().bare() ? forwardedTo : forwardedFrom;
     EncryptionContext context;
     context.options.insert(QStringLiteral("forwardedCarbon"), true);
-    auto *session = encryptedSession(method->id(), peer);
+    auto *session = encryptedSession(method->id(), peer, EncryptionSessionPurpose::Carbon);
     auto *job = session ? session->decrypt(forwarded, context)
                         : missingEncryptionSession(d->encryptionManager, method->id());
     const QString     methodId = method->id();
@@ -886,7 +800,7 @@ void Client::send(const QString &str)
 }
 
 EncryptionJob *Client::sendEncrypted(const QDomElement &stanza, const QString &methodId,
-                                     const EncryptionContext &context)
+                                     const EncryptionContext &context, EncryptionSessionPurpose purpose)
 {
     // Bind to the addressed conversation, not to an arbitrary OMEMO key
     // recipient (a MUC message may encrypt its key for many different JIDs).
@@ -898,7 +812,7 @@ EncryptionJob *Client::sendEncrypted(const QDomElement &stanza, const QString &m
                 && recipient.bare() == peer.bare()))
             peer = recipient;
     }
-    auto *session = encryptedSession(methodId, peer);
+    auto *session = encryptedSession(methodId, peer, purpose);
     return session ? sendEncrypted(stanza, session, context)
                    : missingEncryptionSession(d->encryptionManager, methodId);
 }
@@ -936,7 +850,7 @@ EncryptionJob *Client::replyEncrypted(const QDomElement &stanza, const Encryptio
     if (!metadata.sender.isEmpty())
         context.recipients.append(metadata.sender);
     context.replyTo = metadata;
-    return sendEncrypted(stanza, metadata.methodId, context);
+    return sendEncrypted(stanza, metadata.methodId, context, EncryptionSessionPurpose::Reply);
 }
 
 /* drops any pending outgoing xml elements */
