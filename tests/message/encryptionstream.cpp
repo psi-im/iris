@@ -172,6 +172,16 @@ int main(int argc, char **argv)
                   && session->stanzaCalls == previousCalls + 2,
               "Client::sendEncrypted created a temporary session instead of reusing the peer session");
 
+        // If the wire addresses a bare JID but one full resource was selected
+        // for encryption, reuse that resource's session.
+        testStanza.setAttribute(QStringLiteral("to"), peerA.bare());
+        EncryptionContext resourceContext;
+        resourceContext.recipients = { peerA };
+        check(await(client.sendEncrypted(testStanza, registeredMethod.id(), resourceContext))->success()
+                  && client.encryptedSession(registeredMethod.id(), peerA) == sessionA
+                  && session->stanzaCalls == previousCalls + 3,
+              "A bare-addressed message lost its resolved full-JID encryption session");
+
         client.closeEncryptedSession(registeredMethod.id(), peerA);
         check(sessionA->isClosing(), "Explicit close did not retire the peer session");
         auto *replacement = client.encryptedSession(registeredMethod.id(), peerA);
