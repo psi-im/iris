@@ -381,7 +381,7 @@ void exerciseMucSelfEcho(Endpoint &alice, Endpoint &bob)
     check(alice.client.groupChatJoin(room.domain(), room.node(), nick), "Could not join test MUC");
 
     QDomDocument doc;
-    auto presence = doc.createElement(QStringLiteral("presence"));
+    auto presence = doc.createElementNS(QStringLiteral("jabber:client"), QStringLiteral("presence"));
     presence.setAttribute(QStringLiteral("from"), selfOccupant);
     doc.appendChild(presence);
     auto x = doc.createElementNS(QStringLiteral("http://jabber.org/protocol/muc#user"), QStringLiteral("x"));
