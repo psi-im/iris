@@ -1,382 +1,204 @@
 /*
- * jingle-jet-omemo.cpp - Jingle Encrypted Transports with OMEMO (XEP-0391, XEP-0396)
- * Copyright (C) 2026  Sergey Ilinykh
+ * jingle-jet-omemo.cpp - OMEMO key delivery for JET (XEP-0396)
+ * Copyright (C) 2026 Sergey Ilinykh
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
- * License as published by the Free Software Foundation; either
- * version 2.1 of the License, or (at your option) any later version.
- *
- * This library is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * Lesser General Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public License
- * along with this library.  If not, see <https://www.gnu.org/licenses/>.
- *
+ * License as published by the Free Software Foundation; either version 2.1
+ * of the License, or (at your option) any later version.
  */
 
 #include "jingle-jet-omemo.h"
 
-#include "jingle-ft.h"
 #include "jingle-jet_p.h"
-#include "jingle-session.h"
 #include "xmpp_caps.h"
 #include "xmpp_client.h"
 #include "xmpp_encryption.h"
 #include "xmpp_omemo.h"
 
-#include <QHash>
 #include <QPointer>
 #include <QtCrypto>
 
 namespace XMPP { namespace Jingle {
-    namespace {
-        const QString JetNs(QStringLiteral("urn:xmpp:jingle:jet:0"));
-        const QString JetOmemoNs(QStringLiteral("urn:xmpp:jingle:jet-omemo:0"));
+namespace {
+const QString JetOmemoNs(QStringLiteral("urn:xmpp:jingle:jet-omemo:0"));
 
-        // OMEMO 2 has no key transport message: the secret travels as SCE content (a Psi extension,
-        // docs/xsf-proposals/xep-0396-jet-omemo2.md).
-        QDomElement secretElement(QDomDocument &document, const QByteArray &key, const QByteArray &iv)
-        {
-            auto secret = document.createElementNS(JetOmemoNs, QStringLiteral("secret"));
-            secret.setAttribute(QStringLiteral("key"), QString::fromLatin1(key.toBase64()));
-            secret.setAttribute(QStringLiteral("iv"), QString::fromLatin1(iv.toBase64()));
-            document.appendChild(secret);
-            return secret;
-        }
+int keySizeFor(OmemoProtocol protocol) { return protocol == OmemoProtocol::Omemo2 ? 32 : 16; }
 
-        // Legacy OMEMO carries the 16-byte AES-128 key itself; OMEMO 2 an AES-256 key in the envelope.
-        int keySizeFor(OmemoProtocol protocol) { return protocol == OmemoProtocol::Omemo2 ? 32 : 16; }
+QDomElement makeSecret(QDomDocument &document, const QByteArray &key, const QByteArray &iv)
+{
+    auto secret = document.createElementNS(JetOmemoNs, QStringLiteral("secret"));
+    secret.setAttribute(QStringLiteral("key"), QString::fromLatin1(key.toBase64()));
+    secret.setAttribute(QStringLiteral("iv"), QString::fromLatin1(iv.toBase64()));
+    document.appendChild(secret);
+    return secret;
+}
+}
 
-        struct Secret {
-            Origin                      creator = Origin::None;
-            QByteArray                  key;
-            QByteArray                  iv;
-            Session::PeerAuthentication authentication;
-        };
+class JetOmemo::Private {
+public:
+    QPointer<Manager> manager;
+    QPointer<OmemoEncryption> omemo;
+    QPointer<JET::Jet> jet;
+};
 
-        QString key(const Jid &peer, const QString &sid) { return peer.full() + QLatin1Char('\n') + sid; }
+QString JetOmemo::ns() { return JetOmemoNs; }
+QString JetOmemo::jetNs() { return JET::Jet::ns(); }
 
-        Origin creatorOf(const QDomElement &content)
-        {
-            return content.attribute(QStringLiteral("creator")) == QLatin1String("responder") ? Origin::Responder
-                                                                                              : Origin::Initiator;
-        }
+JetOmemo::JetOmemo(Manager *manager, OmemoEncryption *omemo, QObject *parent)
+    : QObject(parent), d(std::make_unique<Private>())
+{
+    d->manager = manager;
+    d->omemo = omemo;
+    d->jet = JET::Jet::of(manager);
+    if (!d->jet)
+        d->jet = new JET::Jet(manager);
+    if (!d->jet->registerKeyTransport(this))
+        qWarning("jingle-jet-omemo: duplicate key transport registration");
+}
 
-        bool isFileTransfer(const QDomElement &content)
-        {
-            return content.firstChildElement(QStringLiteral("description")).namespaceURI() == FileTransfer::NS;
-        }
+JetOmemo::~JetOmemo()
+{
+    if (d->jet)
+        d->jet->unregisterKeyTransport(this);
+}
 
-        QDomElement securityOf(const QDomElement &content)
-        {
-            for (auto el = content.firstChildElement(QStringLiteral("security")); !el.isNull();
-                 el      = el.nextSiblingElement(QStringLiteral("security")))
-                if (el.namespaceURI() == JetNs)
-                    return el;
-            return {};
-        }
+QString JetOmemo::methodId() const { return OmemoEncryption::methodId(); }
 
-        Stanza::Error refusal(const QString &text)
-        {
-            return Stanza::Error(Stanza::Error::ErrorType::Cancel, Stanza::Error::ErrorCond::NotAcceptable, text);
-        }
+QStringList JetOmemo::discoFeatures() const
+{
+    if (!d->omemo)
+        return {};
+    const auto supported = d->omemo->supportedProtocols();
+    if ((supported.testFlag(OmemoProtocol::Legacy) && JET::StreamCipher::isSupported(16))
+        || (supported.testFlag(OmemoProtocol::Omemo2) && JET::StreamCipher::isSupported(32)))
+        return { JetOmemoNs };
+    return {};
+}
 
-        void sequence(int count, const std::function<void(int, std::function<void()>)> &step,
-                      const std::function<void()> &finished)
-        {
-            auto next = std::make_shared<std::function<void(int)>>();
-            *next     = [count, step, finished, next](int index) {
-                if (index >= count) {
-                    finished();
-                    *next = nullptr;
-                    return;
-                }
-                step(index, [next, index]() {
-                    if (*next)
-                        (*next)(index + 1);
-                });
-            };
-            (*next)(0);
-        }
+bool JetOmemo::canEncrypt(const Jid &peer) const
+{
+    if (!d->manager || !d->omemo || !d->omemo->isReady())
+        return false;
+    const auto protocol = d->omemo->preferredProtocolFor(peer);
+    return protocol && JET::StreamCipher::isSupported(keySizeFor(*protocol))
+        && d->manager->client()->capsManager()->features(peer).test(JetOmemoNs);
+}
+
+bool JetOmemo::accepts(const QString &wireProfile) const
+{
+    return wireProfile == OmemoEncryption::namespaceUri()
+        || wireProfile == OmemoEncryption::legacyNamespaceUri();
+}
+
+void JetOmemo::encryptSecret(const Jid &peer, const Done &done)
+{
+    if (!canEncrypt(peer)) {
+        done({}, QStringLiteral("The peer cannot receive JET-OMEMO key material"));
+        return;
     }
 
-    class JetOmemo::Private {
-    public:
-        QPointer<Manager>                      manager;
-        QPointer<OmemoEncryption>              omemo;
-        QDomDocument                           document;
-        QHash<QString, QHash<QString, Secret>> pending; // (peer, sid) → content name → secret
-        QList<QPointer<Session>>               watched;
+    const auto protocol = d->omemo->preferredProtocolFor(peer);
+    QDomDocument document;
+    QByteArray key;
+    QByteArray iv;
+    QDomElement secret;
+    if (*protocol == OmemoProtocol::Omemo2) {
+        key = QCA::Random::randomArray(32).toByteArray();
+        iv = QCA::Random::randomArray(12).toByteArray();
+        secret = makeSecret(document, key, iv);
+    }
 
-        // Gives received secrets to file-transfer contents that exist by now.
-        void install(Session *session)
-        {
-            auto it = pending.find(key(session->peer(), session->sid()));
-            if (it == pending.end())
-                return;
-            for (auto entry = it->begin(); entry != it->end();) {
-                auto transfer
-                    = qobject_cast<FileTransfer::Application *>(session->content(entry.key(), entry->creator));
-                if (!transfer) {
-                    ++entry;
-                    continue;
-                }
-                transfer->setTransportSecret(entry->key, entry->iv);
-                if (!session->peerAuthentication().isValid())
-                    session->setPeerAuthentication(entry->authentication);
-                entry = it->erase(entry);
-            }
-            if (it->isEmpty())
-                pending.erase(it);
+    auto *job = d->omemo->encryptElement(peer, *protocol, secret);
+    if (!job) {
+        done({}, QStringLiteral("Cannot encrypt the JET transport secret"));
+        return;
+    }
+    QPointer<JetOmemo> guard(this);
+    const auto finish = [guard, job, protocol = *protocol, key, iv, done]() {
+        if (!guard) {
+            job->deleteLater();
+            return;
         }
-
-        void watch(Session *session, QObject *owner)
-        {
-            for (const auto &known : std::as_const(watched))
-                if (known == session)
-                    return;
-            watched.append(session);
-            // The adapter may be unregistered before the Jingle session terminates.
-            QObject::connect(session, &Session::newContentReceived, owner, [this, session]() { install(session); });
+        if (!job->success()) {
+            const auto error = job->errorString();
+            job->deleteLater();
+            done({}, error);
+            return;
         }
+        JET::ProtectedSecret result;
+        result.key = protocol == OmemoProtocol::Omemo2 ? key
+            : job->metadata().details.value(QStringLiteral("transportKey")).toByteArray();
+        result.iv = protocol == OmemoProtocol::Omemo2 ? iv
+            : job->metadata().details.value(QStringLiteral("transportIv")).toByteArray();
+        result.cipher = JET::cipherFor(keySizeFor(protocol));
+        result.type = protocol == OmemoProtocol::Omemo2
+            ? OmemoEncryption::namespaceUri() : OmemoEncryption::legacyNamespaceUri();
+        result.envelope = job->stanza();
+        job->deleteLater();
+        done(result, {});
     };
+    if (job->isFinished())
+        finish();
+    else
+        connect(job, &EncryptionJob::finished, this, finish);
+}
 
-    QString JetOmemo::ns() { return JetOmemoNs; }
-
-    QString JetOmemo::jetNs() { return JetNs; }
-
-    JetOmemo::JetOmemo(Manager *manager, OmemoEncryption *omemo, QObject *parent) :
-        QObject(parent), d(std::make_unique<Private>())
-    {
-        d->manager = manager;
-        d->omemo   = omemo;
-        manager->addSignalingFilter(this);
-        connect(manager, &Manager::incomingSession, this, [this](Session *session) {
-            d->install(session);
-            d->watch(session, this);
-        });
+void JetOmemo::decryptSecret(const Jid &peer, const QDomElement &security, const Done &done)
+{
+    const auto wireProfile = security.attribute(QStringLiteral("type"));
+    const bool omemo2 = wireProfile == OmemoEncryption::namespaceUri();
+    const auto keySize = JET::keySize(security.attribute(QStringLiteral("cipher")));
+    if (!d->omemo || !accepts(wireProfile)
+        || keySize != std::optional<int>(omemo2 ? 32 : 16)) {
+        done({}, QStringLiteral("Unsupported JET-OMEMO profile or cipher"));
+        return;
     }
 
-    JetOmemo::~JetOmemo()
-    {
-        if (d->manager)
-            d->manager->removeSignalingFilter(this);
+    auto *job = d->omemo->decryptElement(peer, security.firstChildElement(QStringLiteral("encrypted")));
+    if (!job) {
+        done({}, QStringLiteral("Cannot decrypt the JET transport secret"));
+        return;
     }
-
-    QStringList JetOmemo::discoFeatures() const
-    {
-        if (!d->omemo
-            || !((d->omemo->supportedProtocols().testFlag(OmemoProtocol::Legacy) && JET::StreamCipher::isSupported(16))
-                 || (d->omemo->supportedProtocols().testFlag(OmemoProtocol::Omemo2)
-                     && JET::StreamCipher::isSupported(32))))
-            return {};
-        return { JetNs, JetOmemoNs };
-    }
-
-    bool JetOmemo::filterOutgoing(const Jid &to, const QDomElement &jingle, const Done &done)
-    {
-        const auto action = jingle.attribute(QStringLiteral("action"));
-        if (action != QLatin1String("session-initiate") && action != QLatin1String("content-add"))
-            return false;
-        const auto sid     = jingle.attribute(QStringLiteral("sid"));
-        const auto session = d->manager ? d->manager->session(to, sid) : nullptr;
-        if (!session || !session->isEndToEndPreferred())
-            return false;
-        if (!session->allowsEncryptionMethod(OmemoEncryption::methodId())) {
-            if (!session->isEndToEndRequired())
-                return false;
-            done({}, refusal(QStringLiteral("The selected encryption method cannot protect JET files")));
-            return true;
+    QPointer<JetOmemo> guard(this);
+    const auto finish = [guard, job, wireProfile, omemo2, done]() {
+        if (!guard) {
+            job->deleteLater();
+            return;
+        }
+        if (!job->success()) {
+            const auto error = job->errorString();
+            job->deleteLater();
+            done({}, error);
+            return;
         }
 
-        auto               copy = d->document.importNode(jingle, true).toElement();
-        QList<QDomElement> contents;
-        for (auto content = copy.firstChildElement(QStringLiteral("content")); !content.isNull();
-             content      = content.nextSiblingElement(QStringLiteral("content")))
-            if (isFileTransfer(content) && securityOf(content).isNull() && creatorOf(content) == session->role())
-                contents.append(content);
-        if (contents.isEmpty())
-            return false;
-
-        const bool required = session->isEndToEndRequired();
-        // OMEMO 2 when the peer advertises it, as for messages; otherwise the profile of XEP-0396.
-        const auto protocol = d->omemo ? d->omemo->preferredProtocolFor(to) : std::nullopt;
-        const bool possible = protocol && d->omemo->isReady() && JET::StreamCipher::isSupported(keySizeFor(*protocol))
-            && d->manager->client()->capsManager()->features(to).test(JetOmemoNs);
-        if (!possible) {
-            if (!required)
-                return false;
-            done({}, refusal(QStringLiteral("The peer cannot receive end-to-end encrypted files (JET-OMEMO)")));
-            return true;
+        const auto &metadata = job->metadata();
+        JET::ProtectedSecret result;
+        result.key = metadata.details.value(QStringLiteral("transportKey")).toByteArray();
+        result.iv = metadata.details.value(QStringLiteral("transportIv")).toByteArray();
+        if (omemo2) {
+            const auto secret = job->stanza();
+            const bool valid = secret.namespaceURI() == JetOmemoNs
+                && secret.localName() == QLatin1String("secret");
+            result.key = valid ? QByteArray::fromBase64(secret.attribute(QStringLiteral("key")).toLatin1())
+                               : QByteArray();
+            result.iv = valid ? QByteArray::fromBase64(secret.attribute(QStringLiteral("iv")).toLatin1())
+                              : QByteArray();
         }
+        result.cipher = security.attribute(QStringLiteral("cipher"));
+        result.type = wireProfile;
+        result.authentication.method = OmemoEncryption::methodId();
+        result.authentication.deviceId = metadata.senderDeviceId;
+        result.authentication.identityKey = metadata.senderKey;
+        result.authentication.trustLevel = metadata.details.value(QStringLiteral("trustLevel")).toInt();
+        job->deleteLater();
+        done(result, {});
+    };
+    if (job->isFinished())
+        finish();
+    else
+        connect(job, &EncryptionJob::finished, this, finish);
+}
 
-        QPointer<JetOmemo> guard(this);
-        QPointer<Session>  sessionGuard(session);
-        auto               failure = std::make_shared<std::optional<QString>>();
-        auto               secrets = std::make_shared<QList<Secret>>();
-        sequence(
-            int(contents.size()),
-            [this, guard, to, protocol, contents, failure, secrets](int index, std::function<void()> next) {
-                QByteArray   omemo2Key, omemo2Iv;
-                QDomDocument secretDocument;
-                QDomElement  secret;
-                if (*protocol == OmemoProtocol::Omemo2) {
-                    omemo2Key = QCA::Random::randomArray(32).toByteArray();
-                    omemo2Iv  = QCA::Random::randomArray(12).toByteArray();
-                    secret    = secretElement(secretDocument, omemo2Key, omemo2Iv);
-                }
-                auto job    = d->omemo->encryptElement(to, *protocol, secret);
-                auto handle = [guard, job, protocol, omemo2Key, omemo2Iv, content = contents.at(index), failure,
-                               secrets, next]() {
-                    job->deleteLater();
-                    if (!guard)
-                        return;
-                    const auto key = *protocol == OmemoProtocol::Omemo2
-                        ? omemo2Key
-                        : job->metadata().details.value(QStringLiteral("transportKey")).toByteArray();
-                    const auto iv  = *protocol == OmemoProtocol::Omemo2
-                         ? omemo2Iv
-                         : job->metadata().details.value(QStringLiteral("transportIv")).toByteArray();
-                    if (!*failure && (!job->success() || key.size() != keySizeFor(*protocol) || iv.size() != 12)) {
-                        *failure = job->errorString();
-                    } else if (!*failure) {
-                        auto document = content.ownerDocument();
-                        auto security = document.createElementNS(JetNs, QStringLiteral("security"));
-                        security.setAttribute(QStringLiteral("name"), content.attribute(QStringLiteral("name")));
-                        security.setAttribute(QStringLiteral("cipher"), JET::cipherFor(keySizeFor(*protocol)));
-                        security.setAttribute(QStringLiteral("type"),
-                                              *protocol == OmemoProtocol::Omemo2
-                                                  ? OmemoEncryption::namespaceUri()
-                                                  : OmemoEncryption::legacyNamespaceUri());
-                        security.appendChild(document.importNode(job->stanza(), true));
-                        auto target = content;
-                        target.appendChild(security);
-                        secrets->append({ creatorOf(content), key, iv, {} });
-                    }
-                    next();
-                };
-                if (job->isFinished())
-                    handle();
-                else
-                    connect(job, &EncryptionJob::finished, this, handle);
-            },
-            [guard, sessionGuard, copy, contents, failure, secrets, required, done]() {
-                if (!guard)
-                    return;
-                if (*failure) {
-                    if (required)
-                        done({}, refusal(QStringLiteral("The file key could not be encrypted: %1").arg(**failure)));
-                    else
-                        done({}, std::nullopt); // unprotected, as without JET
-                    return;
-                }
-                // The key is set before the offer leaves, so the transfer is encrypted from its start.
-                for (int i = 0; sessionGuard && i < contents.size(); ++i) {
-                    const auto name     = contents.at(i).attribute(QStringLiteral("name"));
-                    auto       transfer = qobject_cast<FileTransfer::Application *>(
-                        sessionGuard->content(name, secrets->at(i).creator));
-                    if (transfer)
-                        transfer->setTransportSecret(secrets->at(i).key, secrets->at(i).iv);
-                }
-                done(copy, std::nullopt);
-            });
-        return true;
-    }
-
-    bool JetOmemo::filterIncoming(const Jid &from, const QDomElement &jingle, const Done &done)
-    {
-        QList<QDomElement> contents;
-        for (auto content = jingle.firstChildElement(QStringLiteral("content")); !content.isNull();
-             content      = content.nextSiblingElement(QStringLiteral("content")))
-            if (!securityOf(content).isNull())
-                contents.append(content);
-        if (contents.isEmpty())
-            return false;
-        if (!d->omemo) {
-            done({}, refusal(QStringLiteral("End-to-end encrypted files are not supported")));
-            return true;
-        }
-
-        const auto sid     = jingle.attribute(QStringLiteral("sid"));
-        const auto session = d->manager ? d->manager->session(from, sid) : nullptr;
-        if (session && !session->allowsEncryptionMethod(OmemoEncryption::methodId())) {
-            done({}, refusal(QStringLiteral("JET uses a different encryption method than this session")));
-            return true;
-        }
-
-
-        QPointer<JetOmemo> guard(this);
-        auto               failure = std::make_shared<std::optional<QString>>();
-        auto               secrets = std::make_shared<QHash<QString, Secret>>();
-        sequence(
-            int(contents.size()),
-            [this, guard, from, contents, failure, secrets](int index, std::function<void()> next) {
-                const auto content  = contents.at(index);
-                const auto security = securityOf(content);
-                const auto size     = JET::keySize(security.attribute(QStringLiteral("cipher")));
-                const auto type     = security.attribute(QStringLiteral("type"));
-                const bool omemo2   = type == OmemoEncryption::namespaceUri();
-                if (*failure || (!omemo2 && type != OmemoEncryption::legacyNamespaceUri())
-                    || size != std::optional<int>(omemo2 ? 32 : 16)
-                    || security.attribute(QStringLiteral("name")) != content.attribute(QStringLiteral("name"))) {
-                    if (!*failure)
-                        *failure = QStringLiteral("Unsupported JET envelope or cipher");
-                    next();
-                    return;
-                }
-                auto job    = d->omemo->decryptElement(from, security.firstChildElement(QStringLiteral("encrypted")));
-                auto handle = [guard, job, content, omemo2, failure, secrets, next]() {
-                    job->deleteLater();
-                    if (!guard)
-                        return;
-                    const auto &meta = job->metadata();
-                    QByteArray  key  = meta.details.value(QStringLiteral("transportKey")).toByteArray();
-                    QByteArray  iv   = meta.details.value(QStringLiteral("transportIv")).toByteArray();
-                    if (omemo2) {
-                        const auto secret = job->stanza();
-                        const bool valid
-                            = secret.namespaceURI() == JetOmemoNs && secret.localName() == QLatin1String("secret");
-                        key = valid ? QByteArray::fromBase64(secret.attribute(QStringLiteral("key")).toLatin1())
-                                    : QByteArray();
-                        iv  = valid ? QByteArray::fromBase64(secret.attribute(QStringLiteral("iv")).toLatin1())
-                                    : QByteArray();
-                    }
-                    if (!*failure && (!job->success() || key.size() != (omemo2 ? 32 : 16) || iv.size() != 12)) {
-                        *failure = QStringLiteral("The file key could not be decrypted: %1").arg(job->errorString());
-                    } else if (!*failure) {
-                        Session::PeerAuthentication auth;
-                        auth.method      = QStringLiteral("omemo");
-                        auth.deviceId    = meta.senderDeviceId;
-                        auth.identityKey = meta.senderKey;
-                        auth.trustLevel  = meta.details.value(QStringLiteral("trustLevel")).toInt();
-                        secrets->insert(content.attribute(QStringLiteral("name")),
-                                        { creatorOf(content), key, iv, auth });
-                    }
-                    next();
-                };
-                if (job->isFinished())
-                    handle();
-                else
-                    connect(job, &EncryptionJob::finished, this, handle);
-            },
-            [this, guard, from, sid, failure, secrets, done]() {
-                if (!guard)
-                    return;
-                if (*failure) {
-                    done({}, refusal(**failure));
-                    return;
-                }
-                auto &pending = d->pending[key(from, sid)];
-                for (auto it = secrets->cbegin(); it != secrets->cend(); ++it)
-                    pending.insert(it.key(), *it);
-                // A content-add for an existing session gets its key once the content exists.
-                if (auto session = d->manager ? d->manager->session(from, sid) : nullptr)
-                    d->watch(session, this);
-                done({}, std::nullopt);
-            });
-        return true;
-    }
-}}
+}} // namespace XMPP::Jingle
