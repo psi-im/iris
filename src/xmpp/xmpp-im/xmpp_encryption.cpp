@@ -135,15 +135,23 @@ void EncryptedSession::close()
         deleteLater();
 }
 
-void EncryptedSession::track(EncryptionJob *job)
+EncryptionJob *EncryptedSession::track(EncryptionJob *job)
 {
-    if (!job)
-        return;
+    if (!job) {
+        auto *failed = new EncryptionJob(parent() ? parent() : this);
+        failed->fail(EncryptionJob::Error::ProtocolError,
+                     QStringLiteral("Encryption session did not return an operation"));
+        return failed;
+    }
+    // Jobs may outlive a completed transient session. Keep results with the owning
+    // factory when one exists, rather than destroying them with close().
+    job->setParent(parent() ? parent() : this);
     d->activeJobs.insert(job);
     connect(job, &EncryptionJob::finished, this, [this, job]() { operationFinished(job); });
     connect(job, &QObject::destroyed, this, [this, job]() { operationFinished(job); });
     if (job->isFinished())
         operationFinished(job);
+    return job;
 }
 
 void EncryptedSession::operationFinished(EncryptionJob *job)
@@ -169,14 +177,28 @@ EncryptionJob *EncryptedSession::decrypt(const QByteArray &) { return unsupporte
 EncryptionJob *EncryptedSession::encryptChunk(const QByteArray &, bool) { return unsupportedJob(this); }
 EncryptionJob *EncryptedSession::decryptChunk(const QByteArray &, bool) { return unsupportedJob(this); }
 
-EncryptionJob *EncryptedSession::run(bool encrypting, const QByteArray &chunk, bool final)
+EncryptionJob *EncryptedSession::run(const QDomElement &stanza, Direction direction)
 {
-    if (d->closing || !d->requestedCapabilities.testFlag(EncryptionMethod::DataStream))
-        return unsupportedJob(this);
-    if (d->streamBusy || d->streamFinished)
-        return unsupportedJob(this);
+    if (d->closing || !d->requestedCapabilities.testFlag(EncryptionMethod::XmppStanza))
+        return unsupportedJob(parent() ? parent() : this);
+    return track(direction == Direction::Encrypt ? encrypt(stanza) : decrypt(stanza));
+}
+
+EncryptionJob *EncryptedSession::run(const QByteArray &data, Direction direction)
+{
+    if (d->closing || !d->requestedCapabilities.testFlag(EncryptionMethod::DataMessage))
+        return unsupportedJob(parent() ? parent() : this);
+    return track(direction == Direction::Encrypt ? encrypt(data) : decrypt(data));
+}
+
+EncryptionJob *EncryptedSession::run(const QByteArray &chunk, Direction direction, bool final)
+{
+    if (d->closing || !d->requestedCapabilities.testFlag(EncryptionMethod::DataStream)
+        || d->streamBusy || d->streamFinished)
+        return unsupportedJob(parent() ? parent() : this);
+    const bool encrypting = direction == Direction::Encrypt;
     if (d->streamEncrypting && *d->streamEncrypting != encrypting)
-        return unsupportedJob(this);
+        return unsupportedJob(parent() ? parent() : this);
 
     d->streamBusy = true;
     d->streamEncrypting = encrypting;
@@ -184,19 +206,18 @@ EncryptionJob *EncryptedSession::run(bool encrypting, const QByteArray &chunk, b
     if (!job) {
         d->streamBusy = false;
         d->streamFinished = true;
-        return unsupportedJob(this);
+        return track(nullptr);
     }
-
-    const auto finish = [this, job, final]() {
+    const auto finish = [this, jobGuard = QPointer<EncryptionJob>(job), final]() {
         d->streamBusy = false;
-        if (final || !job->success())
+        if (final || !jobGuard || !jobGuard->success())
             d->streamFinished = true;
     };
     if (job->isFinished())
         finish();
     else
         connect(job, &EncryptionJob::finished, this, finish);
-    return job;
+    return track(job);
 }
 
 EncryptionMethod::EncryptionMethod(QObject *parent) : QObject(parent) { }
@@ -209,7 +230,6 @@ EncryptionJob *EncryptionMethod::recoverDecryption(const EncryptionMetadata &) {
 class EncryptionManager::Private {
 public:
     QList<QPointer<EncryptionMethod>> methods;
-    QSet<EncryptedSession *>          sessions;
 };
 
 EncryptionManager::EncryptionManager(QObject *parent) : QObject(parent), d(std::make_unique<Private>()) { }
@@ -228,7 +248,7 @@ bool EncryptionManager::registerMethod(EncryptionMethod *method)
                            [method](const auto &entry) { return entry.isNull() || entry.data() == method; }),
             d->methods.end());
         if (d->methods.size() != oldSize) {
-            for (auto *session : std::as_const(d->sessions)) {
+            for (auto *session : findChildren<EncryptedSession *>(QString(), Qt::FindDirectChildrenOnly)) {
                 if (session && session->methodId() == methodId)
                     session->close();
             }
@@ -249,7 +269,7 @@ void EncryptionManager::unregisterMethod(EncryptionMethod *method)
                                     [method](const auto &entry) { return entry.isNull() || entry == method; }),
                      d->methods.end());
     if (d->methods.size() != oldSize) {
-        for (auto *session : std::as_const(d->sessions)) {
+        for (auto *session : findChildren<EncryptedSession *>(QString(), Qt::FindDirectChildrenOnly)) {
             if (session && session->methodId() == id)
                 session->close();
         }
@@ -328,27 +348,7 @@ EncryptedSession *EncryptionManager::startSession(const QString &methodId,
     }
     session->setParent(this);
     session->d->requestedCapabilities = capabilities;
-    d->sessions.insert(session);
-    connect(session, &QObject::destroyed, this, [this, session]() { d->sessions.remove(session); });
     return session;
-}
-
-EncryptionJob *EncryptionManager::run(EncryptedSession                                         *session,
-                                      const std::function<EncryptionJob *(EncryptedSession *)> &operation)
-{
-    if (!session || !d->sessions.contains(session) || session->isClosing())
-        return unsupported(QStringLiteral("Encryption session is unavailable"));
-
-    EncryptionJob *job = operation(session);
-    if (!job) {
-        return unsupported(QStringLiteral("Encryption session returned no job"));
-    }
-
-    // Jobs have their own lifetime. A closing long-lived session remains alive
-    // until every operation which uses its stored context has completed.
-    job->setParent(this);
-    session->track(job);
-    return job;
 }
 
 EncryptionJob *EncryptionManager::runTransient(EncryptionMethod *method, EncryptionMethod::Capability capability,
@@ -361,9 +361,9 @@ EncryptionJob *EncryptionManager::runTransient(EncryptionMethod *method, Encrypt
     auto *session = startSession(method->id(), capability, context);
     if (!session)
         return unsupported(QStringLiteral("Encryption method could not create a session"));
-    auto *job = run(session, operation);
+    auto *job = operation(session);
     session->close();
-    return job;
+    return job ? job : unsupported(QStringLiteral("Encryption session returned no job"));
 }
 
 EncryptionJob *EncryptionManager::encrypt(const QString &methodId, const QDomElement &stanza,
@@ -373,7 +373,9 @@ EncryptionJob *EncryptionManager::encrypt(const QString &methodId, const QDomEle
     if (!m)
         return unsupported(QStringLiteral("Unknown encryption method: %1").arg(methodId));
     return runTransient(m, EncryptionMethod::XmppStanza, context,
-                        [&stanza](EncryptedSession *session) { return session->encrypt(stanza); });
+                        [&stanza](EncryptedSession *session) {
+                            return session->run(stanza, EncryptedSession::Direction::Encrypt);
+                        });
 }
 
 EncryptionJob *EncryptionManager::decrypt(const QDomElement &stanza, const EncryptionContext &context)
@@ -382,7 +384,9 @@ EncryptionJob *EncryptionManager::decrypt(const QDomElement &stanza, const Encry
     if (!m)
         return unsupported(QStringLiteral("No encryption method recognizes this stanza"));
     return runTransient(m, EncryptionMethod::XmppStanza, context,
-                        [&stanza](EncryptedSession *session) { return session->decrypt(stanza); });
+                        [&stanza](EncryptedSession *session) {
+                            return session->run(stanza, EncryptedSession::Direction::Decrypt);
+                        });
 }
 
 EncryptionJob *EncryptionManager::encrypt(const QString &methodId, const QByteArray &data,
@@ -392,7 +396,9 @@ EncryptionJob *EncryptionManager::encrypt(const QString &methodId, const QByteAr
     if (!m)
         return unsupported(QStringLiteral("Unknown encryption method: %1").arg(methodId));
     return runTransient(m, EncryptionMethod::DataMessage, context,
-                        [&data](EncryptedSession *session) { return session->encrypt(data); });
+                        [&data](EncryptedSession *session) {
+                            return session->run(data, EncryptedSession::Direction::Encrypt);
+                        });
 }
 
 EncryptionJob *EncryptionManager::decrypt(const QString &methodId, const QByteArray &data,
@@ -402,7 +408,9 @@ EncryptionJob *EncryptionManager::decrypt(const QString &methodId, const QByteAr
     if (!m)
         return unsupported(QStringLiteral("Unknown encryption method: %1").arg(methodId));
     return runTransient(m, EncryptionMethod::DataMessage, context,
-                        [&data](EncryptedSession *session) { return session->decrypt(data); });
+                        [&data](EncryptedSession *session) {
+                            return session->run(data, EncryptedSession::Direction::Decrypt);
+                        });
 }
 
 EncryptionJob *EncryptionManager::prepareDecryptionRecovery(const QString &methodId, const EncryptionMetadata &metadata)
@@ -418,18 +426,45 @@ EncryptionJob *EncryptionManager::recoverDecryption(const QString &methodId, con
 {
     auto m = method(methodId);
     if (!m)
-        return unsupported(QStringLiteral("Unknown encEncryptionJob *EncryptionManager::encryptChunk(EncryptedSession *session, const QByteArray &chunk, bool final)
+        return unsupported(QStringLiteral("Unknown encryption method: %1").arg(methodId));
+    auto job = m->recoverDecryption(metadata);
+    return job ? job : unsupported(QStringLiteral("Encryption method returned no recovery job"));
+}
+
+EncryptionJob *EncryptionManager::encrypt(EncryptedSession *session, const QDomElement &stanza)
 {
-    return run(session, [&chunk, final](EncryptedSession *current) {
-        return current->run(true, chunk, final);
-    });
+    return session ? session->run(stanza, EncryptedSession::Direction::Encrypt)
+                   : unsupported(QStringLiteral("Encryption session is unavailable"));
+}
+
+EncryptionJob *EncryptionManager::decrypt(EncryptedSession *session, const QDomElement &stanza)
+{
+    return session ? session->run(stanza, EncryptedSession::Direction::Decrypt)
+                   : unsupported(QStringLiteral("Encryption session is unavailable"));
+}
+
+EncryptionJob *EncryptionManager::encrypt(EncryptedSession *session, const QByteArray &data)
+{
+    return session ? session->run(data, EncryptedSession::Direction::Encrypt)
+                   : unsupported(QStringLiteral("Encryption session is unavailable"));
+}
+
+EncryptionJob *EncryptionManager::decrypt(EncryptedSession *session, const QByteArray &data)
+{
+    return session ? session->run(data, EncryptedSession::Direction::Decrypt)
+                   : unsupported(QStringLiteral("Encryption session is unavailable"));
+}
+
+EncryptionJob *EncryptionManager::encryptChunk(EncryptedSession *session, const QByteArray &chunk, bool final)
+{
+    return session ? session->run(chunk, EncryptedSession::Direction::Encrypt, final)
+                   : unsupported(QStringLiteral("Encryption session is unavailable"));
 }
 
 EncryptionJob *EncryptionManager::decryptChunk(EncryptedSession *session, const QByteArray &chunk, bool final)
 {
-    return run(session, [&chunk, final](EncryptedSession *current) {
-        return current->run(false, chunk, final);
-    });
+    return session ? session->run(chunk, EncryptedSession::Direction::Decrypt, final)
+                   : unsupported(QStringLiteral("Encryption session is unavailable"));
 }
 
 } // namespace XMPP

@@ -178,6 +178,14 @@ public:
     bool                     isClosing() const;
     void                     close();
 
+    enum class Direction { Encrypt, Decrypt };
+
+    // The session owns operation validation, job lifetime, and stream state.
+    // Protocol implementations override the encrypt/decrypt operations below.
+    EncryptionJob *run(const QDomElement &stanza, Direction direction);
+    EncryptionJob *run(const QByteArray &data, Direction direction);
+    EncryptionJob *run(const QByteArray &chunk, Direction direction, bool final);
+
     virtual EncryptionJob *encrypt(const QDomElement &xml);
     virtual EncryptionJob *decrypt(const QDomElement &xml);
     virtual EncryptionJob *encrypt(const QByteArray &data);
@@ -199,9 +207,7 @@ public:
     virtual EncryptionJob *decryptChunk(const QByteArray &chunk, bool final);
 
 private:
-    // Stream ordering and finalization belong to the session, not the registry.
-    EncryptionJob *run(bool encrypting, const QByteArray &chunk, bool final);
-    void track(EncryptionJob *job);
+    EncryptionJob *track(EncryptionJob *job);
     void operationFinished(EncryptionJob *job);
 
     class Private;
@@ -247,7 +253,7 @@ public:
 };
 Q_DECLARE_OPERATORS_FOR_FLAGS(EncryptionMethod::Capabilities)
 
-/** Registry/router for dynamically installable end-to-end encryption methods. */
+/** Registry and session factory for dynamically installable end-to-end encryption methods. */
 class EncryptionManager : public QObject {
     Q_OBJECT
 public:
@@ -296,7 +302,6 @@ signals:
 
 private:
     EncryptionJob *unsupported(const QString &message) const;
-    EncryptionJob *run(EncryptedSession *session, const std::function<EncryptionJob *(EncryptedSession *)> &operation);
     EncryptionJob *runTransient(EncryptionMethod *method, EncryptionMethod::Capability capability,
                                 const EncryptionContext                                  &context,
                                 const std::function<EncryptionJob *(EncryptedSession *)> &operation);

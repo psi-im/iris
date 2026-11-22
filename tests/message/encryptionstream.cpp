@@ -89,17 +89,17 @@ int main(int argc, char **argv)
     QDomDocument doc;
     auto signaling = doc.createElement(QStringLiteral("jingle"));
     doc.appendChild(signaling);
-    auto *signaled = await(manager.encrypt(tx, signaling));
+    auto *signaled = await(tx->run(signaling, EncryptedSession::Direction::Encrypt));
     check(signaled->success() && signaled->stanza().tagName() == QLatin1String("jingle"),
           "Shared session cannot protect signaling");
-    auto *first = manager.encryptChunk(tx, QByteArray("ab"));
+    auto *first = tx->run(QByteArray("ab"), EncryptedSession::Direction::Encrypt, false);
     check(!first->isFinished(), "Expected asynchronous chunk");
-    auto *overlap = manager.encryptChunk(tx, QByteArray("cd"));
+    auto *overlap = tx->run(QByteArray("cd"), EncryptedSession::Direction::Encrypt, false);
     check(overlap->isFinished() && !overlap->success(), "Overlapping chunks accepted");
-    auto *wrongDirection = manager.decryptChunk(tx, QByteArray("ab"));
+    auto *wrongDirection = tx->run(QByteArray("ab"), EncryptedSession::Direction::Decrypt, false);
     check(wrongDirection->isFinished() && !wrongDirection->success(), "Direction switch accepted");
     check(await(first)->success() && first->data() == "AB", "First chunk failed");
-    auto *last = await(manager.encryptChunk(tx, QByteArray("cd"), true));
+    auto *last = await(tx->run(QByteArray("cd"), EncryptedSession::Direction::Encrypt, true));
     check(last->success() && last->data() == "CDTAG", "Final encryption chunk failed");
     check(!manager.encryptChunk(tx, QByteArray("extra"))->success(), "Finalized stream reused");
     tx->close();
@@ -120,12 +120,18 @@ int main(int argc, char **argv)
 
     auto *stanzaOnly = manager.startSession(method.id(), EncryptionMethod::XmppStanza);
     check(stanzaOnly != nullptr, "Stanza-only session not created");
-    auto *wrongCapability = manager.encryptChunk(stanzaOnly, QByteArray("plain"));
+    auto *wrongCapability = stanzaOnly->run(QByteArray("plain"), EncryptedSession::Direction::Encrypt, false);
     check(wrongCapability->isFinished() && !wrongCapability->success(),
           "Stream operation accepted on a stanza-only session");
     stanzaOnly->close();
     check(!manager.startSession(method.id(), EncryptionMethod::DataMessage),
           "Unsupported data-message capability accepted");
+    auto *registrySession = manager.startSession(method.id(), EncryptionMethod::DataStream);
+    check(registrySession != nullptr, "Manager failed to create a session for unload test");
+    manager.unregisterMethod(&method);
+    check(registrySession->isClosing(), "Unregistering a method did not close its sessions");
+    check(!registrySession->run(QByteArray("more"), EncryptedSession::Direction::Encrypt, false)->success(),
+          "A closed session accepted another operation");
     qInfo("Stream session routing and final authentication passed");
     return 0;
 }
