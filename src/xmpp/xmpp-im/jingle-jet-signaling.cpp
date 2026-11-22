@@ -159,7 +159,7 @@ Jet *Jet::of(Manager *manager)
 Jet::Jet(Manager *manager) : QObject(manager), d(std::make_unique<Private>())
 {
     d->manager = manager;
-    manager->addSignalingFilter(this);
+    // Register with the manager only while at least one crypto method exists.
     connect(manager, &Manager::incomingSession, this, [this](Session *session) {
         d->install(session);
         d->watch(session, this);
@@ -178,6 +178,8 @@ bool Jet::registerKeyTransport(KeyTransport *transport)
         return false;
     if (auto *existing = d->forMethod(transport->methodId()))
         return existing == transport;
+    if (d->transports.isEmpty() && d->manager)
+        d->manager->addSignalingFilter(this);
     d->transports.append(transport);
     return true;
 }
@@ -185,6 +187,10 @@ bool Jet::registerKeyTransport(KeyTransport *transport)
 void Jet::unregisterKeyTransport(KeyTransport *transport)
 {
     d->transports.removeAll(transport);
+    // Without a key transport this must not count as a Jingle security filter:
+    // Manager's no-filter path rejects required E2EE for all content types.
+    if (d->transports.isEmpty() && d->manager)
+        d->manager->removeSignalingFilter(this);
 }
 
 QStringList Jet::discoFeatures() const
