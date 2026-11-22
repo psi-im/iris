@@ -162,6 +162,12 @@ public:
     QList<GroupChat>          groupChatList;
     EncryptionManager        *encryptionManager         = nullptr;
     const EncryptionMetadata *currentEncryptionMetadata = nullptr;
+    struct MucEcho {
+        QDomDocument plaintext;
+        QString methodId;
+    };
+    QHash<QString, MucEcho> pendingMucEchoes;
+    QStringList            pendingMucEchoOrder;
     JT_PushMessage           *pushMessage               = nullptr;
 };
 
@@ -475,6 +481,15 @@ void Client::groupChatLeave(const QString &host, const QString &room, const QStr
 
         i.status = GroupChat::Closing;
         i.realJids.clear();
+        const QString prefix = jid.bare() + QLatin1Char('\n');
+        for (auto pending = d->pendingMucEchoes.begin(); pending != d->pendingMucEchoes.end();) {
+            if (pending.key().startsWith(prefix)) {
+                d->pendingMucEchoOrder.removeAll(pending.key());
+                pending = d->pendingMucEchoes.erase(pending);
+            } else {
+                ++pending;
+            }
+        }
         debug(QString("Client: Leaving: [%1]\n").arg(i.j.full()));
 
         JT_Presence *j = new JT_Presence(rootTask());
@@ -488,6 +503,8 @@ void Client::groupChatLeave(const QString &host, const QString &room, const QStr
 
 void Client::groupChatLeaveAll(const QString &statusStr)
 {
+    d->pendingMucEchoes.clear();
+    d->pendingMucEchoOrder.clear();
     if (d->stream && d->active) {
         for (QList<GroupChat>::Iterator it = d->groupChatList.begin(); it != d->groupChatList.end(); it++) {
             GroupChat &i = *it;
@@ -547,6 +564,8 @@ void Client::cleanup()
     d->active = false;
     // d->authed = false;
     d->groupChatList.clear();
+    d->pendingMucEchoes.clear();
+    d->pendingMucEchoOrder.clear();
 }
 
 /*void Client::continueAfterCert()
@@ -650,6 +669,28 @@ Task *Client::rootTask() { return d->root; }
 
 QDomDocument *Client::doc() const { return &d->doc; }
 
+void Client::rememberEncryptedMucEcho(const QDomElement &plaintext, const QString &methodId)
+{
+    if (methodId != QLatin1String("omemo")
+        || plaintext.attribute(QStringLiteral("type")) != QLatin1String("groupchat"))
+        return;
+    const Jid room(plaintext.attribute(QStringLiteral("to")));
+    const QString id = plaintext.attribute(QStringLiteral("id"));
+    if (!room.isValid() || room.node().isEmpty() || !room.resource().isEmpty() || id.isEmpty())
+        return;
+
+    const QString key = room.bare() + QLatin1Char('\n') + id;
+    QDomDocument copy;
+    copy.appendChild(copy.importNode(plaintext, true));
+    d->pendingMucEchoes.insert(key, { copy, methodId });
+    d->pendingMucEchoOrder.removeAll(key);
+    d->pendingMucEchoOrder.append(key);
+    // Keep only a small bounded set; a server may never reflect old sends.
+    constexpr int MaxPendingMucEchoes = 64;
+    while (d->pendingMucEchoOrder.size() > MaxPendingMucEchoes)
+        d->pendingMucEchoes.remove(d->pendingMucEchoOrder.takeFirst());
+}
+
 void Client::distribute(const QDomElement &x)
 {
     static QString fromAttr(QStringLiteral("from"));
@@ -662,6 +703,48 @@ void Client::distribute(const QDomElement &x)
     }
 
     if (auto method = d->encryptionManager->methodForStanza(x)) {
+        // The sending device does not encrypt a key to itself. Recover only
+        // its own *specific* server-reflected MUC stanza from the original
+        // plaintext held until echo; do not bypass normal cryptography for
+        // other occupants, other rooms or unknown message IDs.
+        if (method->id() == QLatin1String("omemo")
+            && x.attribute(QStringLiteral("type")) == QLatin1String("groupchat")) {
+            const Jid occupant(x.attribute(QStringLiteral("from")));
+            const QString key = occupant.bare() + QLatin1Char('\n')
+                + x.attribute(QStringLiteral("id"));
+            for (const auto &gc : std::as_const(d->groupChatList)) {
+                if (gc.status != GroupChat::Connected || !gc.j.compare(occupant, false)
+                    || gc.j.resource() != occupant.resource()
+                    || gc.realJids.value(occupant.resource()).bare() != jid().bare())
+                    continue;
+                auto pending = d->pendingMucEchoes.find(key);
+                if (pending == d->pendingMucEchoes.end() || pending->methodId != method->id())
+                    break;
+                QDomDocument delivered;
+                auto root = delivered.importNode(pending->plaintext.documentElement(), true).toElement();
+                delivered.appendChild(root);
+                root.setAttribute(QStringLiteral("from"), occupant.full());
+                if (x.hasAttribute(QStringLiteral("to")))
+                    root.setAttribute(QStringLiteral("to"), x.attribute(QStringLiteral("to")));
+                else
+                    root.removeAttribute(QStringLiteral("to"));
+                // Copy only server-assigned stanza IDs needed for MAM identity.
+                // Do not accept injected plaintext content from the echo.
+                for (auto child = x.firstChildElement(); !child.isNull(); child = child.nextSiblingElement()) {
+                    if (child.namespaceURI() == QLatin1String("urn:xmpp:sid:0")
+                        && localName(child) == QLatin1String("stanza-id"))
+                        root.appendChild(delivered.importNode(child, true));
+                }
+                EncryptionMetadata metadata;
+                metadata.methodId = method->id();
+                metadata.sender = jid().bare();
+                metadata.details.insert(QStringLiteral("localMucEcho"), true);
+                d->pendingMucEchoOrder.removeAll(key);
+                d->pendingMucEchoes.erase(pending);
+                distributeDecrypted(root, &metadata);
+                return;
+            }
+        }
         EncryptionContext context;
         if (x.attribute(QStringLiteral("type")) == QLatin1String("groupchat")) {
             const Jid occupant(x.attribute(QStringLiteral("from")));
