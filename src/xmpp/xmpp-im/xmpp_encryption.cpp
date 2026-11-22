@@ -328,12 +328,6 @@ Features EncryptionManager::features() const
     return result;
 }
 
-EncryptedSession *EncryptionManager::startSession(const QString &methodId, EncryptionMethod::Capability capability,
-                                                  const EncryptionContext &context)
-{
-    return startSession(methodId, EncryptionMethod::Capabilities(capability), context);
-}
-
 EncryptedSession *EncryptionManager::startSession(const QString &methodId,
                                                   EncryptionMethod::Capabilities capabilities,
                                                   const EncryptionContext &context)

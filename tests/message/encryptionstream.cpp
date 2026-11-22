@@ -85,6 +85,7 @@ int main(int argc, char **argv)
     EncryptionManager manager;
     StreamMethod method;
     check(manager.registerMethod(&method), "Cannot register stream method");
+    check(manager.methods().count(method.id()) == 1, "Default registry query returned no methods");
     check(manager.availability(method.id(), Jid(QStringLiteral("online@example.test")))
               == EncryptionMethod::Availability::Available, "Registered method availability failed");
     check(manager.availability(method.id(), Jid(QStringLiteral("unsupported@example.test")))

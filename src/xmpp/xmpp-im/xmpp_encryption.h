@@ -272,12 +272,10 @@ public:
     EncryptionMethod *method(const QString &id) const;
     EncryptionMethod *methodForStanza(const QDomElement &stanza) const;
     EncryptionMethod::Availability availability(const QString &methodId, const Jid &peer) const;
-    MethodsMap        methods(EncryptionMethod::Capabilities caps = EncryptionMethod::Capabilities(0xff)) const;
+    MethodsMap        methods(EncryptionMethod::Capabilities caps = {}) const;
     Features          features() const;
 
-    EncryptedSession *startSession(const QString &methodId, EncryptionMethod::Capability capability,
-                                   const EncryptionContext &context = {});
-    /** A single session can combine stanza signaling and incremental data, e.g. for Jingle. */
+    /** A session may combine stanza signaling and incremental data, e.g. for Jingle. */
     EncryptedSession *startSession(const QString &methodId, EncryptionMethod::Capabilities capabilities,
                                    const EncryptionContext &context = {});
 
