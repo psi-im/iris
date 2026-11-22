@@ -64,7 +64,8 @@ struct Transfer {
 
 // Alice offers @a data to bob over IBB with the given policy; bob accepts.
 std::unique_ptr<Transfer> send(Endpoint &alice, Endpoint &bob, const QByteArray &data, bool preferred, bool required,
-                               const std::function<void(QDomElement &)> &tamper = {})
+                               const std::function<void(QDomElement &)> &tamper = {},
+                               const QString &methodId = OmemoEncryption::methodId())
 {
     auto t    = std::make_unique<Transfer>();
     t->source = std::make_unique<QBuffer>();
@@ -98,11 +99,14 @@ std::unique_ptr<Transfer> send(Endpoint &alice, Endpoint &bob, const QByteArray 
 
     t->session = alice.client.jingleManager()->newSession(bob.jid);
     if (preferred) {
-        check(t->session->setEncryptionMethod(OmemoEncryption::methodId()),
-              "A Jingle session could not select OMEMO");
-        check(t->session->encryptionSession() != nullptr
-                  && t->session->encryptionSession()->methodId() == OmemoEncryption::methodId(),
-              "Jingle did not retain a method-specific encryption session");
+        const bool registered = t->session->setEncryptionMethod(methodId);
+        check(registered == (methodId == OmemoEncryption::methodId()),
+              "Jingle method selection did not reflect method availability");
+        check(t->session->encryptionMethodId() == methodId, "Jingle lost the selected encryption method");
+        if (registered)
+            check(t->session->encryptionSession() != nullptr
+                      && t->session->encryptionSession()->methodId() == methodId,
+                  "Jingle did not retain a method-specific encryption session");
     }
     t->session->setEndToEndPreferred(preferred);
     t->session->setEndToEndRequired(required);
@@ -215,6 +219,12 @@ int main(int argc, char **argv)
         t = send(alice, bob, data, true, true);
         check(!t->peerSession && t->wire.isEmpty() && (!t->session || t->session->state() == J::State::Finished),
               "a required encryption sent the file to a peer without JET-OMEMO");
+
+        // Never substitute OMEMO or plaintext when another method was selected.
+        setPeerFeatures(alice.client, bob.jid, bob.client.jingleManager()->discoFeatures() + legacy);
+        t = send(alice, bob, data, true, true, {}, QStringLiteral("unavailable-method"));
+        check(!t->peerSession && t->wire.isEmpty() && (!t->session || t->session->state() == J::State::Finished),
+              "required Jingle encryption used the wrong method or sent plaintext");
         qInfo("JET-OMEMO %s passed", omemo2 ? "2" : "legacy");
     }
 

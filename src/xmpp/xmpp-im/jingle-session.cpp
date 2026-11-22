@@ -3317,6 +3317,16 @@ namespace XMPP { namespace Jingle {
     void Session::accept()
     {
         Q_ASSERT(d->role == Origin::Responder && d->state == State::Created);
+        // Incoming initial signaling is filtered before the application selects
+        // its method. Do not accept a previously authenticated offer from
+        // another method, or an unavailable required method.
+        if (d->endToEndRequired && !d->encryptionMethodId.isEmpty()
+            && (!d->encryptionSession
+                || (d->peerAuthentication.isValid()
+                    && d->peerAuthentication.method != d->encryptionMethodId))) {
+            terminate(Reason::SecurityError, QStringLiteral("Selected Jingle encryption method unavailable or mismatched"));
+            return;
+        }
         // So we presented a user incoming session in UI, the user modified it somehow and finally accepted.
         d->state = State::ApprovedToSend;
         d->notifyPads<&SessionManagerPad::onLocalAccepted>();
@@ -3344,6 +3354,13 @@ namespace XMPP { namespace Jingle {
 
     void Session::initiate()
     {
+        if (d->role == Origin::Initiator && d->state == State::Created && d->endToEndRequired
+            && !d->encryptionMethodId.isEmpty() && !d->encryptionSession) {
+            d->terminateReason = Reason(Reason::SecurityError,
+                                        QStringLiteral("Selected Jingle encryption method unavailable"));
+            d->setSessionFinished();
+            return;
+        }
         emit initiated();
         if (d->role == Origin::Initiator && d->state == State::Created) {
             d->state = State::ApprovedToSend;
