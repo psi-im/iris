@@ -4,6 +4,72 @@
 #include <iris/xmpp_message.h>
 
 namespace {
+// A resolved conversation must not round-trip into Psi's contact lookup for
+// every subsequent stanza. Only the first encrypted stanza reaches the host
+// fallback; Iris reuses a weak reference until the owning session closes.
+void exerciseIncomingFastPath(Endpoint &alice, Endpoint &bob)
+{
+    QStringList received;
+    int failures = 0;
+    QObject::connect(&bob.client, &Client::messageReceived, &bob.client, [&](const Message &m) {
+        if (m.type() == Message::Type::Chat)
+            received.append(m.body());
+    });
+    QObject::connect(&bob.client, &Client::stanzaDecryptionFailed, &bob.client,
+                     [&](const QString &, const Jid &, EncryptionJob::Error, const QString &,
+                         const EncryptionMetadata &) { ++failures; });
+
+    const auto encrypted = [&](const QString &body) {
+        QDomDocument doc;
+        auto message = doc.createElementNS(QStringLiteral("jabber:client"), QStringLiteral("message"));
+        doc.appendChild(message);
+        message.setAttribute(QStringLiteral("from"), alice.jid.full());
+        message.setAttribute(QStringLiteral("to"), bob.jid.full());
+        message.setAttribute(QStringLiteral("type"), QStringLiteral("chat"));
+        const auto bodyElement = doc.createElementNS(QStringLiteral("jabber:client"), QStringLiteral("body"));
+        bodyElement.appendChild(doc.createTextNode(body));
+        message.appendChild(bodyElement);
+        EncryptionContext context;
+        context.recipients = { bob.jid.bare() };
+        context.options.insert(QStringLiteral("omemoProtocol"), QStringLiteral("omemo2"));
+        auto *session = alice.client.encryptionManager()->startSession(
+            OmemoEncryption::methodId(), EncryptionMethod::XmppStanza, context);
+        check(session != nullptr, "Cannot create direct OMEMO sender session");
+        auto *job = session->encrypt(message);
+        session->close();
+        wait(job, alice, bob);
+        check(job->success(), "Cannot encrypt direct OMEMO routing test stanza");
+        QDomDocument wire;
+        wire.appendChild(wire.importNode(job->stanza(), true));
+        return wire;
+    };
+
+    const auto deliver = [&](const QString &body, int expected) {
+        auto wire = encrypted(body);
+        bob.stream.inject(wire.documentElement());
+        for (int i = 0; i < 30 && received.size() < expected; ++i)
+            pump(alice, bob);
+        check(received.size() == expected && received.last() == body && failures == 0,
+              "Explicit incoming decryption or normal message delivery failed");
+    };
+
+    const int initialFallbacks = bob.incomingFallbacks;
+    deliver(QStringLiteral("first protected message"), 1);
+    check(bob.incomingFallbacks == initialFallbacks + 1, "First stanza did not reach the host fallback");
+    deliver(QStringLiteral("second protected message"), 2);
+    check(bob.incomingFallbacks == initialFallbacks + 1, "An established session triggered a second host lookup");
+
+    // Retiring the owning contact session invalidates the Iris weak cache.
+    for (auto session : std::as_const(bob.conversationSessions))
+        if (session)
+            session->close();
+    bob.conversationSessions.clear();
+    deliver(QStringLiteral("third protected message"), 3);
+    check(bob.incomingFallbacks == initialFallbacks + 2,
+          "Iris reused a retired session instead of calling the host");
+    qInfo("OMEMO incoming last-resort fallback and weak session fast path passed");
+}
+
 void exerciseMuc(Endpoint &alice, Endpoint &bob)
 {
     const Jid room(QStringLiteral("garden@conference.example.test"));
@@ -175,6 +241,7 @@ int main(int argc, char **argv)
         check(setUp->success() && endpoint->omemo->isReady(), "OMEMO setup failed");
     }
     if (alice.omemo->supportedProtocols().testFlag(OmemoProtocol::Omemo2)) {
+        exerciseIncomingFastPath(alice, bob);
         exerciseMuc(alice, bob);
         exerciseMucSelfEcho(alice, bob);
     } else {
