@@ -32,7 +32,6 @@
 #include <QString>
 #include <QVariantMap>
 
-#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
@@ -282,34 +281,11 @@ public:
     EncryptedSession *startSession(const QString &methodId, EncryptionMethod::Capabilities capabilities,
                                    const EncryptionContext &context = {});
 
-    EncryptionJob *encrypt(const QString &methodId, const QDomElement &stanza, const EncryptionContext &context = {});
-    EncryptionJob *decrypt(const QDomElement &stanza, const EncryptionContext &context = {});
-    EncryptionJob *encrypt(const QString &methodId, const QByteArray &data, const EncryptionContext &context = {});
-    EncryptionJob *decrypt(const QString &methodId, const QByteArray &data, const EncryptionContext &context = {});
-
-    EncryptionJob *prepareDecryptionRecovery(const QString &methodId, const EncryptionMetadata &metadata);
-    EncryptionJob *recoverDecryption(const QString &methodId, const EncryptionMetadata &metadata);
-
-    EncryptionJob *encrypt(EncryptedSession *session, const QDomElement &stanza);
-    EncryptionJob *decrypt(EncryptedSession *session, const QDomElement &stanza);
-    EncryptionJob *encrypt(EncryptedSession *session, const QByteArray &data);
-    EncryptionJob *decrypt(EncryptedSession *session, const QByteArray &data);
-
-    // Incremental stream jobs require an explicitly owned DataStream session.
-    // No transient session is created for individual chunks.
-    EncryptionJob *encryptChunk(EncryptedSession *session, const QByteArray &chunk, bool final = false);
-    EncryptionJob *decryptChunk(EncryptedSession *session, const QByteArray &chunk, bool final = false);
-
 signals:
     void methodRegistered(const QString &id);
     void methodUnregistered(const QString &id);
 
 private:
-    EncryptionJob *unsupported(const QString &message) const;
-    EncryptionJob *runTransient(EncryptionMethod *method, EncryptionMethod::Capability capability,
-                                const EncryptionContext                                  &context,
-                                const std::function<EncryptionJob *(EncryptedSession *)> &operation);
-
     class Private;
     std::unique_ptr<Private> d;
 };

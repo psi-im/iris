@@ -23,8 +23,12 @@ void exerciseMuc(Endpoint &alice, Endpoint &bob)
         EncryptionContext send;
         send.recipients = { bob.jid.bare() };
         send.options.insert(QStringLiteral("omemoProtocol"), QStringLiteral("omemo2"));
-        auto job = wait(alice.client.encryptionManager()->encrypt(OmemoEncryption::methodId(), stanza, send),
-                        alice, bob);
+        auto *session = alice.client.encryptionManager()->startSession(
+            OmemoEncryption::methodId(), EncryptionMethod::XmppStanza, send);
+        check(session != nullptr, "Cannot create OMEMO sender session");
+        auto *job = session->run(stanza, EncryptedSession::Direction::Encrypt);
+        session->close();
+        wait(job, alice, bob);
         check(job->success(), "MUC OMEMO 2 encryption failed");
 
         QDomDocument incomingDoc;
@@ -37,13 +41,21 @@ void exerciseMuc(Endpoint &alice, Endpoint &bob)
 
     QDomDocument incomingDoc = encryptMessage();
     auto incoming = incomingDoc.documentElement();
-    auto unknown = wait(bob.client.encryptionManager()->decrypt(incoming), alice, bob);
+    const auto decrypt = [&](const QDomElement &stanza, const EncryptionContext &context) {
+        auto *session = bob.client.encryptionManager()->startSession(
+            OmemoEncryption::methodId(), EncryptionMethod::XmppStanza, context);
+        check(session != nullptr, "Cannot create OMEMO receiver session");
+        auto *job = session->run(stanza, EncryptedSession::Direction::Decrypt);
+        session->close();
+        return wait(job, alice, bob);
+    };
+    auto *unknown = decrypt(incoming, {});
     check(!unknown->success() && unknown->error() == EncryptionJob::Error::AuthenticationFailed,
           "MUC ciphertext without a real sender mapping was accepted");
 
     EncryptionContext receive;
     receive.options.insert(QStringLiteral("mucRealSender"), alice.jid.bare());
-    auto opened = wait(bob.client.encryptionManager()->decrypt(incoming, receive), alice, bob);
+    auto *opened = decrypt(incoming, receive);
     check(opened->success(), "MUC message with authenticated real sender failed");
     check(opened->metadata().sender.bare() == alice.jid.bare()
               && opened->stanza().attribute(QStringLiteral("from")) == occupant.full()
@@ -55,7 +67,7 @@ void exerciseMuc(Endpoint &alice, Endpoint &bob)
     auto wrongRoomDoc = encryptMessage();
     auto wrongRoom = wrongRoomDoc.documentElement();
     wrongRoom.setAttribute(QStringLiteral("from"), QStringLiteral("other@conference.example.test/Alice"));
-    auto roomAttack = wait(bob.client.encryptionManager()->decrypt(wrongRoom, receive), alice, bob);
+    auto *roomAttack = decrypt(wrongRoom, receive);
     check(!roomAttack->success() && roomAttack->error() == EncryptionJob::Error::AuthenticationFailed,
           "MUC SCE <to/> did not bind ciphertext to the original room");
 

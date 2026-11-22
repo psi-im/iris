@@ -328,13 +328,6 @@ Features EncryptionManager::features() const
     return result;
 }
 
-EncryptionJob *EncryptionManager::unsupported(const QString &message) const
-{
-    auto job = new EncryptionJob(const_cast<EncryptionManager *>(this));
-    job->fail(EncryptionJob::Error::Unsupported, message);
-    return job;
-}
-
 EncryptedSession *EncryptionManager::startSession(const QString &methodId, EncryptionMethod::Capability capability,
                                                   const EncryptionContext &context)
 {
@@ -360,122 +353,6 @@ EncryptedSession *EncryptionManager::startSession(const QString &methodId,
     session->setParent(this);
     session->d->requestedCapabilities = capabilities;
     return session;
-}
-
-EncryptionJob *EncryptionManager::runTransient(EncryptionMethod *method, EncryptionMethod::Capability capability,
-                                               const EncryptionContext                                  &context,
-                                               const std::function<EncryptionJob *(EncryptedSession *)> &operation)
-{
-    if (!method || !method->capabilities().testFlag(capability))
-        return unsupported(QStringLiteral("Encryption method does not support the requested capability"));
-
-    auto *session = startSession(method->id(), capability, context);
-    if (!session)
-        return unsupported(QStringLiteral("Encryption method could not create a session"));
-    auto *job = operation(session);
-    session->close();
-    return job ? job : unsupported(QStringLiteral("Encryption session returned no job"));
-}
-
-EncryptionJob *EncryptionManager::encrypt(const QString &methodId, const QDomElement &stanza,
-                                          const EncryptionContext &context)
-{
-    auto m = method(methodId);
-    if (!m)
-        return unsupported(QStringLiteral("Unknown encryption method: %1").arg(methodId));
-    return runTransient(m, EncryptionMethod::XmppStanza, context,
-                        [&stanza](EncryptedSession *session) {
-                            return session->run(stanza, EncryptedSession::Direction::Encrypt);
-                        });
-}
-
-EncryptionJob *EncryptionManager::decrypt(const QDomElement &stanza, const EncryptionContext &context)
-{
-    auto m = methodForStanza(stanza);
-    if (!m)
-        return unsupported(QStringLiteral("No encryption method recognizes this stanza"));
-    return runTransient(m, EncryptionMethod::XmppStanza, context,
-                        [&stanza](EncryptedSession *session) {
-                            return session->run(stanza, EncryptedSession::Direction::Decrypt);
-                        });
-}
-
-EncryptionJob *EncryptionManager::encrypt(const QString &methodId, const QByteArray &data,
-                                          const EncryptionContext &context)
-{
-    auto m = method(methodId);
-    if (!m)
-        return unsupported(QStringLiteral("Unknown encryption method: %1").arg(methodId));
-    return runTransient(m, EncryptionMethod::DataMessage, context,
-                        [&data](EncryptedSession *session) {
-                            return session->run(data, EncryptedSession::Direction::Encrypt);
-                        });
-}
-
-EncryptionJob *EncryptionManager::decrypt(const QString &methodId, const QByteArray &data,
-                                          const EncryptionContext &context)
-{
-    auto m = method(methodId);
-    if (!m)
-        return unsupported(QStringLiteral("Unknown encryption method: %1").arg(methodId));
-    return runTransient(m, EncryptionMethod::DataMessage, context,
-                        [&data](EncryptedSession *session) {
-                            return session->run(data, EncryptedSession::Direction::Decrypt);
-                        });
-}
-
-EncryptionJob *EncryptionManager::prepareDecryptionRecovery(const QString &methodId, const EncryptionMetadata &metadata)
-{
-    auto m = method(methodId);
-    if (!m)
-        return unsupported(QStringLiteral("Unknown encryption method: %1").arg(methodId));
-    auto job = m->prepareDecryptionRecovery(metadata);
-    return job ? job : unsupported(QStringLiteral("Encryption method returned no recovery preparation job"));
-}
-
-EncryptionJob *EncryptionManager::recoverDecryption(const QString &methodId, const EncryptionMetadata &metadata)
-{
-    auto m = method(methodId);
-    if (!m)
-        return unsupported(QStringLiteral("Unknown encryption method: %1").arg(methodId));
-    auto job = m->recoverDecryption(metadata);
-    return job ? job : unsupported(QStringLiteral("Encryption method returned no recovery job"));
-}
-
-EncryptionJob *EncryptionManager::encrypt(EncryptedSession *session, const QDomElement &stanza)
-{
-    return session ? session->run(stanza, EncryptedSession::Direction::Encrypt)
-                   : unsupported(QStringLiteral("Encryption session is unavailable"));
-}
-
-EncryptionJob *EncryptionManager::decrypt(EncryptedSession *session, const QDomElement &stanza)
-{
-    return session ? session->run(stanza, EncryptedSession::Direction::Decrypt)
-                   : unsupported(QStringLiteral("Encryption session is unavailable"));
-}
-
-EncryptionJob *EncryptionManager::encrypt(EncryptedSession *session, const QByteArray &data)
-{
-    return session ? session->run(data, EncryptedSession::Direction::Encrypt)
-                   : unsupported(QStringLiteral("Encryption session is unavailable"));
-}
-
-EncryptionJob *EncryptionManager::decrypt(EncryptedSession *session, const QByteArray &data)
-{
-    return session ? session->run(data, EncryptedSession::Direction::Decrypt)
-                   : unsupported(QStringLiteral("Encryption session is unavailable"));
-}
-
-EncryptionJob *EncryptionManager::encryptChunk(EncryptedSession *session, const QByteArray &chunk, bool final)
-{
-    return session ? session->run(chunk, EncryptedSession::Direction::Encrypt, final)
-                   : unsupported(QStringLiteral("Encryption session is unavailable"));
-}
-
-EncryptionJob *EncryptionManager::decryptChunk(EncryptedSession *session, const QByteArray &chunk, bool final)
-{
-    return session ? session->run(chunk, EncryptedSession::Direction::Decrypt, final)
-                   : unsupported(QStringLiteral("Encryption session is unavailable"));
 }
 
 } // namespace XMPP
