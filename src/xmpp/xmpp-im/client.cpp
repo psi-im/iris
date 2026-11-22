@@ -733,7 +733,7 @@ void Client::distribute(const QDomElement &x)
                 // never accept server-provided plaintext body or extensions.
                 for (auto child = x.firstChildElement(); !child.isNull(); child = child.nextSiblingElement()) {
                     const auto ns = child.namespaceURI();
-                    const auto name = localName(child);
+                    const auto name = child.localName();
                     if ((ns == QLatin1String("urn:xmpp:sid:0") && name == QLatin1String("stanza-id"))
                         || (ns == QLatin1String("urn:xmpp:eme:0") && name == QLatin1String("encryption")))
                         root.appendChild(delivered.importNode(child, true));
