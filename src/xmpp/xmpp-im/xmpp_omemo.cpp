@@ -2503,9 +2503,8 @@ public:
     {
     }
 
-    EncryptionJob *doEncrypt(const QDomElement &xml) override
+    EncryptionJob *doEncrypt(const QDomElement &xml, const EncryptionContext &context) override
     {
-        const auto &context = this->context();
         auto        job     = new EncryptionJob(this);
         auto        d       = method_->d.get();
         if (!d->ready) {
@@ -2527,16 +2526,16 @@ public:
         const bool legacyFallback = *protocolValue == OmemoProtocol::Omemo2 && !context.replyTo
             && !context.options.contains(QLatin1String(OmemoProtocolOption))
             && d->supportedProtocols.testFlag(OmemoProtocol::Legacy) && localName(xml) == QLatin1String("message");
-        encryptWith(xml, *protocolValue, legacyFallback, job);
+        encryptWith(xml, *protocolValue, legacyFallback, context, job);
         return job;
     }
 
     // With @a legacyFallback an OMEMO 2 message is encrypted with legacy OMEMO instead when that reaches more of
     // the recipients' devices: a server keeping one item per PEP node holds only the OMEMO 2 bundle published
     // last by an account's devices, while legacy OMEMO keeps a node per device.
-    void encryptWith(const QDomElement &xml, OmemoProtocol protocol, bool legacyFallback, EncryptionJob *job)
+    void encryptWith(const QDomElement &xml, OmemoProtocol protocol, bool legacyFallback,
+                     const EncryptionContext &context, EncryptionJob *job)
     {
-        const auto &context = this->context();
         auto        d       = method_->d.get();
         if (protocol == OmemoProtocol::Legacy && localName(xml) != QLatin1String("message")) {
             job->fail(EncryptionJob::Error::Unsupported, QStringLiteral("Legacy OMEMO supports message stanzas only"));
@@ -2607,7 +2606,7 @@ public:
                 d->ensureSessions(
                     targets, protocol, 0, true,
                     [this, guardedJob, preparedOuter, plaintext, legacyHasPayload, owners, protocol, legacyFallback,
-                     targets, inputDocument,
+                     targets, context, inputDocument,
                      stanza](bool sessionsOk, EncryptionJob::Error sessionError, const QString &sessionErrorString,
                              QList<QPair<QString, uint32_t>> readyTargets, const QStringList &skippedTargets) {
                         if (!guardedJob)
@@ -2635,7 +2634,7 @@ public:
                                 qInfo("OMEMO: device(s) without an OMEMO 2 bundle are reachable with legacy OMEMO; "
                                       "encrypting with legacy OMEMO");
                                 Q_UNUSED(inputDocument) // keeps the stanza's document alive
-                                encryptWith(stanza, OmemoProtocol::Legacy, false, guardedJob);
+                                encryptWith(stanza, OmemoProtocol::Legacy, false, context, guardedJob);
                                 return;
                             }
                         }
@@ -2799,7 +2798,7 @@ public:
             });
     }
 
-    EncryptionJob *doDecrypt(const QDomElement &xml) override
+    EncryptionJob *doDecrypt(const QDomElement &xml, const EncryptionContext &context) override
     {
         auto job = new EncryptionJob(this);
         auto d   = method_->d.get();
@@ -2836,7 +2835,7 @@ public:
         }
         Jid sender = outerSender;
         if (isMuc) {
-            sender = Jid(context().options.value(QStringLiteral("mucRealSender")).toString());
+            sender = Jid(context.options.value(QStringLiteral("mucRealSender")).toString());
             if (outerSender.resource().isEmpty() || !sender.isValid() || sender.node().isEmpty()
                 || !sender.resource().isEmpty()) {
                 job->fail(EncryptionJob::Error::AuthenticationFailed,

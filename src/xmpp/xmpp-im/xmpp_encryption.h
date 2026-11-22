@@ -178,8 +178,10 @@ public:
     void                     close();
 
     // Validate session state, track jobs, and dispatch to protocol implementations.
-    EncryptionJob *encrypt(const QDomElement &xml);
-    EncryptionJob *decrypt(const QDomElement &xml);
+    // Per-operation context is merged with the long-lived peer context.
+    // Concurrent jobs never modify the session's base context.
+    EncryptionJob *encrypt(const QDomElement &xml, const EncryptionContext &operation = {});
+    EncryptionJob *decrypt(const QDomElement &xml, const EncryptionContext &operation = {});
     EncryptionJob *encrypt(const QByteArray &data);
     EncryptionJob *decrypt(const QByteArray &data);
 
@@ -199,8 +201,8 @@ public:
     EncryptionJob *decryptChunk(const QByteArray &chunk, bool final = false);
 
 protected:
-    virtual EncryptionJob *doEncrypt(const QDomElement &xml);
-    virtual EncryptionJob *doDecrypt(const QDomElement &xml);
+    virtual EncryptionJob *doEncrypt(const QDomElement &xml, const EncryptionContext &context);
+    virtual EncryptionJob *doDecrypt(const QDomElement &xml, const EncryptionContext &context);
     virtual EncryptionJob *doEncrypt(const QByteArray &data);
     virtual EncryptionJob *doDecrypt(const QByteArray &data);
     virtual EncryptionJob *doEncryptChunk(const QByteArray &chunk, bool final);

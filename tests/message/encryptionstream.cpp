@@ -22,7 +22,7 @@ class StreamSession final : public EncryptedSession {
 public:
     explicit StreamSession(const EncryptionContext &ctx) : EncryptedSession(QStringLiteral("test-stream"), ctx) { }
 
-    EncryptionJob *doEncrypt(const QDomElement &xml) override
+    EncryptionJob *doEncrypt(const QDomElement &xml, const EncryptionContext &) override
     {
         auto *job = new EncryptionJob(this);
         job->complete(xml);

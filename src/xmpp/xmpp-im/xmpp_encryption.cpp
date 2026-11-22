@@ -171,25 +171,40 @@ static EncryptionJob *unsupportedJob(QObject *parent)
     return job;
 }
 
-EncryptionJob *EncryptedSession::doEncrypt(const QDomElement &) { return unsupportedJob(this); }
-EncryptionJob *EncryptedSession::doDecrypt(const QDomElement &) { return unsupportedJob(this); }
+EncryptionJob *EncryptedSession::doEncrypt(const QDomElement &, const EncryptionContext &) { return unsupportedJob(this); }
+EncryptionJob *EncryptedSession::doDecrypt(const QDomElement &, const EncryptionContext &) { return unsupportedJob(this); }
 EncryptionJob *EncryptedSession::doEncrypt(const QByteArray &) { return unsupportedJob(this); }
 EncryptionJob *EncryptedSession::doDecrypt(const QByteArray &) { return unsupportedJob(this); }
 EncryptionJob *EncryptedSession::doEncryptChunk(const QByteArray &, bool) { return unsupportedJob(this); }
 EncryptionJob *EncryptedSession::doDecryptChunk(const QByteArray &, bool) { return unsupportedJob(this); }
 
-EncryptionJob *EncryptedSession::encrypt(const QDomElement &xml)
+// Immutable per-call context avoids races between overlapping async stanzas.
+// The bound peer is the default recipient; a stanza may override it (e.g. a
+// group message with multiple recipients or a reply to an encrypted request).
+static EncryptionContext effectiveContext(const EncryptionContext &session, const EncryptionContext &operation)
 {
-    if (d->closing || (d->capabilitiesConfigured && !d->requestedCapabilities.testFlag(EncryptionMethod::XmppStanza)))
-        return unsupportedJob(parent() ? parent() : this);
-    return track(doEncrypt(xml));
+    EncryptionContext result = session;
+    if (!operation.recipients.isEmpty())
+        result.recipients = operation.recipients;
+    if (operation.replyTo)
+        result.replyTo = operation.replyTo;
+    for (auto it = operation.options.cbegin(); it != operation.options.cend(); ++it)
+        result.options.insert(it.key(), it.value());
+    return result;
 }
 
-EncryptionJob *EncryptedSession::decrypt(const QDomElement &xml)
+EncryptionJob *EncryptedSession::encrypt(const QDomElement &xml, const EncryptionContext &operation)
 {
     if (d->closing || (d->capabilitiesConfigured && !d->requestedCapabilities.testFlag(EncryptionMethod::XmppStanza)))
         return unsupportedJob(parent() ? parent() : this);
-    return track(doDecrypt(xml));
+    return track(doEncrypt(xml, effectiveContext(d->context, operation)));
+}
+
+EncryptionJob *EncryptedSession::decrypt(const QDomElement &xml, const EncryptionContext &operation)
+{
+    if (d->closing || (d->capabilitiesConfigured && !d->requestedCapabilities.testFlag(EncryptionMethod::XmppStanza)))
+        return unsupportedJob(parent() ? parent() : this);
+    return track(doDecrypt(xml, effectiveContext(d->context, operation)));
 }
 
 EncryptionJob *EncryptedSession::encrypt(const QByteArray &data)
