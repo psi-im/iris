@@ -216,6 +216,11 @@ int main(int argc, char **argv)
         check(client.encryptedSession(methodId, roomPeer, Client::EncryptionSessionPurpose::Groupchat)
                   && lastPurpose == Client::EncryptionSessionPurpose::Groupchat,
               "The host did not receive the groupchat routing purpose");
+        testStanza.setAttribute(QStringLiteral("to"), roomPeer.bare());
+        testStanza.setAttribute(QStringLiteral("type"), QStringLiteral("groupchat"));
+        check(await(client.sendEncrypted(testStanza, methodId, {}))->success()
+                  && lastPurpose == Client::EncryptionSessionPurpose::Groupchat,
+              "Outbound groupchat did not retain its room-level encryption scope");
         check(client.encryptedSession(methodId, peerA, Client::EncryptionSessionPurpose::ArchiveReplay)
                   && lastPurpose == Client::EncryptionSessionPurpose::ArchiveReplay,
               "The archive-specific purpose was lost");

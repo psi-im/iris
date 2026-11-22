@@ -812,6 +812,9 @@ EncryptionJob *Client::sendEncrypted(const QDomElement &stanza, const QString &m
                 && recipient.bare() == peer.bare()))
             peer = recipient;
     }
+    if (purpose == EncryptionSessionPurpose::Message
+        && stanza.attribute(QStringLiteral("type")) == QLatin1String("groupchat"))
+        purpose = EncryptionSessionPurpose::Groupchat;
     auto *session = encryptedSession(methodId, peer, purpose);
     return session ? sendEncrypted(stanza, session, context)
                    : missingEncryptionSession(d->encryptionManager, methodId);
