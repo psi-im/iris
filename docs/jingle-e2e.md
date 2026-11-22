@@ -182,7 +182,11 @@ Conversations `Content.setSecurity()/getSecurity()`, `JingleFileTransferConnecti
 - `Session::setEndToEndPreferred()` asks for protection where possible without refusing otherwise
   (a session requiring it prefers it too). Signaling filters can add disco features
   (`SignalingFilter::discoFeatures()`).
-- `Jingle::JetOmemo` (built with OMEMO) is JET-OMEMO for file transfer, in the format of
+- `Jingle::JET::Jet` owns generic XEP-0391 signaling: it parses/writes `<security/>`,
+  matches per-content keys, installs them before transport startup, and selects a
+  registered `JET::KeyTransport` according to the Jingle encryption method.
+  It builds and advertises without OMEMO.
+- `Jingle::JetOmemo` implements only the XEP-0396 `JET::KeyTransport` adapter in the format of
   Conversations and Dino:
   - for file-transfer contents it creates in a session that prefers or requires end-to-end
     encryption, it adds `<security xmlns='urn:xmpp:jingle:jet:0' name cipher type>` with an OMEMO
@@ -194,7 +198,9 @@ Conversations `Content.setSecurity()/getSecurity()`, `JingleFileTransferConnecti
     Psi extension, see `xsf-proposals/`); otherwise legacy OMEMO with a key transport message and
     AES-128-GCM, as Conversations and Dino;
   - received envelopes are decrypted and their key given to the content when it exists;
-  - it must be registered before `OmemoDtlsVerification`, which treats JET contents as protected.
+  - the generic JET filter must be registered before `OmemoDtlsVerification`, which treats JET contents as protected.
+  - adding another JET key-delivery method does not require another signaling
+    filter or a duplicate file-transfer implementation.
 - `FileTransfer::Application::setTransportSecret()` encrypts the whole transfer as AES-GCM with the
   16-byte tag appended (`JET::StreamCipher`, `jingle-jet_p.h`); size and hashes describe the plain
   file. The receiver decrypts with AES-CTR from the counter block IV‖2 and checks the tag by

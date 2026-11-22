@@ -4,6 +4,7 @@
 #include <iris/xmpp_client.h>
 
 #include <QCoreApplication>
+#include <utility>
 
 using namespace XMPP;
 namespace J = XMPP::Jingle;
