@@ -35,14 +35,26 @@ and processing belong in Iris.
 
 ### Lifetime and peer identity
 
-`Client::encryptedSession(methodId, peer)` retains a stanza encryption session
-for each encryption method and peer **full JID**. Repeated incoming and outgoing
-stanzas use that same object. A bare JID is keyed separately only when the caller
-has no resource (for example, a message to a bare chat address).
+`Client` does not maintain a parallel JID/resource table. An application installs
+`Client::setEncryptionSessionResolver()`, which resolves an encryption method,
+conversation peer and purpose (`Message`, `Groupchat`, `Carbon`, `Reply`,
+`ArchiveReplay`) to an application-owned `EncryptedSession`. It may use the
+existing contacts, MUC occupants, and local archival operations as session
+owners. An unresolved request fails closed; there is no silent plaintext
+fallback or implicit contact creation inside Iris.
 
-The client retires sessions on resource-unavailable presence, MUC leave/rejoin,
-disconnect/restart and method unregistration. A session must not be reused for
-another resource or a later occupant claiming the same MUC nickname.
+The application creates/reuses stanza sessions using
+`EncryptionManager::startSession()` and closes them on the corresponding
+contact/resource/operation lifecycle. `EncryptionManager` remains the method
+registry and session factory, and closes all sessions for an unregistered
+method; it is not a conversation or resource directory.
+
+Jingle and other protocols with a known operation owner **pass their bound
+`EncryptedSession` explicitly**, rather than looking it up by JID. Incoming
+Jingle IQs reach `JTPush` through the existing `Task` dispatcher and are
+routed by (peer, sid), including signaling filters that can exchange protected
+transport keys before a responder session exists. No competing global
+encrypted-stanza subscriber chain is needed.
 
 A long-lived session's `context()` identifies its peer and defaults, but
 `encrypt(stanza, operationContext)` and `decrypt(stanza, operationContext)`
@@ -54,8 +66,8 @@ context for that operation.
 
 OMEMO's actual Double Ratchet sessions remain in the libsignal storage by
 bare JID **and device ID** (separate for legacy and OMEMO 2). They survive
-the lifetime of a `Client::encryptedSession`; the latter is a higher-level
-XMPP peer session and must neither replace nor reset those underlying ratchets.
+the lifetime of any application-owned stanza `EncryptedSession`, which must
+neither replace nor reset those underlying ratchets.
 
 OMEMO does **not** claim `DataMessage` or `DataStream`: using the Double Ratchet to
 bulk-encrypt a file or media stream is the wrong layer. A file-encryption method (for
