@@ -950,12 +950,17 @@ void Client::send(const QString &str)
 EncryptionJob *Client::sendEncrypted(const QDomElement &stanza, const QString &methodId,
                                      const EncryptionContext &context)
 {
+    QDomDocument original;
+    if (stanza.attribute(QStringLiteral("type")) == QLatin1String("groupchat"))
+        original.appendChild(original.importNode(stanza, true));
     auto job    = d->encryptionManager->encrypt(methodId, stanza, context);
-    auto finish = [this, job]() {
-        if (job->success())
+    auto finish = [this, job, original, methodId]() {
+        if (job->success()) {
+            rememberEncryptedMucEcho(original.documentElement(), methodId);
             send(job->stanza());
-        else
+        } else {
             debug(QStringLiteral("Client: outgoing stanza encryption failed: %1").arg(job->errorString()));
+        }
     };
     if (job->isFinished())
         finish();
@@ -966,12 +971,18 @@ EncryptionJob *Client::sendEncrypted(const QDomElement &stanza, const QString &m
 
 EncryptionJob *Client::sendEncrypted(const QDomElement &stanza, EncryptedSession *session)
 {
+    QDomDocument original;
+    if (stanza.attribute(QStringLiteral("type")) == QLatin1String("groupchat"))
+        original.appendChild(original.importNode(stanza, true));
+    const QString methodId = session ? session->methodId() : QString();
     auto job    = d->encryptionManager->encrypt(session, stanza);
-    auto finish = [this, job]() {
-        if (job->success())
+    auto finish = [this, job, original, methodId]() {
+        if (job->success()) {
+            rememberEncryptedMucEcho(original.documentElement(), methodId);
             send(job->stanza());
-        else
+        } else {
             debug(QStringLiteral("Client: outgoing stanza encryption failed: %1").arg(job->errorString()));
+        }
     };
     if (job->isFinished())
         finish();
