@@ -96,6 +96,7 @@
 #include <QMap>
 #include <QObject>
 #include <QPointer>
+#include <QSet>
 #include <QTimer>
 
 #ifdef Q_OS_WIN
@@ -168,6 +169,8 @@ public:
     };
     QHash<QString, MucEcho> pendingMucEchoes;
     QStringList            pendingMucEchoOrder;
+    QSet<QString>          completedMucEchoes;
+    QStringList            completedMucEchoOrder;
     JT_PushMessage           *pushMessage               = nullptr;
 };
 
@@ -490,6 +493,14 @@ void Client::groupChatLeave(const QString &host, const QString &room, const QStr
                 ++pending;
             }
         }
+        for (auto it = d->completedMucEchoes.begin(); it != d->completedMucEchoes.end();) {
+            if (it->startsWith(prefix)) {
+                d->completedMucEchoOrder.removeAll(*it);
+                it = d->completedMucEchoes.erase(it);
+            } else {
+                ++it;
+            }
+        }
         debug(QString("Client: Leaving: [%1]\n").arg(i.j.full()));
 
         JT_Presence *j = new JT_Presence(rootTask());
@@ -505,6 +516,8 @@ void Client::groupChatLeaveAll(const QString &statusStr)
 {
     d->pendingMucEchoes.clear();
     d->pendingMucEchoOrder.clear();
+    d->completedMucEchoes.clear();
+    d->completedMucEchoOrder.clear();
     if (d->stream && d->active) {
         for (QList<GroupChat>::Iterator it = d->groupChatList.begin(); it != d->groupChatList.end(); it++) {
             GroupChat &i = *it;
@@ -566,6 +579,8 @@ void Client::cleanup()
     d->groupChatList.clear();
     d->pendingMucEchoes.clear();
     d->pendingMucEchoOrder.clear();
+    d->completedMucEchoes.clear();
+    d->completedMucEchoOrder.clear();
 }
 
 /*void Client::continueAfterCert()
@@ -717,6 +732,8 @@ void Client::distribute(const QDomElement &x)
                     || gc.j.resource() != occupant.resource()
                     || gc.realJids.value(occupant.resource()).bare() != jid().bare())
                     continue;
+                if (d->completedMucEchoes.contains(key))
+                    return; // Already delivered this authenticated local echo.
                 auto pending = d->pendingMucEchoes.find(key);
                 if (pending == d->pendingMucEchoes.end() || pending->methodId != method->id())
                     break;
@@ -744,6 +761,11 @@ void Client::distribute(const QDomElement &x)
                 metadata.details.insert(QStringLiteral("localMucEcho"), true);
                 d->pendingMucEchoOrder.removeAll(key);
                 d->pendingMucEchoes.erase(pending);
+                d->completedMucEchoes.insert(key);
+                d->completedMucEchoOrder.append(key);
+                constexpr int MaxCompletedMucEchoes = 64;
+                while (d->completedMucEchoOrder.size() > MaxCompletedMucEchoes)
+                    d->completedMucEchoes.remove(d->completedMucEchoOrder.takeFirst());
                 distributeDecrypted(root, &metadata);
                 return;
             }
