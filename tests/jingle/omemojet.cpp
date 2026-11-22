@@ -147,8 +147,14 @@ int main(int argc, char **argv)
         auto setUp = wait(endpoint->omemo->setUp(), alice, bob);
         check(setUp->success(), "OMEMO was not set up");
     }
-    J::JetOmemo aliceJet(alice.client.jingleManager(), alice.omemo);
-    J::JetOmemo bobJet(bob.client.jingleManager(), bob.omemo);
+    // Iris installs all OMEMO Jingle adapters through the encryption method,
+    // rather than requiring the application to instantiate protocol filters.
+    alice.omemo->enableJingleEncryption();
+    bob.omemo->enableJingleEncryption();
+    const auto beforeDuplicateEnable = alice.client.jingleManager()->discoFeatures();
+    alice.omemo->enableJingleEncryption();
+    check(alice.client.jingleManager()->discoFeatures() == beforeDuplicateEnable,
+          "Enabling Jingle encryption twice changed its advertised capabilities");
     if (!alice.client.jingleManager()->discoFeatures().contains(J::JetOmemo::ns())) {
         qInfo("JET-OMEMO tests skipped: no legacy OMEMO or AES-GCM/CTR in QCA");
         pep.clear();

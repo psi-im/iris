@@ -133,13 +133,14 @@ namespace XMPP { namespace Jingle {
                 pending.erase(it);
         }
 
-        void watch(Session *session)
+        void watch(Session *session, QObject *owner)
         {
             for (const auto &known : std::as_const(watched))
                 if (known == session)
                     return;
             watched.append(session);
-            QObject::connect(session, &Session::newContentReceived, session, [this, session]() { install(session); });
+            // The adapter may be unregistered before the Jingle session terminates.
+            QObject::connect(session, &Session::newContentReceived, owner, [this, session]() { install(session); });
         }
     };
 
@@ -155,7 +156,7 @@ namespace XMPP { namespace Jingle {
         manager->addSignalingFilter(this);
         connect(manager, &Manager::incomingSession, this, [this](Session *session) {
             d->install(session);
-            d->watch(session);
+            d->watch(session, this);
         });
     }
 
@@ -360,7 +361,7 @@ namespace XMPP { namespace Jingle {
                     pending.insert(it.key(), *it);
                 // A content-add for an existing session gets its key once the content exists.
                 if (auto session = d->manager ? d->manager->session(from, sid) : nullptr)
-                    d->watch(session);
+                    d->watch(session, this);
                 done({}, std::nullopt);
             });
         return true;
