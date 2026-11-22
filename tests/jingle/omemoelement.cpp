@@ -394,6 +394,10 @@ void exerciseMucSelfEcho(Endpoint &alice, Endpoint &bob)
     alice.stream.inject(presence);
 
     int ownMessages = 0;
+    int decryptionFailures = 0;
+    QObject::connect(&alice.client, &Client::stanzaDecryptionFailed, &alice.client,
+                     [&](const QString &, const Jid &, EncryptionJob::Error, const QString &,
+                         const EncryptionMetadata &) { ++decryptionFailures; });
     QString receivedBody;
     bool encrypted = false;
     QObject::connect(&alice.client, &Client::messageReceived, &alice.client, [&](const Message &m) {
@@ -434,7 +438,8 @@ void exerciseMucSelfEcho(Endpoint &alice, Endpoint &bob)
     // A duplicate echo has no remaining local plaintext mapping and must not
     // be shown again; neither may a message with the wrong stanza ID.
     alice.stream.inject(stanza);
-    check(ownMessages == 1, "An OMEMO MUC self echo was shown more than once");
+    check(ownMessages == 1 && decryptionFailures == 0,
+          "A duplicate OMEMO MUC self echo was shown or reported as a decryption error");
     onStanza = {};
     qInfo("OMEMO 2 MUC self echo reconciliation passed");
 }
