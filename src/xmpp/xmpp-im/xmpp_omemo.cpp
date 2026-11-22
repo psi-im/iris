@@ -4046,9 +4046,13 @@ EncryptionJob *OmemoEncryption::encryptElement(const Jid &recipient, OmemoProtoc
         wrapper.appendChild(wrapperDocument.importNode(content, true));
     }
 
-    auto session = new OmemoEncryptedSession(this, context);
+    auto *session = startSession(XmppStanza, context);
+    if (!session) {
+        job->fail(EncryptionJob::Error::NoSession, QStringLiteral("Could not create OMEMO element session"));
+        return job;
+    }
     session->setParent(job);
-    auto inner  = session->encrypt(wrapper);
+    auto *inner = session->encrypt(wrapper);
     auto finish = [job, inner, protocol]() {
         const auto encrypted
             = inner->success() ? inner->stanza().firstChildElement(QStringLiteral("encrypted")) : QDomElement();
@@ -4081,9 +4085,13 @@ EncryptionJob *OmemoEncryption::decryptElement(const Jid &sender, const QDomElem
     wrapper.appendChild(wrapperDocument.importNode(encrypted, true));
     wrapperDocument.appendChild(wrapper);
 
-    auto session = new OmemoEncryptedSession(this, {});
+    auto *session = startSession(XmppStanza, {});
+    if (!session) {
+        job->fail(EncryptionJob::Error::NoSession, QStringLiteral("Could not create OMEMO element session"));
+        return job;
+    }
     session->setParent(job);
-    auto inner  = session->decrypt(wrapper);
+    auto *inner = session->decrypt(wrapper);
     auto finish = [job, inner]() {
         if (!inner->success()) {
             job->fail(inner->error(), inner->errorString(), inner->metadata());
