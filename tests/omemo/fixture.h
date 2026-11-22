@@ -10,6 +10,7 @@
 #include <iris/xmpp_task.h>
 
 #include <QCoreApplication>
+#include <QHash>
 #include <QMap>
 #include <QPointer>
 #include <QTextStream>
@@ -65,6 +66,7 @@ struct Endpoint {
     MemoryOmemoStorage           storage;
     MemoryEncryptionTrustStorage trust;
     OmemoEncryption             *omemo = nullptr;
+    QHash<QString, QPointer<EncryptedSession>> conversationSessions;
 
     explicit Endpoint(const QString &user)
     {
@@ -72,9 +74,31 @@ struct Endpoint {
         client.start(QStringLiteral("example.test"), user, QString(), QStringLiteral("device"));
         client.connectToServer(&stream, jid);
         omemo = new OmemoEncryption(&client, &storage, &trust);
+        // In production Psi resolves these against its existing contacts.
+        // This lightweight endpoint fixture owns its peer sessions directly.
+        client.setEncryptionSessionResolver([this](const QString &methodId, const Jid &peer,
+                                                   Client::EncryptionSessionPurpose) -> EncryptedSession * {
+            const auto key = methodId + QLatin1Char('\n') + peer.full();
+            auto *session = conversationSessions.value(key).data();
+            if (session && !session->isClosing())
+                return session;
+            EncryptionContext context;
+            context.recipients = { peer };
+            session = client.encryptionManager()->startSession(methodId, EncryptionMethod::XmppStanza, context);
+            if (session)
+                conversationSessions.insert(key, session);
+            return session;
+        });
     }
     // The method uses the storages, which are destroyed before the client.
-    ~Endpoint() { delete omemo; }
+    ~Endpoint()
+    {
+        client.setEncryptionSessionResolver({});
+        for (auto session : std::as_const(conversationSessions))
+            if (session)
+                session->close();
+        delete omemo;
+    }
 };
 
 // PEP nodes of all accounts: owner bare JID → node → item id → payload.
