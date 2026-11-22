@@ -62,6 +62,11 @@ public:
     }
     Features features() const override { return {}; }
     bool canDecrypt(const QDomElement &) const override { return false; }
+    Availability availability(const Jid &peer) const override
+    {
+        return peer.bare() == QStringLiteral("unsupported@example.test") ? Availability::Unavailable
+                                                                          : Availability::Available;
+    }
 };
 
 static EncryptionJob *await(EncryptionJob *job)
@@ -80,6 +85,12 @@ int main(int argc, char **argv)
     EncryptionManager manager;
     StreamMethod method;
     check(manager.registerMethod(&method), "Cannot register stream method");
+    check(manager.availability(method.id(), Jid(QStringLiteral("online@example.test")))
+              == EncryptionMethod::Availability::Available, "Registered method availability failed");
+    check(manager.availability(method.id(), Jid(QStringLiteral("unsupported@example.test")))
+              == EncryptionMethod::Availability::Unavailable, "Method-specific availability was ignored");
+    check(manager.availability(QStringLiteral("missing"), Jid(QStringLiteral("online@example.test")))
+              == EncryptionMethod::Availability::Unavailable, "Missing method was treated as available");
     const auto signalingAndStream = EncryptionMethod::Capabilities(EncryptionMethod::XmppStanza
                                                                   | EncryptionMethod::DataStream);
     check(manager.methods(signalingAndStream).count(method.id()) == 1,

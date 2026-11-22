@@ -3201,6 +3201,23 @@ bool OmemoEncryption::canDecrypt(const QDomElement &stanza) const
     return encrypted && d->supportedProtocols.testFlag(encrypted->protocol);
 }
 
+EncryptionMethod::Availability OmemoEncryption::availability(const Jid &peer) const
+{
+    if (supportedProtocols() == OmemoProtocols())
+        return Availability::Unavailable;
+    if (!peer.resource().isEmpty() && preferredProtocolFor(peer))
+        return Availability::Available;
+
+    // Missing caps information does not mean the recipient lacks OMEMO.
+    // A cached active PEP device is sufficient to confirm availability.
+    const auto supported = supportedProtocols();
+    for (const auto &device : devices(peer)) {
+        if (device.active && (device.protocols & supported) != OmemoProtocols())
+            return Availability::Available;
+    }
+    return Availability::Unknown;
+}
+
 OmemoProtocols OmemoEncryption::supportedProtocols() const { return d->supportedProtocols; }
 
 OmemoProtocols OmemoEncryption::protocolsFor(const Jid &fullJid) const

@@ -219,6 +219,7 @@ private:
 class EncryptionMethod : public QObject {
     Q_OBJECT
 public:
+    enum class Availability { Unknown, Available, Unavailable };
     enum Capability {
         XmppStanza  = 0x1, /**< XML stanza/SCE style encryption. */
         DataMessage = 0x2, /**< An independent byte message, processed at once. */
@@ -235,6 +236,8 @@ public:
     virtual EncryptedSession *startSession(Capabilities caps, const EncryptionContext &context) = 0;
     virtual Features          features() const                                                  = 0;
     virtual bool              canDecrypt(const QDomElement &stanza) const                       = 0;
+    // Concrete methods decide peer support; absent discovery must not be mistaken for rejection.
+    virtual Availability      availability(const Jid &peer) const;
 
     /**
      * Resolve and validate the peer data needed to recover a failed incoming
@@ -269,6 +272,7 @@ public:
 
     EncryptionMethod *method(const QString &id) const;
     EncryptionMethod *methodForStanza(const QDomElement &stanza) const;
+    EncryptionMethod::Availability availability(const QString &methodId, const Jid &peer) const;
     MethodsMap        methods(EncryptionMethod::Capabilities caps = EncryptionMethod::Capabilities(0xff)) const;
     Features          features() const;
 

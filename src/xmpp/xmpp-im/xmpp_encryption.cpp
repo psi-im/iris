@@ -223,6 +223,11 @@ EncryptionJob *EncryptedSession::run(const QByteArray &chunk, Direction directio
 EncryptionMethod::EncryptionMethod(QObject *parent) : QObject(parent) { }
 EncryptionMethod::~EncryptionMethod() = default;
 
+EncryptionMethod::Availability EncryptionMethod::availability(const Jid &) const
+{
+    return Availability::Available;
+}
+
 EncryptionJob *EncryptionMethod::prepareDecryptionRecovery(const EncryptionMetadata &) { return unsupportedJob(this); }
 
 EncryptionJob *EncryptionMethod::recoverDecryption(const EncryptionMetadata &) { return unsupportedJob(this); }
@@ -293,6 +298,12 @@ EncryptionMethod *EncryptionManager::methodForStanza(const QDomElement &stanza) 
             return entry;
     }
     return nullptr;
+}
+
+EncryptionMethod::Availability EncryptionManager::availability(const QString &methodId, const Jid &peer) const
+{
+    auto *entry = method(methodId);
+    return entry ? entry->availability(peer) : EncryptionMethod::Availability::Unavailable;
 }
 
 EncryptionManager::MethodsMap EncryptionManager::methods(EncryptionMethod::Capabilities caps) const
