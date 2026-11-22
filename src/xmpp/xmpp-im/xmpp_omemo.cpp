@@ -2235,18 +2235,41 @@ public:
             callback(true, {});
             return;
         }
-        const auto owner = Jid(owners.at(index)).bare();
-        if (fetchedDeviceLists.contains(fetchedListKey(owner, protocol))) {
-            ensureDeviceLists(owners, protocol, index + 1, callback);
-            return;
-        }
-        fetchDeviceList(owner, protocol, [this, owners, protocol, index, callback](bool ok, const QString &error) {
-            if (!ok) {
-                callback(false, error);
+
+        // For MUC a recipient list can contain many offline members. Network
+        // latency must not accumulate one RTT at a time, but avoid flooding
+        // PEP services with an unlimited number of simultaneous requests.
+        constexpr int MaxConcurrentDeviceLists = 4;
+        const int     end = qMin(index + MaxConcurrentDeviceLists, owners.size());
+        struct Batch {
+            int     pending = 0;
+            QString firstError;
+        };
+        auto batch = std::make_shared<Batch>();
+        batch->pending = end - index;
+
+        const auto completed = [this, batch, owners, protocol, end, callback](bool ok, const QString &error) {
+            if (!ok && batch->firstError.isEmpty())
+                batch->firstError = error.isEmpty() ? QStringLiteral("OMEMO device-list request failed") : error;
+            if (--batch->pending != 0)
+                return;
+            if (!batch->firstError.isEmpty()) {
+                callback(false, batch->firstError);
                 return;
             }
-            ensureDeviceLists(owners, protocol, index + 1, callback);
-        });
+            ensureDeviceLists(owners, protocol, end, callback);
+        };
+
+        for (int i = index; i < end; ++i) {
+            const auto owner = Jid(owners.at(i)).bare();
+            if (fetchedDeviceLists.contains(fetchedListKey(owner, protocol))) {
+                completed(true, {});
+            } else {
+                fetchDeviceList(owner, protocol, [completed](bool ok, const QString &error) {
+                    completed(ok, error);
+                });
+            }
+        }
     }
 
     void ensureSessions(const QList<QPair<QString, uint32_t>> &targets, OmemoProtocol protocol, int index,
