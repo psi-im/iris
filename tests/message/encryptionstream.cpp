@@ -142,7 +142,7 @@ int main(int argc, char **argv)
         const auto lookup = [&](const QString &method, const Jid &peer,
                                 Client::EncryptionSessionPurpose purpose) -> EncryptedSession * {
             lastPurpose = purpose;
-            const auto key = method + QLatin1Char('\\n') + peer.full();
+            const auto key = method + QLatin1Char('\n') + peer.full();
             auto *session = hostSessions.value(key).data();
             if (!session || session->isClosing()) {
                 EncryptionContext baseContext;
@@ -203,7 +203,7 @@ int main(int argc, char **argv)
               "Bare-addressed message did not use the selected full-JID resource");
 
         const auto methodId = registeredMethod.id();
-        const auto peerAKey = methodId + QLatin1Char('\\n') + peerA.full();
+        const auto peerAKey = methodId + QLatin1Char('\n') + peerA.full();
         sessionA->close();
         hostSessions.remove(peerAKey);
         check(sessionA->isClosing(), "Host did not retire its peer session");
