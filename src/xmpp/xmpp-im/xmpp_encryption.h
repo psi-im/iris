@@ -199,6 +199,8 @@ public:
     virtual EncryptionJob *decryptChunk(const QByteArray &chunk, bool final);
 
 private:
+    // Stream ordering and finalization belong to the session, not the registry.
+    EncryptionJob *run(bool encrypting, const QByteArray &chunk, bool final);
     void track(EncryptionJob *job);
     void operationFinished(EncryptionJob *job);
 
@@ -294,7 +296,6 @@ signals:
 
 private:
     EncryptionJob *unsupported(const QString &message) const;
-    EncryptionJob *runStream(EncryptedSession *session, const QByteArray &chunk, bool final, bool encrypting);
     EncryptionJob *run(EncryptedSession *session, const std::function<EncryptionJob *(EncryptedSession *)> &operation);
     EncryptionJob *runTransient(EncryptionMethod *method, EncryptionMethod::Capability capability,
                                 const EncryptionContext                                  &context,
