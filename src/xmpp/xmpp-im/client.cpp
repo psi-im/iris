@@ -74,6 +74,7 @@
 #include "jingle-s5b.h"
 #include "jingle-sxe.h"
 #include "jingle.h"
+#include "mucmanager.h"
 #include "s5b.h"
 #include "stundisco.h"
 #include "tcpportreserver.h"
@@ -109,19 +110,6 @@ namespace XMPP {
 //----------------------------------------------------------------------------
 // Client
 //----------------------------------------------------------------------------
-class Client::GroupChat {
-public:
-    enum { Connecting, Connected, Closing };
-    GroupChat() = default;
-
-    Jid     j;
-    int     status = 0;
-    QString password;
-    // Only occupant JIDs announced in presence for the current MUC join.
-    // Never cache these aliases across room disconnects or nickname reuse.
-    QHash<QString, Jid> realJids;
-};
-
 class Client::ClientPrivate {
 public:
     ClientPrivate() { }
@@ -160,23 +148,18 @@ public:
     StunDiscoManager         *stunDiscoManager         = nullptr;
     HttpFileUploadManager    *httpFileUploadManager    = nullptr;
     Jingle::Manager          *jingleManager            = nullptr;
-    QList<GroupChat>          groupChatList;
-    EncryptionManager        *encryptionManager         = nullptr;
-    const EncryptionMetadata *currentEncryptionMetadata = nullptr;
-    struct MucEcho {
-        QDomDocument plaintext;
-        QString methodId;
-    };
-    QHash<QString, MucEcho> pendingMucEchoes;
-    QStringList            pendingMucEchoOrder;
-    QSet<QString>          completedMucEchoes;
-    QStringList            completedMucEchoOrder;
+    MucManager              *mucManager               = nullptr;
     JT_PushMessage           *pushMessage               = nullptr;
 };
 
 Client::Client(QObject *par) : QObject(par)
 {
     d                = new ClientPrivate;
+    d->mucManager = new MucManager(this);
+    connect(d->mucManager, &MucManager::joined, this, &Client::groupChatJoined);
+    connect(d->mucManager, &MucManager::left, this, &Client::groupChatLeft);
+    connect(d->mucManager, &MucManager::presence, this, &Client::groupChatPresence);
+    connect(d->mucManager, &MucManager::error, this, &Client::groupChatError);
     d->active        = false;
     d->osName        = "N/A";
     d->clientName    = "N/A";
@@ -386,163 +369,38 @@ JT_PushMessage *Client::pushMessage() const { return d->pushMessage; }
 
 QString Client::groupChatPassword(const QString &host, const QString &room) const
 {
-    Jid jid(room + "@" + host);
-    for (const GroupChat &i : std::as_const(d->groupChatList)) {
-        if (i.j.compare(jid, false)) {
-            return i.password;
-        }
-    }
-    return QString();
+    return d->mucManager->password(host, room);
 }
 
-void Client::groupChatChangeNick(const QString &host, const QString &room, const QString &nick, const Status &_s)
+void Client::groupChatChangeNick(const QString &host, const QString &room, const QString &nick, const Status &status)
 {
-    Jid jid(room + "@" + host + "/" + nick);
-    for (QList<GroupChat>::Iterator it = d->groupChatList.begin(); it != d->groupChatList.end(); it++) {
-        GroupChat &i = *it;
-        if (i.j.compare(jid, false)) {
-            i.j = jid;
-
-            Status s = _s;
-            s.setIsAvailable(true);
-
-            JT_Presence *j = new JT_Presence(rootTask());
-            j->pres(jid, s);
-            j->go(true);
-
-            break;
-        }
-    }
+    d->mucManager->changeNick(host, room, nick, status);
 }
 
 bool Client::groupChatJoin(const QString &host, const QString &room, const QString &nick, const QString &password,
-                           int maxchars, int maxstanzas, int seconds, const QDateTime &since, const Status &_s)
+                           int maxchars, int maxstanzas, int seconds, const QDateTime &since, const Status &status)
 {
-    Jid jid(room + "@" + host + "/" + nick);
-    for (QList<GroupChat>::Iterator it = d->groupChatList.begin(); it != d->groupChatList.end();) {
-        GroupChat &i = *it;
-        if (i.j.compare(jid, false)) {
-            // if this room is shutting down, then free it up
-            if (i.status == GroupChat::Closing)
-                it = d->groupChatList.erase(it);
-            else
-                return false;
-        } else
-            ++it;
-    }
-
-    debug(QString("Client: Joined: [%1]\n").arg(jid.full()));
-    GroupChat i;
-    i.j        = jid;
-    i.status   = GroupChat::Connecting;
-    i.password = password;
-    d->groupChatList += i;
-
-    JT_Presence *j = new JT_Presence(rootTask());
-    Status       s = _s;
-    s.setMUC();
-    s.setMUCHistory(maxchars, maxstanzas, seconds, since);
-    if (!password.isEmpty()) {
-        s.setMUCPassword(password);
-    }
-    j->pres(jid, s);
-    j->go(true);
-
-    return true;
+    return d->mucManager->join(host, room, nick, password, maxchars, maxstanzas, seconds, since, status);
 }
 
-void Client::groupChatSetStatus(const QString &host, const QString &room, const Status &_s)
+void Client::groupChatSetStatus(const QString &host, const QString &room, const Status &status)
 {
-    Jid  jid(room + "@" + host);
-    bool found = false;
-    for (const GroupChat &i : std::as_const(d->groupChatList)) {
-        if (i.j.compare(jid, false)) {
-            found = true;
-            jid   = i.j;
-            break;
-        }
-    }
-    if (!found)
-        return;
-
-    Status s = _s;
-    s.setIsAvailable(true);
-
-    JT_Presence *j = new JT_Presence(rootTask());
-    j->pres(jid, s);
-    j->go(true);
+    d->mucManager->setStatus(host, room, status);
 }
 
-void Client::groupChatLeave(const QString &host, const QString &room, const QString &statusStr)
+void Client::groupChatLeave(const QString &host, const QString &room, const QString &reason)
 {
-    Jid jid(room + "@" + host);
-    for (QList<GroupChat>::Iterator it = d->groupChatList.begin(); it != d->groupChatList.end(); it++) {
-        GroupChat &i = *it;
-
-        if (!i.j.compare(jid, false))
-            continue;
-
-        i.status = GroupChat::Closing;
-        i.realJids.clear();
-        const QString prefix = jid.bare() + QLatin1Char('\n');
-        for (auto pending = d->pendingMucEchoes.begin(); pending != d->pendingMucEchoes.end();) {
-            if (pending.key().startsWith(prefix)) {
-                d->pendingMucEchoOrder.removeAll(pending.key());
-                pending = d->pendingMucEchoes.erase(pending);
-            } else {
-                ++pending;
-            }
-        }
-        for (auto it = d->completedMucEchoes.begin(); it != d->completedMucEchoes.end();) {
-            if (it->startsWith(prefix)) {
-                d->completedMucEchoOrder.removeAll(*it);
-                it = d->completedMucEchoes.erase(it);
-            } else {
-                ++it;
-            }
-        }
-        debug(QString("Client: Leaving: [%1]\n").arg(i.j.full()));
-
-        JT_Presence *j = new JT_Presence(rootTask());
-        Status       s;
-        s.setIsAvailable(false);
-        s.setStatus(statusStr);
-        j->pres(i.j, s);
-        j->go(true);
-    }
+    d->mucManager->leave(host, room, reason);
 }
 
-void Client::groupChatLeaveAll(const QString &statusStr)
+void Client::groupChatLeaveAll(const QString &reason)
 {
-    d->pendingMucEchoes.clear();
-    d->pendingMucEchoOrder.clear();
-    d->completedMucEchoes.clear();
-    d->completedMucEchoOrder.clear();
-    if (d->stream && d->active) {
-        for (QList<GroupChat>::Iterator it = d->groupChatList.begin(); it != d->groupChatList.end(); it++) {
-            GroupChat &i = *it;
-            i.status     = GroupChat::Closing;
-            i.realJids.clear();
-
-            JT_Presence *j = new JT_Presence(rootTask());
-            Status       s;
-            s.setIsAvailable(false);
-            s.setStatus(statusStr);
-            j->pres(i.j, s);
-            j->go(true);
-        }
-    }
+    d->mucManager->leaveAll(reason);
 }
 
 QString Client::groupChatNick(const QString &host, const QString &room) const
 {
-    Jid jid(room + "@" + host);
-    for (const GroupChat &gc : std::as_const(d->groupChatList)) {
-        if (gc.j.compare(jid, false)) {
-            return gc.j.resource();
-        }
-    }
-    return QString();
+    return d->mucManager->nick(host, room);
 }
 
 /*void Client::start()
@@ -576,11 +434,7 @@ void Client::cleanup()
 {
     d->active = false;
     // d->authed = false;
-    d->groupChatList.clear();
-    d->pendingMucEchoes.clear();
-    d->pendingMucEchoOrder.clear();
-    d->completedMucEchoes.clear();
-    d->completedMucEchoOrder.clear();
+    d->mucManager->clear();
 }
 
 /*void Client::continueAfterCert()
@@ -684,28 +538,6 @@ Task *Client::rootTask() { return d->root; }
 
 QDomDocument *Client::doc() const { return &d->doc; }
 
-void Client::rememberEncryptedMucEcho(const QDomElement &plaintext, const QString &methodId)
-{
-    if (methodId != QLatin1String("omemo")
-        || plaintext.attribute(QStringLiteral("type")) != QLatin1String("groupchat"))
-        return;
-    const Jid room(plaintext.attribute(QStringLiteral("to")));
-    const QString id = plaintext.attribute(QStringLiteral("id"));
-    if (!room.isValid() || room.node().isEmpty() || !room.resource().isEmpty() || id.isEmpty())
-        return;
-
-    const QString key = room.bare() + QLatin1Char('\n') + id;
-    QDomDocument copy;
-    copy.appendChild(copy.importNode(plaintext, true));
-    d->pendingMucEchoes.insert(key, { copy, methodId });
-    d->pendingMucEchoOrder.removeAll(key);
-    d->pendingMucEchoOrder.append(key);
-    // Keep only a small bounded set; a server may never reflect old sends.
-    constexpr int MaxPendingMucEchoes = 64;
-    while (d->pendingMucEchoOrder.size() > MaxPendingMucEchoes)
-        d->pendingMucEchoes.remove(d->pendingMucEchoOrder.takeFirst());
-}
-
 void Client::distribute(const QDomElement &x)
 {
     static QString fromAttr(QStringLiteral("from"));
@@ -718,56 +550,23 @@ void Client::distribute(const QDomElement &x)
     }
 
     if (auto method = d->encryptionManager->methodForStanza(x)) {
-        // The sending device does not encrypt a key to itself. Recover only
-        // its own *specific* server-reflected MUC stanza from the original
-        // plaintext held until echo; do not bypass normal cryptography for
-        // other occupants, other rooms or unknown message IDs.
+        // The MUC manager authenticates the reflected ciphertext and its
+        // live sender before delivering our own encrypted message.
         if (method->id() == QLatin1String("omemo")
             && x.attribute(QStringLiteral("type")) == QLatin1String("groupchat")) {
-            const Jid occupant(x.attribute(QStringLiteral("from")));
-            const QString key = occupant.bare() + QLatin1Char('\n')
-                + x.attribute(QStringLiteral("id"));
-            for (const auto &gc : std::as_const(d->groupChatList)) {
-                if (gc.status != GroupChat::Connected || !gc.j.compare(occupant, false)
-                    || gc.j.resource() != occupant.resource()
-                    || gc.realJids.value(occupant.resource()).bare() != jid().bare())
-                    continue;
-                if (d->completedMucEchoes.contains(key))
-                    return; // Already delivered this authenticated local echo.
-                auto pending = d->pendingMucEchoes.find(key);
-                if (pending == d->pendingMucEchoes.end() || pending->methodId != method->id())
-                    break;
-                QDomDocument delivered;
-                auto root = delivered.importNode(pending->plaintext.documentElement(), true).toElement();
-                delivered.appendChild(root);
-                root.setAttribute(QStringLiteral("from"), occupant.full());
-                if (x.hasAttribute(QStringLiteral("to")))
-                    root.setAttribute(QStringLiteral("to"), x.attribute(QStringLiteral("to")));
-                else
-                    root.removeAttribute(QStringLiteral("to"));
-                // Preserve the server's stanza ID and EME marker. The latter
-                // makes normal message parsing mark the local echo encrypted;
-                // never accept server-provided plaintext body or extensions.
-                for (auto child = x.firstChildElement(); !child.isNull(); child = child.nextSiblingElement()) {
-                    const auto ns = child.namespaceURI();
-                    const auto name = child.localName();
-                    if ((ns == QLatin1String("urn:xmpp:sid:0") && name == QLatin1String("stanza-id"))
-                        || (ns == QLatin1String("urn:xmpp:eme:0") && name == QLatin1String("encryption")))
-                        root.appendChild(delivered.importNode(child, true));
-                }
-                EncryptionMetadata metadata;
-                metadata.methodId = method->id();
-                metadata.sender = jid().bare();
-                metadata.details.insert(QStringLiteral("localMucEcho"), true);
-                d->pendingMucEchoOrder.removeAll(key);
-                d->pendingMucEchoes.erase(pending);
-                d->completedMucEchoes.insert(key);
-                d->completedMucEchoOrder.append(key);
-                constexpr int MaxCompletedMucEchoes = 64;
-                while (d->completedMucEchoOrder.size() > MaxCompletedMucEchoes)
-                    d->completedMucEchoes.remove(d->completedMucEchoOrder.takeFirst());
-                distributeDecrypted(root, &metadata);
+            auto echo = d->mucManager->resolveEncryptedEcho(x, method->id());
+            switch (echo.disposition) {
+            case MucManager::EchoDisposition::Delivered:
+                distributeDecrypted(echo.plaintext.documentElement(), &echo.metadata);
                 return;
+            case MucManager::EchoDisposition::Duplicate:
+                return;
+            case MucManager::EchoDisposition::Rejected:
+                emit stanzaDecryptionFailed(method->id(), Jid(x.attribute(QStringLiteral("from"))),
+                                            EncryptionJob::Error::AuthenticationFailed, echo.error, {});
+                return;
+            case MucManager::EchoDisposition::NotEcho:
+                break;
             }
         }
         EncryptionContext context;
@@ -776,19 +575,14 @@ void Client::distribute(const QDomElement &x)
             // Incoming MUC 'from' is room/nick, never the cryptographic
             // sender. Use only a current real JID supplied by MUC presence.
             // Never infer an identity from the nick or from an old room join.
-            for (const auto &gc : std::as_const(d->groupChatList)) {
-                if (gc.status == GroupChat::Closing || !gc.j.compare(occupant, false))
-                    continue;
-                const Jid real = gc.realJids.value(occupant.resource());
-                if (!real.isValid() || real.node().isEmpty() || occupant.resource().isEmpty()) {
-                    emit stanzaDecryptionFailed(
-                        method->id(), occupant, EncryptionJob::Error::AuthenticationFailed,
-                        QStringLiteral("No authenticated real JID for MUC sender %1").arg(occupant.full()), {});
-                    return;
-                }
-                context.options.insert(QStringLiteral("mucRealSender"), real.bare());
-                break;
+            const Jid real = d->mucManager->realJid(occupant);
+            if (!real.isValid() || real.node().isEmpty()) {
+                emit stanzaDecryptionFailed(method->id(), occupant, EncryptionJob::Error::AuthenticationFailed,
+                                           QStringLiteral("No authenticated real JID for MUC sender %1")
+                                               .arg(occupant.full()), {});
+                return;
             }
+            context.options.insert(QStringLiteral("mucRealSender"), real.bare());
         }
         auto              job      = d->encryptionManager->decrypt(x, context);
         const QString     methodId = method->id();
@@ -981,7 +775,7 @@ EncryptionJob *Client::sendEncrypted(const QDomElement &stanza, const QString &m
     auto job    = d->encryptionManager->encrypt(methodId, stanza, context);
     auto finish = [this, job, original, methodId]() {
         if (job->success()) {
-            rememberEncryptedMucEcho(original.documentElement(), methodId);
+            d->mucManager->rememberEncryptedEcho(original.documentElement(), job->stanza(), methodId);
             send(job->stanza());
         } else {
             debug(QStringLiteral("Client: outgoing stanza encryption failed: %1").arg(job->errorString()));
@@ -1003,7 +797,7 @@ EncryptionJob *Client::sendEncrypted(const QDomElement &stanza, EncryptedSession
     auto job    = d->encryptionManager->encrypt(session, stanza);
     auto finish = [this, job, original, methodId]() {
         if (job->success()) {
-            rememberEncryptedMucEcho(original.documentElement(), methodId);
+            d->mucManager->rememberEncryptedEcho(original.documentElement(), job->stanza(), methodId);
             send(job->stanza());
         } else {
             debug(QStringLiteral("Client: outgoing stanza encryption failed: %1").arg(job->errorString()));
@@ -1095,55 +889,8 @@ void Client::ppPresence(const Jid &j, const Status &s)
     else
         debug(QString("Client: %1 is unavailable.\n").arg(j.full()));
 
-    for (QList<GroupChat>::Iterator it = d->groupChatList.begin(); it != d->groupChatList.end(); it++) {
-        GroupChat &i = *it;
-
-        if (i.j.compare(j, false)) {
-            // MUC nicknames are transient. Only map the current occupant
-            // presence to its actual JID, and forget it on any unavailable
-            // or identity-less update. A later occupant can reuse that nick.
-            if (!j.resource().isEmpty()) {
-                if (i.status != GroupChat::Closing && s.isAvailable() && !s.hasError() && s.hasMUCItem()
-                    && s.mucItem().jid().isValid() && !s.mucItem().jid().node().isEmpty())
-                    i.realJids.insert(j.resource(), Jid(s.mucItem().jid().bare()));
-                else
-                    i.realJids.remove(j.resource());
-            }
-            bool us = i.j.resource() == j.resource() || j.resource().isEmpty();
-
-            debug(QString("for groupchat i=[%1] pres=[%2], [us=%3].\n").arg(i.j.full(), j.full()).arg(us));
-            switch (i.status) {
-            case GroupChat::Connecting:
-                if (us && s.hasError()) {
-                    Jid j = i.j;
-                    d->groupChatList.erase(it);
-                    emit groupChatError(j, s.errorCode(), s.errorString());
-                } else {
-                    // don't signal success unless it is a non-error presence
-                    if (!s.hasError()) {
-                        i.status = GroupChat::Connected;
-                        emit groupChatJoined(i.j);
-                    }
-                    emit groupChatPresence(j, s);
-                }
-                break;
-            case GroupChat::Connected:
-                emit groupChatPresence(j, s);
-                break;
-            case GroupChat::Closing:
-                if (us && !s.isAvailable()) {
-                    Jid j = i.j;
-                    d->groupChatList.erase(it);
-                    emit groupChatLeft(j);
-                }
-                break;
-            default:
-                break;
-            }
-
-            return;
-        }
-    }
+    if (d->mucManager->handlePresence(j, s))
+        return;
 
     if (s.hasError()) {
         emit presenceError(j, s.errorCode(), s.errorString());
@@ -1257,17 +1004,7 @@ void Client::pmMessage(const Message &m)
         d->ibbman->takeIncomingData(m.from(), m.id(), m.ibbData(), Stanza::Message);
     }
 
-    if (m.type() == Message::Type::Groupchat) {
-        for (QList<GroupChat>::Iterator it = d->groupChatList.begin(); it != d->groupChatList.end(); it++) {
-            const GroupChat &i = *it;
-
-            if (!i.j.compare(m.from(), false))
-                continue;
-
-            if (i.status == GroupChat::Connected)
-                emit messageReceived(m);
-        }
-    } else
+    if (m.type() != Message::Type::Groupchat || d->mucManager->acceptsMessage(m.from()))
         emit messageReceived(m);
 }
 
