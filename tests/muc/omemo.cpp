@@ -114,6 +114,9 @@ void exerciseMucSelfEcho(Endpoint &alice, Endpoint &bob)
     context.options.insert(QStringLiteral("omemoProtocol"), QStringLiteral("omemo2"));
     auto *job = wait(alice.client.sendMessageEncrypted(outgoing, OmemoEncryption::methodId(), context), alice, bob);
     check(job->success(), "Could not send a MUC encrypted stanza");
+    // A completed encryption job need not have driven the fixture's outgoing
+    // stream queue. The onStanza hook runs when pump() drains that queue.
+    pump(alice, bob);
     check(!captured.documentElement().isNull(), "The encrypted groupchat stanza was not emitted");
 
     QDomDocument echoed;
