@@ -333,9 +333,14 @@ MucManager::EchoResult MucManager::resolveEncryptedEcho(const QDomElement &stanz
 
     const Jid occupant(stanza.attribute(QStringLiteral("from")));
     const auto *room = findRoom(occupant);
-    if (!room || room->state != State::Connected || room->jid.resource() != occupant.resource()
-        || room->realJids.value(occupant.resource()).bare() != client_->jid().bare())
-        return result; // Not our verified live MUC occupant.
+    if (!room || room->state != State::Connected || occupant.resource().isEmpty()
+        || room->jid.resource() != occupant.resource())
+        return result;
+    const Jid real = room->realJids.value(occupant.resource());
+    const Jid self = client_->jid();
+    if (!real.isValid() || real.node().isEmpty() || !self.isValid() || self.node().isEmpty()
+        || real.bare() != self.bare())
+        return result; // Only a verified current MUC occupant can be our echo.
 
     const QString id = stanza.attribute(QStringLiteral("id"));
     if (id.isEmpty())
