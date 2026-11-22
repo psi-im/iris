@@ -431,6 +431,19 @@ void exerciseMucSelfEcho(Endpoint &alice, Endpoint &bob)
     echoed.appendChild(stanza);
     stanza.setAttribute(QStringLiteral("from"), selfOccupant);
     stanza.setAttribute(QStringLiteral("to"), alice.jid.full());
+
+    // Matching room, nick and message id alone must not authenticate an
+    // echo. The ciphertext and encrypted recipient keys must also match.
+    QDomDocument forgedDoc;
+    auto forged = forgedDoc.importNode(stanza, true).toElement();
+    forgedDoc.appendChild(forged);
+    auto encrypted = forged.firstChildElement(QStringLiteral("encrypted"));
+    check(!encrypted.isNull(), "OMEMO encrypted element missing in echo test");
+    encrypted.setAttribute(QStringLiteral("tampered"), QStringLiteral("yes"));
+    alice.stream.inject(forged);
+    check(ownMessages == 0 && decryptionFailures == 1,
+          "MUC echoed a ciphertext not matching the locally sent message");
+
     alice.stream.inject(stanza);
     check(ownMessages == 1 && receivedBody == QStringLiteral("A protected groupchat message") && encrypted,
           "The outgoing OMEMO MUC echo was not delivered locally as an encrypted message");
@@ -438,7 +451,7 @@ void exerciseMucSelfEcho(Endpoint &alice, Endpoint &bob)
     // A duplicate echo has no remaining local plaintext mapping and must not
     // be shown again; neither may a message with the wrong stanza ID.
     alice.stream.inject(stanza);
-    check(ownMessages == 1 && decryptionFailures == 0,
+    check(ownMessages == 1 && decryptionFailures == 1,
           "A duplicate OMEMO MUC self echo was shown or reported as a decryption error");
     onStanza = {};
     qInfo("OMEMO 2 MUC self echo reconciliation passed");
