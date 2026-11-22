@@ -65,6 +65,20 @@ public:
     }
 };
 
+class ConcurrentContextSession final : public EncryptedSession {
+public:
+    ConcurrentContextSession() : EncryptedSession(QStringLiteral("test-concurrent")) { }
+
+    EncryptionJob *doEncrypt(const QDomElement &xml, const EncryptionContext &context) override
+    {
+        auto *job = new EncryptionJob(this);
+        EncryptionMetadata metadata;
+        metadata.details.insert(QStringLiteral("operation"), context.options.value(QStringLiteral("operation")));
+        QTimer::singleShot(0, job, [job, xml, metadata]() { job->complete(xml, metadata); });
+        return job;
+    }
+};
+
 class StreamMethod final : public EncryptionMethod {
 public:
     QString id() const override { return QStringLiteral("test-stream"); }
@@ -178,6 +192,26 @@ int main(int argc, char **argv)
         client.close();
         check(sessionB->isClosing(), "Disconnect did not close the remaining peer session");
     }
+
+    // Two concurrent stanza jobs must retain their own immutable operation
+    // contexts even though they run through the same long-lived session.
+    ConcurrentContextSession concurrent;
+    EncryptionContext firstContext;
+    firstContext.options.insert(QStringLiteral("operation"), QStringLiteral("first"));
+    EncryptionContext secondContext;
+    secondContext.options.insert(QStringLiteral("operation"), QStringLiteral("second"));
+    QDomDocument concurrentDocument;
+    auto concurrentMessage = concurrentDocument.createElement(QStringLiteral("message"));
+    concurrentDocument.appendChild(concurrentMessage);
+    auto *firstJob = concurrent.encrypt(concurrentMessage, firstContext);
+    auto *secondJob = concurrent.encrypt(concurrentMessage, secondContext);
+    check(!firstJob->isFinished() && !secondJob->isFinished(),
+          "Concurrent stanza jobs were unexpectedly synchronous");
+    check(await(firstJob)->success() && await(secondJob)->success()
+              && firstJob->metadata().details.value(QStringLiteral("operation")).toString() == QStringLiteral("first")
+              && secondJob->metadata().details.value(QStringLiteral("operation")).toString() == QStringLiteral("second")
+              && concurrent.context().options.isEmpty(),
+          "Concurrent encrypted operations shared mutable stanza context");
 
     // Jingle can use one encryption session both for signaling XML and for payload chunks.
     auto *tx = manager.startSession(method.id(),
