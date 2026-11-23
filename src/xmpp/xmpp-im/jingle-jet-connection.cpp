@@ -210,6 +210,14 @@ namespace XMPP { namespace Jingle { namespace JET {
                 fail(QStringLiteral("JET datagram framing is incomplete"));
                 return;
             }
+            if (finished_ && plain.isEmpty()) {
+                // A zero-length file still needs to notify its reader that
+                // the authentication tag has arrived.
+                QPointer<Connection> guard(this);
+                emit readyRead();
+                if (!guard)
+                    return;
+            }
         }
     }
 

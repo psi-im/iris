@@ -514,10 +514,8 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
             if (bytesLeft && *bytesLeft == 0) {
                 QPointer<Application> guard(q);
                 if (protection && !protection->authenticated()) {
-                    // The data written so far is not authentic: the consumer discards it on failure.
-                    lastReason = Reason(Reason::Condition::SecurityError,
-                                        QStringLiteral("the encrypted file failed authentication"));
-                    q->remove(lastReason.condition(), lastReason.text());
+                    // In particular, an empty file has no plaintext bytes
+                    // to read while its final authentication tag is in flight.
                     return;
                 }
                 beginPayloadFinishing();
@@ -656,6 +654,12 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
         void tryFinalizeIncoming()
         {
             const bool moreBytesExpected = bytesLeft && *bytesLeft > 0;
+            if (protection && protection->encrypted() && !protection->authenticated()) {
+                if (connection && connection->isOpen())
+                    return;
+                handleStreamFail(QStringLiteral("JET stream ended without authentication"));
+                return;
+            }
             if (q->_state == State::Finished || receiptReady || outgoingReceived || q->_terminationReason.isValid())
                 return;
             if (bytesLeft && !moreBytesExpected && q->_state < State::Finishing) {
