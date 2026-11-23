@@ -60,8 +60,8 @@ namespace XMPP { namespace Jingle { namespace JET {
         virtual void        decryptSecret(const Jid &peer, const QDomElement &security, const Done &done) = 0;
     };
 
-    /** Shared JET signaling and per-content transport-key installation. */
-    class IRIS_EXPORT Jet : public QObject, public SignalingFilter {
+    /** Shared JET key preparation, called by accepted Jingle content owners. */
+    class IRIS_EXPORT Jet : public QObject {
         Q_OBJECT
     public:
         static QString ns(); // urn:xmpp:jingle:jet:0
@@ -73,9 +73,15 @@ namespace XMPP { namespace Jingle { namespace JET {
         bool registerKeyTransport(KeyTransport *transport);
         void unregisterKeyTransport(KeyTransport *transport);
 
-        bool        filterOutgoing(const Jid &to, const QDomElement &jingle, const Done &done) override;
-        bool        filterIncoming(const Jid &from, const QDomElement &jingle, const Done &done) override;
-        QStringList discoFeatures() const override;
+        using Done = KeyTransport::Done;
+        void prepareOutgoing(Session *session, const Done &done);
+        void prepareIncoming(Session *session, const QDomElement &security, const QString &contentName,
+                             const Done &done);
+        QStringList discoFeatures() const;
+
+    signals:
+        // A pending preparation must fail closed if its crypto provider goes away.
+        void keyTransportRemoved(const QString &methodId);
 
     private:
         class Private;

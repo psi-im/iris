@@ -1233,6 +1233,10 @@ namespace XMPP { namespace Jingle {
             const bool installed = app->setTransport(std::get<2>(trpr));
             if (!session || !app)
                 return result { Unparsed, Reason::Success, nullptr };
+            if (installed && !app->setRemoteContentExtensions(ce))
+                return result { Unparsed, Reason::Success, nullptr };
+            if (!session || !app)
+                return result { Unparsed, Reason::Success, nullptr };
             appReleaser.applications.clear(); // The pad remains the sole lifetime owner.
             if (installed)
                 return result { Ok, Reason::Success, app };

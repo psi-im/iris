@@ -109,8 +109,8 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
         /**
          * End-to-end encryption of the file data with JET (XEP-0391): the whole transfer is AES-GCM with
          * the 16-byte tag appended, as Conversations and Dino send it; size and hashes describe the plain
-         * file. The key and the 12-byte IV come from an envelope that a signaling filter such as
-         * JetOmemo exchanges. Set before the connection is established; not for ranged transfers.
+         * file. The key and the 12-byte IV are prepared by the content itself using a
+         * registered JET key transport. Set before connection; not for ranged transfers.
          */
         void setTransportSecret(const QByteArray &key, const QByteArray &iv);
         bool isTransportEncrypted() const;
@@ -125,6 +125,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
         void                              start() override;
         SetDescError                      setRemoteOffer(const QDomElement &description) override;
         SetDescError                      setRemoteAnswer(const QDomElement &description) override;
+        bool                              setRemoteContentExtensions(const QDomElement &content) override;
 
     protected:
         QDomElement makeLocalOffer() override;

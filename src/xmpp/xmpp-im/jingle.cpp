@@ -23,6 +23,7 @@
 #include "jingle-rtp.h"
 
 #include "jingle-application.h"
+#include "jingle-jet.h"
 #include "jingle-session.h"
 #include "xmpp-im/xmpp_hash.h"
 #include "xmpp/jid/jid.h"
@@ -1052,6 +1053,8 @@ namespace XMPP { namespace Jingle {
         }
         for (auto filter : d->filters)
             ret += filter->discoFeatures();
+        if (auto *jet = JET::Jet::of(this))
+            ret += jet->discoFeatures();
         ret.removeDuplicates();
         return ret;
     }
