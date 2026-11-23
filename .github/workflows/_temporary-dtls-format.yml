@@ -1,4 +1,4 @@
-name: Temporary DTLS refactor clang-format
+name: Temporary DTLS final clang-format
 on:
   push:
     branches: [feat/encryption-session-stream-api]
