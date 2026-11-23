@@ -879,37 +879,54 @@ namespace XMPP { namespace Jingle {
 
     void Manager::removeSignalingFilter(SignalingFilter *filter) { d->filters.removeAll(filter); }
 
-    // A JET-protected file does not need a DTLS signaling filter. Keep the
-    // no-filter fail-closed policy for every other kind of required E2EE.
-    static bool jetProtectsContents(Manager *manager, Session *session, const QDomElement &jingle)
+    // Jingle has already identified each content's application and transport.
+    // Enforce the required-E2EE policy at this common signaling boundary; the
+    // selected transport/application performs cryptographic preparation itself.
+    static bool protectedContents(Manager *manager, Session *session, const QDomElement &jingle)
     {
-        auto *jet = manager->jet();
-        if (!jet || jet->discoFeatures().isEmpty())
+        if (!session)
             return false;
 
         bool found = false;
         for (auto content = jingle.firstChildElement(QStringLiteral("content")); !content.isNull();
-             content      = content.nextSiblingElement(QStringLiteral("content"))) {
-            found                 = true;
-            bool protectedContent = false;
-            if (content.firstChildElement(QStringLiteral("description")).namespaceURI() == FileTransfer::NS) {
-                for (auto security = content.firstChildElement(QStringLiteral("security")); !security.isNull();
-                     security      = security.nextSiblingElement(QStringLiteral("security"))) {
-                    if (security.namespaceURI() == JET::Jet::ns()) {
-                        protectedContent = true;
+             content = content.nextSiblingElement(QStringLiteral("content"))) {
+            found = true;
+            const auto transport = content.firstChildElement(QStringLiteral("transport"));
+            const auto description = content.firstChildElement(QStringLiteral("description"));
+            const ContentBase key(content);
+            auto *application = key.isValid() ? session->content(key.name, key.creator) : nullptr;
+            auto *file = qobject_cast<FileTransfer::Application *>(application);
+
+            if (file && file->isTransportEncrypted())
+                continue;
+            if (description.namespaceURI() == FileTransfer::NS && manager->jet()) {
+                bool hasSecurity = false;
+                for (auto sec = content.firstChildElement(QStringLiteral("security")); !sec.isNull();
+                     sec = sec.nextSiblingElement(QStringLiteral("security"))) {
+                    if (sec.namespaceURI() == JET::Jet::ns()) {
+                        hasSecurity = true;
                         break;
                     }
                 }
+                if (hasSecurity)
+                    continue;
             }
-            if (!protectedContent && session) {
-                const ContentBase key(content);
-                auto             *application = key.isValid()
-                                ? qobject_cast<FileTransfer::Application *>(session->content(key.name, key.creator))
-                                : nullptr;
-                protectedContent              = application && application->isTransportEncrypted();
+            if (transport.namespaceURI() == QLatin1String("urn:xmpp:jingle:transports:sxe")
+                && transport.hasAttribute(QStringLiteral("encryption")))
+                continue;
+
+            if (transport.namespaceURI() == ICE::NS || transport.namespaceURI() == ICE::NS_ICE_UDP) {
+                const auto fingerprint = transport.firstChildElement(QStringLiteral("fingerprint"));
+                if (!fingerprint.isNull() && fingerprint.namespaceURI() == OmemoDtlsVerification::ns()
+                    && manager->dtlsVerification())
+                    continue;
+                // Candidate-only updates do not change the established DTLS
+                // fingerprint; the transport still enforces its authenticated
+                // peer association.
+                if (fingerprint.isNull() && description.isNull())
+                    continue;
             }
-            if (!protectedContent)
-                return false;
+            return false;
         }
         return found;
     }
@@ -923,7 +940,7 @@ namespace XMPP { namespace Jingle {
                 = this->session(Jid(iq.attribute(QStringLiteral("from"))), jingle.attribute(QStringLiteral("sid")));
             if (session && session->isEndToEndRequired()
                 && !jingle.firstChildElement(QStringLiteral("content")).isNull()
-                && !jetProtectsContents(this, session, jingle)) {
+                && !protectedContents(this, session, jingle)) {
                 d->pushTask->respondError(iq,
                                           Stanza::Error(Stanza::Error::ErrorType::Cancel,
                                                         Stanza::Error::ErrorCond::NotAcceptable,
@@ -961,7 +978,7 @@ namespace XMPP { namespace Jingle {
             const auto session = this->session(to, jingle.attribute(QStringLiteral("sid")));
             if (session && session->isEndToEndRequired()
                 && !jingle.firstChildElement(QStringLiteral("content")).isNull()
-                && !jetProtectsContents(this, session, jingle))
+                && !protectedContents(this, session, jingle))
                 send({},
                      Stanza::Error(Stanza::Error::ErrorType::Cancel, Stanza::Error::ErrorCond::NotAcceptable,
                                    QStringLiteral("No end-to-end encryption available")));
