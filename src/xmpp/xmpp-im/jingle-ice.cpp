@@ -219,7 +219,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
 
             e = el.firstChildElement(QLatin1String("fingerprint"));
             if (!e.isNull()) {
-                if (e.namespaceURI() == OmemoDtlsVerification::ns())
+                if (e.namespaceURI() == QLatin1String("http://gultsch.de/xmpp/drafts/omemo/dlts-srtp-verification"))
                     protectedFingerprint = e;
                 else if (!fingerprint.parse(e))
                     throw std::runtime_error("invalid fingerprint");
@@ -1932,6 +1932,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
             if (guard && guard->d->remoteUpdateBusy && guard->_state < State::Finishing)
                 guard->onFinish(Reason::SecurityError, QStringLiteral("OMEMO DTLS verifier was unloaded"));
         });
+#ifdef IRIS_ENABLE_OMEMO
         const auto                      encryptedFingerprint = update.protectedFingerprint;
         QPointer<OmemoDtlsVerification> provider(verification);
         verification->decryptFingerprint(
@@ -1970,10 +1971,19 @@ namespace XMPP { namespace Jingle { namespace ICE {
                 update.protectedFingerprint.clear();
                 proceed(std::move(update));
             });
+#else
+        onFinish(Reason::SecurityError, QStringLiteral("OMEMO support is not compiled into this client"));
+#endif
     }
 
     void Transport::prepareOutgoingFingerprint()
     {
+#ifndef IRIS_ENABLE_OMEMO
+        if (requiresVerifiedFingerprint())
+            onFinish(Reason::SecurityError, QStringLiteral("OMEMO support is not compiled into this client"));
+        else
+            emit updated();
+#else
         if (_state >= State::Finishing || d->outgoingFingerprintBusy || !(d->pendingActions & Private::NewFingerprint))
             return;
         auto      *session   = pad()->session();
@@ -2052,6 +2062,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
                     guard->start();
                 }
             });
+#endif
     }
 
     void Transport::prepare()

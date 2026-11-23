@@ -855,8 +855,10 @@ namespace XMPP { namespace Jingle {
         auto decorated = initiation;
         for (auto filter : std::as_const(d->filters))
             filter->decorateMessageInitiation(to, decorated);
+#ifdef IRIS_ENABLE_OMEMO
         if (auto *verifier = dtlsVerification())
             verifier->decorateMessageInitiation(to, decorated);
+#endif
 
         Message message(to);
         message.setType(Message::Type::Chat);
@@ -916,7 +918,7 @@ namespace XMPP { namespace Jingle {
 
             if (transport.namespaceURI() == ICE::NS || transport.namespaceURI() == ICE::NS_ICE_UDP) {
                 const auto fingerprint = transport.firstChildElement(QStringLiteral("fingerprint"));
-                if (!fingerprint.isNull() && fingerprint.namespaceURI() == OmemoDtlsVerification::ns()
+                if (!fingerprint.isNull() && fingerprint.namespaceURI() == QLatin1String("http://gultsch.de/xmpp/drafts/omemo/dlts-srtp-verification")
                     && manager->dtlsVerification())
                     continue;
                 // Candidate-only updates do not change the established DTLS
