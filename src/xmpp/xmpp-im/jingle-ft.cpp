@@ -1103,6 +1103,10 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
                     guard->d->outgoingSecret = secret;
             }
             guard->d->jetPrepared = true;
+            if (!guard->_transport) {
+                guard->remove(Reason::FailedTransport, QStringLiteral("Transport disappeared during JET preparation"));
+                return;
+            }
             guard->d->setState(State::ApprovedToSend);
             if (guard)
                 guard->prepareTransport();

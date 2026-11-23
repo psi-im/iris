@@ -171,8 +171,9 @@ Conversations `Content.setSecurity()/getSecurity()`, `JingleFileTransferConnecti
     untrusted devices and fingerprints it cannot encrypt, with `not-acceptable`. A responder
     learns the requirement after the `session-initiate` has been parsed, so its answer is refused
     unless the initiator's fingerprints were verified by a trusted device.
-- Without any signaling filter, Jingle IQs with contents of a session requiring end-to-end
-  encryption are refused in both directions: nothing can protect them.
+- Without a DTLS signaling filter, required end-to-end encryption fails closed unless
+  the content is a JET-protected file transfer (whose key is prepared and checked by its application).
+  Unprotected RTP and other content is still refused.
   `tests/jingle/omemodtls.cpp` runs a whiteboard on an ICE data channel between two clients in both
   profiles: verified fingerprints only on the wire and a recorded authentication on both sides; a
   session requiring end-to-end encryption without a peer device sends nothing and ends; without
@@ -182,9 +183,12 @@ Conversations `Content.setSecurity()/getSecurity()`, `JingleFileTransferConnecti
 - `Session::setEndToEndPreferred()` asks for protection where possible without refusing otherwise
   (a session requiring it prefers it too). Signaling filters can add disco features
   (`SignalingFilter::discoFeatures()`).
-- `Jingle::JET::Jet` owns generic XEP-0391 signaling: it parses/writes `<security/>`,
-  matches per-content keys, installs them before transport startup, and selects a
-  registered `JET::KeyTransport` according to the Jingle encryption method.
+- `Jingle::JET::Jet` registers generic XEP-0391 key transports. Its
+  `prepareIncoming()` / `prepareOutgoing()` methods are called by
+  `FileTransfer::Application::prepare()` after `Session::parseContentAddList()`
+  has selected the content and transport. The content retains its own security
+  envelope and key; no Jingle-IQ pre-parse JET filter or (peer, sid) pending-key
+  table is involved. The key must be ready before preparing the transport.
   It builds and advertises without OMEMO.
 - `Jingle::JetOmemo` implements only the XEP-0396 `JET::KeyTransport` adapter in the format of
   Conversations and Dino:
@@ -197,9 +201,12 @@ Conversations `Content.setSecurity()/getSecurity()`, `JingleFileTransferConnecti
     SCE envelope holding `<secret xmlns='urn:xmpp:jingle:jet-omemo:0' key iv/>` and AES-256-GCM (a
     Psi extension, see `xsf-proposals/`); otherwise legacy OMEMO with a key transport message and
     AES-128-GCM, as Conversations and Dino;
-  - received envelopes are decrypted and their key given to the content when it exists;
-  - the generic JET filter must be registered before `OmemoDtlsVerification`, which treats JET contents as protected.
-  - adding another JET key-delivery method does not require another signaling
+  - received envelopes are retained only by their parsed file-transfer content;
+    they are decrypted during that content's preparation. An IQ result need not
+    wait for the cryptographic job, but a transfer must.
+  - `OmemoDtlsVerification` recognizes JET content as protected without running a
+    separate generic JET signaling filter.
+  - adding another JET key-delivery method does not require a signaling
     filter or a duplicate file-transfer implementation.
 - `FileTransfer::Application::setTransportSecret()` encrypts the whole transfer as AES-GCM with the
   16-byte tag appended (`JET::StreamCipher`, `jingle-jet_p.h`); size and hashes describe the plain

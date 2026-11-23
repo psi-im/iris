@@ -51,8 +51,10 @@ int main(int argc, char **argv)
 
     {
         J::JET::Jet jet(manager);
-        check(J::JET::Jet::of(manager) == &jet, "The generic JET filter was not registered");
+        check(J::JET::Jet::of(manager) == &jet, "The generic JET key service was not registered");
         check(jet.discoFeatures().isEmpty(), "JET advertised encryption without a registered key transport");
+        check(!manager->discoFeatures().contains(J::JET::Jet::ns()),
+              "The Jingle manager advertised JET with no provider");
 
         TestKeyTransport first(QStringLiteral("test-first"), QStringLiteral("urn:test:jet:first"));
         TestKeyTransport second(QStringLiteral("test-second"), QStringLiteral("urn:test:jet:second"));
@@ -69,14 +71,18 @@ int main(int argc, char **argv)
                   && !advertised.contains(QStringLiteral("urn:test:jet:duplicate")),
               "JET advertised the wrong generic/protocol-specific features");
 
+        check(manager->discoFeatures().contains(J::JET::Jet::ns())
+                  && manager->discoFeatures().contains(QStringLiteral("urn:test:jet:first")),
+              "The Jingle manager did not advertise registered JET providers");
         jet.unregisterKeyTransport(&first);
         check(jet.discoFeatures().contains(QStringLiteral("urn:test:jet:second"))
                   && !jet.discoFeatures().contains(QStringLiteral("urn:test:jet:first")),
               "JET could not unregister a single encryption method");
         jet.unregisterKeyTransport(&second);
-        check(jet.discoFeatures().isEmpty(), "JET advertised itself without a key transport");
+        check(jet.discoFeatures().isEmpty() && !manager->discoFeatures().contains(J::JET::Jet::ns()),
+              "JET advertised itself without a key transport");
     }
 
-    check(J::JET::Jet::of(manager) == nullptr, "JET left a signaling filter after destruction");
+    check(J::JET::Jet::of(manager) == nullptr, "JET service survived its destruction");
     return 0;
 }

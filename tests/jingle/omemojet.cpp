@@ -208,6 +208,18 @@ int main(int argc, char **argv)
                   && t->receivingReason.condition() == J::Reason::SecurityError,
               "a tampered file was not refused");
 
+        // A malformed JET envelope is acknowledged as Jingle signaling, but
+        // cryptographic preparation fails before the receiver starts transport.
+        t = send(alice, bob, data, true, false, [](QDomElement &stanza) {
+            auto security = stanza.firstChildElement(QStringLiteral("jingle"))
+                                .elementsByTagNameNS(J::JetOmemo::jetNs(), QStringLiteral("security"));
+            if (!security.isEmpty())
+                security.at(0).toElement().setAttribute(QStringLiteral("cipher"), QStringLiteral("invalid-cipher"));
+        });
+        check(t->offered && t->wire.isEmpty() && !t->receivingEncrypted
+                  && t->receivingReason.condition() == J::Reason::SecurityError,
+              "Invalid JET envelope was accepted or a transfer was started");
+
         // Preferred, but the peer has no JET-OMEMO: the file goes unprotected.
         setPeerFeatures(alice.client, bob.jid, QStringList { QStringLiteral("urn:xmpp:jingle:1") } + legacy);
         t = send(alice, bob, data, true, false);
