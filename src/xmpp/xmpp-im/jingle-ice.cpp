@@ -999,20 +999,20 @@ namespace XMPP { namespace Jingle { namespace ICE {
         QList<XMPP::Ice176::Candidate> pendingLocalCandidates; // cid to candidate mapping
         std::unique_ptr<Element>       remoteState;
         struct QueuedRemoteUpdate {
-            Element                  element;
-            QPointer<IceConnection>  network;
-            quint64                  iceGeneration = 0;
-            bool                     hadNetwork = false;
+            Element                 element;
+            QPointer<IceConnection> network;
+            quint64                 iceGeneration = 0;
+            bool                    hadNetwork    = false;
         };
-        QList<QueuedRemoteUpdate>      remoteUpdates;
-        bool                           remoteUpdateBusy            = false;
-        bool                           deferredPrepare             = false;
-        bool                           deferredStart               = false;
-        bool                           verifiedRemoteFingerprint   = false;
-        bool                           outgoingFingerprintBusy     = false;
-        quint64                        outgoingFingerprintRevision = 0;
-        QDomDocument                   fingerprintDocument;
-        QDomElement                    protectedOutgoingFingerprint;
+        QList<QueuedRemoteUpdate> remoteUpdates;
+        bool                      remoteUpdateBusy            = false;
+        bool                      deferredPrepare             = false;
+        bool                      deferredStart               = false;
+        bool                      verifiedRemoteFingerprint   = false;
+        bool                      outgoingFingerprintBusy     = false;
+        quint64                   outgoingFingerprintRevision = 0;
+        QDomDocument              fingerprintDocument;
+        QDomElement               protectedOutgoingFingerprint;
 
         // QString            sid;
         // Transport::Mode    mode = Transport::Tcp;
@@ -1888,17 +1888,17 @@ namespace XMPP { namespace Jingle { namespace ICE {
             return;
         }
 
-        auto queued = d->remoteUpdates.takeFirst();
-        auto update = std::move(queued.element);
-        const auto network = queued.network;
-        const auto iceGeneration = queued.iceGeneration;
-        const bool hadNetwork = queued.hadNetwork;
+        auto                queued        = d->remoteUpdates.takeFirst();
+        auto                update        = std::move(queued.element);
+        const auto          network       = queued.network;
+        const auto          iceGeneration = queued.iceGeneration;
+        const bool          hadNetwork    = queued.hadNetwork;
         QPointer<Transport> guard(this);
-        auto proceed = [guard, network, iceGeneration, hadNetwork](Element update) {
+        auto                proceed = [guard, network, iceGeneration, hadNetwork](Element update) {
             if (!guard || guard->d->networkOwnershipRetired || guard->_state >= State::Finishing)
                 return;
             guard->d->remoteUpdateBusy = false;
-            const bool current = !hadNetwork
+            const bool current         = !hadNetwork
                 || (network && guard->d->network == network && network->generation.iceGeneration == iceGeneration);
             if (current)
                 guard->d->handleRemoteUpdate(update);
@@ -1936,14 +1936,14 @@ namespace XMPP { namespace Jingle { namespace ICE {
         QPointer<OmemoDtlsVerification> provider(verification);
         verification->decryptFingerprint(
             pad()->session(), encryptedFingerprint,
-            [guard, provider, network, iceGeneration, hadNetwork, update = std::move(update), proceed](
-                const QDomElement &plain,
-                                                                   const Session::PeerAuthentication &authentication,
-                                                                   const QString                     &error) mutable {
+            [guard, provider, network, iceGeneration, hadNetwork, update = std::move(update),
+             proceed](const QDomElement &plain, const Session::PeerAuthentication &authentication,
+                      const QString &error) mutable {
                 if (!guard || guard->d->networkOwnershipRetired || guard->_state >= State::Finishing)
                     return;
-                if (hadNetwork && (!network || guard->d->network != network
-                                   || network->generation.iceGeneration != iceGeneration)) {
+                if (hadNetwork
+                    && (!network || guard->d->network != network
+                        || network->generation.iceGeneration != iceGeneration)) {
                     proceed(std::move(update));
                     return;
                 }
@@ -2209,7 +2209,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
 
         // Apply updates in order, after asynchronous fingerprint verification.
         // The XML is already structurally validated; cryptography is content-owned.
-        const auto network = QPointer<IceConnection>(d->network);
+        const auto network       = QPointer<IceConnection>(d->network);
         const auto iceGeneration = network ? network->generation.iceGeneration : 0;
         d->remoteUpdates.append({ std::move(prepared->element), network, iceGeneration, bool(network) });
         if (d->remoteUpdates.size() == 1 && !d->remoteUpdateBusy) {
