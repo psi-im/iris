@@ -894,6 +894,10 @@ namespace XMPP { namespace Jingle {
             found                         = true;
             const auto        transport   = content.firstChildElement(QStringLiteral("transport"));
             const auto        description = content.firstChildElement(QStringLiteral("description"));
+            // Content-modify and description-info do not replace the existing
+            // transport, and therefore cannot weaken its security association.
+            if (transport.isNull())
+                continue;
             const ContentBase key(content);
             auto             *application = key.isValid() ? session->content(key.name, key.creator) : nullptr;
             auto             *file        = qobject_cast<FileTransfer::Application *>(application);
