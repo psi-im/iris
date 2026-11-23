@@ -10,6 +10,7 @@
 #include "xmpp_encryption.h"
 
 #include <QPointer>
+#include <utility>
 
 namespace XMPP { namespace Jingle { namespace JET {
     namespace {
@@ -339,7 +340,10 @@ namespace XMPP { namespace Jingle { namespace JET {
         if (!jet->isValid())
             return {};
         activeConnection_ = jet;
-        connect(jet, &ByteStream::error, this, [this, jet](int) { emit failed(jet->errorText()); });
+        connect(jet, &ByteStream::error, this, [this, jet](int) {
+            const QString error = jet->errorText();
+            emit failed(error);
+        });
         return wrapped;
     }
 

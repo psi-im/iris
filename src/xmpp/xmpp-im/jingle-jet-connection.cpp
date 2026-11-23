@@ -39,9 +39,11 @@ namespace XMPP { namespace Jingle { namespace JET {
         connect(raw_.data(), &XMPP::Jingle::Connection::connected, this, &Connection::connected);
         connect(raw_.data(), &XMPP::Jingle::Connection::disconnected, this, &Connection::disconnected);
         connect(raw_.data(), &ByteStream::connectionClosed, this, [this]() {
+            QPointer<Connection> guard(this);
             if (!sender_ && !verified_ && !failed_)
                 fail(QStringLiteral("JET stream closed before authentication completed"));
-            emit connectionClosed();
+            if (guard)
+                emit connectionClosed();
         });
         connect(raw_.data(), &ByteStream::delayedCloseFinished, this, &Connection::delayedCloseFinished);
         connect(raw_.data(), &ByteStream::error, this, [this](int code) {
@@ -129,13 +131,17 @@ namespace XMPP { namespace Jingle { namespace JET {
             return 0;
         const auto encrypted = cipher_->process(QByteArray(data, int(maxSize)));
         plainWritten_ += quint64(maxSize);
+        QPointer<Connection> guard(this);
         if (encrypted.size() != maxSize || !writeWire(encrypted)) {
-            fail(QStringLiteral("Failed writing encrypted JET data"));
+            if (guard)
+                fail(QStringLiteral("Failed writing encrypted JET data"));
             return -1;
         }
+        if (!guard)
+            return -1;
         if (plainWritten_ == plainSize_)
             finishSending();
-        return maxSize;
+        return guard && !failed_ ? maxSize : -1;
     }
 
     void Connection::finishSending()
@@ -231,8 +237,10 @@ namespace XMPP { namespace Jingle { namespace JET {
 
     void Connection::close()
     {
+        QPointer<Connection> guard(this);
         if (raw_)
             raw_->close();
-        QIODevice::close();
+        if (guard)
+            QIODevice::close();
     }
 }}} // namespace XMPP::Jingle::JET
