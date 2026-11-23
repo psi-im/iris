@@ -91,8 +91,9 @@ namespace Jingle {
         PeerAuthentication peerAuthentication() const;
         void               setPeerAuthentication(const PeerAuthentication &authentication);
 
-        /// Local policy: the session uses only end-to-end protected transports. A signaling filter that
-        /// can protect them refuses everything else with security-error; without one nothing is sent.
+        /// Local policy: the session uses only end-to-end protected transports. Signaling filters
+        /// enforce authenticated DTLS, while JET file transfers prepare their keys in the
+        /// application; unsupported contents are not sent in plaintext.
         void setEndToEndRequired(bool required);
         bool isEndToEndRequired() const;
         /// Local wish: protect what can be protected (e.g. JET for files) but run unprotected otherwise.
