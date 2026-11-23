@@ -255,42 +255,25 @@ int main(int argc, char **argv)
     check(manager.methods(EncryptionMethod::XmppStanza | EncryptionMethod::DataMessage).empty(),
           "Registry selected a method supporting only part of the required capabilities");
 
-    // Iris Client deliberately has no peer registry. The host owns one session
-    // per method and full JID and resolves it for encrypted stanza operations.
+    // The host owns peer sessions: different resources may use different
+    // sessions, and Iris never resolves or caches them by JID.
     {
         Client client;
         StreamMethod registeredMethod;
         check(client.encryptionManager()->registerMethod(&registeredMethod),
               "Could not register a peer-specific method");
-
-        QHash<QString, QPointer<EncryptedSession>> hostSessions;
-        Client::EncryptionSessionPurpose lastPurpose = Client::EncryptionSessionPurpose::Message;
-        const auto lookup = [&](const QString &method, const Jid &peer,
-                                Client::EncryptionSessionPurpose purpose) -> EncryptedSession * {
-            lastPurpose = purpose;
-            const auto key = method + QLatin1Char('\n') + peer.full();
-            auto *session = hostSessions.value(key).data();
-            if (!session || session->isClosing()) {
-                EncryptionContext baseContext;
-                baseContext.recipients = { peer };
-                session = client.encryptionManager()->startSession(method, EncryptionMethod::XmppStanza, baseContext);
-                if (session)
-                    hostSessions.insert(key, session);
-            }
-            return session;
-        };
         const Jid peerA(QStringLiteral("alice@example.test/desktop"));
         const Jid peerB(QStringLiteral("alice@example.test/mobile"));
-        check(!client.encryptedSession(registeredMethod.id(), peerA),
-              "Client invented a peer session without a host resolver");
-        client.setEncryptionSessionResolver(lookup);
-
-        auto *sessionA = client.encryptedSession(registeredMethod.id(), peerA);
-        auto *sessionB = client.encryptedSession(registeredMethod.id(), peerB);
+        EncryptionContext peerAContext;
+        peerAContext.recipients = { peerA };
+        EncryptionContext peerBContext;
+        peerBContext.recipients = { peerB };
+        auto *sessionA = client.encryptionManager()->startSession(
+            registeredMethod.id(), EncryptionMethod::XmppStanza, peerAContext);
+        auto *sessionB = client.encryptionManager()->startSession(
+            registeredMethod.id(), EncryptionMethod::XmppStanza, peerBContext);
         check(sessionA && sessionB && sessionA != sessionB,
-              "Host resolver combined different full-JID resources");
-        check(client.encryptedSession(registeredMethod.id(), peerA) == sessionA,
-              "Host resolver failed to reuse a session");
+              "Separate host-owned peer sessions were not created");
 
         QDomDocument testDoc;
         auto testStanza = testDoc.createElement(QStringLiteral("message"));
@@ -313,56 +296,24 @@ int main(int argc, char **argv)
                   && !session->lastContext.replyTo.has_value(),
               "An earlier stanza's context leaked into the next operation");
 
-        testStanza.setAttribute(QStringLiteral("to"), peerA.full());
+        // Explicit session calls reuse that session. Selecting only a method
+        // creates a separate one-shot session and never consults host state.
         const int previousCalls = session->stanzaCalls;
-        check(await(client.sendEncrypted(testStanza, registeredMethod.id(), {}))->success()
-                  && await(client.sendEncrypted(testStanza, registeredMethod.id(), {}))->success()
-                  && lastPurpose == Client::EncryptionSessionPurpose::Message
-                  && session->stanzaCalls == previousCalls + 2,
-              "Client::sendEncrypted did not reuse the host-owned session");
+        check(await(client.sendEncrypted(testStanza, sessionA))->success()
+                  && session->stanzaCalls == previousCalls + 1,
+              "Explicitly bound outgoing encryption did not reuse its session");
+        check(await(client.sendEncrypted(testStanza, registeredMethod.id(), peerBContext))->success()
+                  && session->stanzaCalls == previousCalls + 1,
+              "Method-only encryption unexpectedly reused a host-owned session");
 
-        testStanza.setAttribute(QStringLiteral("to"), peerA.bare());
-        EncryptionContext resourceContext;
-        resourceContext.recipients = { peerA };
-        check(await(client.sendEncrypted(testStanza, registeredMethod.id(), resourceContext))->success()
-                  && session->stanzaCalls == previousCalls + 3,
-              "Bare-addressed message did not use the selected full-JID resource");
-
-        const auto methodId = registeredMethod.id();
-        const auto peerAKey = methodId + QLatin1Char('\n') + peerA.full();
-        sessionA->close();
-        hostSessions.remove(peerAKey);
-        check(sessionA->isClosing(), "Host did not retire its peer session");
-        auto *replacement = client.encryptedSession(methodId, peerA);
-        check(replacement && replacement != sessionA, "Resolver returned a closed session");
-
-        // Client forwards the purpose; protocol routing and MUC lifetime stay
-        // under their actual owners, not in a second map inside Iris.
-        const Jid roomPeer(QStringLiteral("room@conference.example.test/nick"));
-        check(client.encryptedSession(methodId, roomPeer, Client::EncryptionSessionPurpose::Groupchat)
-                  && lastPurpose == Client::EncryptionSessionPurpose::Groupchat,
-              "The host did not receive the groupchat routing purpose");
-        testStanza.setAttribute(QStringLiteral("to"), roomPeer.bare());
-        testStanza.setAttribute(QStringLiteral("type"), QStringLiteral("groupchat"));
-        check(await(client.sendEncrypted(testStanza, methodId, {}))->success()
-                  && lastPurpose == Client::EncryptionSessionPurpose::Groupchat,
-              "Outbound groupchat did not retain its room-level encryption scope");
-        check(client.encryptedSession(methodId, peerA, Client::EncryptionSessionPurpose::ArchiveReplay)
-                  && lastPurpose == Client::EncryptionSessionPurpose::ArchiveReplay,
-              "The archive-specific purpose was lost");
-        auto protocolIq = testDoc.createElement(QStringLiteral("iq"));
-        protocolIq.setAttribute(QStringLiteral("to"), peerB.full());
-        check(await(client.sendEncrypted(protocolIq, methodId, {}))->success()
-                  && lastPurpose == Client::EncryptionSessionPurpose::Protocol,
-              "An encrypted IQ was incorrectly routed as a chat message");
-
-        // The application owns the sessions and retires them on resource
-        // removal, MUC departure and account logout. Client never owns them.
+        // The host, not Client, controls when peer sessions are retired.
         client.close();
-        check(!sessionB->isClosing(), "Client retired an application-owned session");
-        for (auto active : std::as_const(hostSessions))
-            if (active)
-                active->close();
+        check(!sessionA->isClosing() && !sessionB->isClosing(),
+              "Client retired host-owned sessions on disconnect");
+        sessionA->close();
+        check(sessionA->isClosing() && !sessionB->isClosing(),
+              "Retiring one peer session affected a different resource");
+        sessionB->close();
     }
 
     // Two concurrent stanza jobs must retain their own immutable operation
