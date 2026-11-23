@@ -441,8 +441,7 @@ void Client::cancelPendingDecryptionJobs()
     // Destroy the jobs now, not in a later event-loop iteration.
     auto pending = std::move(d->pendingIncomingDecryptionJobs);
     d->pendingIncomingDecryptionJobs.clear();
-    for (auto *job : pending)
-        delete job;
+    qDeleteAll(pending);
 }
 
 void Client::cleanup()
