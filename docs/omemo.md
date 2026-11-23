@@ -56,8 +56,11 @@ Incoming Jingle IQs reach `JTPush` through the existing `Task` dispatcher and
 are routed by (peer, sid). JET security is attached to the selected file-transfer
 content during `Session::parseContentAddList()` and decrypted during
 `FileTransfer::Application::prepare()`, not by a separate signaling pre-filter.
-DTLS fingerprint verification remains a Jingle signaling filter. There is no
-global (peer, sid) cache of pending JET keys.
+DTLS fingerprint verification is performed by the selected ICE transport
+after parsing the content and before using the peer fingerprint, via the
+Jingle manager's optional `OmemoDtlsVerification` service. No DTLS filter
+rescans the complete Jingle XML, and there is no global (peer, sid) cache
+of pending DTLS authentication or JET keys.
 
 A long-lived session's `context()` identifies its peer and defaults, but
 `encrypt(stanza, operationContext)` and `decrypt(stanza, operationContext)`

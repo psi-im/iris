@@ -79,8 +79,8 @@ namespace Jingle {
 
         std::optional<Stanza::Error> lastError() const;
 
-        /// Authentication of the session's DTLS fingerprints by an end-to-end method, set by a signaling
-        /// filter such as OmemoDtlsVerification (docs/jingle-e2e.md).
+        /// Identity authenticated by the DTLS fingerprint verification service
+        /// after the ICE transport has validated the decrypted fingerprint.
         struct PeerAuthentication {
             QString    method;         // e.g. "omemo"
             quint32    deviceId = 0;   // the peer's device
@@ -91,9 +91,9 @@ namespace Jingle {
         PeerAuthentication peerAuthentication() const;
         void               setPeerAuthentication(const PeerAuthentication &authentication);
 
-        /// Local policy: the session uses only end-to-end protected transports. Signaling filters
-        /// enforce authenticated DTLS, while JET file transfers prepare their keys in the
-        /// application; unsupported contents are not sent in plaintext.
+        /// Local policy: the session uses only end-to-end protected transports.
+        /// ICE prepares authenticated DTLS fingerprints, while JET file transfers
+        /// prepare their keys in the application; unprotected contents are refused.
         void setEndToEndRequired(bool required);
         bool isEndToEndRequired() const;
         /// Local wish: protect what can be protected (e.g. JET for files) but run unprotected otherwise.

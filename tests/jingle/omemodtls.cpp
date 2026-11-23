@@ -208,6 +208,7 @@ void exercise(Endpoint &alice, Endpoint &bob, bool omemo2)
     pumpUntil(alice, bob, [&run] { return !run.session || run.session->state() == J::State::Finished; }, 5000);
     check(!run.peerSession || run.peerSession->state() == J::State::Finished,
           "a tampered fingerprint was allowed to start a transport");
+    check(!synchronized(run.local, run.remote), "tampered DTLS authentication exposed application data");
     onStanza = nullptr;
     qInfo("OMEMO %s DTLS verification passed", omemo2 ? "2" : "legacy");
 }
