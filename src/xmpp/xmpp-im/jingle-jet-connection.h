@@ -24,7 +24,7 @@ namespace XMPP { namespace Jingle { namespace JET {
                    quint64 plainSize);
         ~Connection() override;
 
-        bool isValid() const { return bool(cipher_); }
+        bool isValid() const { return bool(cipher_) && !failed_; }
         bool authenticated() const { return sender_ || verified_; }
         bool finished() const { return finished_; }
         quint64 plainSize() const { return plainSize_; }

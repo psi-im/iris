@@ -106,13 +106,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
         // Pause only the receive pump; already received bytes retain their offsets.
         void setReceivingPaused(bool paused);
 
-        /**
-         * End-to-end encryption of the file data with JET (XEP-0391): the whole transfer is AES-GCM with
-         * the 16-byte tag appended, as Conversations and Dino send it; size and hashes describe the plain
-         * file. The key and the 12-byte IV are prepared by the content itself using a
-         * registered JET key transport. Set before connection; not for ranged transfers.
-         */
-        void setTransportSecret(const QByteArray &key, const QByteArray &iv);
+        // Whether this file content has prepared an encrypted JET connection.
         bool isTransportEncrypted() const;
 
         void            setDevice(QIODevice *dev, bool closeOnFinish = true);
