@@ -183,10 +183,6 @@ namespace XMPP { namespace Jingle { namespace JET {
                     fail(QStringLiteral("JET authentication tag is invalid"));
                     return;
                 }
-                if (!pendingFrameSizes_.isEmpty() && !pendingPlain_.isEmpty()) {
-                    fail(QStringLiteral("JET datagram framing is incomplete"));
-                    return;
-                }
                 verified_ = true;
                 finished_ = true;
             }
@@ -209,6 +205,10 @@ namespace XMPP { namespace Jingle { namespace JET {
                     if (!guard)
                         return;
                 }
+            }
+            if (finished_ && messageOriented && (!pendingFrameSizes_.isEmpty() || !pendingPlain_.isEmpty())) {
+                fail(QStringLiteral("JET datagram framing is incomplete"));
+                return;
             }
         }
     }
