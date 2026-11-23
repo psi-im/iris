@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #include <iris/xmpp_encryption.h>
 #include <iris/xmpp_client.h>
+#include <iris/xmpp_clientstream.h>
+#include <iris/xmpp.h>
 
 #include <QCoreApplication>
+#include <QEvent>
 #include <QEventLoop>
 #include <QTimer>
 #include <QDebug>
@@ -98,6 +101,129 @@ public:
                                                                           : Availability::Available;
     }
 };
+
+// Pending incoming jobs must remain independent; a second stanza cannot
+// cancel the first. Disconnect, however, invalidates every unfinished job.
+class TestConnector final : public Connector {
+public:
+    void setOptHostPort(const QString &, quint16) override { }
+    void connectToServer(const QString &) override { }
+    ByteStream *stream() const override { return nullptr; }
+    void done() override { }
+};
+
+class TestStream final : public ClientStream {
+public:
+    explicit TestStream(Connector *connector) : ClientStream(connector) { }
+    void write(const Stanza &) override { }
+    bool stanzaAvailable() const override { return !incoming.isEmpty(); }
+    Stanza read() override { return incoming.takeFirst(); }
+    void inject(const QDomElement &xml)
+    {
+        incoming.append(createStanza(xml));
+        emit readyRead();
+    }
+    QList<Stanza> incoming;
+};
+
+class DeferredMethod final : public EncryptionMethod {
+public:
+    struct Operation {
+        QPointer<EncryptionJob> job;
+        QDomDocument stanza;
+    };
+    QList<Operation> pending;
+    QString id() const override { return QStringLiteral("test-deferred-incoming"); }
+    QString name() const override { return id(); }
+    Capabilities capabilities() const override { return XmppStanza; }
+    Features features() const override { return {}; }
+    bool canDecrypt(const QDomElement &stanza) const override
+    {
+        return stanza.firstChildElement(QStringLiteral("encrypted")).namespaceURI()
+            == QLatin1String("urn:psi:test:deferred-incoming");
+    }
+
+    class Session final : public EncryptedSession {
+    public:
+        Session(DeferredMethod *method, const EncryptionContext &base) :
+            EncryptedSession(method->id(), base), method(method)
+        {
+        }
+        EncryptionJob *doDecrypt(const QDomElement &stanza, const EncryptionContext &) override
+        {
+            auto *job = new EncryptionJob(this);
+            Operation operation;
+            operation.job = job;
+            operation.stanza.appendChild(operation.stanza.importNode(stanza, true));
+            method->pending.append(operation);
+            return job;
+        }
+    private:
+        DeferredMethod *method;
+    };
+
+    EncryptedSession *startSession(Capabilities caps, const EncryptionContext &context) override
+    {
+        return caps.testFlag(XmppStanza) ? new Session(this, context) : nullptr;
+    }
+};
+
+static void exercisePendingIncomingCancellation()
+{
+    Client client;
+    TestConnector connector;
+    TestStream stream(&connector);
+    DeferredMethod method;
+    client.start(QStringLiteral("example.test"), QStringLiteral("bob"), {}, QStringLiteral("device"));
+    client.connectToServer(&stream, Jid(QStringLiteral("bob@example.test/device")));
+    check(client.encryptionManager()->registerMethod(&method), "Could not register deferred decrypt method");
+    client.setIncomingEncryptedStanzaHandler(
+        [&client](const QDomElement &stanza, const QString &methodId, const EncryptionContext &context,
+                  Client::EncryptionSessionPurpose) -> EncryptionJob * {
+            auto *session = client.encryptionManager()->startSession(methodId, EncryptionMethod::XmppStanza);
+            if (!session)
+                return nullptr;
+            auto *job = session->decrypt(stanza, context);
+            session->close();
+            return job;
+        });
+    int delivered = 0;
+    QObject::connect(&client, &Client::messageReceived, &client, [&](const Message &) { ++delivered; });
+
+    const auto inject = [&](const QString &body) {
+        QDomDocument doc;
+        auto message = doc.createElementNS(QStringLiteral("jabber:client"), QStringLiteral("message"));
+        doc.appendChild(message);
+        message.setAttribute(QStringLiteral("type"), QStringLiteral("chat"));
+        message.setAttribute(QStringLiteral("from"), QStringLiteral("alice@example.test/desktop"));
+        message.setAttribute(QStringLiteral("to"), QStringLiteral("bob@example.test/device"));
+        auto encrypted = doc.createElementNS(QStringLiteral("urn:psi:test:deferred-incoming"),
+                                             QStringLiteral("encrypted"));
+        message.appendChild(encrypted);
+        auto content = doc.createElementNS(QStringLiteral("jabber:client"), QStringLiteral("body"));
+        content.appendChild(doc.createTextNode(body));
+        message.appendChild(content);
+        stream.inject(message);
+    };
+
+    inject(QStringLiteral("one"));
+    inject(QStringLiteral("two"));
+    check(method.pending.size() == 2 && delivered == 0, "Concurrent incoming decrypt jobs did not start");
+    for (int i = 0; i < 2; ++i) {
+        auto &operation = method.pending[i];
+        check(operation.job && !operation.job->isFinished(), "Pending incoming job was cancelled by a newer stanza");
+        operation.job->complete(operation.stanza.documentElement());
+    }
+    check(delivered == 2, "Both incoming decrypt operations must deliver");
+
+    inject(QStringLiteral("obsolete"));
+    check(method.pending.size() == 3 && method.pending.last().job,
+          "Could not start a pending decryption before disconnect");
+    QPointer<EncryptionJob> obsolete = method.pending.last().job;
+    client.close();
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    check(obsolete.isNull() && delivered == 2, "Disconnect did not cancel the pending decryption job");
+}
 
 static EncryptionJob *await(EncryptionJob *job)
 {
@@ -319,6 +445,7 @@ int main(int argc, char **argv)
     check(registrySession->isClosing(), "Unregistering a method did not close its sessions");
     check(!registrySession->encryptChunk(QByteArray("more"))->success(),
           "A closed session accepted another operation");
-    qInfo("Stream session routing and final authentication passed");
+    exercisePendingIncomingCancellation();
+    qInfo("Stream session routing, pending-job cancellation and final authentication passed");
     return 0;
 }
