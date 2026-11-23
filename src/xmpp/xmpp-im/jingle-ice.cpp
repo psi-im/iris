@@ -1891,8 +1891,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
                 });
         };
         if (update.protectedFingerprint.isNull()) {
-            if (update.fingerprint.isValid() && requiresVerifiedFingerprint()
-                && !d->verifiedRemoteFingerprint) {
+            if (update.fingerprint.isValid() && requiresVerifiedFingerprint()) {
                 onFinish(Reason::SecurityError, QStringLiteral("Unverified DTLS fingerprint in protected session"));
                 return;
             }
@@ -1945,7 +1944,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
         auto *verification = session->manager()->dtlsVerification();
         const auto device = verification ? verification->peerDevice(session->peer(), session->sid())
                                          : std::optional<quint32> {};
-        if (!verification || !session->allowsEncryptionMethod(QStringLiteral("omemo")) || !device) {
+        if (!verification || !session->allowsEncryptionMethod(OmemoDtlsVerification::methodId()) || !device) {
             if (required)
                 onFinish(Reason::SecurityError, QStringLiteral("No OMEMO device available for DTLS verification"));
             else

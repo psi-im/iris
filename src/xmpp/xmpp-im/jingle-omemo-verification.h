@@ -44,6 +44,7 @@ namespace Jingle {
         Q_OBJECT
     public:
         static QString ns();
+        static QString methodId();
 
         OmemoDtlsVerification(Manager *manager, OmemoEncryption *omemo, QObject *parent = nullptr);
         ~OmemoDtlsVerification() override;

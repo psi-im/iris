@@ -52,6 +52,8 @@ namespace XMPP { namespace Jingle {
 
     QString OmemoDtlsVerification::ns() { return VerificationNs; }
 
+    QString OmemoDtlsVerification::methodId() { return OmemoEncryption::methodId(); }
+
     OmemoDtlsVerification::OmemoDtlsVerification(Manager *manager, OmemoEncryption *omemo, QObject *parent) :
         QObject(parent), d(std::make_unique<Private>())
     {

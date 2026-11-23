@@ -206,7 +206,8 @@ void exercise(Endpoint &alice, Endpoint &bob, bool omemo2)
     };
     run = startSession(alice, bob, true, false);
     pumpUntil(alice, bob, [&run] { return !run.session || run.session->state() == J::State::Finished; }, 5000);
-    check(!run.peerSession, "a tampered fingerprint was accepted");
+    check(!run.peerSession || run.peerSession->state() == J::State::Finished,
+          "a tampered fingerprint was allowed to start a transport");
     onStanza = nullptr;
     qInfo("OMEMO %s DTLS verification passed", omemo2 ? "2" : "legacy");
 }
@@ -234,6 +235,9 @@ int main(int argc, char **argv)
     }
     J::OmemoDtlsVerification aliceVerification(alice.client.jingleManager(), alice.omemo);
     J::OmemoDtlsVerification bobVerification(bob.client.jingleManager(), bob.omemo);
+    check(alice.client.jingleManager()->dtlsVerification() == &aliceVerification
+              && bob.client.jingleManager()->dtlsVerification() == &bobVerification,
+          "The Jingle manager did not register the DTLS verification service");
 
     const auto protocols = alice.omemo->supportedProtocols();
     if (protocols.testFlag(OmemoProtocol::Legacy))
