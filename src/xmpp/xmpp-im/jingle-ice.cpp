@@ -998,7 +998,12 @@ namespace XMPP { namespace Jingle { namespace ICE {
         int                            proxiesInDiscoCount       = 0;
         QList<XMPP::Ice176::Candidate> pendingLocalCandidates; // cid to candidate mapping
         std::unique_ptr<Element>       remoteState;
-        QList<Element>                 remoteUpdates;
+        struct QueuedRemoteUpdate {
+            Element                  element;
+            QPointer<IceConnection>  network;
+            quint64                  iceGeneration = 0;
+        };
+        QList<QueuedRemoteUpdate>      remoteUpdates;
         bool                           remoteUpdateBusy            = false;
         bool                           deferredPrepare             = false;
         bool                           deferredStart               = false;
@@ -1882,19 +1887,29 @@ namespace XMPP { namespace Jingle { namespace ICE {
             return;
         }
 
-        auto                update = d->remoteUpdates.takeFirst();
+        auto queued = d->remoteUpdates.takeFirst();
+        auto update = std::move(queued.element);
+        const auto network = queued.network;
+        const auto iceGeneration = queued.iceGeneration;
         QPointer<Transport> guard(this);
-        auto                proceed = [guard](Element update) {
+        auto proceed = [guard, network, iceGeneration](Element update) {
             if (!guard || guard->d->networkOwnershipRetired || guard->_state >= State::Finishing)
                 return;
             guard->d->remoteUpdateBusy = false;
-            guard->d->handleRemoteUpdate(update);
+            const bool current = !network
+                || (guard->d->network == network && network->generation.iceGeneration == iceGeneration);
+            if (current)
+                guard->d->handleRemoteUpdate(update);
             if (guard && guard->_state < State::Finishing)
                 QTimer::singleShot(0, guard, [guard]() {
                     if (guard)
                         guard->processNextRemoteUpdate();
                 });
         };
+        if (network && (d->network != network || network->generation.iceGeneration != iceGeneration)) {
+            proceed(std::move(update));
+            return;
+        }
         if (update.protectedFingerprint.isNull()) {
             if (update.fingerprint.isValid() && requiresVerifiedFingerprint()) {
                 onFinish(Reason::SecurityError, QStringLiteral("Unverified DTLS fingerprint in protected session"));
@@ -1919,11 +1934,17 @@ namespace XMPP { namespace Jingle { namespace ICE {
         QPointer<OmemoDtlsVerification> provider(verification);
         verification->decryptFingerprint(
             pad()->session(), encryptedFingerprint,
-            [guard, provider, update = std::move(update), proceed](const QDomElement                 &plain,
+            [guard, provider, network, iceGeneration, update = std::move(update), proceed](
+                const QDomElement &plain,
                                                                    const Session::PeerAuthentication &authentication,
                                                                    const QString                     &error) mutable {
                 if (!guard || guard->d->networkOwnershipRetired || guard->_state >= State::Finishing)
                     return;
+                if (network && (guard->d->network != network
+                                || network->generation.iceGeneration != iceGeneration)) {
+                    proceed(std::move(update));
+                    return;
+                }
                 if (!error.isEmpty() || plain.isNull() || !update.fingerprint.parse(plain)) {
                     guard->onFinish(Reason::SecurityError,
                                     error.isEmpty() ? QStringLiteral("Invalid authenticated DTLS fingerprint") : error);
@@ -2186,7 +2207,9 @@ namespace XMPP { namespace Jingle { namespace ICE {
 
         // Apply updates in order, after asynchronous fingerprint verification.
         // The XML is already structurally validated; cryptography is content-owned.
-        d->remoteUpdates.append(std::move(prepared->element));
+        const auto network = QPointer<IceConnection>(d->network);
+        const auto iceGeneration = network ? network->generation.iceGeneration : 0;
+        d->remoteUpdates.append({ std::move(prepared->element), network, iceGeneration });
         if (d->remoteUpdates.size() == 1 && !d->remoteUpdateBusy) {
             QTimer::singleShot(0, this, [this]() {
                 if (!d->networkOwnershipRetired)
