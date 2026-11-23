@@ -36,12 +36,12 @@ and processing belong in Iris.
 ### Lifetime and peer identity
 
 `Client` does not maintain a parallel JID/resource table. An application installs
-`Client::setEncryptionSessionResolver()`, which resolves an encryption method,
-conversation peer and purpose (`Message`, `Groupchat`, `Carbon`, `Reply`,
-`ArchiveReplay`) to an application-owned `EncryptedSession`. It may use the
-existing contacts, MUC occupants, and local archival operations as session
-owners. An unresolved request fails closed; there is no silent plaintext
-fallback or implicit contact creation inside Iris.
+`Client::setIncomingEncryptedStanzaHandler()`: Iris passes an encrypted stanza,
+method ID, operation context and purpose to the application, which chooses or
+creates its own `EncryptedSession` and returns the decryption job. The
+application may reuse sessions attached to existing contacts and MUC occupants,
+or create operation-local sessions for unknown senders and archive replay.
+Unresolved requests fail closed; Iris never creates provisional contacts.
 
 The application creates/reuses stanza sessions using
 `EncryptionManager::startSession()` and closes them on the corresponding
@@ -50,7 +50,8 @@ registry and session factory, and closes all sessions for an unregistered
 method; it is not a conversation or resource directory.
 
 Jingle and other protocols with a known operation owner **pass their bound
-`EncryptedSession` explicitly**, rather than looking it up by JID. Incoming
+`EncryptedSession` explicitly**, rather than looking it up by JID. Method-only
+outgoing calls use an operation-local session and close it when no longer needed. Incoming
 Jingle IQs reach `JTPush` through the existing `Task` dispatcher and are
 routed by (peer, sid), including signaling filters that can exchange protected
 transport keys before a responder session exists. No competing global

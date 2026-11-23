@@ -5,9 +5,9 @@
 
 namespace {
 // A resolved conversation must not round-trip into Psi's contact lookup for
-// every subsequent stanza. Only the first encrypted stanza reaches the host
-// fallback; Iris reuses a weak reference until the owning session closes.
-void exerciseIncomingFastPath(Endpoint &alice, Endpoint &bob)
+// every subsequent stanza. Psi selects and reuses its contact-owned session;
+// Iris does not cache contact sessions or look them up by JID.
+void exerciseHostOwnedIncomingSessions(Endpoint &alice, Endpoint &bob)
 {
     QStringList received;
     int failures = 0;
@@ -53,21 +53,23 @@ void exerciseIncomingFastPath(Endpoint &alice, Endpoint &bob)
               "Explicit incoming decryption or normal message delivery failed");
     };
 
-    const int initialFallbacks = bob.incomingFallbacks;
+    const int initialHandled = bob.incomingHandled;
+    const int initialSessions = bob.incomingSessionsCreated;
     deliver(QStringLiteral("first protected message"), 1);
-    check(bob.incomingFallbacks == initialFallbacks + 1, "First stanza did not reach the host fallback");
+    check(bob.incomingHandled == initialHandled + 1 && bob.incomingSessionsCreated == initialSessions + 1,
+          "First stanza did not create a host-owned session");
     deliver(QStringLiteral("second protected message"), 2);
-    check(bob.incomingFallbacks == initialFallbacks + 1, "An established session triggered a second host lookup");
+    check(bob.incomingHandled == initialHandled + 2 && bob.incomingSessionsCreated == initialSessions + 1,
+          "The host did not reuse its session for a second stanza");
 
-    // Retiring the owning contact session invalidates the Iris weak cache.
     for (auto session : std::as_const(bob.conversationSessions))
         if (session)
             session->close();
     bob.conversationSessions.clear();
     deliver(QStringLiteral("third protected message"), 3);
-    check(bob.incomingFallbacks == initialFallbacks + 2,
-          "Iris reused a retired session instead of calling the host");
-    qInfo("OMEMO incoming last-resort fallback and weak session fast path passed");
+    check(bob.incomingHandled == initialHandled + 3 && bob.incomingSessionsCreated == initialSessions + 2,
+          "The host reused a retired session");
+    qInfo("OMEMO host-owned incoming session routing passed");
 }
 
 void exerciseMuc(Endpoint &alice, Endpoint &bob)
@@ -241,7 +243,7 @@ int main(int argc, char **argv)
         check(setUp->success() && endpoint->omemo->isReady(), "OMEMO setup failed");
     }
     if (alice.omemo->supportedProtocols().testFlag(OmemoProtocol::Omemo2)) {
-        exerciseIncomingFastPath(alice, bob);
+        exerciseHostOwnedIncomingSessions(alice, bob);
         exerciseMuc(alice, bob);
         exerciseMucSelfEcho(alice, bob);
     } else {

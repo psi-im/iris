@@ -150,9 +150,7 @@ public:
     Jingle::Manager          *jingleManager            = nullptr;
     MucManager              *mucManager               = nullptr;
     EncryptionManager       *encryptionManager         = nullptr;
-    Client::EncryptionSessionResolver encryptionSessionResolver;
     Client::IncomingEncryptedStanzaHandler incomingEncryptedStanzaHandler;
-    QHash<QString, QPointer<EncryptedSession>> incomingSessions;
     QSet<EncryptionJob *> pendingIncomingDecryptionJobs;
     const EncryptionMetadata *currentEncryptionMetadata = nullptr;
     JT_PushMessage           *pushMessage               = nullptr;
@@ -451,7 +449,6 @@ void Client::cleanup()
 {
     d->active = false;
     // d->authed = false;
-    d->incomingSessions.clear();
     d->mucManager->clear();
 }
 
@@ -557,56 +554,9 @@ Task *Client::rootTask() { return d->root; }
 
 QDomDocument *Client::doc() const { return &d->doc; }
 
-void Client::setEncryptionSessionResolver(EncryptionSessionResolver resolver)
-{
-    d->encryptionSessionResolver = std::move(resolver);
-}
-
 void Client::setIncomingEncryptedStanzaHandler(IncomingEncryptedStanzaHandler handler)
 {
     d->incomingEncryptedStanzaHandler = std::move(handler);
-}
-
-static QString incomingSessionKey(const QString &methodId, const Jid &peer,
-                                  Client::EncryptionSessionPurpose purpose)
-{
-    return methodId + QLatin1Char('\n') + QString::number(int(purpose)) + QLatin1Char('\n') + peer.full();
-}
-
-void Client::registerIncomingSession(const QString &methodId, const Jid &peer,
-                                     EncryptionSessionPurpose purpose, EncryptedSession *session)
-{
-    if (methodId.isEmpty() || !peer.isValid())
-        return;
-    const auto key = incomingSessionKey(methodId, peer, purpose);
-    if (!session || session->isClosing() || session->methodId() != methodId) {
-        d->incomingSessions.remove(key);
-        return;
-    }
-    // Re-registering the same session is common on outgoing messages. Do not
-    // accumulate one QObject connection per stanza.
-    if (d->incomingSessions.value(key).data() == session)
-        return;
-    d->incomingSessions.insert(key, session);
-    connect(session, &QObject::destroyed, this, [this, key] {
-        auto it = d->incomingSessions.find(key);
-        if (it != d->incomingSessions.end() && it.value().isNull())
-            d->incomingSessions.erase(it);
-    });
-}
-
-EncryptedSession *Client::encryptedSession(const QString &methodId, const Jid &peer,
-                                           EncryptionSessionPurpose purpose)
-{
-    if (methodId.isEmpty() || !peer.isValid() || !d->encryptionSessionResolver)
-        return nullptr;
-    auto *session = d->encryptionSessionResolver(methodId, peer, purpose);
-    // A stale, revoked or incorrectly selected method must never be used.
-    if (!session || session->isClosing() || session->methodId() != methodId)
-        return nullptr;
-    if (purpose == EncryptionSessionPurpose::Message || purpose == EncryptionSessionPurpose::Carbon)
-        registerIncomingSession(methodId, peer, purpose, session);
-    return session;
 }
 
 static EncryptionJob *missingEncryptionSession(EncryptionManager *registry, const QString &methodId)
@@ -668,16 +618,8 @@ void Client::distribute(const QDomElement &x)
             ? EncryptionSessionPurpose::Protocol
             : x.attribute(QStringLiteral("type")) == QLatin1String("groupchat")
                 ? EncryptionSessionPurpose::Groupchat : EncryptionSessionPurpose::Message;
-        auto *session = d->incomingSessions.value(incomingSessionKey(method->id(), peer, purpose)).data();
-        if (session && (session->isClosing() || session->methodId() != method->id()))
-            session = nullptr;
-        EncryptionJob *job = nullptr;
-        if (session)
-            job = session->decrypt(x, context);
-        else if (d->incomingEncryptedStanzaHandler)
-            job = d->incomingEncryptedStanzaHandler(x, method->id(), context, purpose);
-        else if (auto *resolved = encryptedSession(method->id(), peer, purpose))
-            job = resolved->decrypt(x, context);
+        EncryptionJob *job = d->incomingEncryptedStanzaHandler
+            ? d->incomingEncryptedStanzaHandler(x, method->id(), context, purpose) : nullptr;
         if (!job)
             job = missingEncryptionSession(d->encryptionManager, method->id());
         const QString methodId = method->id();
@@ -726,18 +668,9 @@ bool Client::distributeEncryptedCarbon(const QDomElement &x)
     const Jid peer = forwardedFrom.bare() == jid().bare() ? forwardedTo : forwardedFrom;
     EncryptionContext context;
     context.options.insert(QStringLiteral("forwardedCarbon"), true);
-    auto *session = d->incomingSessions.value(incomingSessionKey(method->id(), peer,
-                                                                 EncryptionSessionPurpose::Carbon)).data();
-    if (session && (session->isClosing() || session->methodId() != method->id()))
-        session = nullptr;
-    EncryptionJob *job = nullptr;
-    if (session)
-        job = session->decrypt(forwarded, context);
-    else if (d->incomingEncryptedStanzaHandler)
-        job = d->incomingEncryptedStanzaHandler(forwarded, method->id(), context,
-                                               EncryptionSessionPurpose::Carbon);
-    else if (auto *resolved = encryptedSession(method->id(), peer, EncryptionSessionPurpose::Carbon))
-        job = resolved->decrypt(forwarded, context);
+    EncryptionJob *job = d->incomingEncryptedStanzaHandler
+        ? d->incomingEncryptedStanzaHandler(forwarded, method->id(), context,
+                                           EncryptionSessionPurpose::Carbon) : nullptr;
     if (!job)
         job = missingEncryptionSession(d->encryptionManager, method->id());
     const QString     methodId = method->id();
@@ -884,27 +817,16 @@ void Client::send(const QString &str)
 }
 
 EncryptionJob *Client::sendEncrypted(const QDomElement &stanza, const QString &methodId,
-                                     const EncryptionContext &context, EncryptionSessionPurpose purpose)
+                                     const EncryptionContext &context)
 {
-    // Bind to the addressed conversation, not to an arbitrary OMEMO key
-    // recipient (a MUC message may encrypt its key for many different JIDs).
-    Jid peer(stanza.attribute(QStringLiteral("to")));
-    if (context.recipients.size() == 1) {
-        const auto &recipient = context.recipients.first();
-        if (!peer.isValid()
-            || (peer.resource().isEmpty() && !recipient.resource().isEmpty()
-                && recipient.bare() == peer.bare()))
-            peer = recipient;
-    }
-    if (purpose == EncryptionSessionPurpose::Message) {
-        if (stanza.tagName() != QLatin1String("message"))
-            purpose = EncryptionSessionPurpose::Protocol;
-        else if (stanza.attribute(QStringLiteral("type")) == QLatin1String("groupchat"))
-            purpose = EncryptionSessionPurpose::Groupchat;
-    }
-    auto *session = encryptedSession(methodId, peer, purpose);
-    return session ? sendEncrypted(stanza, session, context)
-                   : missingEncryptionSession(d->encryptionManager, methodId);
+    // A method-only call is explicitly transient. Conversation and Jingle
+    // owners pass their own session when they need it to survive an operation.
+    auto *session = d->encryptionManager->startSession(methodId, EncryptionMethod::XmppStanza, context);
+    if (!session)
+        return missingEncryptionSession(d->encryptionManager, methodId);
+    auto *job = sendEncrypted(stanza, session, context);
+    session->close();
+    return job;
 }
 
 EncryptionJob *Client::sendEncrypted(const QDomElement &stanza, EncryptedSession *session,
@@ -940,7 +862,7 @@ EncryptionJob *Client::replyEncrypted(const QDomElement &stanza, const Encryptio
     if (!metadata.sender.isEmpty())
         context.recipients.append(metadata.sender);
     context.replyTo = metadata;
-    return sendEncrypted(stanza, metadata.methodId, context, EncryptionSessionPurpose::Reply);
+    return sendEncrypted(stanza, metadata.methodId, context);
 }
 
 /* drops any pending outgoing xml elements */

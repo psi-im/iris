@@ -67,7 +67,8 @@ struct Endpoint {
     MemoryEncryptionTrustStorage trust;
     OmemoEncryption             *omemo = nullptr;
     QHash<QString, QPointer<EncryptedSession>> conversationSessions;
-    int incomingFallbacks = 0;
+    int incomingHandled = 0;
+    int incomingSessionsCreated = 0;
 
     explicit Endpoint(const QString &user)
     {
@@ -75,42 +76,34 @@ struct Endpoint {
         client.start(QStringLiteral("example.test"), user, QString(), QStringLiteral("device"));
         client.connectToServer(&stream, jid);
         omemo = new OmemoEncryption(&client, &storage, &trust);
-        // In production Psi resolves these against its existing contacts.
-        // This lightweight endpoint fixture owns its peer sessions directly.
-        client.setEncryptionSessionResolver([this](const QString &methodId, const Jid &peer,
-                                                   Client::EncryptionSessionPurpose) -> EncryptedSession * {
-            const auto key = methodId + QLatin1Char('\n') + peer.full();
-            auto *session = conversationSessions.value(key).data();
-            if (session && !session->isClosing())
-                return session;
-            EncryptionContext context;
-            context.recipients = { peer };
-            session = client.encryptionManager()->startSession(methodId, EncryptionMethod::XmppStanza, context);
-            if (session)
-                conversationSessions.insert(key, session);
-            return session;
-        });
+        // The fixture models Psi's contact-owned sessions. Iris never indexes
+        // these sessions or asks for one by JID.
         client.setIncomingEncryptedStanzaHandler(
             [this](const QDomElement &stanza, const QString &methodId, const EncryptionContext &context,
                    Client::EncryptionSessionPurpose purpose) -> EncryptionJob * {
-                ++incomingFallbacks;
+                ++incomingHandled;
                 const Jid from(stanza.attribute(QStringLiteral("from")));
                 const Jid to(stanza.attribute(QStringLiteral("to")));
                 const Jid peer = purpose == Client::EncryptionSessionPurpose::Carbon
                         && from.bare() == client.jid().bare() ? to : from;
-                auto *session = client.encryptedSession(methodId, peer, purpose);
-                if (!session)
-                    return nullptr;
-                if (purpose == Client::EncryptionSessionPurpose::Groupchat)
-                    client.registerIncomingSession(methodId, peer, purpose, session);
-                return session->decrypt(stanza, context);
+                const auto key = methodId + QLatin1Char('\n') + peer.full();
+                auto *session = conversationSessions.value(key).data();
+                if (!session || session->isClosing()) {
+                    EncryptionContext base;
+                    base.recipients = { peer };
+                    session = client.encryptionManager()->startSession(methodId, EncryptionMethod::XmppStanza, base);
+                    if (session) {
+                        conversationSessions.insert(key, session);
+                        ++incomingSessionsCreated;
+                    }
+                }
+                return session ? session->decrypt(stanza, context) : nullptr;
             });
     }
     // The method uses the storages, which are destroyed before the client.
     ~Endpoint()
     {
         client.setIncomingEncryptedStanzaHandler({});
-        client.setEncryptionSessionResolver({});
         for (auto session : std::as_const(conversationSessions))
             if (session)
                 session->close();

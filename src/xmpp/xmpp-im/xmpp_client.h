@@ -104,25 +104,15 @@ public:
 
     void           send(const QDomElement &);
     void           send(const QString &);
-    // The application owns conversation sessions. Protocol operations (Jingle,
-    // transfers, Task-bound IQs) pass their explicitly bound session instead.
-    enum class EncryptionSessionPurpose { Message, Groupchat, Carbon, Reply, ArchiveReplay, Protocol };
-    using EncryptionSessionResolver
-        = std::function<EncryptedSession *(const QString &, const Jid &, EncryptionSessionPurpose)>;
-    // The host's last-resort handler starts decryption with an explicitly
-    // selected session and returns its job. Iris still owns final stanza delivery.
+    // Iris owns protocol-scoped sessions. Applications own their conversation
+    // sessions and decrypt incoming stanzas through this callback.
+    enum class EncryptionSessionPurpose { Message, Groupchat, Carbon, Protocol };
     using IncomingEncryptedStanzaHandler = std::function<EncryptionJob *(
         const QDomElement &, const QString &methodId, const EncryptionContext &, EncryptionSessionPurpose)>;
-    void setEncryptionSessionResolver(EncryptionSessionResolver resolver);
     void setIncomingEncryptedStanzaHandler(IncomingEncryptedStanzaHandler handler);
-    // Cache only weak references to already resolved sessions. Session ownership
-    // and retirement remain with their actual contact or protocol owner.
-    void registerIncomingSession(const QString &methodId, const Jid &peer, EncryptionSessionPurpose,
-                                 EncryptedSession *session);
-    EncryptedSession *encryptedSession(const QString &methodId, const Jid &peer,
-                                       EncryptionSessionPurpose purpose = EncryptionSessionPurpose::Message);
-    EncryptionJob *sendEncrypted(const QDomElement &, const QString &methodId, const EncryptionContext &,
-                                 EncryptionSessionPurpose purpose = EncryptionSessionPurpose::Message);
+    // An explicitly named method uses a one-operation session; protocol owners
+    // with established sessions pass them using the overload below.
+    EncryptionJob *sendEncrypted(const QDomElement &, const QString &methodId, const EncryptionContext &);
     EncryptionJob *sendEncrypted(const QDomElement &, EncryptedSession *session,
                                  const EncryptionContext &operation = {});
     EncryptionJob *replyEncrypted(const QDomElement &, const EncryptionMetadata &);
