@@ -1247,9 +1247,10 @@ namespace XMPP { namespace Jingle { namespace ICE {
             if (component.dtls) {
                 if (!ensureSecureRtp(componentIndex, component.dtls))
                     return false;
-                if (componentIndex == 0)
+                if (componentIndex == 0) {
                     pendingActions |= NewFingerprint;
-                ++outgoingFingerprintRevision;
+                    ++outgoingFingerprintRevision;
+                }
                 return true;
             }
             component.dtls = new Dtls(network, q->pad()->session()->me().full(), q->pad()->session()->peer().full());
