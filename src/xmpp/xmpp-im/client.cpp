@@ -439,14 +439,12 @@ void Client::close(bool)
 
 void Client::cancelPendingDecryptionJobs()
 {
-    // Different incoming stanzas have independent jobs. Cancel all outstanding
-    // deliveries on disconnect, not on receipt of another encrypted stanza.
+    // Each stanza has an independent job; disconnect cancels them all.
+    // Destroy the jobs now, not in a later event-loop iteration.
     auto pending = std::move(d->pendingIncomingDecryptionJobs);
     d->pendingIncomingDecryptionJobs.clear();
-    for (auto *job : pending) {
-        disconnect(job, nullptr, this, nullptr);
-        job->deleteLater();
-    }
+    for (auto *job : pending)
+        delete job;
 }
 
 void Client::cleanup()
