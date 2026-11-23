@@ -268,6 +268,7 @@ private slots:
 
 private:
     void cleanup();
+    void cancelPendingDecryptionJobs();
     void distribute(const QDomElement &);
     bool distributeEncryptedCarbon(const QDomElement &);
     void distributeDecrypted(const QDomElement &, const EncryptionMetadata *metadata);
