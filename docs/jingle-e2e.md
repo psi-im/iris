@@ -190,13 +190,19 @@ Conversations `Content.setSecurity()/getSecurity()`, `JingleFileTransferConnecti
 - `Session::setEndToEndPreferred()` asks for protection where possible without refusing otherwise
   (a session requiring it prefers it too). Signaling filters can add disco features
   (`SignalingFilter::discoFeatures()`).
-- `Jingle::JET::Jet` registers generic XEP-0391 key transports. Its
-  `prepareIncoming()` / `prepareOutgoing()` methods are called by
-  `FileTransfer::Application::prepare()` after `Session::parseContentAddList()`
-  has selected the content and transport. The content retains its own security
-  envelope and key; no Jingle-IQ pre-parse JET filter or (peer, sid) pending-key
-  table is involved. The key must be ready before preparing the transport.
-  It builds and advertises without OMEMO.
+- `Jingle::JET::Manager` is an always-present Jingle service that registers
+  XEP-0391 key-delivery providers and advertises their disco features. It does
+  not own Jingle sessions or create OMEMO providers. `JET::Pad` belongs to a
+  Jingle session and selects a provider using its negotiated encryption method.
+  `JET::Protection` belongs to one content, retains its own envelope and keys,
+  and prepares them asynchronously before the transport is offered or accepted.
+  No Jingle-IQ pre-parse JET filter or (peer, sid) pending-key cache exists.
+- `JET::Connection` wraps a `Jingle::Connection::Ptr`: FileTransfer receives
+  plaintext through the same interface irrespective of ICE, S5B or IBB.
+  The wrapper handles AES-GCM, the final 16-byte tag, data framing and errors.
+  One content key/IV may protect only one stream: transport replacement cannot
+  silently reuse that pair. This implementation requires the exact plaintext
+  length and does not offer indefinite-stream or ranged-transfer protection.
 - `Jingle::JetOmemo` implements only the XEP-0396 `JET::KeyTransport` adapter in the format of
   Conversations and Dino:
   - for file-transfer contents it creates in a session that prefers or requires end-to-end
@@ -215,13 +221,16 @@ Conversations `Content.setSecurity()/getSecurity()`, `JingleFileTransferConnecti
     `OmemoDtlsVerification` knows only how to protect and authenticate fingerprints.
   - adding another JET key-delivery method does not require a signaling
     filter or a duplicate file-transfer implementation.
-- `FileTransfer::Application::setTransportSecret()` encrypts the whole transfer as AES-GCM with the
-  16-byte tag appended (`JET::StreamCipher`, `jingle-jet_p.h`); size and hashes describe the plain
-  file. The receiver decrypts with AES-CTR from the counter block IV‖2 and checks the tag by
-  encrypting the plaintext again with GCM, since QCA needs a GCM tag before decryption; a wrong tag
-  ends the content with `security-error`, and the data written before is to be discarded. Ranged
-  and streaming transfers are refused.
-- `tests/jingle/jetcipher.cpp` checks the cipher against QCA's GCM decoder with any chunking,
+- `FileTransfer::Application` holds only a `JET::Protection` and a
+  `Jingle::Connection::Ptr`; it neither handles key/IV nor appends/strips a GCM
+  tag. File sizes and checksums remain those of the plaintext. The protected
+  connection decrypts with AES-CTR from IV‖2 and checks the tag by re-encrypting
+  the plaintext with GCM (the QCA API needs the tag before GCM decryption).
+  Authentication failures end the content with `security-error`; any bytes
+  previously exposed are untrusted and must be discarded.
+- `tests/jingle/jetconnection.cpp` checks stream and datagram wrappers,
+  zero-length records, tampered and missing tags, and their transparent
+  plaintext lengths. `tests/jingle/jetcipher.cpp` checks the cipher against QCA's GCM decoder with any chunking,
   tampering and truncation; `tests/jingle/omemojet.cpp` sends a file over IBB between two clients
   with OMEMO: ciphertext with the tag on the wire, the plain file at the end, a tampered block
   refused, preferred encryption falling back without peer support and required encryption sending
