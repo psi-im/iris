@@ -24,6 +24,7 @@
 
 #include "jingle-application.h"
 #include "jingle-ft.h"
+#include "jingle-ice.h"
 #include "jingle-jet.h"
 #include "jingle-omemo-verification.h"
 #include "jingle-session.h"
