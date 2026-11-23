@@ -1915,13 +1915,13 @@ namespace XMPP { namespace Jingle { namespace ICE {
             if (guard && guard->d->remoteUpdateBusy && guard->_state < State::Finishing)
                 guard->onFinish(Reason::SecurityError, QStringLiteral("OMEMO DTLS verifier was unloaded"));
         });
-        const auto encryptedFingerprint = update.protectedFingerprint;
+        const auto                      encryptedFingerprint = update.protectedFingerprint;
         QPointer<OmemoDtlsVerification> provider(verification);
         verification->decryptFingerprint(
             pad()->session(), encryptedFingerprint,
-            [guard, provider, update = std::move(update), proceed](
-                const QDomElement &plain, const Session::PeerAuthentication &authentication,
-                const QString &error) mutable {
+            [guard, provider, update = std::move(update), proceed](const QDomElement                 &plain,
+                                                                   const Session::PeerAuthentication &authentication,
+                                                                   const QString                     &error) mutable {
                 if (!guard || guard->d->networkOwnershipRetired || guard->_state >= State::Finishing)
                     return;
                 if (!error.isEmpty() || plain.isNull() || !update.fingerprint.parse(plain)) {
@@ -1933,7 +1933,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
                     guard->onFinish(Reason::SecurityError, QStringLiteral("OMEMO DTLS verifier was unloaded"));
                     return;
                 }
-                auto *session = guard->pad()->session();
+                auto      *session  = guard->pad()->session();
                 const auto existing = session->peerAuthentication();
                 if (existing.isValid()
                     && (existing.method != authentication.method || existing.deviceId != authentication.deviceId
