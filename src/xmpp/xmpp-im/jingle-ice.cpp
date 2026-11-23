@@ -1916,9 +1916,12 @@ namespace XMPP { namespace Jingle { namespace ICE {
                 guard->onFinish(Reason::SecurityError, QStringLiteral("OMEMO DTLS verifier was unloaded"));
         });
         const auto encryptedFingerprint = update.protectedFingerprint;
+        QPointer<OmemoDtlsVerification> provider(verification);
         verification->decryptFingerprint(
             pad()->session(), encryptedFingerprint,
-            [guard, update = std::move(update), proceed](const QDomElement &plain, const QString &error) mutable {
+            [guard, provider, update = std::move(update), proceed](
+                const QDomElement &plain, const Session::PeerAuthentication &authentication,
+                const QString &error) mutable {
                 if (!guard || guard->d->networkOwnershipRetired || guard->_state >= State::Finishing)
                     return;
                 if (!error.isEmpty() || plain.isNull() || !update.fingerprint.parse(plain)) {
@@ -1926,6 +1929,20 @@ namespace XMPP { namespace Jingle { namespace ICE {
                                     error.isEmpty() ? QStringLiteral("Invalid authenticated DTLS fingerprint") : error);
                     return;
                 }
+                if (!provider) {
+                    guard->onFinish(Reason::SecurityError, QStringLiteral("OMEMO DTLS verifier was unloaded"));
+                    return;
+                }
+                auto *session = guard->pad()->session();
+                const auto existing = session->peerAuthentication();
+                if (existing.isValid()
+                    && (existing.method != authentication.method || existing.deviceId != authentication.deviceId
+                        || existing.identityKey != authentication.identityKey)) {
+                    guard->onFinish(Reason::SecurityError, QStringLiteral("DTLS sender identity changed"));
+                    return;
+                }
+                session->setPeerAuthentication(authentication);
+                provider->setPeerDevice(session->peer(), session->sid(), authentication.deviceId);
                 guard->d->verifiedRemoteFingerprint = true;
                 update.protectedFingerprint.clear();
                 proceed(std::move(update));

@@ -155,10 +155,10 @@ namespace XMPP { namespace Jingle {
     }
 
     void OmemoDtlsVerification::decryptFingerprint(Session *session, const QDomElement &fingerprint,
-                                                   const FingerprintDone &done)
+                                                   const VerificationDone &done)
     {
         if (!session || !session->allowsEncryptionMethod(OmemoEncryption::methodId()) || !d->omemo) {
-            done({}, QStringLiteral("This session cannot verify OMEMO DTLS fingerprints"));
+            done({}, {}, QStringLiteral("This session cannot verify OMEMO DTLS fingerprints"));
             return;
         }
         QDomElement encrypted;
@@ -167,19 +167,19 @@ namespace XMPP { namespace Jingle {
             if (child.namespaceURI() == OmemoEncryption::namespaceUri()
                 || child.namespaceURI() == OmemoEncryption::legacyNamespaceUri()) {
                 if (!encrypted.isNull()) {
-                    done({}, QStringLiteral("Ambiguous encrypted DTLS fingerprint"));
+                    done({}, {}, QStringLiteral("Ambiguous encrypted DTLS fingerprint"));
                     return;
                 }
                 encrypted = child;
             }
         }
         if (encrypted.isNull()) {
-            done({}, QStringLiteral("No OMEMO envelope in DTLS fingerprint"));
+            done({}, {}, QStringLiteral("No OMEMO envelope in DTLS fingerprint"));
             return;
         }
         auto *job = d->omemo->decryptElement(session->peer(), encrypted);
         if (!job) {
-            done({}, QStringLiteral("Cannot decrypt DTLS fingerprint"));
+            done({}, {}, QStringLiteral("Cannot decrypt DTLS fingerprint"));
             return;
         }
         QPointer<OmemoDtlsVerification> guard(this);
@@ -189,7 +189,7 @@ namespace XMPP { namespace Jingle {
             if (!guard || !current)
                 return;
             if (!job->success()) {
-                done({}, job->errorString());
+                done({}, {}, job->errorString());
                 return;
             }
             const auto                 &meta = job->metadata();
@@ -204,7 +204,7 @@ namespace XMPP { namespace Jingle {
                     && (existing.method != authentication.method || existing.deviceId != authentication.deviceId
                         || existing.identityKey != authentication.identityKey))
                 || (current->isEndToEndRequired() && !trusted(authentication.trustLevel))) {
-                done({}, QStringLiteral("The peer's OMEMO identity is not acceptable"));
+                done({}, {}, QStringLiteral("The peer's OMEMO identity is not acceptable"));
                 return;
             }
             const auto   plain = job->stanza();
@@ -220,9 +220,9 @@ namespace XMPP { namespace Jingle {
                 result.appendChild(document.createTextNode(plain.text().trimmed()));
             }
             document.appendChild(result);
-            current->setPeerAuthentication(authentication);
-            guard->setPeerDevice(current->peer(), current->sid(), authentication.deviceId);
-            done(result, {});
+            // ICE validates the decrypted DTLS fingerprint before committing
+            // either its parameters or the peer's authenticated identity.
+            done(result, authentication, {});
         };
         if (job->isFinished())
             finish();
