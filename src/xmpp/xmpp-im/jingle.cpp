@@ -1091,7 +1091,7 @@ namespace XMPP { namespace Jingle {
         }
         for (auto filter : d->filters)
             ret += filter->discoFeatures();
-        if (auto *jet = JET::Jet::of(this))
+        if (auto *jet = findChild<JET::Jet *>(QString(), Qt::FindDirectChildrenOnly))
             ret += jet->discoFeatures();
         ret.removeDuplicates();
         return ret;
