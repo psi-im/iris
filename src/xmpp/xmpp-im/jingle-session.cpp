@@ -228,7 +228,7 @@ namespace XMPP { namespace Jingle {
         Jid     localParty; // that one will be set as initiator/responder if provided
         Session::PeerAuthentication peerAuthentication;
         QString                     encryptionMethodId;
-        QPointer<EncryptedSession>   encryptionSession;
+        QPointer<EncryptedSession>  encryptionSession;
         bool                        endToEndRequired         = false;
         bool                        endToEndPreferred        = false;
         bool                        waitingAck               = false;
@@ -2895,10 +2895,9 @@ namespace XMPP { namespace Jingle {
             return false;
 
         EncryptionContext context;
-        context.recipients = { peer() };
-        const auto capabilities
-            = method->capabilities() & EncryptionMethod::Capabilities(EncryptionMethod::XmppStanza
-                                                                      | EncryptionMethod::DataStream);
+        context.recipients      = { peer() };
+        const auto capabilities = method->capabilities()
+            & EncryptionMethod::Capabilities(EncryptionMethod::XmppStanza | EncryptionMethod::DataStream);
         d->encryptionSession = registry->startSession(methodId, capabilities, context);
         return d->encryptionSession != nullptr;
     }
@@ -2909,8 +2908,7 @@ namespace XMPP { namespace Jingle {
 
     bool Session::allowsEncryptionMethod(const QString &methodId) const
     {
-        return d->encryptionMethodId.isEmpty()
-            || (d->encryptionMethodId == methodId && d->encryptionSession);
+        return d->encryptionMethodId.isEmpty() || (d->encryptionMethodId == methodId && d->encryptionSession);
     }
 
     bool Session::checkPeerCaps(const QString &ns) const
@@ -3322,9 +3320,9 @@ namespace XMPP { namespace Jingle {
         // another method, or an unavailable required method.
         if (!d->encryptionMethodId.isEmpty()
             && ((d->endToEndRequired && !d->encryptionSession)
-                || (d->peerAuthentication.isValid()
-                    && d->peerAuthentication.method != d->encryptionMethodId))) {
-            terminate(Reason::SecurityError, QStringLiteral("Selected Jingle encryption method unavailable or mismatched"));
+                || (d->peerAuthentication.isValid() && d->peerAuthentication.method != d->encryptionMethodId))) {
+            terminate(Reason::SecurityError,
+                      QStringLiteral("Selected Jingle encryption method unavailable or mismatched"));
             return;
         }
         // So we presented a user incoming session in UI, the user modified it somehow and finally accepted.
@@ -3356,8 +3354,8 @@ namespace XMPP { namespace Jingle {
     {
         if (d->role == Origin::Initiator && d->state == State::Created && d->endToEndRequired
             && !d->encryptionMethodId.isEmpty() && !d->encryptionSession) {
-            d->terminateReason = Reason(Reason::SecurityError,
-                                        QStringLiteral("Selected Jingle encryption method unavailable"));
+            d->terminateReason
+                = Reason(Reason::SecurityError, QStringLiteral("Selected Jingle encryption method unavailable"));
             d->setSessionFinished();
             return;
         }

@@ -64,8 +64,8 @@ struct Transfer {
 
 // Alice offers @a data to bob over IBB with the given policy; bob accepts.
 std::unique_ptr<Transfer> send(Endpoint &alice, Endpoint &bob, const QByteArray &data, bool preferred, bool required,
-                               const std::function<void(QDomElement &)> &tamper = {},
-                               const QString &methodId = OmemoEncryption::methodId())
+                               const std::function<void(QDomElement &)> &tamper   = {},
+                               const QString                            &methodId = OmemoEncryption::methodId())
 {
     auto t    = std::make_unique<Transfer>();
     t->source = std::make_unique<QBuffer>();
@@ -104,8 +104,7 @@ std::unique_ptr<Transfer> send(Endpoint &alice, Endpoint &bob, const QByteArray 
               "Jingle method selection did not reflect method availability");
         check(t->session->encryptionMethodId() == methodId, "Jingle lost the selected encryption method");
         if (registered)
-            check(t->session->encryptionSession() != nullptr
-                      && t->session->encryptionSession()->methodId() == methodId,
+            check(t->session->encryptionSession() != nullptr && t->session->encryptionSession()->methodId() == methodId,
                   "Jingle did not retain a method-specific encryption session");
     }
     t->session->setEndToEndPreferred(preferred);

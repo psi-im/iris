@@ -78,8 +78,7 @@ QString dump(const QDomDocument &doc)
 }
 
 Run start(Endpoint &alice, Endpoint &bob, bool preferred, bool required, Wire &wire,
-          const std::function<void(QDomElement &)> &tamper = {},
-          const QString &methodId = OmemoEncryption::methodId())
+          const std::function<void(QDomElement &)> &tamper = {}, const QString &methodId = OmemoEncryption::methodId())
 {
     Run run;
     onStanza = [&wire, tamper](const Endpoint &, QDomElement &stanza) {
@@ -158,12 +157,12 @@ int main(int argc, char **argv)
     J::OmemoDtlsVerification aliceVerification(alice.client.jingleManager(), alice.omemo);
 
     struct UnavailableProtector : SXE::PayloadProtector {
-        QString methodId() const override { return QStringLiteral("test-other"); }
-        QString method() const override { return QStringLiteral("urn:test:other-sxe:0"); }
-        bool canProtect(const Jid &) const override { return false; }
+        QString     methodId() const override { return QStringLiteral("test-other"); }
+        QString     method() const override { return QStringLiteral("urn:test:other-sxe:0"); }
+        bool        canProtect(const Jid &) const override { return false; }
         QStringList discoFeatures() const override { return { method() }; }
-        void protect(const Jid &, const QDomElement &, const Done &done) override { done({}); }
-        void unprotect(const Jid &, const QDomElement &, const Done &done) override { done({}); }
+        void        protect(const Jid &, const QDomElement &, const Done &done) override { done({}); }
+        void        unprotect(const Jid &, const QDomElement &, const Done &done) override { done({}); }
     } alternative;
     auto *transportManager = SXE::TransportManager::of(alice.client.jingleManager());
     check(transportManager && transportManager->registerPayloadProtector(&alternative),

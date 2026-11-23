@@ -18,14 +18,16 @@ void check(bool value, const char *message)
 
 class TestKeyTransport : public J::JET::KeyTransport {
 public:
-    explicit TestKeyTransport(QString methodId, QString feature)
-        : id_(std::move(methodId)), feature_(std::move(feature)) { }
+    explicit TestKeyTransport(QString methodId, QString feature) :
+        id_(std::move(methodId)), feature_(std::move(feature))
+    {
+    }
 
-    QString methodId() const override { return id_; }
+    QString     methodId() const override { return id_; }
     QStringList discoFeatures() const override { return { feature_ }; }
-    bool canEncrypt(const Jid &) const override { return false; }
-    bool accepts(const QString &profile) const override { return profile == feature_; }
-    void encryptSecret(const Jid &, const Done &done) override
+    bool        canEncrypt(const Jid &) const override { return false; }
+    bool        accepts(const QString &profile) const override { return profile == feature_; }
+    void        encryptSecret(const Jid &, const Done &done) override
     {
         done({}, QStringLiteral("No key exchange in this registry test"));
     }
@@ -43,8 +45,8 @@ private:
 int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
-    Client client;
-    auto *manager = client.jingleManager();
+    Client           client;
+    auto            *manager = client.jingleManager();
     check(manager != nullptr, "Iris did not create a Jingle manager");
 
     {
@@ -62,8 +64,7 @@ int main(int argc, char **argv)
         check(jet.registerKeyTransport(&second), "JET could not register a second encryption method");
 
         const auto advertised = jet.discoFeatures();
-        check(advertised.contains(J::JET::Jet::ns())
-                  && advertised.contains(QStringLiteral("urn:test:jet:first"))
+        check(advertised.contains(J::JET::Jet::ns()) && advertised.contains(QStringLiteral("urn:test:jet:first"))
                   && advertised.contains(QStringLiteral("urn:test:jet:second"))
                   && !advertised.contains(QStringLiteral("urn:test:jet:duplicate")),
               "JET advertised the wrong generic/protocol-specific features");

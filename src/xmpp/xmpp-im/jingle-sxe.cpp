@@ -230,9 +230,8 @@ namespace XMPP { namespace Jingle { namespace SXE {
             return { PrepareUpdateStatus::Invalid, {}, {} }; // XEP-0284 requires at least one host
         // Payload protection both sides know; an answer must keep the offered one.
         const auto encryption = transportEl.attribute(QStringLiteral("encryption"));
-        auto *protector = encryption.isEmpty() ? nullptr : protectorForWire(_pad, encryption);
-        if (!encryption.isEmpty()
-            && (!protector || !_pad->session()->allowsEncryptionMethod(protector->methodId())))
+        auto      *protector  = encryption.isEmpty() ? nullptr : protectorForWire(_pad, encryption);
+        if (!encryption.isEmpty() && (!protector || !_pad->session()->allowsEncryptionMethod(protector->methodId())))
             return { PrepareUpdateStatus::Invalid, {}, {} };
         if (isLocal() && _state >= State::Unacked && encryption != d->encryption)
             return { PrepareUpdateStatus::Invalid, {}, {} };

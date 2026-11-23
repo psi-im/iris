@@ -107,11 +107,11 @@ public:
     EncryptionContext     context;
     QSet<EncryptionJob *> activeJobs;
     bool                  closing = false;
-    bool                  streamBusy = false;
-    bool                  streamFinished = false;
-    std::optional<bool>   streamEncrypting;
+    bool                           streamBusy     = false;
+    bool                           streamFinished = false;
+    std::optional<bool>            streamEncrypting;
     EncryptionMethod::Capabilities requestedCapabilities;
-    bool capabilitiesConfigured = false;
+    bool                           capabilitiesConfigured = false;
 };
 
 EncryptedSession::EncryptedSession(const QString &methodId, const EncryptionContext &context, QObject *parent) :
@@ -172,8 +172,14 @@ static EncryptionJob *unsupportedJob(QObject *parent)
     return job;
 }
 
-EncryptionJob *EncryptedSession::doEncrypt(const QDomElement &, const EncryptionContext &) { return unsupportedJob(this); }
-EncryptionJob *EncryptedSession::doDecrypt(const QDomElement &, const EncryptionContext &) { return unsupportedJob(this); }
+EncryptionJob *EncryptedSession::doEncrypt(const QDomElement &, const EncryptionContext &)
+{
+    return unsupportedJob(this);
+}
+EncryptionJob *EncryptedSession::doDecrypt(const QDomElement &, const EncryptionContext &)
+{
+    return unsupportedJob(this);
+}
 EncryptionJob *EncryptedSession::doEncrypt(const QByteArray &) { return unsupportedJob(this); }
 EncryptionJob *EncryptedSession::doDecrypt(const QByteArray &) { return unsupportedJob(this); }
 EncryptionJob *EncryptedSession::doEncryptChunk(const QByteArray &, bool) { return unsupportedJob(this); }
@@ -240,11 +246,11 @@ EncryptionJob *EncryptedSession::runStream(const QByteArray &chunk, bool encrypt
     if (d->streamEncrypting && *d->streamEncrypting != encrypting)
         return unsupportedJob(parent() ? parent() : this);
 
-    d->streamBusy = true;
+    d->streamBusy       = true;
     d->streamEncrypting = encrypting;
-    auto *job = encrypting ? doEncryptChunk(chunk, final) : doDecryptChunk(chunk, final);
+    auto *job           = encrypting ? doEncryptChunk(chunk, final) : doDecryptChunk(chunk, final);
     if (!job) {
-        d->streamBusy = false;
+        d->streamBusy     = false;
         d->streamFinished = true;
         return track(nullptr);
     }
@@ -263,10 +269,7 @@ EncryptionJob *EncryptedSession::runStream(const QByteArray &chunk, bool encrypt
 EncryptionMethod::EncryptionMethod(QObject *parent) : QObject(parent) { }
 EncryptionMethod::~EncryptionMethod() = default;
 
-EncryptionMethod::Availability EncryptionMethod::availability(const Jid &) const
-{
-    return Availability::Available;
-}
+EncryptionMethod::Availability EncryptionMethod::availability(const Jid &) const { return Availability::Available; }
 
 EncryptionJob *EncryptionMethod::prepareDecryptionRecovery(const EncryptionMetadata &) { return unsupportedJob(this); }
 
@@ -368,8 +371,7 @@ Features EncryptionManager::features() const
     return result;
 }
 
-EncryptedSession *EncryptionManager::startSession(const QString &methodId,
-                                                  EncryptionMethod::Capabilities capabilities,
+EncryptedSession *EncryptionManager::startSession(const QString &methodId, EncryptionMethod::Capabilities capabilities,
                                                   const EncryptionContext &context)
 {
     auto *method = this->method(methodId);

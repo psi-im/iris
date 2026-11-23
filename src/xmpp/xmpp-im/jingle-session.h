@@ -106,10 +106,10 @@ namespace Jingle {
          * required end-to-end encryption can never silently choose another method.
          * The associated encryption session lives in Iris's encryption registry.
          */
-        bool setEncryptionMethod(const QString &methodId);
-        QString encryptionMethodId() const;
+        bool              setEncryptionMethod(const QString &methodId);
+        QString           encryptionMethodId() const;
         EncryptedSession *encryptionSession() const;
-        bool allowsEncryptionMethod(const QString &methodId) const;
+        bool              allowsEncryptionMethod(const QString &methodId) const;
 
         TieBreaker       *tieBreaker();
         const TieBreaker *tieBreaker() const;
@@ -205,6 +205,7 @@ namespace Jingle {
         class Private;
         std::unique_ptr<Private> d;
     };
-}}
+}
+}
 
 #endif // JINGLE_SESSION_H

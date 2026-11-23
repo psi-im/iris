@@ -12,10 +12,10 @@
 
 #include "xmpp_omemo.h"
 
-#include "xmpp_caps.h"
 #include "jingle-jet-omemo.h"
 #include "jingle-omemo-verification.h"
 #include "jingle-sxe-omemo.h"
+#include "xmpp_caps.h"
 #include "xmpp_client.h"
 #include "xmpp_pubsub.h"
 #include "xmpp_sce.h"
@@ -4051,7 +4051,7 @@ EncryptionJob *OmemoEncryption::encryptElement(const Jid &recipient, OmemoProtoc
         return job;
     }
     session->setParent(job);
-    auto *inner = session->encrypt(wrapper);
+    auto *inner  = session->encrypt(wrapper);
     auto finish = [job, inner, protocol]() {
         const auto encrypted
             = inner->success() ? inner->stanza().firstChildElement(QStringLiteral("encrypted")) : QDomElement();
@@ -4090,7 +4090,7 @@ EncryptionJob *OmemoEncryption::decryptElement(const Jid &sender, const QDomElem
         return job;
     }
     session->setParent(job);
-    auto *inner = session->decrypt(wrapper);
+    auto *inner  = session->decrypt(wrapper);
     auto finish = [job, inner]() {
         if (!inner->success()) {
             job->fail(inner->error(), inner->errorString(), inner->metadata());

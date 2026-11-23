@@ -10,7 +10,7 @@ namespace {
 void exerciseHostOwnedIncomingSessions(Endpoint &alice, Endpoint &bob)
 {
     QStringList received;
-    int failures = 0;
+    int         failures = 0;
     QObject::connect(&bob.client, &Client::messageReceived, &bob.client, [&](const Message &m) {
         if (m.type() == Message::Type::Chat)
             received.append(m.body());
@@ -21,7 +21,7 @@ void exerciseHostOwnedIncomingSessions(Endpoint &alice, Endpoint &bob)
 
     const auto encrypted = [&](const QString &body) {
         QDomDocument doc;
-        auto message = doc.createElementNS(QStringLiteral("jabber:client"), QStringLiteral("message"));
+        auto         message = doc.createElementNS(QStringLiteral("jabber:client"), QStringLiteral("message"));
         doc.appendChild(message);
         message.setAttribute(QStringLiteral("from"), alice.jid.full());
         message.setAttribute(QStringLiteral("to"), bob.jid.full());
@@ -32,8 +32,8 @@ void exerciseHostOwnedIncomingSessions(Endpoint &alice, Endpoint &bob)
         EncryptionContext context;
         context.recipients = { bob.jid.bare() };
         context.options.insert(QStringLiteral("omemoProtocol"), QStringLiteral("omemo2"));
-        auto *session = alice.client.encryptionManager()->startSession(
-            OmemoEncryption::methodId(), EncryptionMethod::XmppStanza, context);
+        auto *session = alice.client.encryptionManager()->startSession(OmemoEncryption::methodId(),
+                                                                       EncryptionMethod::XmppStanza, context);
         check(session != nullptr, "Cannot create direct OMEMO sender session");
         auto *job = session->encrypt(message);
         session->close();
@@ -53,7 +53,7 @@ void exerciseHostOwnedIncomingSessions(Endpoint &alice, Endpoint &bob)
               "Explicit incoming decryption or normal message delivery failed");
     };
 
-    const int initialHandled = bob.incomingHandled;
+    const int initialHandled  = bob.incomingHandled;
     const int initialSessions = bob.incomingSessionsCreated;
     deliver(QStringLiteral("first protected message"), 1);
     check(bob.incomingHandled == initialHandled + 1 && bob.incomingSessionsCreated == initialSessions + 1,
@@ -91,8 +91,8 @@ void exerciseMuc(Endpoint &alice, Endpoint &bob)
         EncryptionContext send;
         send.recipients = { bob.jid.bare() };
         send.options.insert(QStringLiteral("omemoProtocol"), QStringLiteral("omemo2"));
-        auto *session = alice.client.encryptionManager()->startSession(
-            OmemoEncryption::methodId(), EncryptionMethod::XmppStanza, send);
+        auto *session = alice.client.encryptionManager()->startSession(OmemoEncryption::methodId(),
+                                                                       EncryptionMethod::XmppStanza, send);
         check(session != nullptr, "Cannot create OMEMO sender session");
         auto *job = session->encrypt(stanza);
         session->close();
@@ -109,9 +109,9 @@ void exerciseMuc(Endpoint &alice, Endpoint &bob)
 
     QDomDocument incomingDoc = encryptMessage();
     auto incoming = incomingDoc.documentElement();
-    const auto decrypt = [&](const QDomElement &stanza, const EncryptionContext &context) {
-        auto *session = bob.client.encryptionManager()->startSession(
-            OmemoEncryption::methodId(), EncryptionMethod::XmppStanza, context);
+    const auto   decrypt     = [&](const QDomElement &stanza, const EncryptionContext &context) {
+        auto *session = bob.client.encryptionManager()->startSession(OmemoEncryption::methodId(),
+                                                                           EncryptionMethod::XmppStanza, context);
         check(session != nullptr, "Cannot create OMEMO receiver session");
         auto *job = session->decrypt(stanza);
         session->close();

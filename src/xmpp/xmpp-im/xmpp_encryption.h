@@ -241,7 +241,7 @@ public:
     virtual Features          features() const                                                  = 0;
     virtual bool              canDecrypt(const QDomElement &stanza) const                       = 0;
     // Concrete methods decide peer support; absent discovery must not be mistaken for rejection.
-    virtual Availability      availability(const Jid &peer) const;
+    virtual Availability availability(const Jid &peer) const;
 
     /**
      * Resolve and validate the peer data needed to recover a failed incoming
@@ -277,7 +277,7 @@ public:
     EncryptionMethod *method(const QString &id) const;
     EncryptionMethod *methodForStanza(const QDomElement &stanza) const;
     EncryptionMethod::Availability availability(const QString &methodId, const Jid &peer) const;
-    MethodsMap        methods(EncryptionMethod::Capabilities caps = {}) const;
+    MethodsMap                     methods(EncryptionMethod::Capabilities caps = {}) const;
     Features          features() const;
 
     /** A session may combine stanza signaling and incremental data, e.g. for Jingle. */

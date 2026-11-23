@@ -22,32 +22,33 @@ class OmemoEncryption;
 
 namespace Jingle {
 
-/**
- * XEP-0396 profile of XEP-0391: OMEMO encrypts the JET transport secret.
- * Generic JET signaling, content association and streaming live in JET::Jet.
- * Legacy OMEMO uses its key-transport envelope (AES-128-GCM); OMEMO 2 uses
- * an SCE-wrapped secret (AES-256-GCM).
- */
-class IRIS_EXPORT JetOmemo : public QObject, public JET::KeyTransport {
-    Q_OBJECT
-public:
-    static QString ns();    // urn:xmpp:jingle:jet-omemo:0
-    static QString jetNs(); // urn:xmpp:jingle:jet:0
+    /**
+     * XEP-0396 profile of XEP-0391: OMEMO encrypts the JET transport secret.
+     * Generic JET signaling, content association and streaming live in JET::Jet.
+     * Legacy OMEMO uses its key-transport envelope (AES-128-GCM); OMEMO 2 uses
+     * an SCE-wrapped secret (AES-256-GCM).
+     */
+    class IRIS_EXPORT JetOmemo : public QObject, public JET::KeyTransport {
+        Q_OBJECT
+    public:
+        static QString ns();    // urn:xmpp:jingle:jet-omemo:0
+        static QString jetNs(); // urn:xmpp:jingle:jet:0
 
-    JetOmemo(Manager *manager, OmemoEncryption *omemo, QObject *parent = nullptr);
-    ~JetOmemo() override;
+        JetOmemo(Manager *manager, OmemoEncryption *omemo, QObject *parent = nullptr);
+        ~JetOmemo() override;
 
-    QString methodId() const override;
-    QStringList discoFeatures() const override;
-    bool canEncrypt(const Jid &peer) const override;
-    bool accepts(const QString &wireProfile) const override;
-    void encryptSecret(const Jid &peer, const Done &done) override;
-    void decryptSecret(const Jid &peer, const QDomElement &security, const Done &done) override;
+        QString     methodId() const override;
+        QStringList discoFeatures() const override;
+        bool        canEncrypt(const Jid &peer) const override;
+        bool        accepts(const QString &wireProfile) const override;
+        void        encryptSecret(const Jid &peer, const Done &done) override;
+        void        decryptSecret(const Jid &peer, const QDomElement &security, const Done &done) override;
 
-private:
-    class Private;
-    std::unique_ptr<Private> d;
-};
+    private:
+        class Private;
+        std::unique_ptr<Private> d;
+    };
 
-}} // namespace XMPP::Jingle
+}
+}      // namespace XMPP::Jingle
 #endif // JINGLE_JET_OMEMO_H
