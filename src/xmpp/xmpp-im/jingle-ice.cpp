@@ -1004,6 +1004,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
         bool                           deferredStart = false;
         bool                           verifiedRemoteFingerprint = false;
         bool                           outgoingFingerprintBusy = false;
+        quint64                        outgoingFingerprintRevision = 0;
         QDomDocument                   fingerprintDocument;
         QDomElement                    protectedOutgoingFingerprint;
 
@@ -1174,6 +1175,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
                         return;
                     auto d = guard->d.get();
                     d->pendingActions |= NewFingerprint;
+                    ++d->outgoingFingerprintRevision;
                     d->protectedOutgoingFingerprint.clear();
                     guard->prepareOutgoingFingerprint();
                 };
@@ -1247,6 +1249,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
                     return false;
                 if (componentIndex == 0)
                     pendingActions |= NewFingerprint;
+                ++outgoingFingerprintRevision;
                 return true;
             }
             component.dtls = new Dtls(network, q->pad()->session()->me().full(), q->pad()->session()->peer().full());
@@ -1289,6 +1292,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
                     },
                     Qt::QueuedConnection);
                 pendingActions |= NewFingerprint;
+                ++outgoingFingerprintRevision;
             }
             dtls->connect(dtls, &Dtls::readyRead, network, [net = network, componentIndex]() {
                 if (net->runtime->pad)
@@ -1976,16 +1980,22 @@ namespace XMPP { namespace Jingle { namespace ICE {
             return;
         }
         d->outgoingFingerprintBusy = true;
+        const auto revision = d->outgoingFingerprintRevision;
         QPointer<Transport> guard(this);
         connect(verification, &QObject::destroyed, this, [guard]() {
             if (guard && guard->d->outgoingFingerprintBusy && guard->_state < State::Finishing)
                 guard->onFinish(Reason::SecurityError, QStringLiteral("OMEMO DTLS verifier was unloaded"));
         });
         verification->encryptFingerprint(
-            session, plain, [guard, required](const QDomElement &protectedFingerprint, const QString &error) {
+            session, plain, [guard, required, revision](const QDomElement &protectedFingerprint,
+                                                      const QString &error) {
                 if (!guard || guard->_state >= State::Finishing)
                     return;
                 guard->d->outgoingFingerprintBusy = false;
+                if (revision != guard->d->outgoingFingerprintRevision) {
+                    guard->prepareOutgoingFingerprint();
+                    return;
+                }
                 if (!error.isEmpty() || protectedFingerprint.isNull()) {
                     if (required) {
                         guard->onFinish(Reason::SecurityError,

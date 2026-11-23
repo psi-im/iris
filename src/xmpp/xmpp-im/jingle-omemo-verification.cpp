@@ -105,8 +105,12 @@ namespace XMPP { namespace Jingle {
         const Jid peer = session->peer();
         const auto preferred = d->omemo->preferredProtocolFor(peer).value_or(OmemoProtocol::Legacy);
         auto attempt = std::make_shared<std::function<void(OmemoProtocol)>>();
+        std::weak_ptr<std::function<void(OmemoProtocol)>> weakAttempt = attempt;
         QPointer<OmemoDtlsVerification> guard(this);
-        *attempt = [guard, peer, device, fingerprint, done, attempt](OmemoProtocol protocol) {
+        *attempt = [guard, peer, device, fingerprint, done, weakAttempt](OmemoProtocol protocol) {
+            auto attempt = weakAttempt.lock();
+            if (!attempt)
+                return;
             if (!guard || !guard->d->omemo) {
                 if (guard)
                     done({}, QStringLiteral("The OMEMO encryption method was unregistered"));
