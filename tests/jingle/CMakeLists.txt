@@ -33,6 +33,11 @@ target_link_libraries(jingle_jet_registry_test PRIVATE iris Qt${QT_DEFAULT_MAJOR
     Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
 add_test(NAME jingle_jet_registry COMMAND jingle_jet_registry_test)
 set_tests_properties(jingle_jet_registry PROPERTIES TIMEOUT 10)
+add_executable(jingle_jet_connection_test jetconnection.cpp)
+target_link_libraries(jingle_jet_connection_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
+    Qt${QT_DEFAULT_MAJOR_VERSION}::Network)
+add_test(NAME jingle_jet_connection COMMAND jingle_jet_connection_test)
+set_tests_properties(jingle_jet_connection PROPERTIES TIMEOUT 10)
 target_link_libraries(jingle_signaling_test PRIVATE iris Qt${QT_DEFAULT_MAJOR_VERSION}::Core
     Qt${QT_DEFAULT_MAJOR_VERSION}::Xml)
 enable_testing()
