@@ -50,5 +50,5 @@ namespace Jingle {
     };
 
 }
-}      // namespace XMPP::Jingle
+} // namespace XMPP::Jingle
 #endif // JINGLE_JET_OMEMO_H

@@ -868,12 +868,12 @@ namespace XMPP { namespace Jingle {
 
         bool found = false;
         for (auto content = jingle.firstChildElement(QStringLiteral("content")); !content.isNull();
-             content = content.nextSiblingElement(QStringLiteral("content"))) {
-            found = true;
+             content      = content.nextSiblingElement(QStringLiteral("content"))) {
+            found                 = true;
             bool protectedContent = false;
             if (content.firstChildElement(QStringLiteral("description")).namespaceURI() == FileTransfer::NS) {
                 for (auto security = content.firstChildElement(QStringLiteral("security")); !security.isNull();
-                     security = security.nextSiblingElement(QStringLiteral("security"))) {
+                     security      = security.nextSiblingElement(QStringLiteral("security"))) {
                     if (security.namespaceURI() == JET::Jet::ns()) {
                         protectedContent = true;
                         break;
@@ -882,10 +882,10 @@ namespace XMPP { namespace Jingle {
             }
             if (!protectedContent && session) {
                 const ContentBase key(content);
-                auto *application = key.isValid()
-                    ? qobject_cast<FileTransfer::Application *>(session->content(key.name, key.creator))
-                    : nullptr;
-                protectedContent = application && application->isTransportEncrypted();
+                auto             *application = key.isValid()
+                                ? qobject_cast<FileTransfer::Application *>(session->content(key.name, key.creator))
+                                : nullptr;
+                protectedContent              = application && application->isTransportEncrypted();
             }
             if (!protectedContent)
                 return false;

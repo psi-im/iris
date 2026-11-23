@@ -181,12 +181,12 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
         QByteArray                         jetIv;
         std::unique_ptr<JET::StreamCipher> jet;
         bool                               jetTagWritten = false;
-        QDomDocument                       incomingSecurityDocument;
-        QDomElement                        incomingSecurity;
+        QDomDocument                        incomingSecurityDocument;
+        QDomElement                         incomingSecurity;
         std::optional<JET::ProtectedSecret> outgoingSecret;
-        bool                               jetPreparing = false;
-        bool                               jetPrepared = false;
-        QMetaObject::Connection            jetUnregistered;
+        bool                                jetPreparing = false;
+        bool                                jetPrepared  = false;
+        QMetaObject::Connection             jetUnregistered;
 
         bool writeToConnection(const QByteArray &data)
         {
@@ -823,7 +823,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
     {
         QDomElement security;
         for (auto el = content.firstChildElement(QStringLiteral("security")); !el.isNull();
-             el = el.nextSiblingElement(QStringLiteral("security"))) {
+             el      = el.nextSiblingElement(QStringLiteral("security"))) {
             if (el.namespaceURI() != JET::Jet::ns())
                 continue;
             if (!security.isNull())
@@ -1022,11 +1022,11 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
             }
         }
         const bool outgoingOffer = _update.action == Action::ContentAdd && _creator == _pad->session()->role();
-        auto result = XMPP::Jingle::Application::takeOutgoingUpdate();
+        auto       result        = XMPP::Jingle::Application::takeOutgoingUpdate();
         if (outgoingOffer && d->outgoingSecret && !std::get<0>(result).isEmpty()) {
-            const auto &secret = *d->outgoingSecret;
-            auto content = std::get<0>(result).first();
-            auto security = doc->createElementNS(JET::Jet::ns(), QStringLiteral("security"));
+            const auto &secret   = *d->outgoingSecret;
+            auto        content  = std::get<0>(result).first();
+            auto        security = doc->createElementNS(JET::Jet::ns(), QStringLiteral("security"));
             security.setAttribute(QStringLiteral("name"), content.attribute(QStringLiteral("name")));
             security.setAttribute(QStringLiteral("cipher"), secret.cipher);
             security.setAttribute(QStringLiteral("type"), secret.type);
@@ -1053,7 +1053,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
         }
 
         const bool incomingProtected = !d->incomingSecurity.isNull();
-        const bool outgoingOffer = creator() == session->role();
+        const bool outgoingOffer     = creator() == session->role();
         const bool outgoingProtected = outgoingOffer && session->isEndToEndPreferred();
         if (!incomingProtected && !outgoingProtected) {
             if (!outgoingOffer && session->isEndToEndRequired()) {
@@ -1084,7 +1084,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
             if (guard && guard->d->jetPreparing)
                 guard->remove(Reason::SecurityError, QStringLiteral("JET encryption provider was unloaded"));
         });
-        auto done = [guard, incomingProtected, required = incomingProtected || session->isEndToEndRequired()](
+        auto done          = [guard, incomingProtected, required = incomingProtected || session->isEndToEndRequired()](
                         const std::optional<JET::ProtectedSecret> &secret, const QString &error) {
             if (!guard || guard->_state >= State::Finishing || !guard->d->jetPreparing)
                 return;

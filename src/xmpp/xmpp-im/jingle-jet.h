@@ -74,9 +74,9 @@ namespace XMPP { namespace Jingle { namespace JET {
         void unregisterKeyTransport(KeyTransport *transport);
 
         using Done = KeyTransport::Done;
-        void prepareOutgoing(Session *session, const Done &done);
-        void prepareIncoming(Session *session, const QDomElement &security, const QString &contentName,
-                             const Done &done);
+        void        prepareOutgoing(Session *session, const Done &done);
+        void        prepareIncoming(Session *session, const QDomElement &security, const QString &contentName,
+                                    const Done &done);
         QStringList discoFeatures() const;
 
     signals:

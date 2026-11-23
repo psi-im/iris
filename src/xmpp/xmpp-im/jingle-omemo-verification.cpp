@@ -19,8 +19,8 @@
 
 #include "jingle-omemo-verification.h"
 
-#include "jingle-ice.h"
 #include "jingle-ft.h"
+#include "jingle-ice.h"
 #include "jingle-session.h"
 #include "xmpp_client.h"
 #include "xmpp_encryption.h"
@@ -65,7 +65,7 @@ namespace XMPP { namespace Jingle {
                 if (content.firstChildElement(QStringLiteral("description")).namespaceURI() == FileTransfer::NS) {
                     bool jet = false;
                     for (auto sec = content.firstChildElement(QStringLiteral("security")); !sec.isNull();
-                         sec = sec.nextSiblingElement(QStringLiteral("security")))
+                         sec      = sec.nextSiblingElement(QStringLiteral("security")))
                         jet = jet || sec.namespaceURI() == QLatin1String("urn:xmpp:jingle:jet:0");
                     if (jet)
                         continue;
