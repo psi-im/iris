@@ -1841,6 +1841,165 @@ namespace XMPP { namespace Jingle { namespace ICE {
         return true;
     }
 
+    bool Transport::requiresVerifiedFingerprint() const
+    {
+        auto *session = pad()->session();
+        if (!session->isEndToEndRequired())
+            return false;
+        // A JET file may use ICE, but its payload is protected by the
+        // file-transfer application rather than DTLS fingerprint verification.
+        for (auto *app : session->contentList()) {
+            if (app && app->transport() == this) {
+                if (auto *file = qobject_cast<FileTransfer::Application *>(app))
+                    if (file->isTransportEncrypted())
+                        return false;
+            }
+        }
+        return true;
+    }
+
+    void Transport::processNextRemoteUpdate()
+    {
+        if (d->remoteUpdateBusy || d->networkOwnershipRetired || _state >= State::Finishing)
+            return;
+        if (d->remoteUpdates.isEmpty()) {
+            if (d->deferredPrepare) {
+                d->deferredPrepare = false;
+                prepare();
+                if (_state >= State::Finishing)
+                    return;
+            }
+            if (d->deferredStart) {
+                d->deferredStart = false;
+                start();
+            }
+            return;
+        }
+
+        auto update = d->remoteUpdates.takeFirst();
+        QPointer<Transport> guard(this);
+        auto proceed = [guard](Element update) {
+            if (!guard || guard->d->networkOwnershipRetired || guard->_state >= State::Finishing)
+                return;
+            guard->d->remoteUpdateBusy = false;
+            guard->d->handleRemoteUpdate(update);
+            if (guard && guard->_state < State::Finishing)
+                QTimer::singleShot(0, guard, [guard]() {
+                    if (guard)
+                        guard->processNextRemoteUpdate();
+                });
+        };
+        if (update.protectedFingerprint.isNull()) {
+            if (update.fingerprint.isValid() && requiresVerifiedFingerprint()
+                && !d->verifiedRemoteFingerprint) {
+                onFinish(Reason::SecurityError, QStringLiteral("Unverified DTLS fingerprint in protected session"));
+                return;
+            }
+            proceed(std::move(update));
+            return;
+        }
+
+        d->remoteUpdateBusy = true;
+        auto *verification = pad()->session()->manager()->dtlsVerification();
+        if (!verification) {
+            onFinish(Reason::SecurityError, QStringLiteral("OMEMO DTLS verification provider is unavailable"));
+            return;
+        }
+        // If the method is unloaded before the job completes, fail closed.
+        connect(verification, &QObject::destroyed, this, [guard]() {
+            if (guard && guard->d->remoteUpdateBusy && guard->_state < State::Finishing)
+                guard->onFinish(Reason::SecurityError, QStringLiteral("OMEMO DTLS verifier was unloaded"));
+        });
+        verification->decryptFingerprint(
+            pad()->session(), update.protectedFingerprint,
+            [guard, update = std::move(update), proceed](const QDomElement &plain, const QString &error) mutable {
+                if (!guard || guard->d->networkOwnershipRetired || guard->_state >= State::Finishing)
+                    return;
+                if (!error.isEmpty() || plain.isNull() || !update.fingerprint.parse(plain)) {
+                    guard->onFinish(Reason::SecurityError,
+                                    error.isEmpty() ? QStringLiteral("Invalid authenticated DTLS fingerprint") : error);
+                    return;
+                }
+                guard->d->verifiedRemoteFingerprint = true;
+                update.protectedFingerprint.clear();
+                proceed(std::move(update));
+            });
+    }
+
+    void Transport::prepareOutgoingFingerprint()
+    {
+        if (_state >= State::Finishing || d->outgoingFingerprintBusy
+            || !(d->pendingActions & Private::NewFingerprint))
+            return;
+        auto *session = pad()->session();
+        const bool required  = requiresVerifiedFingerprint();
+        const bool preferred = session->isEndToEndPreferred();
+        d->protectedOutgoingFingerprint.clear();
+        if (!preferred) {
+            emit updated();
+            return;
+        }
+
+        auto *verification = session->manager()->dtlsVerification();
+        const auto device = verification ? verification->peerDevice(session->peer(), session->sid())
+                                         : std::optional<quint32> {};
+        if (!verification || !session->allowsEncryptionMethod(QStringLiteral("omemo")) || !device) {
+            if (required)
+                onFinish(Reason::SecurityError, QStringLiteral("No OMEMO device available for DTLS verification"));
+            else
+                emit updated();
+            return;
+        }
+        if (required && session->role() == Origin::Responder) {
+            const auto auth = session->peerAuthentication();
+            if (!auth.isValid()) {
+                onFinish(Reason::SecurityError, QStringLiteral("Peer DTLS fingerprint is not authenticated"));
+                return;
+            }
+        }
+        if (!d->network || d->network->components.isEmpty() || !d->network->components[0].dtls) {
+            if (required)
+                onFinish(Reason::SecurityError, QStringLiteral("DTLS fingerprint is not available"));
+            else
+                emit updated();
+            return;
+        }
+
+        QDomDocument document;
+        const auto plain = d->network->components[0].dtls->localFingerprint().toXml(&document);
+        if (plain.isNull()) {
+            onFinish(Reason::SecurityError, QStringLiteral("Cannot serialize the DTLS fingerprint"));
+            return;
+        }
+        d->outgoingFingerprintBusy = true;
+        QPointer<Transport> guard(this);
+        connect(verification, &QObject::destroyed, this, [guard]() {
+            if (guard && guard->d->outgoingFingerprintBusy && guard->_state < State::Finishing)
+                guard->onFinish(Reason::SecurityError, QStringLiteral("OMEMO DTLS verifier was unloaded"));
+        });
+        verification->encryptFingerprint(
+            session, plain, [guard, required](const QDomElement &protectedFingerprint, const QString &error) {
+                if (!guard || guard->_state >= State::Finishing)
+                    return;
+                guard->d->outgoingFingerprintBusy = false;
+                if (!error.isEmpty() || protectedFingerprint.isNull()) {
+                    if (required) {
+                        guard->onFinish(Reason::SecurityError,
+                                        error.isEmpty() ? QStringLiteral("Cannot encrypt DTLS fingerprint") : error);
+                        return;
+                    }
+                } else {
+                    guard->d->protectedOutgoingFingerprint
+                        = guard->d->fingerprintDocument.importNode(protectedFingerprint, true).toElement();
+                }
+                emit guard->updated();
+                if (guard->d->deferredStart) {
+                    guard->d->deferredStart = false;
+                    guard->start();
+                }
+            });
+    }
+
     void Transport::prepare()
     {
         qDebug("Prepare local offer");
