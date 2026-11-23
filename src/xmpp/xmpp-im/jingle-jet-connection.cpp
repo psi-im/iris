@@ -61,20 +61,26 @@ namespace XMPP { namespace Jingle { namespace JET {
     TransportFeatures Connection::features() const { return raw_ ? raw_->features() : TransportFeatures(); }
     size_t Connection::blockSize() const { return raw_ ? raw_->blockSize() : 0; }
     int Connection::component() const { return raw_ ? raw_->component() : 0; }
-    qint64 Connection::bytesAvailable() const { return ByteStream::bytesAvailable(); }
+    qint64 Connection::bytesAvailable() const
+    {
+        return bool(features() & TransportFeature::MessageOriented) ? availableFrames_ : ByteStream::bytesAvailable();
+    }
     qint64 Connection::bytesToWrite() const { return raw_ ? raw_->bytesToWrite() : 0; }
 
     bool Connection::hasPendingDatagrams() const
     {
-        return bool(features() & TransportFeature::MessageOriented) && bytesAvailable() > 0;
+        return bool(features() & TransportFeature::MessageOriented) && !plainFrames_.isEmpty();
     }
 
     QNetworkDatagram Connection::readDatagram(qint64 maxSize)
     {
-        const qint64 available = bytesAvailable();
-        if (maxSize < 0 || maxSize > available)
-            maxSize = available;
-        return QNetworkDatagram(takeRead(int(qMin(maxSize, qint64(std::numeric_limits<int>::max()))));
+        if (!hasPendingDatagrams())
+            return {};
+        auto frame = plainFrames_.dequeue();
+        availableFrames_ -= frame.size();
+        if (maxSize >= 0 && maxSize < frame.size())
+            frame.truncate(int(maxSize));
+        return QNetworkDatagram(frame);
     }
 
     bool Connection::writeDatagram(const QNetworkDatagram &datagram)
@@ -84,7 +90,20 @@ namespace XMPP { namespace Jingle { namespace JET {
 
     qint64 Connection::readDataInternal(char *data, qint64 maxSize)
     {
-        return ByteStream::readData(data, maxSize);
+        if (!(features() & TransportFeature::MessageOriented))
+            return ByteStream::readData(data, maxSize);
+        qint64 count = 0;
+        while (count < maxSize && !plainFrames_.isEmpty()) {
+            auto &front = plainFrames_.head();
+            const int size = int(qMin(qint64(front.size()), maxSize - count));
+            std::memcpy(data + count, front.constData(), size_t(size));
+            front.remove(0, size);
+            count += size;
+            availableFrames_ -= size;
+            if (front.isEmpty())
+                plainFrames_.dequeue();
+        }
+        return count;
     }
 
     bool Connection::writeWire(const QByteArray &data)
@@ -136,6 +155,11 @@ namespace XMPP { namespace Jingle { namespace JET {
         if (sender_ || !cipher_ || failed_ || !raw_)
             return;
         const auto expected = plainSize_ + quint64(StreamCipher::TagSize);
+        if (wireRead_ == expected) {
+            if (raw_->bytesAvailable() > 0 || raw_->hasPendingDatagrams())
+                fail(QStringLiteral("Unexpected data after JET authentication tag"));
+            return;
+        }
         while (!failed_ && wireRead_ < expected
                && (raw_->bytesAvailable() > 0 || raw_->hasPendingDatagrams())) {
             QByteArray chunk;
@@ -149,6 +173,9 @@ namespace XMPP { namespace Jingle { namespace JET {
                 fail(QStringLiteral("JET payload exceeds its negotiated length"));
                 return;
             }
+            const bool messageOriented = bool(raw_->features() & TransportFeature::MessageOriented);
+            if (messageOriented && wireRead_ < plainSize_)
+                pendingFrameSizes_.enqueue(chunk.size());
             wireRead_ += quint64(chunk.size());
             auto plain = cipher_->process(chunk);
             if (wireRead_ == expected) {
@@ -156,15 +183,32 @@ namespace XMPP { namespace Jingle { namespace JET {
                     fail(QStringLiteral("JET authentication tag is invalid"));
                     return;
                 }
+                if (!pendingFrameSizes_.isEmpty() && !pendingPlain_.isEmpty()) {
+                    fail(QStringLiteral("JET datagram framing is incomplete"));
+                    return;
+                }
                 verified_ = true;
                 finished_ = true;
             }
             if (!plain.isEmpty()) {
-                appendRead(plain);
-                QPointer<Connection> guard(this);
-                emit readyRead();
-                if (!guard)
-                    return;
+                if (messageOriented) {
+                    pendingPlain_ += plain;
+                    while (!pendingFrameSizes_.isEmpty()
+                           && pendingPlain_.size() >= pendingFrameSizes_.head()) {
+                        const auto size = pendingFrameSizes_.dequeue();
+                        plainFrames_.enqueue(pendingPlain_.left(size));
+                        pendingPlain_.remove(0, size);
+                        availableFrames_ += size;
+                    }
+                } else {
+                    appendRead(plain);
+                }
+                if (!messageOriented || hasPendingDatagrams()) {
+                    QPointer<Connection> guard(this);
+                    emit readyRead();
+                    if (!guard)
+                        return;
+                }
             }
         }
     }
@@ -174,7 +218,7 @@ namespace XMPP { namespace Jingle { namespace JET {
         if (failed_)
             return;
         failed_ = true;
-        setError(ByteStream::ErrRead, message);
+        setError(sender_ ? ByteStream::ErrWrite : ByteStream::ErrRead, message);
     }
 
     void Connection::close()

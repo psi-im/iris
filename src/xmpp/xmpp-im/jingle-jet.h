@@ -152,6 +152,7 @@ namespace XMPP { namespace Jingle { namespace JET {
         bool preparing_ = false;
         bool prepared_ = false;
         bool outgoing_ = false;
+        bool connectionUsed_ = false; // GCM key/IV must never encrypt a second stream
         QMetaObject::Connection removed_;
         QMetaObject::Connection providerDestroyed_;
     };

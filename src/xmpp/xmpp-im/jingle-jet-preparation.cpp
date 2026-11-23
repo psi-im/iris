@@ -330,6 +330,9 @@ namespace XMPP { namespace Jingle { namespace JET {
             return {};
         if (!secret_)
             return raw;
+        if (connectionUsed_)
+            return {}; // No reuse of an AES-GCM key/IV across transport replacements.
+        connectionUsed_ = true;
         auto wrapped = XMPP::Jingle::Connection::Ptr(
             new JET::Connection(raw, secret_->key, secret_->iv, sending, plainSize));
         auto *jet = static_cast<JET::Connection *>(wrapped.data());

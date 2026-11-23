@@ -9,6 +9,7 @@
 #include <iris/iris_export.h>
 #include <iris/xmpp-im/jingle-connection.h>
 
+#include <QQueue>
 #include <memory>
 
 namespace XMPP { namespace Jingle { namespace JET {
@@ -59,6 +60,10 @@ namespace XMPP { namespace Jingle { namespace JET {
         bool finished_ = false;
         bool verified_ = false;
         bool failed_ = false;
+        QQueue<int> pendingFrameSizes_;
+        QQueue<QByteArray> plainFrames_;
+        QByteArray pendingPlain_;
+        qint64 availableFrames_ = 0;
     };
 }}} // namespace XMPP::Jingle::JET
 
