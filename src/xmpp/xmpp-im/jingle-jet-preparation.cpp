@@ -97,7 +97,7 @@ namespace XMPP { namespace Jingle { namespace JET {
     {
         Q_ASSERT(session);
         Q_ASSERT(session->manager()->jet() == this);
-        if (auto *existing = d->pads.value(session))
+        if (auto *existing = d->pads.value(session).data())
             return existing;
         auto *created = new Pad(this, session);
         d->pads.insert(session, created);
