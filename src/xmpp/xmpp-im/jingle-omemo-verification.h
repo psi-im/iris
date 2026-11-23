@@ -21,10 +21,11 @@
 #define JINGLE_OMEMO_VERIFICATION_H
 
 #include <iris/iris_export.h>
-#include <iris/xmpp-im/jingle.h>
+#include <iris/xmpp-im/jingle-session.h>
 
 #include <QObject>
 
+#include <functional>
 #include <memory>
 #include <optional>
 
@@ -33,37 +34,28 @@ class OmemoEncryption;
 
 namespace Jingle {
     /**
-     * @brief OMEMO-verified DTLS fingerprints, compatible with Conversations and Dino.
+     * OMEMO protection for DTLS fingerprints in Jingle ICE transports.
      *
-     * The DTLS fingerprints of ICE transports (ice:0 and ice-udp:1) travel encrypted with OMEMO for
-     * one device of the peer, so a server cannot replace them: the media or data channel is then
-     * end-to-end protected without a second encryption layer. Wire format (docs/jingle-e2e.md):
-     * <fingerprint xmlns='http://gultsch.de/xmpp/drafts/omemo/dlts-srtp-verification' hash setup>
-     * with the profile's <encrypted/> inside, and the device id in XEP-0353 <proceed/>.
-     *
-     * The legacy profile carries the fingerprint as payload text, as those clients do; OMEMO 2,
-     * chosen when the peer advertises it, carries the whole <fingerprint/> element.
-     *
-     * Sessions get Session::peerAuthentication(). For a session with
-     * Session::isEndToEndRequired() the filter refuses unprotected fingerprints and transports
-     * without DTLS, and fails when it cannot encrypt for the peer, with not-acceptable.
+     * The ICE transport owns parsing and preparation of its fingerprint;
+     * this service only encrypts or verifies an individual fingerprint.
+     * A verification job never starts DTLS or mutates the transport.
      */
-    class IRIS_EXPORT OmemoDtlsVerification : public QObject, public SignalingFilter {
+    class IRIS_EXPORT OmemoDtlsVerification : public QObject {
         Q_OBJECT
     public:
         static QString ns();
 
-        /// Registers itself as a signaling filter of @a manager until destroyed.
         OmemoDtlsVerification(Manager *manager, OmemoEncryption *omemo, QObject *parent = nullptr);
         ~OmemoDtlsVerification() override;
 
-        /// The peer device of a session: learned from <proceed/> or from its encrypted fingerprints.
-        void                   setPeerDevice(const Jid &peer, const QString &sid, quint32 deviceId);
+        void setPeerDevice(const Jid &peer, const QString &sid, quint32 deviceId);
         std::optional<quint32> peerDevice(const Jid &peer, const QString &sid) const;
 
-        bool filterIncoming(const Jid &from, const QDomElement &jingle, const Done &done) override;
-        bool filterOutgoing(const Jid &to, const QDomElement &jingle, const Done &done) override;
-        void decorateMessageInitiation(const Jid &to, MessageInitiation &initiation) override;
+        using FingerprintDone = std::function<void(const QDomElement &fingerprint, const QString &error)>;
+        void encryptFingerprint(Session *session, const QDomElement &fingerprint, const FingerprintDone &done);
+        void decryptFingerprint(Session *session, const QDomElement &fingerprint, const FingerprintDone &done);
+
+        void decorateMessageInitiation(const Jid &to, MessageInitiation &initiation);
 
     private:
         class Private;

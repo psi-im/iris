@@ -25,6 +25,7 @@
 #include "jingle-application.h"
 #include "jingle-ft.h"
 #include "jingle-jet.h"
+#include "jingle-omemo-verification.h"
 #include "jingle-session.h"
 #include "xmpp-im/xmpp_hash.h"
 #include "xmpp/jid/jid.h"
@@ -609,6 +610,7 @@ namespace XMPP { namespace Jingle {
         std::unique_ptr<PublicationManager>   publicationManager;
         std::unique_ptr<RTP::Manager>         rtpManager;
         QPointer<JET::Jet>                    jet;
+        QPointer<OmemoDtlsVerification>      dtlsVerification;
         bool                                  messageInitiationEnabled = false;
         int                                   maxSessions              = -1; // no limit
 
@@ -798,12 +800,20 @@ namespace XMPP { namespace Jingle {
     PublicationManager *Manager::publicationManager() const { return d->publicationManager.get(); }
     RTP::Manager       *Manager::rtpManager() const { return d->rtpManager.get(); }
     JET::Jet           *Manager::jet() const { return d->jet.data(); }
+    OmemoDtlsVerification *Manager::dtlsVerification() const { return d->dtlsVerification.data(); }
 
     void Manager::registerJet(JET::Jet *jet)
     {
         Q_ASSERT(jet);
         Q_ASSERT(!d->jet || d->jet == jet);
         d->jet = jet;
+    }
+
+    void Manager::registerDtlsVerification(OmemoDtlsVerification *verifier)
+    {
+        Q_ASSERT(verifier);
+        Q_ASSERT(!d->dtlsVerification || d->dtlsVerification == verifier);
+        d->dtlsVerification = verifier;
     }
 
     bool Manager::messageInitiationEnabled() const { return d->messageInitiationEnabled; }
@@ -850,6 +860,8 @@ namespace XMPP { namespace Jingle {
         auto decorated = initiation;
         for (auto filter : std::as_const(d->filters))
             filter->decorateMessageInitiation(to, decorated);
+        if (auto *verifier = dtlsVerification())
+            verifier->decorateMessageInitiation(to, decorated);
 
         Message message(to);
         message.setType(Message::Type::Chat);
