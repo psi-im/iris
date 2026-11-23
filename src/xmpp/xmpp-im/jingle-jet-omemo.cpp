@@ -1,11 +1,20 @@
 /*
- * jingle-jet-omemo.cpp - OMEMO key delivery for JET (XEP-0396)
- * Copyright (C) 2026 Sergey Ilinykh
+ * jingle-jet-omemo.cpp - Jingle Encrypted Transports with OMEMO (XEP-0391, XEP-0396)
+ * Copyright (C) 2026  Sergey Ilinykh
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
- * License as published by the Free Software Foundation; either version 2.1
- * of the License, or (at your option) any later version.
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public License
+ * along with this library.  If not, see <https://www.gnu.org/licenses/>.
+ *
  */
 
 #include "jingle-jet-omemo.h"
