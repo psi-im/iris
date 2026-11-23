@@ -20,6 +20,7 @@
 #include "jingle-omemo-verification.h"
 
 #include "jingle-ice.h"
+#include "jingle-ft.h"
 #include "jingle-session.h"
 #include "xmpp_client.h"
 #include "xmpp_encryption.h"
@@ -59,13 +60,16 @@ namespace XMPP { namespace Jingle {
                 const auto transport = content.firstChildElement(QStringLiteral("transport"));
                 if (transport.isNull())
                     continue;
-                // Contents protected by JET (files) are end-to-end encrypted on any transport.
-                bool jet = false;
-                for (auto sec = content.firstChildElement(QStringLiteral("security")); !sec.isNull();
-                     sec      = sec.nextSiblingElement(QStringLiteral("security")))
-                    jet = jet || sec.namespaceURI() == QLatin1String("urn:xmpp:jingle:jet:0");
-                if (jet)
-                    continue;
+                // Only file-transfer applications can validate JET security.
+                // An arbitrary <security/> on RTP must not bypass DTLS checks.
+                if (content.firstChildElement(QStringLiteral("description")).namespaceURI() == FileTransfer::NS) {
+                    bool jet = false;
+                    for (auto sec = content.firstChildElement(QStringLiteral("security")); !sec.isNull();
+                         sec = sec.nextSiblingElement(QStringLiteral("security")))
+                        jet = jet || sec.namespaceURI() == QLatin1String("urn:xmpp:jingle:jet:0");
+                    if (jet)
+                        continue;
+                }
                 if (!isIce(transport)) {
                     // SXE payload protected end to end (SxeOmemo) is protected on its message transport.
                     if (!(transport.namespaceURI() == QLatin1String("urn:xmpp:jingle:transports:sxe")
