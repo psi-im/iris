@@ -40,6 +40,7 @@
 #include "udpportreserver.h"
 #include "xmpp/jid/jid.h"
 #include "xmpp_client.h"
+#include "xmpp_encryption.h"
 #include "xmpp_externalservicediscovery.h"
 #include "xmpp_serverinfomanager.h"
 #include "xmpp_task.h"
@@ -1910,8 +1911,9 @@ namespace XMPP { namespace Jingle { namespace ICE {
             if (guard && guard->d->remoteUpdateBusy && guard->_state < State::Finishing)
                 guard->onFinish(Reason::SecurityError, QStringLiteral("OMEMO DTLS verifier was unloaded"));
         });
+        const auto encryptedFingerprint = update.protectedFingerprint;
         verification->decryptFingerprint(
-            pad()->session(), update.protectedFingerprint,
+            pad()->session(), encryptedFingerprint,
             [guard, update = std::move(update), proceed](const QDomElement &plain, const QString &error) mutable {
                 if (!guard || guard->d->networkOwnershipRetired || guard->_state >= State::Finishing)
                     return;
@@ -1952,8 +1954,11 @@ namespace XMPP { namespace Jingle { namespace ICE {
         }
         if (required && session->role() == Origin::Responder) {
             const auto auth = session->peerAuthentication();
-            if (!auth.isValid()) {
-                onFinish(Reason::SecurityError, QStringLiteral("Peer DTLS fingerprint is not authenticated"));
+            const auto trust = EncryptionTrustLevel(auth.trustLevel);
+            if (!auth.isValid() || (trust != EncryptionTrustLevel::AutomaticallyTrusted
+                                    && trust != EncryptionTrustLevel::ManuallyTrusted
+                                    && trust != EncryptionTrustLevel::Authenticated)) {
+                onFinish(Reason::SecurityError, QStringLiteral("Peer DTLS fingerprint is not trusted"));
                 return;
             }
         }
