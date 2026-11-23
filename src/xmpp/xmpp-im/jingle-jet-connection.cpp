@@ -7,6 +7,8 @@
 
 #include "jingle-jet_p.h"
 
+#include <QPointer>
+
 #include <algorithm>
 #include <cstring>
 #include <limits>
@@ -22,7 +24,6 @@ namespace XMPP { namespace Jingle { namespace JET {
         if (!cipher_)
             return;
 
-        setId(raw_->id());
         setRemote(raw_->isRemote());
         open(QIODevice::ReadWrite | QIODevice::Unbuffered);
 
@@ -108,11 +109,11 @@ namespace XMPP { namespace Jingle { namespace JET {
         if (!maxSize)
             return 0;
         const auto encrypted = cipher_->process(QByteArray(data, int(maxSize)));
+        plainWritten_ += quint64(maxSize);
         if (encrypted.size() != maxSize || !writeWire(encrypted)) {
             fail(QStringLiteral("Failed writing encrypted JET data"));
             return -1;
         }
-        plainWritten_ += quint64(maxSize);
         if (plainWritten_ == plainSize_)
             finishSending();
         return maxSize;
@@ -160,7 +161,10 @@ namespace XMPP { namespace Jingle { namespace JET {
             }
             if (!plain.isEmpty()) {
                 appendRead(plain);
+                QPointer<Connection> guard(this);
                 emit readyRead();
+                if (!guard)
+                    return;
             }
         }
     }
