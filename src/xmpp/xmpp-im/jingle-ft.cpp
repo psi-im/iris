@@ -24,6 +24,7 @@
 #include "jingle-session.h"
 
 #include "xmpp_client.h"
+#include "xmpp_encryption.h"
 #include "xmpp_hash.h"
 #include "xmpp_thumbs.h"
 
@@ -1097,10 +1098,27 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
             }
             if (secret) {
                 guard->setTransportSecret(secret->key, secret->iv);
-                if (incomingProtected)
-                    guard->pad()->session()->setPeerAuthentication(secret->authentication);
-                else
+                if (incomingProtected) {
+                    auto *session = guard->pad()->session();
+                    const auto &authentication = secret->authentication;
+                    const auto existing = session->peerAuthentication();
+                    if (existing.isValid()
+                        && (existing.method != authentication.method || existing.deviceId != authentication.deviceId
+                            || existing.identityKey != authentication.identityKey)) {
+                        guard->remove(Reason::SecurityError, QStringLiteral("JET sender identity changed"));
+                        return;
+                    }
+                    const auto trust = EncryptionTrustLevel(authentication.trustLevel);
+                    if (session->isEndToEndRequired() && trust != EncryptionTrustLevel::AutomaticallyTrusted
+                        && trust != EncryptionTrustLevel::ManuallyTrusted
+                        && trust != EncryptionTrustLevel::Authenticated) {
+                        guard->remove(Reason::SecurityError, QStringLiteral("JET sender device is not trusted"));
+                        return;
+                    }
+                    session->setPeerAuthentication(authentication);
+                } else {
                     guard->d->outgoingSecret = secret;
+                }
             }
             guard->d->jetPrepared = true;
             if (!guard->_transport) {
