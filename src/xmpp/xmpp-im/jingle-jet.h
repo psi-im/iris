@@ -13,10 +13,13 @@
 
 #include <iris/iris_export.h>
 #include <iris/xmpp-im/jingle-session.h>
+#include <iris/xmpp-im/jingle-connection.h>
 #include <iris/xmpp-im/jingle.h>
 
 #include <QByteArray>
 #include <QDomDocument>
+#include <QHash>
+#include <QPointer>
 #include <QObject>
 #include <QStringList>
 
@@ -60,31 +63,97 @@ namespace XMPP { namespace Jingle { namespace JET {
         virtual void        decryptSecret(const Jid &peer, const QDomElement &security, const Done &done) = 0;
     };
 
-    /** Shared JET key preparation, called by accepted Jingle content owners. */
-    class IRIS_EXPORT Jet : public QObject {
+    class Pad;
+    class Protection;
+
+    /**
+     * One provider registry per Jingle account. This object owns neither a
+     * Jingle session nor the encryption keys of any content.
+     */
+    class IRIS_EXPORT Manager : public QObject {
         Q_OBJECT
     public:
         static QString ns(); // urn:xmpp:jingle:jet:0
 
-        explicit Jet(Manager *manager);
-        ~Jet() override;
+        explicit Manager(XMPP::Jingle::Manager *jingle);
+        ~Manager() override;
 
         bool registerKeyTransport(KeyTransport *transport);
         void unregisterKeyTransport(KeyTransport *transport);
-
-        using Done = KeyTransport::Done;
-        void        prepareOutgoing(Session *session, const Done &done);
-        void        prepareIncoming(Session *session, const QDomElement &security, const QString &contentName,
-                                    const Done &done);
         QStringList discoFeatures() const;
+        Pad *pad(Session *session);
 
     signals:
-        // A pending preparation must fail closed if its crypto provider goes away.
         void keyTransportRemoved(const QString &methodId);
 
     private:
+        friend class Pad;
         class Private;
         std::unique_ptr<Private> d;
+    };
+
+    /**
+     * Session-owned JET context. Chooses a registered key transport using the
+     * Jingle session's method, without duplicating the encryption registry.
+     */
+    class IRIS_EXPORT Pad : public QObject {
+        Q_OBJECT
+    public:
+        Pad(Manager *manager, Session *session);
+        ~Pad() override;
+
+        Manager *manager() const { return manager_; }
+        Session *session() const { return session_; }
+        Protection *createProtection(QObject *owner, const QString &contentName);
+
+        using Done = KeyTransport::Done;
+        void prepareOutgoing(const Done &done);
+        void prepareIncoming(const QDomElement &security, const QString &contentName, const Done &done);
+
+    private:
+        QPointer<Manager> manager_;
+        QPointer<Session> session_;
+    };
+
+    /**
+     * Per-content encryption state. Wraps transport connections, not physical
+     * ICE/S5B associations, so BUNDLE members keep independent cipher contexts.
+     */
+    class IRIS_EXPORT Protection : public QObject {
+        Q_OBJECT
+    public:
+        using Done = std::function<void(const QString &error)>;
+
+        Protection(Pad *pad, QObject *owner, const QString &contentName);
+        ~Protection() override;
+
+        bool setIncomingContent(const QDomElement &content);
+        void prepare(bool outgoing, const Done &done);
+        bool prepared() const { return prepared_; }
+        bool encrypted() const { return secret_.has_value(); }
+        bool authenticated() const;
+
+        QDomElement outgoingSecurity(QDomDocument *document) const;
+        XMPP::Jingle::Connection::Ptr wrap(XMPP::Jingle::Connection::Ptr raw, bool sending, quint64 plainSize);
+
+    signals:
+        void failed(const QString &error);
+
+    private:
+        void complete(const std::optional<ProtectedSecret> &secret, const QString &error);
+
+        QPointer<Pad> pad_;
+        QString contentName_;
+        QDomDocument document_;
+        QDomElement incomingSecurity_;
+        std::optional<ProtectedSecret> secret_;
+        QPointer<QObject> activeConnection_;
+        Done done_;
+        bool preparing_ = false;
+        bool prepared_ = false;
+        bool outgoing_ = false;
+        QMetaObject::Connection removed_;
+        QMetaObject::Connection providerDestroyed_;
     };
 
 }}} // namespace XMPP::Jingle::JET
