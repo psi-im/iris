@@ -48,11 +48,11 @@ namespace XMPP { namespace Jingle {
     public:
         QPointer<Manager>         manager;
         QPointer<OmemoEncryption> omemo;
-        QPointer<JET::Jet>        jet;
+        QPointer<JET::Manager>    jet;
     };
 
     QString JetOmemo::ns() { return JetOmemoNs; }
-    QString JetOmemo::jetNs() { return JET::Jet::ns(); }
+    QString JetOmemo::jetNs() { return JET::Manager::ns(); }
 
     JetOmemo::JetOmemo(Manager *manager, OmemoEncryption *omemo, QObject *parent) :
         QObject(parent), d(std::make_unique<Private>())
@@ -60,8 +60,7 @@ namespace XMPP { namespace Jingle {
         d->manager = manager;
         d->omemo   = omemo;
         d->jet     = manager->jet();
-        if (!d->jet)
-            d->jet = new JET::Jet(manager);
+        Q_ASSERT(d->jet);
         if (!d->jet->registerKeyTransport(this))
             qWarning("jingle-jet-omemo: duplicate key transport registration");
     }

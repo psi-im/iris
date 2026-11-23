@@ -610,7 +610,7 @@ namespace XMPP { namespace Jingle {
         QHash<QPair<Jid, QString>, Session *> sessions;
         std::unique_ptr<PublicationManager>   publicationManager;
         std::unique_ptr<RTP::Manager>         rtpManager;
-        QPointer<JET::Jet>                    jet;
+        QPointer<JET::Manager>                jet;
         QPointer<OmemoDtlsVerification>       dtlsVerification;
         bool                                  messageInitiationEnabled = false;
         int                                   maxSessions              = -1; // no limit
@@ -734,6 +734,7 @@ namespace XMPP { namespace Jingle {
         d->publicationManager = std::make_unique<PublicationManager>(this);
         d->rtpManager         = std::make_unique<RTP::Manager>();
         registerApplication(d->rtpManager.get());
+        d->jet = new JET::Manager(this);
 
         connect(d->client, &Client::messageReceived, this, [this](const Message &message) {
             // Carbons wrap the protocol message in a forwarding envelope. JMI
@@ -800,15 +801,8 @@ namespace XMPP { namespace Jingle {
 
     PublicationManager *Manager::publicationManager() const { return d->publicationManager.get(); }
     RTP::Manager       *Manager::rtpManager() const { return d->rtpManager.get(); }
-    JET::Jet           *Manager::jet() const { return d->jet.data(); }
+    JET::Manager       *Manager::jet() const { return d->jet.data(); }
     OmemoDtlsVerification *Manager::dtlsVerification() const { return d->dtlsVerification.data(); }
-
-    void Manager::registerJet(JET::Jet *jet)
-    {
-        Q_ASSERT(jet);
-        Q_ASSERT(!d->jet || d->jet == jet);
-        d->jet = jet;
-    }
 
     void Manager::registerDtlsVerification(OmemoDtlsVerification *verifier)
     {
@@ -908,7 +902,7 @@ namespace XMPP { namespace Jingle {
                 bool hasSecurity = false;
                 for (auto sec = content.firstChildElement(QStringLiteral("security")); !sec.isNull();
                      sec      = sec.nextSiblingElement(QStringLiteral("security"))) {
-                    if (sec.namespaceURI() == JET::Jet::ns()) {
+                    if (sec.namespaceURI() == JET::Manager::ns()) {
                         hasSecurity = true;
                         break;
                     }

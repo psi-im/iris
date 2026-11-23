@@ -53,7 +53,7 @@ namespace Jingle {
     class SignalingFilter;
     class TieBreaker;
     namespace JET {
-        class Jet;
+        class Manager;
     }
     class OmemoDtlsVerification;
     namespace RTP {
@@ -410,7 +410,7 @@ namespace Jingle {
 
         PublicationManager *publicationManager() const;
         RTP::Manager       *rtpManager() const;
-        JET::Jet           *jet() const; // nullptr when no JET provider is registered
+        JET::Manager       *jet() const; // nullptr when no JET provider is registered
         OmemoDtlsVerification *dtlsVerification() const; // optional DTLS fingerprint handler
 
         bool messageInitiationEnabled() const;
@@ -440,7 +440,6 @@ namespace Jingle {
 
     private:
         friend class JTPush;
-        friend class JET::Jet;
         friend class OmemoDtlsVerification;
         friend class XMPP::Client;
         friend class XMPP::Message;
@@ -450,7 +449,6 @@ namespace Jingle {
                                                           QDomDocument *document) const;
         void        shutdown();
         void        clientPresenceAvailable();
-        void        registerJet(JET::Jet *jet);
         void        registerDtlsVerification(OmemoDtlsVerification *verifier);
         Session    *incomingSessionInitiate(const Jid &from, const Jingle &jingle, const QDomElement &jingleEl);
         void        receiveFiltered(const QDomElement &iq);

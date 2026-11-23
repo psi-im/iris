@@ -24,7 +24,7 @@ namespace Jingle {
 
     /**
      * XEP-0396 profile of XEP-0391: OMEMO encrypts the JET transport secret.
-     * Generic JET signaling, content association and streaming live in JET::Jet.
+     * Generic JET signaling, content association and streaming live in the JET registry, pad, protection and connection.
      * Legacy OMEMO uses its key-transport envelope (AES-128-GCM); OMEMO 2 uses
      * an SCE-wrapped secret (AES-256-GCM).
      */
