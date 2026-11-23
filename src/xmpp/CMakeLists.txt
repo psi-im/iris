@@ -144,6 +144,7 @@ set(XMPP_IM_HEADERS
     xmpp-im/jingle-sxe-document.h
     xmpp-im/jingle-sxe.h
     xmpp-im/jingle-jet.h
+    xmpp-im/jingle-jet-connection.h
     xmpp-im/jingle-file.h
     xmpp-im/jingle-pub.h
     xmpp-im/xmpp_file-sharing.h
@@ -226,6 +227,7 @@ target_sources(iris PRIVATE
     xmpp-im/jingle-nstransportslist.cpp
     xmpp-im/jingle-ft.cpp
     xmpp-im/jingle-jet.cpp
+    xmpp-im/jingle-jet-connection.cpp
     xmpp-im/jingle-jet-preparation.cpp
     xmpp-im/jingle-jet_p.h
     xmpp-im/jingle-rtp-description.cpp
