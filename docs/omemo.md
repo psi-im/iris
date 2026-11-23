@@ -51,11 +51,13 @@ method; it is not a conversation or resource directory.
 
 Jingle and other protocols with a known operation owner **pass their bound
 `EncryptedSession` explicitly**, rather than looking it up by JID. Method-only
-outgoing calls use an operation-local session and close it when no longer needed. Incoming
-Jingle IQs reach `JTPush` through the existing `Task` dispatcher and are
-routed by (peer, sid), including signaling filters that can exchange protected
-transport keys before a responder session exists. No competing global
-encrypted-stanza subscriber chain is needed.
+outgoing calls use an operation-local session and close it when no longer needed.
+Incoming Jingle IQs reach `JTPush` through the existing `Task` dispatcher and
+are routed by (peer, sid). JET security is attached to the selected file-transfer
+content during `Session::parseContentAddList()` and decrypted during
+`FileTransfer::Application::prepare()`, not by a separate signaling pre-filter.
+DTLS fingerprint verification remains a Jingle signaling filter. There is no
+global (peer, sid) cache of pending JET keys.
 
 A long-lived session's `context()` identifies its peer and defaults, but
 `encrypt(stanza, operationContext)` and `decrypt(stanza, operationContext)`
