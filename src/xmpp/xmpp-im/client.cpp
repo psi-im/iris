@@ -153,7 +153,7 @@ public:
     Client::EncryptionSessionResolver encryptionSessionResolver;
     Client::IncomingEncryptedStanzaHandler incomingEncryptedStanzaHandler;
     QHash<QString, QPointer<EncryptedSession>> incomingSessions;
-    quint64 encryptionDeliveryGeneration = 0;
+    QSet<EncryptionJob *> pendingIncomingDecryptionJobs;
     const EncryptionMetadata *currentEncryptionMetadata = nullptr;
     JT_PushMessage           *pushMessage               = nullptr;
 };
@@ -432,15 +432,27 @@ void Client::close(bool)
         d->stream->close();
         d->stream = nullptr;
     }
+    cancelPendingDecryptionJobs();
     emit disconnected();
     cleanup(); // TODO wait till stream writes all data to the socket
+}
+
+void Client::cancelPendingDecryptionJobs()
+{
+    // Different incoming stanzas have independent jobs. Cancel all outstanding
+    // deliveries on disconnect, not on receipt of another encrypted stanza.
+    auto pending = std::move(d->pendingIncomingDecryptionJobs);
+    d->pendingIncomingDecryptionJobs.clear();
+    for (auto *job : pending) {
+        disconnect(job, nullptr, this, nullptr);
+        job->deleteLater();
+    }
 }
 
 void Client::cleanup()
 {
     d->active = false;
     // d->authed = false;
-    ++d->encryptionDeliveryGeneration;
     d->incomingSessions.clear();
     d->mucManager->clear();
 }
@@ -466,6 +478,7 @@ void Client::streamError(int)
     // error(e);
 
     // if(!e.isWarning()) {
+    cancelPendingDecryptionJobs();
     emit disconnected();
     cleanup();
     //}
@@ -669,13 +682,9 @@ void Client::distribute(const QDomElement &x)
             job = resolved->decrypt(x, context);
         if (!job)
             job = missingEncryptionSession(d->encryptionManager, method->id());
-        const QString     methodId = method->id();
-        const auto generation = d->encryptionDeliveryGeneration;
-        auto finish = [this, job, methodId, peer, generation]() {
-            if (generation != d->encryptionDeliveryGeneration) {
-                job->deleteLater();
-                return;
-            }
+        const QString methodId = method->id();
+        auto finish = [this, job, methodId, peer]() {
+            d->pendingIncomingDecryptionJobs.remove(job);
             if (job->success()) {
                 distributeDecrypted(job->stanza(), &job->metadata());
             } else {
@@ -684,10 +693,14 @@ void Client::distribute(const QDomElement &x)
             }
             job->deleteLater();
         };
-        if (job->isFinished())
+        if (job->isFinished()) {
             finish();
-        else
+        } else {
+            d->pendingIncomingDecryptionJobs.insert(job);
+            connect(job, &QObject::destroyed, this,
+                    [this, job] { d->pendingIncomingDecryptionJobs.remove(job); });
             connect(job, &EncryptionJob::finished, this, finish);
+        }
         return;
     }
 
@@ -731,12 +744,8 @@ bool Client::distributeEncryptedCarbon(const QDomElement &x)
         job = missingEncryptionSession(d->encryptionManager, method->id());
     const QString     methodId = method->id();
     const QDomElement original = x;
-    const auto generation = d->encryptionDeliveryGeneration;
-    auto finish = [this, job, methodId, original, peer, generation]() {
-        if (generation != d->encryptionDeliveryGeneration) {
-            job->deleteLater();
-            return;
-        }
+    auto finish = [this, job, methodId, original, peer]() {
+        d->pendingIncomingDecryptionJobs.remove(job);
         if (!job->success()) {
             debug(
                 QStringLiteral("Client: %1 forwarded carbon decryption failed: %2").arg(methodId, job->errorString()));
@@ -783,10 +792,14 @@ bool Client::distributeEncryptedCarbon(const QDomElement &x)
         distributeDecrypted(carbon, &job->metadata());
         job->deleteLater();
     };
-    if (job->isFinished())
+    if (job->isFinished()) {
         finish();
-    else
+    } else {
+        d->pendingIncomingDecryptionJobs.insert(job);
+        connect(job, &QObject::destroyed, this,
+                [this, job] { d->pendingIncomingDecryptionJobs.remove(job); });
         connect(job, &EncryptionJob::finished, this, finish);
+    }
     return true;
 }
 
