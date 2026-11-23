@@ -655,7 +655,9 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
         {
             const bool moreBytesExpected = bytesLeft && *bytesLeft > 0;
             if (protection && protection->encrypted() && !protection->authenticated()) {
-                if (connection && connection->isOpen())
+                // A checksum IQ may arrive before the transport is connected.
+                // Wait for its authentication tag instead of treating this as EOF.
+                if (!connection || connection->isOpen())
                     return;
                 handleStreamFail(QStringLiteral("JET stream ended without authentication"));
                 return;
