@@ -608,6 +608,7 @@ namespace XMPP { namespace Jingle {
         QHash<QPair<Jid, QString>, Session *> sessions;
         std::unique_ptr<PublicationManager>   publicationManager;
         std::unique_ptr<RTP::Manager>         rtpManager;
+        QPointer<JET::Jet>                    jet;
         bool                                  messageInitiationEnabled = false;
         int                                   maxSessions              = -1; // no limit
 
@@ -796,6 +797,14 @@ namespace XMPP { namespace Jingle {
 
     PublicationManager *Manager::publicationManager() const { return d->publicationManager.get(); }
     RTP::Manager       *Manager::rtpManager() const { return d->rtpManager.get(); }
+    JET::Jet           *Manager::jet() const { return d->jet.data(); }
+
+    void Manager::registerJet(JET::Jet *jet)
+    {
+        Q_ASSERT(jet);
+        Q_ASSERT(!d->jet || d->jet == jet);
+        d->jet = jet;
+    }
 
     bool Manager::messageInitiationEnabled() const { return d->messageInitiationEnabled; }
 
@@ -862,7 +871,7 @@ namespace XMPP { namespace Jingle {
     // no-filter fail-closed policy for every other kind of required E2EE.
     static bool jetProtectsContents(Manager *manager, Session *session, const QDomElement &jingle)
     {
-        auto *jet = JET::Jet::of(manager);
+        auto *jet = manager->jet();
         if (!jet || jet->discoFeatures().isEmpty())
             return false;
 
@@ -1091,7 +1100,7 @@ namespace XMPP { namespace Jingle {
         }
         for (auto filter : d->filters)
             ret += filter->discoFeatures();
-        if (auto *jet = findChild<JET::Jet *>(QString(), Qt::FindDirectChildrenOnly))
+        if (auto *jet = d->jet.data())
             ret += jet->discoFeatures();
         ret.removeDuplicates();
         return ret;

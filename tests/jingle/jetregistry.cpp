@@ -48,10 +48,11 @@ int main(int argc, char **argv)
     Client           client;
     auto            *manager = client.jingleManager();
     check(manager != nullptr, "Iris did not create a Jingle manager");
+    check(manager->jet() == nullptr, "The Jingle manager unexpectedly has a JET provider");
 
     {
         J::JET::Jet jet(manager);
-        check(J::JET::Jet::of(manager) == &jet, "The generic JET key service was not registered");
+        check(manager->jet() == &jet, "The Jingle manager did not register its JET provider");
         check(jet.discoFeatures().isEmpty(), "JET advertised encryption without a registered key transport");
         check(!manager->discoFeatures().contains(J::JET::Jet::ns()),
               "The Jingle manager advertised JET with no provider");
@@ -83,6 +84,6 @@ int main(int argc, char **argv)
               "JET advertised itself without a key transport");
     }
 
-    check(J::JET::Jet::of(manager) == nullptr, "JET service survived its destruction");
+    check(manager->jet() == nullptr, "JET provider registration survived its destruction");
     return 0;
 }

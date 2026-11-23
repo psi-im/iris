@@ -59,12 +59,11 @@ namespace XMPP { namespace Jingle { namespace JET {
 
     QString Jet::ns() { return JetNs; }
 
-    Jet *Jet::of(Manager *manager)
+    Jet::Jet(Manager *manager) : QObject(manager), d(std::make_unique<Private>())
     {
-        return manager ? manager->findChild<Jet *>(QString(), Qt::FindDirectChildrenOnly) : nullptr;
+        Q_ASSERT(manager);
+        manager->registerJet(this);
     }
-
-    Jet::Jet(Manager *manager) : QObject(manager), d(std::make_unique<Private>()) { }
 
     Jet::~Jet() = default;
 

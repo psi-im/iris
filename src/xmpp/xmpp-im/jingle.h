@@ -52,6 +52,9 @@ namespace Jingle {
     class Session;
     class SignalingFilter;
     class TieBreaker;
+    namespace JET {
+        class Jet;
+    }
     namespace RTP {
         class Manager;
     }
@@ -406,6 +409,7 @@ namespace Jingle {
 
         PublicationManager *publicationManager() const;
         RTP::Manager       *rtpManager() const;
+        JET::Jet           *jet() const; // nullptr when no JET provider is registered
 
         bool messageInitiationEnabled() const;
         void setMessageInitiationEnabled(bool enabled);
@@ -434,6 +438,7 @@ namespace Jingle {
 
     private:
         friend class JTPush;
+        friend class JET::Jet;
         friend class XMPP::Client;
         friend class XMPP::Message;
 
@@ -442,6 +447,7 @@ namespace Jingle {
                                                           QDomDocument *document) const;
         void        shutdown();
         void        clientPresenceAvailable();
+        void        registerJet(JET::Jet *jet);
         Session    *incomingSessionInitiate(const Jid &from, const Jingle &jingle, const QDomElement &jingleEl);
         void        receiveFiltered(const QDomElement &iq);
 

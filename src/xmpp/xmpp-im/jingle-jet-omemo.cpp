@@ -59,7 +59,7 @@ namespace XMPP { namespace Jingle {
     {
         d->manager = manager;
         d->omemo   = omemo;
-        d->jet     = JET::Jet::of(manager);
+        d->jet     = manager->jet();
         if (!d->jet)
             d->jet = new JET::Jet(manager);
         if (!d->jet->registerKeyTransport(this))

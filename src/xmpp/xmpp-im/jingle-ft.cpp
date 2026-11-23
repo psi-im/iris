@@ -1067,7 +1067,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
             return;
         }
 
-        auto *jet = JET::Jet::of(session->manager());
+        auto *jet = session->manager()->jet();
         if (!jet) {
             if (incomingProtected || session->isEndToEndRequired()) {
                 remove(Reason::SecurityError, QStringLiteral("JET key transport is unavailable"));

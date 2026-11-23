@@ -65,7 +65,6 @@ namespace XMPP { namespace Jingle { namespace JET {
         Q_OBJECT
     public:
         static QString ns(); // urn:xmpp:jingle:jet:0
-        static Jet    *of(Manager *manager);
 
         explicit Jet(Manager *manager);
         ~Jet() override;
