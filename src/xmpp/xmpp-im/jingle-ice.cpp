@@ -28,10 +28,12 @@
 #include "jingle-ice-pad_p.h"
 #include "jingle-ice-udp.h"
 #include "jingle-ice.h"
+#include "jingle-omemo-verification.h"
 
 #include "dtls.h"
 #include "ice176.h"
 #include "jingle-session.h"
+#include "jingle-ft.h"
 #include "netnames.h"
 #include "stundisco.h"
 #include "stunserviceaddress_p.h"
@@ -155,6 +157,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
         QString             ufrag;
         std::optional<bool> ice2;
         Dtls::FingerPrint   fingerprint;
+        QDomElement         protectedFingerprint;
 #ifdef JINGLE_SCTP
         SCTP::MapElement            sctpMap;
         QList<SCTP::ChannelElement> sctpChannels;
@@ -214,8 +217,14 @@ namespace XMPP { namespace Jingle { namespace ICE {
             gatheringComplete = !e.isNull();
 
             e = el.firstChildElement(QLatin1String("fingerprint"));
-            if (!e.isNull() && !fingerprint.parse(e))
-                throw std::runtime_error("invalid fingerprint");
+            if (!e.isNull()) {
+                if (e.namespaceURI() == OmemoDtlsVerification::ns())
+                    protectedFingerprint = e;
+                else if (!fingerprint.parse(e))
+                    throw std::runtime_error("invalid fingerprint");
+                if (!e.nextSiblingElement(QLatin1String("fingerprint")).isNull())
+                    throw std::runtime_error("duplicate DTLS fingerprint");
+            }
 
             if (fingerprint.isValid() && !Dtls::isSupported())
                 qWarning("Remote requested DTLS but it's not supported by used crypto libraries.");
@@ -988,6 +997,14 @@ namespace XMPP { namespace Jingle { namespace ICE {
         int                            proxiesInDiscoCount       = 0;
         QList<XMPP::Ice176::Candidate> pendingLocalCandidates; // cid to candidate mapping
         std::unique_ptr<Element>       remoteState;
+        QList<Element>                 remoteUpdates;
+        bool                           remoteUpdateBusy = false;
+        bool                           deferredPrepare = false;
+        bool                           deferredStart = false;
+        bool                           verifiedRemoteFingerprint = false;
+        bool                           outgoingFingerprintBusy = false;
+        QDomDocument                   fingerprintDocument;
+        QDomElement                    protectedOutgoingFingerprint;
 
         // QString            sid;
         // Transport::Mode    mode = Transport::Tcp;
@@ -1156,7 +1173,8 @@ namespace XMPP { namespace Jingle { namespace ICE {
                         return;
                     auto d = guard->d.get();
                     d->pendingActions |= NewFingerprint;
-                    emit guard->updated();
+                    d->protectedOutgoingFingerprint.clear();
+                    guard->prepareOutgoingFingerprint();
                 };
 #ifdef JINGLE_SCTP
                 participant.onIncomingChannel = [guard](Connection::Ptr channel) {
@@ -1826,6 +1844,14 @@ namespace XMPP { namespace Jingle { namespace ICE {
     void Transport::prepare()
     {
         qDebug("Prepare local offer");
+        if (d->remoteUpdateBusy || !d->remoteUpdates.isEmpty()) {
+            d->deferredPrepare = true;
+            return;
+        }
+        if (requiresVerifiedFingerprint() && isRemote() && !d->verifiedRemoteFingerprint) {
+            onFinish(Reason::SecurityError, QStringLiteral("A verified DTLS fingerprint is required"));
+            return;
+        }
         if (!d->ensureNetwork()) {
             onFinish(Reason::FailedTransport, QStringLiteral("Unable to allocate ICE association"));
             return;
@@ -1872,7 +1898,10 @@ namespace XMPP { namespace Jingle { namespace ICE {
         }
 
         d->findStunAndTurn();
-        emit updated();
+        if (d->pendingActions & Private::NewFingerprint)
+            prepareOutgoingFingerprint();
+        else
+            emit updated();
     }
 
     // we got content acceptance from any side and now can connect
@@ -1884,6 +1913,14 @@ namespace XMPP { namespace Jingle { namespace ICE {
               int(d->network && d->network->runtime && d->network->runtime->checksStarted));
         if (_state >= State::Finishing)
             return;
+        if (d->remoteUpdateBusy || !d->remoteUpdates.isEmpty() || d->outgoingFingerprintBusy) {
+            d->deferredStart = true;
+            return;
+        }
+        if (requiresVerifiedFingerprint() && !d->verifiedRemoteFingerprint) {
+            onFinish(Reason::SecurityError, QStringLiteral("DTLS peer fingerprint was not verified"));
+            return;
+        }
         if (!d->network || !d->network->ice) {
             onFinish(Reason::FailedTransport, QStringLiteral("ICE transport has not been prepared"));
             return;
@@ -1957,21 +1994,15 @@ namespace XMPP { namespace Jingle { namespace ICE {
         if (!prepared || d->networkOwnershipRetired)
             return false;
 
-        // Preserve the existing deferred ICE application boundary. The caller has
-        // already validated the complete signaling batch before this work is queued.
-        // A transport-replace may retire this Transport before the event loop runs;
-        // in that case the old payload belongs to a dead signaling incarnation and
-        // must not recreate a standalone association.
-        const auto element       = prepared->element;
-        const auto network       = QPointer<IceConnection>(d->network);
-        const auto iceGeneration = network ? network->generation.iceGeneration : 0;
-        QTimer::singleShot(0, this, [this, element, network, iceGeneration]() {
-            if (d->networkOwnershipRetired)
-                return;
-            if (network && (!d->network || d->network != network || network->generation.iceGeneration != iceGeneration))
-                return;
-            d->handleRemoteUpdate(element);
-        });
+        // Apply updates in order, after asynchronous fingerprint verification.
+        // The XML is already structurally validated; cryptography is content-owned.
+        d->remoteUpdates.append(std::move(prepared->element));
+        if (d->remoteUpdates.size() == 1 && !d->remoteUpdateBusy) {
+            QTimer::singleShot(0, this, [this]() {
+                if (!d->networkOwnershipRetired)
+                    processNextRemoteUpdate();
+            });
+        }
         return true;
     }
 
@@ -1983,7 +2014,8 @@ namespace XMPP { namespace Jingle { namespace ICE {
 
     bool Transport::hasUpdates() const
     {
-        return isValid() && d->network && d->pendingActions && d->network->ice && _state >= State::ApprovedToSend
+        return isValid() && d->network && d->pendingActions && !d->outgoingFingerprintBusy && d->network->ice
+            && _state >= State::ApprovedToSend
             && !(isRemote() && _state == State::Pending)
             && (d->network->ice->isLocalGatheringComplete() || d->pendingLocalCandidates.size());
     }
@@ -2020,8 +2052,15 @@ namespace XMPP { namespace Jingle { namespace ICE {
             }
         }
 
+        if (hasFingerprint && !d->protectedOutgoingFingerprint.isNull()) {
+            const auto fingerprint = transportXml.firstChildElement(QStringLiteral("fingerprint"));
+            if (!fingerprint.isNull())
+                transportXml.replaceChild(doc->importNode(d->protectedOutgoingFingerprint, true), fingerprint);
+        }
+
         d->pendingLocalCandidates.clear();
         d->pendingActions = 0;
+        d->protectedOutgoingFingerprint.clear();
 
         return OutgoingTransportInfoUpdate {
             transportXml,
