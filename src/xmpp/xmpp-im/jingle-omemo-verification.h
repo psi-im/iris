@@ -49,7 +49,7 @@ namespace Jingle {
         OmemoDtlsVerification(Manager *manager, OmemoEncryption *omemo, QObject *parent = nullptr);
         ~OmemoDtlsVerification() override;
 
-        void setPeerDevice(const Jid &peer, const QString &sid, quint32 deviceId);
+        void                   setPeerDevice(const Jid &peer, const QString &sid, quint32 deviceId);
         std::optional<quint32> peerDevice(const Jid &peer, const QString &sid) const;
 
         using FingerprintDone = std::function<void(const QDomElement &fingerprint, const QString &error)>;

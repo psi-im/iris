@@ -32,8 +32,8 @@
 
 #include "dtls.h"
 #include "ice176.h"
-#include "jingle-session.h"
 #include "jingle-ft.h"
+#include "jingle-session.h"
 #include "netnames.h"
 #include "stundisco.h"
 #include "stunserviceaddress_p.h"
@@ -999,11 +999,11 @@ namespace XMPP { namespace Jingle { namespace ICE {
         QList<XMPP::Ice176::Candidate> pendingLocalCandidates; // cid to candidate mapping
         std::unique_ptr<Element>       remoteState;
         QList<Element>                 remoteUpdates;
-        bool                           remoteUpdateBusy = false;
-        bool                           deferredPrepare = false;
-        bool                           deferredStart = false;
-        bool                           verifiedRemoteFingerprint = false;
-        bool                           outgoingFingerprintBusy = false;
+        bool                           remoteUpdateBusy            = false;
+        bool                           deferredPrepare             = false;
+        bool                           deferredStart               = false;
+        bool                           verifiedRemoteFingerprint   = false;
+        bool                           outgoingFingerprintBusy     = false;
         quint64                        outgoingFingerprintRevision = 0;
         QDomDocument                   fingerprintDocument;
         QDomElement                    protectedOutgoingFingerprint;
@@ -1882,9 +1882,9 @@ namespace XMPP { namespace Jingle { namespace ICE {
             return;
         }
 
-        auto update = d->remoteUpdates.takeFirst();
+        auto                update = d->remoteUpdates.takeFirst();
         QPointer<Transport> guard(this);
-        auto proceed = [guard](Element update) {
+        auto                proceed = [guard](Element update) {
             if (!guard || guard->d->networkOwnershipRetired || guard->_state >= State::Finishing)
                 return;
             guard->d->remoteUpdateBusy = false;
@@ -1905,7 +1905,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
         }
 
         d->remoteUpdateBusy = true;
-        auto *verification = pad()->session()->manager()->dtlsVerification();
+        auto *verification  = pad()->session()->manager()->dtlsVerification();
         if (!verification) {
             onFinish(Reason::SecurityError, QStringLiteral("OMEMO DTLS verification provider is unavailable"));
             return;
@@ -1934,10 +1934,9 @@ namespace XMPP { namespace Jingle { namespace ICE {
 
     void Transport::prepareOutgoingFingerprint()
     {
-        if (_state >= State::Finishing || d->outgoingFingerprintBusy
-            || !(d->pendingActions & Private::NewFingerprint))
+        if (_state >= State::Finishing || d->outgoingFingerprintBusy || !(d->pendingActions & Private::NewFingerprint))
             return;
-        auto *session = pad()->session();
+        auto      *session   = pad()->session();
         const bool required  = requiresVerifiedFingerprint();
         const bool preferred = session->isEndToEndPreferred();
         d->protectedOutgoingFingerprint.clear();
@@ -1946,9 +1945,9 @@ namespace XMPP { namespace Jingle { namespace ICE {
             return;
         }
 
-        auto *verification = session->manager()->dtlsVerification();
-        const auto device = verification ? verification->peerDevice(session->peer(), session->sid())
-                                         : std::optional<quint32> {};
+        auto      *verification = session->manager()->dtlsVerification();
+        const auto device
+            = verification ? verification->peerDevice(session->peer(), session->sid()) : std::optional<quint32> {};
         if (!verification || !session->allowsEncryptionMethod(OmemoDtlsVerification::methodId()) || !device) {
             if (required)
                 onFinish(Reason::SecurityError, QStringLiteral("No OMEMO device available for DTLS verification"));
@@ -1957,11 +1956,12 @@ namespace XMPP { namespace Jingle { namespace ICE {
             return;
         }
         if (required && session->role() == Origin::Responder) {
-            const auto auth = session->peerAuthentication();
+            const auto auth  = session->peerAuthentication();
             const auto trust = EncryptionTrustLevel(auth.trustLevel);
-            if (!auth.isValid() || (trust != EncryptionTrustLevel::AutomaticallyTrusted
-                                    && trust != EncryptionTrustLevel::ManuallyTrusted
-                                    && trust != EncryptionTrustLevel::Authenticated)) {
+            if (!auth.isValid()
+                || (trust != EncryptionTrustLevel::AutomaticallyTrusted
+                    && trust != EncryptionTrustLevel::ManuallyTrusted
+                    && trust != EncryptionTrustLevel::Authenticated)) {
                 onFinish(Reason::SecurityError, QStringLiteral("Peer DTLS fingerprint is not trusted"));
                 return;
             }
@@ -1975,21 +1975,20 @@ namespace XMPP { namespace Jingle { namespace ICE {
         }
 
         QDomDocument document;
-        const auto plain = d->network->components[0].dtls->localFingerprint().toXml(&document);
+        const auto   plain = d->network->components[0].dtls->localFingerprint().toXml(&document);
         if (plain.isNull()) {
             onFinish(Reason::SecurityError, QStringLiteral("Cannot serialize the DTLS fingerprint"));
             return;
         }
-        d->outgoingFingerprintBusy = true;
-        const auto revision = d->outgoingFingerprintRevision;
+        d->outgoingFingerprintBusy   = true;
+        const auto          revision = d->outgoingFingerprintRevision;
         QPointer<Transport> guard(this);
         connect(verification, &QObject::destroyed, this, [guard]() {
             if (guard && guard->d->outgoingFingerprintBusy && guard->_state < State::Finishing)
                 guard->onFinish(Reason::SecurityError, QStringLiteral("OMEMO DTLS verifier was unloaded"));
         });
         verification->encryptFingerprint(
-            session, plain, [guard, required, revision](const QDomElement &protectedFingerprint,
-                                                      const QString &error) {
+            session, plain, [guard, required, revision](const QDomElement &protectedFingerprint, const QString &error) {
                 if (!guard || guard->_state >= State::Finishing)
                     return;
                 guard->d->outgoingFingerprintBusy = false;
@@ -2189,8 +2188,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
     bool Transport::hasUpdates() const
     {
         return isValid() && d->network && d->pendingActions && !d->outgoingFingerprintBusy && d->network->ice
-            && _state >= State::ApprovedToSend
-            && !(isRemote() && _state == State::Pending)
+            && _state >= State::ApprovedToSend && !(isRemote() && _state == State::Pending)
             && (d->network->ice->isLocalGatheringComplete() || d->pendingLocalCandidates.size());
     }
 

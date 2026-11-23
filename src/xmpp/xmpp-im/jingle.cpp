@@ -611,7 +611,7 @@ namespace XMPP { namespace Jingle {
         std::unique_ptr<PublicationManager>   publicationManager;
         std::unique_ptr<RTP::Manager>         rtpManager;
         QPointer<JET::Jet>                    jet;
-        QPointer<OmemoDtlsVerification>      dtlsVerification;
+        QPointer<OmemoDtlsVerification>       dtlsVerification;
         bool                                  messageInitiationEnabled = false;
         int                                   maxSessions              = -1; // no limit
 
@@ -890,20 +890,20 @@ namespace XMPP { namespace Jingle {
 
         bool found = false;
         for (auto content = jingle.firstChildElement(QStringLiteral("content")); !content.isNull();
-             content = content.nextSiblingElement(QStringLiteral("content"))) {
-            found = true;
-            const auto transport = content.firstChildElement(QStringLiteral("transport"));
-            const auto description = content.firstChildElement(QStringLiteral("description"));
+             content      = content.nextSiblingElement(QStringLiteral("content"))) {
+            found                         = true;
+            const auto        transport   = content.firstChildElement(QStringLiteral("transport"));
+            const auto        description = content.firstChildElement(QStringLiteral("description"));
             const ContentBase key(content);
-            auto *application = key.isValid() ? session->content(key.name, key.creator) : nullptr;
-            auto *file = qobject_cast<FileTransfer::Application *>(application);
+            auto             *application = key.isValid() ? session->content(key.name, key.creator) : nullptr;
+            auto             *file        = qobject_cast<FileTransfer::Application *>(application);
 
             if (file && file->isTransportEncrypted())
                 continue;
             if (description.namespaceURI() == FileTransfer::NS && manager->jet()) {
                 bool hasSecurity = false;
                 for (auto sec = content.firstChildElement(QStringLiteral("security")); !sec.isNull();
-                     sec = sec.nextSiblingElement(QStringLiteral("security"))) {
+                     sec      = sec.nextSiblingElement(QStringLiteral("security"))) {
                     if (sec.namespaceURI() == JET::Jet::ns()) {
                         hasSecurity = true;
                         break;

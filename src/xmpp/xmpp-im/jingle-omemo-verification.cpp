@@ -44,7 +44,7 @@ namespace XMPP { namespace Jingle {
 
     class OmemoDtlsVerification::Private {
     public:
-        QPointer<Manager>          manager;
+        QPointer<Manager>         manager;
         QPointer<OmemoEncryption> omemo;
         QHash<QString, quint32>   devices;
         QDomDocument              document;
@@ -102,9 +102,9 @@ namespace XMPP { namespace Jingle {
             done({}, QStringLiteral("No OMEMO device was negotiated for the peer"));
             return;
         }
-        const Jid peer = session->peer();
+        const Jid  peer      = session->peer();
         const auto preferred = d->omemo->preferredProtocolFor(peer).value_or(OmemoProtocol::Legacy);
-        auto attempt = std::make_shared<std::function<void(OmemoProtocol)>>();
+        auto       attempt   = std::make_shared<std::function<void(OmemoProtocol)>>();
         std::weak_ptr<std::function<void(OmemoProtocol)>> weakAttempt = attempt;
         QPointer<OmemoDtlsVerification> guard(this);
         *attempt = [guard, peer, device, fingerprint, done, weakAttempt](OmemoProtocol protocol) {
@@ -138,7 +138,7 @@ namespace XMPP { namespace Jingle {
                     return;
                 }
                 QDomDocument document;
-                auto verified = document.createElementNS(VerificationNs, QStringLiteral("fingerprint"));
+                auto         verified = document.createElementNS(VerificationNs, QStringLiteral("fingerprint"));
                 for (const auto &attribute : { QStringLiteral("hash"), QStringLiteral("setup") })
                     if (fingerprint.hasAttribute(attribute))
                         verified.setAttribute(attribute, fingerprint.attribute(attribute));
@@ -184,7 +184,7 @@ namespace XMPP { namespace Jingle {
         }
         QPointer<OmemoDtlsVerification> guard(this);
         QPointer<Session>               current(session);
-        const auto finish = [guard, current, fingerprint, job, done]() {
+        const auto                      finish = [guard, current, fingerprint, job, done]() {
             job->deleteLater();
             if (!guard || !current)
                 return;
@@ -192,13 +192,13 @@ namespace XMPP { namespace Jingle {
                 done({}, job->errorString());
                 return;
             }
-            const auto &meta = job->metadata();
+            const auto                 &meta = job->metadata();
             Session::PeerAuthentication authentication;
             authentication.method      = OmemoEncryption::methodId();
             authentication.deviceId    = meta.senderDeviceId;
             authentication.identityKey = meta.senderKey;
             authentication.trustLevel  = meta.details.value(QStringLiteral("trustLevel")).toInt();
-            const auto existing = current->peerAuthentication();
+            const auto existing        = current->peerAuthentication();
             if (!authentication.deviceId || !authentication.isValid()
                 || (existing.isValid()
                     && (existing.method != authentication.method || existing.deviceId != authentication.deviceId
@@ -207,9 +207,9 @@ namespace XMPP { namespace Jingle {
                 done({}, QStringLiteral("The peer's OMEMO identity is not acceptable"));
                 return;
             }
-            const auto plain = job->stanza();
+            const auto   plain = job->stanza();
             QDomDocument document;
-            QDomElement result;
+            QDomElement  result;
             if (plain.namespaceURI() == DtlsNs && plain.localName() == QLatin1String("fingerprint")) {
                 result = document.importNode(plain, true).toElement();
             } else {
