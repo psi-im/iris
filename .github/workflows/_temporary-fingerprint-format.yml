@@ -1,4 +1,4 @@
-name: Temporary ICE fingerprint final formatting
+name: Temporary ICE fingerprint diff output
 on:
   push:
     branches: [feat/encryption-session-stream-api]
@@ -23,10 +23,5 @@ jobs:
           fi
           git clang-format-18 --binary clang-format-18 61e340ec661882fbb4f605a89127d1bfeee52404 || test -n "$(git diff --name-only)"
           git diff --check
-          if ! git diff --quiet; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add -u
-            git commit -m "Format final authenticated ICE update guards"
-            git push origin HEAD:refs/heads/feat/encryption-session-stream-api
-          fi
+          git diff -- src/xmpp/xmpp-im/jingle-ice.cpp
+
