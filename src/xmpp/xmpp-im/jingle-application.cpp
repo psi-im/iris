@@ -820,14 +820,26 @@ namespace XMPP { namespace Jingle {
                 if (!current())
                     return false;
             }
+            if (_transport && _transport->lastReason().condition() == Reason::SecurityError) {
+                const auto reason = _transport->lastReason();
+                remove(reason.condition(), reason.text());
+                return false;
+            }
             _state             = (isRemote() || _state > State::ApprovedToSend) ? State::Finishing : State::Finished;
             _terminationReason = Reason(Reason::FailedTransport);
             emit updated(); // will be evaluated to content-remove
             return false;
         };
 
-        if (!current())
+        if (!current() || _terminationReason.isValid())
             return false;
+
+        if (_transport && _transport->failureDisposition() == Transport::FailureDisposition::AbortContent) {
+            const auto reason = _transport->lastReason();
+            cancelConnectionWaiter();
+            remove(reason.condition(), reason.text());
+            return false;
+        }
 
         // If the application policy cannot migrate the current transport,
         // do not enter a selector loop that may keep returning the same
@@ -1079,7 +1091,7 @@ namespace XMPP { namespace Jingle {
             const auto reason = _transport->lastReason();
             // A failed authentication is not a connectivity failure. Trying
             // another transport here could bypass the rejected peer identity.
-            if (reason.condition() == Reason::SecurityError) {
+            if (_transport->failureDisposition() == Transport::FailureDisposition::AbortContent) {
                 cancelConnectionWaiter();
                 remove(reason.condition(), reason.text());
                 return;

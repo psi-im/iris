@@ -214,7 +214,7 @@ namespace XMPP { namespace Jingle { namespace SXE {
         if (!d->encryption.isEmpty()) {
             const auto methodId = protectionMethod(session, d->encryption);
             if (methodId.isEmpty() || !session->ensureEncryptionMethod(methodId)) {
-                onFinish(Reason::SecurityError, QStringLiteral("SXE encryption method does not match the session"));
+                onSecurityFailure(QStringLiteral("SXE encryption method does not match the session"));
                 return;
             }
             if (!d->methodUnregistered)
@@ -222,10 +222,14 @@ namespace XMPP { namespace Jingle { namespace SXE {
                                                 &EncryptionManager::methodUnregistered, this,
                                                 [this, methodId](const QString &id) {
                     if (id == methodId && _state < State::Finishing)
-                        onFinish(Reason::SecurityError, QStringLiteral("SXE encryption method was unloaded"));
+                        onSecurityFailure(QStringLiteral("SXE encryption method was unloaded"));
                 });
         } else if (session->isEndToEndRequired()) {
-            onFinish(Reason::SecurityError, QStringLiteral("Required end-to-end protection is unavailable for SXE"));
+            const auto message = QStringLiteral("Required end-to-end protection is unavailable for SXE");
+            if (isLocal() && session->state() == State::ApprovedToSend)
+                onFinish(Reason::SecurityError, message, FailureDisposition::TryNextTransport);
+            else
+                onSecurityFailure(message);
             return;
         }
         setState(State::ApprovedToSend);

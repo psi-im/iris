@@ -111,10 +111,11 @@ namespace XMPP { namespace Jingle {
         return _state >= State::ApprovedToSend;
     }
 
-    void Transport::onFinish(Reason::Condition condition, const QString &message)
+    void Transport::onFinish(Reason::Condition condition, const QString &message, FailureDisposition disposition)
     {
         qInfo("jingle transport=%p ns=%s finished state=%d creator=%d reason=%d text=%s", static_cast<void *>(this),
               qUtf8Printable(_pad->ns()), int(_state), int(_creator), int(condition), qUtf8Printable(message));
+        failureDisposition_ = disposition;
         _lastReason = Reason(condition, message);
         _prevState  = _state;
         _state      = State::Finished;

@@ -73,6 +73,8 @@ namespace XMPP { namespace Jingle {
         inline Origin               creator() const { return _creator; }
         inline State                state() const { return _state; }
         inline State                prevState() const { return _prevState; }
+        enum class FailureDisposition { TryNextTransport, AbortContent };
+        FailureDisposition failureDisposition() const { return failureDisposition_; }
         inline Reason               lastReason() const { return _lastReason; }
         inline XMPP::Stanza::Error  lastError() const { return _lastError; }
         inline TransportManagerPad *pad() const { return _pad; }
@@ -267,7 +269,12 @@ namespace XMPP { namespace Jingle {
         bool wasAccepted() const;
 
         /// Called in the end of life to trigger final events
-        void onFinish(Reason::Condition condition, const QString &message = QString());
+        void onFinish(Reason::Condition condition, const QString &message = QString(),
+                      FailureDisposition disposition = FailureDisposition::TryNextTransport);
+        void onSecurityFailure(const QString &message)
+        {
+            onFinish(Reason::SecurityError, message, FailureDisposition::AbortContent);
+        }
 
         /**
          * @brief notifyIncomingConnection checks all acceptors and return true if any accepted the connection
@@ -280,6 +287,7 @@ namespace XMPP { namespace Jingle {
         Origin                    _creator   = Origin::None;
         TransportManagerPad      *_pad       = nullptr; // owner of this transport
         Reason                    _lastReason;
+        FailureDisposition        failureDisposition_ = FailureDisposition::TryNextTransport;
         XMPP::Stanza::Error       _lastError;
         int                       _componentsCount = 1;
         QList<ConnectionAcceptor> _connectionAcceptors;

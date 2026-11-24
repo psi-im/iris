@@ -967,6 +967,19 @@ namespace XMPP { namespace Jingle {
                 if (!fingerprint.isNull() && fingerprint.namespaceURI() == QLatin1String("http://gultsch.de/xmpp/drafts/omemo/dlts-srtp-verification")
                     && manager->dtlsVerification())
                     continue;
+                // A BUNDLE extension may repeat the public fingerprint of an
+                // authenticated association. The ICE transport must verify the
+                // exact pending membership, credentials and certificate before
+                // accepting it; session-level identity alone is not proof.
+#ifdef IRIS_ENABLE_OMEMO
+                const auto action = jingle.attribute(QStringLiteral("action"));
+                if (session->state() == State::Active && session->peerAuthentication().isValid()
+                    && session->checkPeerCaps(OmemoDtlsVerification::directFeature())
+                    && (action == QLatin1String("content-add") || action == QLatin1String("content-accept")
+                        || (action == QLatin1String("transport-info") && application))
+                    && !fingerprint.isNull())
+                    continue;
+#endif
                 // Candidate-only updates do not change the established DTLS
                 // fingerprint; the transport still enforces its authenticated
                 // peer association.
