@@ -262,6 +262,10 @@ namespace XMPP { namespace Jingle {
         void stateChanged();
 
     protected:
+        // All associated contents must independently protect their payloads
+        // before native transport authentication can be omitted.
+        bool hasIndependentPayloadProtection() const;
+
         /// Just updates state and signals about the change. No logic is attached to the new state.
         void setState(State newState);
 

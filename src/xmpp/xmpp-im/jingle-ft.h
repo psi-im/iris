@@ -108,6 +108,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
 
         // Whether this file content has prepared an encrypted JET connection.
         bool isTransportEncrypted() const;
+        bool hasIndependentPayloadProtection() const override { return isTransportEncrypted(); }
 
         void            setDevice(QIODevice *dev, bool closeOnFinish = true);
         Connection::Ptr connection() const;

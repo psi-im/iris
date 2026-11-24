@@ -63,6 +63,17 @@ namespace XMPP { namespace Jingle {
 
     Transport::~Transport() { setParent(nullptr); }
 
+    bool Transport::hasIndependentPayloadProtection() const
+    {
+        if (_applications.isEmpty())
+            return false;
+        for (const auto *app : _applications) {
+            if (!app->hasIndependentPayloadProtection())
+                return false;
+        }
+        return true;
+    }
+
     void Transport::associate(Application *app) { _applications.insert(app); }
 
     void Transport::disassociate(Application *app)

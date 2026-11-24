@@ -215,6 +215,11 @@ namespace XMPP { namespace Jingle {
         // Application policy: true when this content may share one physical
         // transport association with other Jingle contents.
         virtual bool allowsSharedTransport() const { return false; }
+
+        // True only after independent end-to-end payload protection has been
+        // prepared. The application must enforce it on every connection.
+        // Native transport protection is not counted here.
+        virtual bool hasIndependentPayloadProtection() const { return false; }
         // Compatibility with an already negotiated physical association.
         // Initial grouping still uses allowsSharedTransport().
         virtual bool canShareTransport(const Transport *) const { return allowsSharedTransport(); }

@@ -133,14 +133,18 @@ Run startSession(Endpoint &alice, Endpoint &bob, bool proceed, bool requireEndTo
 }
 
 // Direct IQ file requests must not need JMI or an extra JET layer.
-void fileRanges(Endpoint &alice, Endpoint &bob)
+void fileRanges(Endpoint &alice, Endpoint &bob, bool native = true)
 {
-    setPeerFeatures(alice.client, bob.jid, bob.client.jingleManager()->discoFeatures()
-                        + QStringList { OmemoEncryption::namespaceUri(),
-                                        OmemoEncryption::legacyDevicesNode() + QStringLiteral("+notify") });
-    setPeerFeatures(bob.client, alice.jid, alice.client.jingleManager()->discoFeatures()
-                        + QStringList { OmemoEncryption::namespaceUri(),
-                                        OmemoEncryption::legacyDevicesNode() + QStringLiteral("+notify") });
+    auto features = [native](Endpoint &endpoint) {
+        auto result = endpoint.client.jingleManager()->discoFeatures()
+            + QStringList { OmemoEncryption::namespaceUri(),
+                            OmemoEncryption::legacyDevicesNode() + QStringLiteral("+notify") };
+        if (!native)
+            result.removeAll(J::OmemoDtlsVerification::directFeature());
+        return result;
+    };
+    setPeerFeatures(alice.client, bob.jid, features(bob));
+    setPeerFeatures(bob.client, alice.jid, features(alice));
 
     const QByteArray payload = QByteArray(8192, 'a') + QByteArray(8192, 'b');
     FT::File file;
@@ -180,7 +184,7 @@ void fileRanges(Endpoint &alice, Endpoint &bob)
                     a->setKeepTransportUntilReceipt();
                     QObject::connect(a, &FT::Application::deviceRequested, a,
                         [&, a](quint64 offset, std::optional<quint64>) {
-                            check(!a->isTransportEncrypted(), "JET was added to verified DTLS");
+                            check(a->isTransportEncrypted() == !native, "incorrect payload protection on sender");
                             auto *source = new QBuffer(a);
                             source->setData(payload);
                             source->open(QIODevice::ReadOnly);
@@ -213,7 +217,7 @@ void fileRanges(Endpoint &alice, Endpoint &bob)
         a->setReceiptDeferred();
         check(a->setTransport(session->newOutgoingTransport(J::ICE::NS)), "could not select ICE");
         QObject::connect(a, &FT::Application::connectionReady, &consumer, [&, a, i] {
-            check(!a->isTransportEncrypted(), "JET was added to verified DTLS");
+            check(a->isTransportEncrypted() == !native, "incorrect payload protection on receiver");
             auto connection = a->connection();
             auto read = [&, i, connection] { received[i] += connection->readAll(); };
             QObject::connect(connection.data(), &QIODevice::readyRead, &consumer, read);
@@ -226,6 +230,19 @@ void fileRanges(Endpoint &alice, Endpoint &bob)
     auto first = request(0);
     session->initiate();
     check(pumpUntil(alice, bob, [&] { return verified[0]; }), "direct encrypted range did not complete");
+    if (!native) {
+        check(first && received[0] == payload.left(8192) && jet > 0
+                  && initialWire.verified == 0 && initialWire.plain >= 2,
+              "required JET over ICE did not use independent payload protection");
+        check(first->acknowledgeReceived(), "JET range receipt was lost");
+        check(pumpUntil(alice, bob, [&] { return receipts == 1; }), "JET range receipt did not arrive");
+        if (session)
+            session->terminate(J::Reason::Success);
+        pumpUntil(alice, bob, [] { return false; }, 200);
+        QObject::disconnect(incoming);
+        onStanza = nullptr;
+        return;
+    }
     check(first && senders.size() == 1 && senders[0] && senders[0]->state() < J::State::Finished
               && receipts == 0 && initialWire.verified >= 2 && initialWire.plain == 0 && jet == 0,
           "initial range did not use authenticated DTLS and deferred receipt");
@@ -381,6 +398,7 @@ int main(int argc, char **argv)
         exercise(alice, bob, true);
 
     fileRanges(alice, bob);
+    fileRanges(alice, bob, false); // JET over ICE without direct fingerprint verification.
 
     // A peer whose OMEMO 2 bundle the server no longer holds (one item per node, as old ejabberd) is
     // reached through its legacy OMEMO bundle, and the fingerprints are still verified.

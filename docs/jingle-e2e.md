@@ -235,7 +235,12 @@ Conversations `Content.setSecurity()/getSecurity()`, `JingleFileTransferConnecti
   use a fresh content key and IV. Indefinite-length streams are not supported.
 - FileTransfer prefers authenticated native transport encryption when the
   transport can negotiate it; JET remains the fallback for IBB/S5B and ICE
-  without native authentication. DTLS fingerprint verification uses OMEMO,
+  without native authentication. ICE knows only the generic application
+  payload-protection contract, not FileTransfer or JET. A shared transport
+  can omit native authentication only when every associated content has
+  prepared its own protection. An initial plain fingerprint can be parsed
+  before application preparation, but it cannot start an unprotected
+  required transfer. DTLS fingerprint verification uses OMEMO,
   including direct IQ negotiation with peers advertising the direct feature.
   BUNDLE followers inherit authentication only from their existing connected
   association with matching local and remote fingerprints. No per-range

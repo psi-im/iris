@@ -32,7 +32,6 @@
 
 #include "dtls.h"
 #include "ice176.h"
-#include "jingle-ft.h"
 #include "jingle-session.h"
 #include "netnames.h"
 #include "stundisco.h"
@@ -1913,19 +1912,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
     {
         if (d->nativeProtectionRequired || d->receivedProtectedFingerprint || d->sentProtectedFingerprint)
             return true;
-        auto *session = pad()->session();
-        if (!session->isEndToEndRequired())
-            return false;
-        // A JET file may use ICE, but its payload is protected by the
-        // file-transfer application rather than DTLS fingerprint verification.
-        for (auto *app : session->contentList()) {
-            if (app && app->transport() == this) {
-                if (auto *file = qobject_cast<FileTransfer::Application *>(app))
-                    if (file->isTransportEncrypted())
-                        return false;
-            }
-        }
-        return true;
+        return pad()->session()->isEndToEndRequired() && !hasIndependentPayloadProtection();
     }
 
     void Transport::processNextRemoteUpdate()
@@ -1988,7 +1975,14 @@ namespace XMPP { namespace Jingle { namespace ICE {
                     }
                 }
 #endif
-                if (requiresVerifiedFingerprint() && !d->inheritedFingerprint) {
+                // An initial offer can arrive before its application has
+                // prepared independent payload protection. Enforce the session
+                // policy at prepare()/start(); explicit or previously negotiated
+                // native authentication must never be downgraded.
+                const bool nativeSelected = d->nativeProtectionRequired || d->receivedProtectedFingerprint
+                    || d->sentProtectedFingerprint;
+                if ((nativeSelected || (_state >= State::ApprovedToSend && requiresVerifiedFingerprint()))
+                    && !d->inheritedFingerprint) {
                     onSecurityFailure(QStringLiteral("Unverified DTLS fingerprint in protected session"));
                     return;
                 }
@@ -2064,8 +2058,8 @@ namespace XMPP { namespace Jingle { namespace ICE {
             return;
         auto      *session   = pad()->session();
         const bool required  = requiresVerifiedFingerprint();
-        const bool preferred = session->isEndToEndPreferred() || d->nativeProtectionRequired
-            || d->verifiedRemoteHash.has_value();
+        const bool preferred = required || d->verifiedRemoteHash.has_value()
+            || (session->isEndToEndPreferred() && !hasIndependentPayloadProtection());
         d->protectedOutgoingFingerprint.clear();
         if (d->groupManagedNetwork && d->network && d->network->runtime
             && d->network->runtime->fingerprintAuthenticated()
