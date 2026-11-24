@@ -242,6 +242,7 @@ int main(int argc, char **argv)
     parseInto(invalid, QStringLiteral("<transport xmlns='urn:xmpp:jingle:transports:sxe' "
                                      "encryption='urn:test:unsupported'><host>carol@example.test/device</host></transport>"));
     check(!transport->prepareUpdate(invalid.documentElement()), "Unsupported SXE wire profile was accepted");
+    check(transport->setEncryptionPolicy(J::EncryptionPolicy::Required), "could not configure SXE protection");
     transport->prepare();
     check(transport->encryption() == OmemoEncryption::namespaceUri(), "SXE did not negotiate OMEMO 2");
     QDomDocument edit;

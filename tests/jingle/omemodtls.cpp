@@ -8,6 +8,7 @@
 
 #include <iris/jingle-ice.h>
 #include <iris/jingle-ft.h>
+#include <iris/jingle-ibb.h>
 #include <iris/jingle-jet.h>
 #include <QBuffer>
 #include <iris/jingle-dtls-omemo.h>
@@ -180,11 +181,16 @@ void fileRanges(Endpoint &alice, Endpoint &bob, bool native = true)
                     auto *a = qobject_cast<FT::Application *>(content);
                     check(a && a->senders() == session->role(), "unexpected file offer");
                     senders.append(a);
+                    const bool independent = a->transport()->pad()->ns() == J::IBB::NS;
+                    if (independent)
+                        check(a->setEncryptionPolicy(J::EncryptionPolicy::Disabled),
+                              "could not override incoming content policy");
                     a->setAcceptFile(a->file());
                     a->setKeepTransportUntilReceipt();
                     QObject::connect(a, &FT::Application::deviceRequested, a,
-                        [&, a](quint64 offset, std::optional<quint64>) {
-                            check(a->isTransportEncrypted() == !native, "incorrect payload protection on sender");
+                        [&, a, independent](quint64 offset, std::optional<quint64>) {
+                            check(a->isTransportEncrypted() == (!native && !independent),
+                                  "incorrect payload protection on sender");
                             auto *source = new QBuffer(a);
                             source->setData(payload);
                             source->open(QIODevice::ReadOnly);
@@ -203,21 +209,25 @@ void fileRanges(Endpoint &alice, Endpoint &bob, bool native = true)
     QPointer<J::Session> session = alice.client.jingleManager()->newSession(bob.jid);
     check(session->setEncryptionMethod(OmemoEncryption::methodId()), "missing outgoing OMEMO");
     session->setEncryptionPolicy(J::EncryptionPolicy::Required);
-    QByteArray received[2];
-    bool verified[2] = { false, false };
+    QByteArray received[3];
+    bool verified[3] = { false, false, false };
     QObject consumer;
     auto request = [&](int i) {
         auto *a = qobject_cast<FT::Application *>(session->newContent(FT::NS, session->peerRole()));
         check(a, "could not create range request");
         auto range = file;
-        range.setRange(FT::Range(quint64(i * 8192), 8192));
+        range.setRange(FT::Range(quint64((i % 2) * 8192), 8192));
         a->setFile(range);
         a->setStreamingMode();
         a->setKeepTransportUntilReceipt();
         a->setReceiptDeferred();
-        check(a->setTransport(session->newOutgoingTransport(J::ICE::NS)), "could not select ICE");
+        const bool independent = i == 2;
+        if (independent)
+            check(a->setEncryptionPolicy(J::EncryptionPolicy::Disabled), "could not override content policy");
+        check(a->setTransport(session->newOutgoingTransport(independent ? J::IBB::NS : J::ICE::NS)),
+              "could not select range transport");
         QObject::connect(a, &FT::Application::connectionReady, &consumer, [&, a, i] {
-            check(a->isTransportEncrypted() == !native, "incorrect payload protection on receiver");
+            check(a->isTransportEncrypted() == (!native && i != 2), "incorrect payload protection on receiver");
             auto connection = a->connection();
             auto read = [&, i, connection] { received[i] += connection->readAll(); };
             QObject::connect(connection.data(), &QIODevice::readyRead, &consumer, read);
@@ -250,6 +260,19 @@ void fileRanges(Endpoint &alice, Endpoint &bob, bool native = true)
               && remoteSession->peerAuthentication().isValid(), "DTLS authentication missing");
 
     extending = true;
+    // An unrelated content with its own transport and an explicit Disabled
+    // policy must not change the authenticated ICE association or its policy.
+    auto independent = request(2);
+    check(pumpUntil(alice, bob, [&] { return verified[2]; }), "independent content did not complete");
+    check(independent && received[2] == payload.left(8192)
+              && independent->encryptionPolicy() == J::EncryptionPolicy::Disabled
+              && session->encryptionPolicy() == J::EncryptionPolicy::Required
+              && first && first->transport()->hasAuthenticatedEncryption()
+              && jet == 0 && extensionWire.verified == 0,
+          "independent content altered the protected association");
+    check(independent->acknowledgeReceived(), "independent receipt was lost");
+    check(pumpUntil(alice, bob, [&] { return receipts == 1; }), "independent receipt did not arrive");
+
     auto second = request(1);
     check(pumpUntil(alice, bob, [&] {
         if (!session || !second)
@@ -266,7 +289,7 @@ void fileRanges(Endpoint &alice, Endpoint &bob, bool native = true)
     check(received[0] == payload.left(8192) && received[1] == payload.mid(8192),
           "DTLS range payload mismatch");
     check(second->acknowledgeReceived(), "successor receipt was lost");
-    check(pumpUntil(alice, bob, [&] { return receipts == 2; }), "range receipts did not arrive");
+    check(pumpUntil(alice, bob, [&] { return receipts == 3; }), "range receipts did not arrive");
     if (session)
         session->terminate(J::Reason::Success);
     pumpUntil(alice, bob, [] { return false; }, 200);

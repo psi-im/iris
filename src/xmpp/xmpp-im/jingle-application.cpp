@@ -810,7 +810,10 @@ namespace XMPP { namespace Jingle {
 
     EncryptionPolicy Application::encryptionPolicy() const
     {
-        return encryptionPolicy_.value_or(_pad->session()->encryptionPolicy());
+        if (encryptionPolicy_)
+            return *encryptionPolicy_;
+        const auto *session = _pad ? _pad->session() : nullptr;
+        return session ? session->encryptionPolicy() : EncryptionPolicy::Disabled;
     }
 
     bool Application::canShareTransport(const Transport *transport) const

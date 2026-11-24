@@ -68,7 +68,7 @@ namespace XMPP { namespace Jingle {
         if (encryptionPolicy_)
             return *encryptionPolicy_ == policy;
         if (_state != State::Created && !(isRemote() && _state == State::Pending))
-            return policy == EncryptionPolicy::Disabled;
+            return false;
         encryptionPolicy_ = policy;
         return true;
     }
