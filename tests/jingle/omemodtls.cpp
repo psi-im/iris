@@ -234,12 +234,21 @@ void fileRanges(Endpoint &alice, Endpoint &bob)
 
     extending = true;
     auto second = request(1);
+    check(pumpUntil(alice, bob, [&] {
+        if (!session || !second)
+            return false;
+        for (const auto &group : session->negotiatedGroupings())
+            if (group.semantics == QLatin1String("BUNDLE") && group.contents.contains(second->contentName()))
+                return true;
+        return false;
+    }), "authenticated BUNDLE extension did not commit");
+    check(first && first->acknowledgeReceived(), "predecessor receipt was lost");
     check(pumpUntil(alice, bob, [&] { return verified[1]; }), "authenticated BUNDLE range did not complete");
-    check(first && second && sessions == 1 && jet == 0 && extensionWire.verified == 0,
+    check(second && sessions == 1 && jet == 0 && extensionWire.verified == 0,
           "BUNDLE repeated OMEMO key exchange or opened another session");
     check(received[0] == payload.left(8192) && received[1] == payload.mid(8192),
           "DTLS range payload mismatch");
-    check(first->acknowledgeReceived() && second->acknowledgeReceived(), "deferred range receipts were lost");
+    check(second->acknowledgeReceived(), "successor receipt was lost");
     check(pumpUntil(alice, bob, [&] { return receipts == 2; }), "range receipts did not arrive");
     if (session)
         session->terminate(J::Reason::Success);

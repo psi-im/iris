@@ -1089,7 +1089,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
         // known-size transfer whose advertised payload is still outstanding.
         if (_terminationReason.isValid())
             d->lastReason = _terminationReason;
-        else if (r.condition() == Reason::Success && d->amIReceiver() && d->protection
+        else if (r.condition() == Reason::Success && d->amIReceiver() && !d->receiptReady && d->protection
                  && d->protection->encrypted() && !d->protection->authenticated())
             d->lastReason = Reason(Reason::SecurityError, QStringLiteral("session ended before JET authentication"));
         else if (r.condition() == Reason::Success && d->bytesLeft && *d->bytesLeft != 0)

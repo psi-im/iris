@@ -272,6 +272,21 @@ int main(int argc, char **argv)
                   && t->wire.size() == data.size() - 91234 + 16,
               "encrypted range to end of file failed");
 
+        // A tampered requested range must not be verified or release a receipt.
+        t = send(alice, bob, data, true, true, [](QDomElement &stanza) {
+            auto ibb = stanza.firstChildElement(QStringLiteral("data"));
+            if (ibb.namespaceURI() != IbbNs || ibb.attribute(QStringLiteral("seq")) != QLatin1String("0"))
+                return;
+            auto bytes = QByteArray::fromBase64(ibb.text().toLatin1());
+            if (!bytes.isEmpty()) {
+                bytes[0] = char(bytes[0] ^ 1);
+                auto text = ibb.firstChild().toText();
+                text.setData(QString::fromLatin1(bytes.toBase64()));
+            }
+        }, OmemoEncryption::methodId(), range, true, true);
+        check(t->offered && !t->verified && t->receivingReason.condition() == J::Reason::SecurityError,
+              "tampered encrypted range was accepted");
+
         // A tampered block fails authentication.
         t = send(alice, bob, data, true, false, [](QDomElement &stanza) {
             auto ibb = stanza.firstChildElement(QStringLiteral("data"));
