@@ -229,8 +229,7 @@ namespace XMPP { namespace Jingle {
         Session::PeerAuthentication peerAuthentication;
         QString                     encryptionMethodId;
         QPointer<EncryptedSession>  encryptionSession;
-        bool                        endToEndRequired         = false;
-        bool                        endToEndPreferred        = false;
+        EncryptionPolicy            encryptionPolicy = EncryptionPolicy::Disabled;
         bool                        waitingAck               = false;
         bool                        needNotifyGroup          = false; // whenever grouping info changes
         bool                        groupingAllowed          = false;
@@ -2882,13 +2881,13 @@ namespace XMPP { namespace Jingle {
         emit peerAuthenticationChanged();
     }
 
-    void Session::setEndToEndRequired(bool required) { d->endToEndRequired = required; }
+    void Session::setEncryptionPolicy(EncryptionPolicy policy)
+    {
+        if (d->state == State::Created)
+            d->encryptionPolicy = policy;
+    }
 
-    bool Session::isEndToEndRequired() const { return d->endToEndRequired; }
-
-    void Session::setEndToEndPreferred(bool preferred) { d->endToEndPreferred = preferred; }
-
-    bool Session::isEndToEndPreferred() const { return d->endToEndPreferred || d->endToEndRequired; }
+    EncryptionPolicy Session::encryptionPolicy() const { return d->encryptionPolicy; }
 
     bool Session::setEncryptionMethod(const QString &methodId)
     {
@@ -3348,7 +3347,7 @@ namespace XMPP { namespace Jingle {
         // its method. Do not accept a previously authenticated offer from
         // another method, or an unavailable required method.
         if (!d->encryptionMethodId.isEmpty()
-            && ((d->endToEndRequired && !d->encryptionSession)
+            && ((isEndToEndRequired() && !d->encryptionSession)
                 || (d->peerAuthentication.isValid() && d->peerAuthentication.method != d->encryptionMethodId))) {
             terminate(Reason::SecurityError,
                       QStringLiteral("Selected Jingle encryption method unavailable or mismatched"));
@@ -3381,7 +3380,7 @@ namespace XMPP { namespace Jingle {
 
     void Session::initiate()
     {
-        if (d->role == Origin::Initiator && d->state == State::Created && d->endToEndRequired
+        if (d->role == Origin::Initiator && d->state == State::Created && isEndToEndRequired()
             && !d->encryptionMethodId.isEmpty() && !d->encryptionSession) {
             d->terminateReason
                 = Reason(Reason::SecurityError, QStringLiteral("Selected Jingle encryption method unavailable"));

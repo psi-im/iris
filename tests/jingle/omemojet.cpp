@@ -113,8 +113,8 @@ std::unique_ptr<Transfer> send(Endpoint &alice, Endpoint &bob, const QByteArray 
             check(t->session->encryptionSession() != nullptr && t->session->encryptionSession()->methodId() == methodId,
                   "Jingle did not retain a method-specific encryption session");
     }
-    t->session->setEndToEndPreferred(preferred);
-    t->session->setEndToEndRequired(required);
+    t->session->setEncryptionPolicy(required ? J::EncryptionPolicy::Required
+        : (preferred ? J::EncryptionPolicy::Preferred : J::EncryptionPolicy::Disabled));
     auto *local = qobject_cast<FT::Application *>(
         t->session->newContent(FT::NS, request ? J::Origin::Responder : J::Origin::Initiator));
     local->setFile(file);

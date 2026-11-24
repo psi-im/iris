@@ -46,6 +46,9 @@ namespace Jingle {
         QStringList contents;
     };
 
+    // Local preference, independent of the negotiated protection and peer capabilities.
+    enum class EncryptionPolicy { Disabled, Preferred, Required };
+
     class IRIS_EXPORT Session : public QObject {
         Q_OBJECT
     public:
@@ -92,15 +95,13 @@ namespace Jingle {
         PeerAuthentication peerAuthentication() const;
         void               setPeerAuthentication(const PeerAuthentication &authentication);
 
-        /// Local policy: the session uses only end-to-end protected transports.
-        /// ICE prepares authenticated DTLS fingerprints, while JET file transfers
-        /// prepare their keys in the application; unprotected contents are refused.
-        void setEndToEndRequired(bool required);
-        bool isEndToEndRequired() const;
-        /// Local wish: protect what can be protected (e.g. JET for files) but run unprotected otherwise.
-        /// A session that requires end-to-end encryption prefers it as well.
-        void setEndToEndPreferred(bool preferred);
-        bool isEndToEndPreferred() const;
+        // Disabled does not initiate E2EE, but accepts a valid protected peer offer.
+        // Preferred may choose plaintext only before protection is negotiated.
+        // Required never accepts unprotected content.
+        void setEncryptionPolicy(EncryptionPolicy policy);
+        EncryptionPolicy encryptionPolicy() const;
+        bool isEndToEndRequired() const { return encryptionPolicy() == EncryptionPolicy::Required; }
+        bool isEndToEndPreferred() const { return encryptionPolicy() != EncryptionPolicy::Disabled; }
 
         /**
          * Select the encryption method for this Jingle negotiation before it starts.

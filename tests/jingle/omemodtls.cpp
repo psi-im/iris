@@ -100,8 +100,8 @@ Run startSession(Endpoint &alice, Endpoint &bob, bool proceed, bool requireEndTo
                                            run.peerSession = session;
                                            check(session->setEncryptionMethod(OmemoEncryption::methodId()),
                                                  "Incoming DTLS session could not select OMEMO");
-                                           session->setEndToEndPreferred(proceed);
-                                           session->setEndToEndRequired(peerRequires);
+                                           session->setEncryptionPolicy(peerRequires ? J::EncryptionPolicy::Required
+                                               : (proceed ? J::EncryptionPolicy::Preferred : J::EncryptionPolicy::Disabled));
                                        });
     const auto sid = QStringLiteral("omemo-dtls-") + QString::number(QRandomGenerator::global()->bounded(1000000));
     if (proceed) {
@@ -112,8 +112,8 @@ Run startSession(Endpoint &alice, Endpoint &bob, bool proceed, bool requireEndTo
     run.session = alice.client.jingleManager()->newSession(bob.jid, sid);
     check(run.session->setEncryptionMethod(OmemoEncryption::methodId()),
           "Outgoing DTLS session could not select OMEMO");
-    run.session->setEndToEndPreferred(proceed);
-    run.session->setEndToEndRequired(requireEndToEnd);
+    run.session->setEncryptionPolicy(requireEndToEnd ? J::EncryptionPolicy::Required
+        : (proceed ? J::EncryptionPolicy::Preferred : J::EncryptionPolicy::Disabled));
     run.local = qobject_cast<SXE::Application *>(run.session->newContent(SXE::NS_SVG_WHITEBOARD));
     check(run.local, "whiteboard content was not created");
     run.session->addContent(run.local);
@@ -168,7 +168,7 @@ void fileRanges(Endpoint &alice, Endpoint &bob)
             remoteSession = session;
             ++sessions;
             check(session->setEncryptionMethod(OmemoEncryption::methodId()), "missing incoming OMEMO");
-            session->setEndToEndRequired(true);
+            session->setEncryptionPolicy(J::EncryptionPolicy::Required);
             auto accept = [&, session]() {
                 for (auto *content : session->contentList()) {
                     if (content->state() != J::State::Created)
@@ -198,7 +198,7 @@ void fileRanges(Endpoint &alice, Endpoint &bob)
 
     QPointer<J::Session> session = alice.client.jingleManager()->newSession(bob.jid);
     check(session->setEncryptionMethod(OmemoEncryption::methodId()), "missing outgoing OMEMO");
-    session->setEndToEndRequired(true);
+    session->setEncryptionPolicy(J::EncryptionPolicy::Required);
     QByteArray received[2];
     bool verified[2] = { false, false };
     QObject consumer;
