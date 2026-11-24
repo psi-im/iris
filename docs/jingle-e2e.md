@@ -22,7 +22,7 @@ authenticated with the peer's OMEMO identity.
 
 
 The Jingle manager observes the client's encryption registry. Registering
-the built-in OMEMO method automatically installs its JET, SXE and
+the built-in OMEMO method automatically installs its JET and
 DTLS-verification adapters; unregistering or destroying the method removes
 them. The manager also destroys them before its transport registries.
 OMEMO itself does not depend on Jingle, and applications do not need to

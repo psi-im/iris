@@ -2881,7 +2881,7 @@ namespace XMPP { namespace Jingle {
     bool Session::setEncryptionMethod(const QString &methodId)
     {
         if (d->encryptionMethodId == methodId)
-            return methodId.isEmpty() || d->encryptionSession;
+            return methodId.isEmpty() || (d->encryptionSession && !d->encryptionSession->isClosing());
         if (d->state != State::Created)
             return false;
 
@@ -2890,9 +2890,22 @@ namespace XMPP { namespace Jingle {
             d->encryptionSession = nullptr;
         }
         d->encryptionMethodId = methodId;
-        if (methodId.isEmpty())
-            return true;
+        return methodId.isEmpty() || startEncryptionSession(methodId);
+    }
 
+    bool Session::ensureEncryptionMethod(const QString &methodId)
+    {
+        // A negotiated transport may bind an as yet unspecified method, but never replace a selected one.
+        if (methodId.isEmpty() || d->state >= State::Finishing)
+            return false;
+        if (!d->encryptionMethodId.isEmpty())
+            return d->encryptionMethodId == methodId && d->encryptionSession && !d->encryptionSession->isClosing();
+        d->encryptionMethodId = methodId;
+        return startEncryptionSession(methodId);
+    }
+
+    bool Session::startEncryptionSession(const QString &methodId)
+    {
         auto *registry = d->manager->client()->encryptionManager();
         auto *method   = registry->method(methodId);
         if (!method || !method->capabilities().testFlag(EncryptionMethod::XmppStanza))

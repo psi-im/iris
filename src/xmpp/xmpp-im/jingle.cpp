@@ -38,7 +38,6 @@
 
 #ifdef IRIS_ENABLE_OMEMO
 #include "jingle-jet-omemo.h"
-#include "jingle-sxe-omemo.h"
 #include "xmpp_encryption.h"
 #include "xmpp_omemo.h"
 #endif
@@ -756,7 +755,6 @@ namespace XMPP { namespace Jingle {
                 return;
             d->omemoAdapters = new QObject(this);
             new JetOmemo(this, omemo, d->omemoAdapters);
-            new SXE::SxeOmemo(this, omemo, d->omemoAdapters);
             new OmemoDtlsVerification(this, omemo, d->omemoAdapters);
         });
         connect(encryption, &EncryptionManager::methodUnregistered, this, [this](const QString &id) {
@@ -792,7 +790,7 @@ namespace XMPP { namespace Jingle {
 #endif
         shutdown();
 #ifdef IRIS_ENABLE_OMEMO
-        // Unregister adapters while the JET and SXE registries are still alive.
+        // Unregister adapters while the JET registry is still alive.
         delete d->omemoAdapters;
         d->omemoAdapters = nullptr;
 #endif

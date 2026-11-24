@@ -38,6 +38,7 @@ namespace Jingle {
 
     // class Manager;
     class Application;
+    namespace SXE { class Transport; }
 
     // Ordered XEP-0338 group. Multiple groups may have the same semantics.
     struct ContentGroup {
@@ -187,6 +188,10 @@ namespace Jingle {
         friend class TransportManagerPad;
         friend class PublicationManager;
         friend class JTPush;
+        friend class SXE::Transport;
+
+        bool ensureEncryptionMethod(const QString &methodId);
+        bool startEncryptionSession(const QString &methodId);
 
         void    noteIncomingActivity();
         void    shutdown();

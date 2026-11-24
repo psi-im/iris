@@ -161,9 +161,9 @@ int main(int argc, char **argv)
     // Registering the encryption method automatically installs all Jingle adapters.
     auto *manager = alice.client.jingleManager();
     auto *registry = alice.client.encryptionManager();
-    auto *sxe = J::SXE::TransportManager::of(manager);
     check(manager->dtlsVerification() && bob.client.jingleManager()->dtlsVerification()
-              && sxe && sxe->payloadProtector(OmemoEncryption::methodId()),
+              && (!alice.omemo->supportedProtocols().testFlag(OmemoProtocol::Omemo2)
+                  || manager->discoFeatures().contains(J::SXE::SxeOmemo::feature())),
           "OMEMO registration did not install Jingle adapters");
     const auto features = manager->discoFeatures();
     auto *verification = manager->dtlsVerification();
@@ -173,11 +173,11 @@ int main(int argc, char **argv)
 
     // Explicit unregistration must retire adapters even while the method is alive.
     registry->unregisterMethod(alice.omemo);
-    check(!manager->dtlsVerification() && !sxe->payloadProtector(OmemoEncryption::methodId())
+    check(!manager->dtlsVerification() && !manager->discoFeatures().contains(J::SXE::SxeOmemo::feature())
               && !manager->discoFeatures().contains(J::JetOmemo::ns()),
           "Jingle adapters survived method unregistration");
     check(registry->registerMethod(alice.omemo) && manager->dtlsVerification()
-              && sxe->payloadProtector(OmemoEncryption::methodId()) && manager->discoFeatures() == features,
+              && manager->discoFeatures() == features,
           "Re-registering OMEMO did not restore Jingle adapters");
     if (!alice.client.jingleManager()->discoFeatures().contains(J::JetOmemo::ns())) {
         qInfo("JET-OMEMO tests skipped: no legacy OMEMO or AES-GCM/CTR in QCA");
@@ -259,7 +259,7 @@ int main(int argc, char **argv)
     // even if a Jingle session remains alive in the manager.
     delete alice.omemo;
     alice.omemo = nullptr;
-    check(!manager->dtlsVerification() && !sxe->payloadProtector(OmemoEncryption::methodId())
+    check(!manager->dtlsVerification() && !manager->discoFeatures().contains(J::SXE::SxeOmemo::feature())
               && !manager->discoFeatures().contains(J::JetOmemo::ns()),
           "Jingle encryption adapter survived its method");
     qInfo("JET-OMEMO tests passed");
