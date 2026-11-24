@@ -112,6 +112,7 @@ namespace XMPP { namespace Jingle { namespace JET {
         void prepareIncoming(const QDomElement &security, const QString &contentName, const Done &done);
 
     private:
+        KeyTransport *outgoingKeyTransport() const;
         QPointer<Manager> manager_;
         QPointer<Session> session_;
     };

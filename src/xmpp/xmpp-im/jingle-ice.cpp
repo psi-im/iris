@@ -1023,6 +1023,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
         std::optional<Hash>       verifiedRemoteHash;
         bool                      inheritedFingerprint = false;
         bool                      receivedProtectedFingerprint = false;
+        bool                      sentProtectedFingerprint = false;
         bool                      nativeProtectionRequired = false;
         bool                      outgoingFingerprintBusy     = false;
         quint64                   outgoingFingerprintRevision = 0;
@@ -1910,7 +1911,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
 
     bool Transport::requiresVerifiedFingerprint() const
     {
-        if (d->nativeProtectionRequired)
+        if (d->nativeProtectionRequired || d->receivedProtectedFingerprint || d->sentProtectedFingerprint)
             return true;
         auto *session = pad()->session();
         if (!session->isEndToEndRequired())
@@ -2142,6 +2143,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
                 } else {
                     guard->d->protectedOutgoingFingerprint
                         = guard->d->fingerprintDocument.importNode(protectedFingerprint, true).toElement();
+                    guard->d->sentProtectedFingerprint = true;
                 }
                 emit guard->updated();
                 if (guard->d->deferredStart) {

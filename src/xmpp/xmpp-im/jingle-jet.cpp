@@ -120,18 +120,21 @@ namespace XMPP { namespace Jingle { namespace JET {
         return new Protection(this, owner, contentName);
     }
 
-    bool Pad::canPrepareOutgoing() const
+    KeyTransport *Pad::outgoingKeyTransport() const
     {
         if (!manager_ || !session_)
-            return false;
+            return nullptr;
         KeyTransport *transport = nullptr;
         if (!session_->encryptionMethodId().isEmpty())
             transport = manager_->d->forMethod(session_->encryptionMethodId());
         else if (manager_->d->transports.size() == 1)
             transport = manager_->d->transports.first();
         return transport && session_->allowsEncryptionMethod(transport->methodId())
-            && transport->canEncrypt(session_->peer());
+                && transport->canEncrypt(session_->peer())
+            ? transport : nullptr;
     }
+
+    bool Pad::canPrepareOutgoing() const { return outgoingKeyTransport() != nullptr; }
 
     void Pad::prepareOutgoing(const Done &done)
     {
@@ -139,14 +142,8 @@ namespace XMPP { namespace Jingle { namespace JET {
             done({}, QStringLiteral("JET session is no longer available"));
             return;
         }
-        KeyTransport *transport = nullptr;
-        if (!session_->encryptionMethodId().isEmpty())
-            transport = manager_->d->forMethod(session_->encryptionMethodId());
-        else if (manager_->d->transports.size() == 1)
-            transport = manager_->d->transports.first();
-
-        if (!transport || !session_->allowsEncryptionMethod(transport->methodId())
-            || !transport->canEncrypt(session_->peer())) {
+        auto *transport = outgoingKeyTransport();
+        if (!transport) {
             done({}, QStringLiteral("No compatible JET key transport is available"));
             return;
         }

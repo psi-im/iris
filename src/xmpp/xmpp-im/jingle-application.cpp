@@ -1085,19 +1085,7 @@ namespace XMPP { namespace Jingle {
             return false;
 
         connect(_transport.data(), &Transport::updated, this, &Application::updated);
-        connect(_transport.data(), &Transport::failed, this, [this]() {
-            if (!_transport || _terminationReason.isValid() || _state >= State::Finishing)
-                return;
-            const auto reason = _transport->lastReason();
-            // A failed authentication is not a connectivity failure. Trying
-            // another transport here could bypass the rejected peer identity.
-            if (_transport->failureDisposition() == Transport::FailureDisposition::AbortContent) {
-                cancelConnectionWaiter();
-                remove(reason.condition(), reason.text());
-                return;
-            }
-            selectNextTransport();
-        });
+        connect(_transport.data(), &Transport::failed, this, [this]() { selectNextTransport(); });
 
         if (_transport && _transport->state() < State::Finishing && _state >= State::ApprovedToSend) {
             QTimer::singleShot(0, this, [this, transport = _transport]() {
