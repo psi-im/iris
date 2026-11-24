@@ -21,11 +21,11 @@ a server can replace it and sit in the middle. It becomes end-to-end once the fi
 authenticated with the peer's OMEMO identity.
 
 
-The OMEMO method owns its Jingle integration: applications that use Jingle call
-`OmemoEncryption::enableJingleEncryption()` once. Iris registers the JET,
-SXE and DTLS-verification adapters in their required order and tears them
-down with the method. Applications no longer create or retain those filter
-objects. Registration is optional for clients without a Jingle UI.
+Applications that use Jingle call `Jingle::enableOmemoEncryption(manager, omemo)`
+from `<iris/jingle-omemo.h>`. The Jingle integration registers the JET, SXE and
+DTLS-verification adapters in their required order and ties their lifetime to
+the OMEMO method. OMEMO itself does not depend on Jingle. Registration is
+optional for clients without a Jingle UI and idempotent for a Jingle manager.
 
 An application passes its selected method ID to
 `Jingle::Session::setEncryptionMethod(methodId)` **before** starting the

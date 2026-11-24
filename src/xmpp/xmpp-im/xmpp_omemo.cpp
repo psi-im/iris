@@ -12,9 +12,6 @@
 
 #include "xmpp_omemo.h"
 
-#include "jingle-jet-omemo.h"
-#include "jingle-omemo-verification.h"
-#include "jingle-sxe-omemo.h"
 #include "xmpp_caps.h"
 #include "xmpp_client.h"
 #include "xmpp_pubsub.h"
@@ -391,7 +388,6 @@ public:
     QSet<QPair<QString, uint32_t>> ambiguousPins;
     int                            minimumEnvelopeSize = 256;
     bool                           ready               = false;
-    bool                           jingleEncryptionEnabled = false;
     OmemoProtocols                 supportedProtocols;
 
     struct SignalStore {
@@ -3176,18 +3172,6 @@ OmemoEncryption::OmemoEncryption(Client *client, OmemoStorage *storage, Encrypti
 }
 
 OmemoEncryption::~OmemoEncryption() = default;
-
-void OmemoEncryption::enableJingleEncryption()
-{
-    if (d->jingleEncryptionEnabled || !d->client || !d->client->jingleManager())
-        return;
-    auto *manager = d->client->jingleManager();
-    // JET must precede DTLS verification, which recognizes JET-protected contents.
-    new Jingle::JetOmemo(manager, this, this);
-    new Jingle::SXE::SxeOmemo(manager, this, this);
-    new Jingle::OmemoDtlsVerification(manager, this, this);
-    d->jingleEncryptionEnabled = true;
-}
 
 QString                        OmemoEncryption::id() const { return methodId(); }
 QString                        OmemoEncryption::name() const { return QStringLiteral("OMEMO"); }

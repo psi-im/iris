@@ -8,6 +8,7 @@
 
 #include <iris/jingle-ft.h>
 #include <iris/jingle-jet-omemo.h>
+#include <iris/jingle-omemo.h>
 #include <iris/jingle-session.h>
 #include <iris/xmpp-im/jingle-ibb.h>
 #include <iris/xmpp_caps.h>
@@ -157,12 +158,17 @@ int main(int argc, char **argv)
         auto setUp = wait(endpoint->omemo->setUp(), alice, bob);
         check(setUp->success(), "OMEMO was not set up");
     }
-    // Iris installs all OMEMO Jingle adapters through the encryption method,
-    // rather than requiring the application to instantiate protocol filters.
-    alice.omemo->enableJingleEncryption();
-    bob.omemo->enableJingleEncryption();
+    // OMEMO itself does not install any Jingle adapters.
+    check(!alice.client.jingleManager()->dtlsVerification()
+              && !alice.client.jingleManager()->discoFeatures().contains(J::JetOmemo::ns()),
+          "OMEMO registered Jingle adapters without opt-in");
+    J::enableOmemoEncryption(alice.client.jingleManager(), alice.omemo);
+    J::enableOmemoEncryption(bob.client.jingleManager(), bob.omemo);
     const auto beforeDuplicateEnable = alice.client.jingleManager()->discoFeatures();
-    alice.omemo->enableJingleEncryption();
+    auto *verification = alice.client.jingleManager()->dtlsVerification();
+    J::enableOmemoEncryption(alice.client.jingleManager(), alice.omemo);
+    check(verification && alice.client.jingleManager()->dtlsVerification() == verification,
+          "Duplicate registration replaced the DTLS verification service");
     check(alice.client.jingleManager()->discoFeatures() == beforeDuplicateEnable,
           "Enabling Jingle encryption twice changed its advertised capabilities");
     if (!alice.client.jingleManager()->discoFeatures().contains(J::JetOmemo::ns())) {
@@ -245,7 +251,8 @@ int main(int argc, char **argv)
     // even if a Jingle session remains alive in the manager.
     delete alice.omemo;
     alice.omemo = nullptr;
-    check(!alice.client.jingleManager()->discoFeatures().contains(J::JetOmemo::ns()),
+    check(!alice.client.jingleManager()->dtlsVerification()
+              && !alice.client.jingleManager()->discoFeatures().contains(J::JetOmemo::ns()),
           "Jingle encryption adapter survived its method");
     qInfo("JET-OMEMO tests passed");
     pep.clear();

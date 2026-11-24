@@ -274,6 +274,8 @@ if(IRIS_ENABLE_OMEMO)
     target_sources(iris PRIVATE
         xmpp-im/xmpp_omemo.h
         xmpp-im/xmpp_omemo.cpp
+        xmpp-im/jingle-omemo.h
+        xmpp-im/jingle-omemo.cpp
         xmpp-im/jingle-omemo-verification.h
         xmpp-im/jingle-omemo-verification.cpp
         xmpp-im/jingle-jet-omemo.h
@@ -283,7 +285,7 @@ if(IRIS_ENABLE_OMEMO)
     )
     target_compile_definitions(iris PUBLIC IRIS_ENABLE_OMEMO=1)
     target_link_libraries(iris PRIVATE PkgConfig::OmemoC)
-    list(APPEND XMPP_IM_HEADERS xmpp-im/xmpp_omemo.h xmpp-im/jingle-omemo-verification.h
+    list(APPEND XMPP_IM_HEADERS xmpp-im/xmpp_omemo.h xmpp-im/jingle-omemo.h xmpp-im/jingle-omemo-verification.h
          xmpp-im/jingle-jet-omemo.h xmpp-im/jingle-sxe-omemo.h)
 endif()
 

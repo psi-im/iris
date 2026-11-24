@@ -83,13 +83,6 @@ public:
     EncryptionJob    *prepareDecryptionRecovery(const EncryptionMetadata &metadata) override;
     EncryptionJob    *recoverDecryption(const EncryptionMetadata &metadata) override;
 
-    /**
-     * Install this method's Jingle encryption adapters (JET, SXE and DTLS
-     * verification). Idempotent and opt-in for clients without media/Jingle
-     * requirements; adapters are owned by this encryption method.
-     */
-    void enableJingleEncryption();
-
     /** Wire profiles usable with the currently available QCA provider. */
     OmemoProtocols supportedProtocols() const;
     /** Protocols advertised by a concrete online resource's cached disco info and usable locally. */
