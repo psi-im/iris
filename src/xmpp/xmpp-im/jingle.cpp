@@ -618,8 +618,8 @@ namespace XMPP { namespace Jingle {
         std::unique_ptr<PublicationManager>   publicationManager;
         std::unique_ptr<RTP::Manager>         rtpManager;
         QPointer<JET::Manager>                jet;
-        QPointer<OmemoDtlsVerification>       dtlsVerification;
 #ifdef IRIS_ENABLE_OMEMO
+        QPointer<OmemoDtlsVerification>       dtlsVerification;
         QObject *omemoAdapters = nullptr;
 #endif
         bool                                  messageInitiationEnabled = false;
@@ -841,14 +841,23 @@ namespace XMPP { namespace Jingle {
     PublicationManager *Manager::publicationManager() const { return d->publicationManager.get(); }
     RTP::Manager       *Manager::rtpManager() const { return d->rtpManager.get(); }
     JET::Manager       *Manager::jet() const { return d->jet.data(); }
-    OmemoDtlsVerification *Manager::dtlsVerification() const { return d->dtlsVerification.data(); }
+    OmemoDtlsVerification *Manager::dtlsVerification() const
+    {
+#ifdef IRIS_ENABLE_OMEMO
+        return d->dtlsVerification.data();
+#else
+        return nullptr;
+#endif
+    }
 
+#ifdef IRIS_ENABLE_OMEMO
     void Manager::registerDtlsVerification(OmemoDtlsVerification *verifier)
     {
         Q_ASSERT(verifier);
         Q_ASSERT(!d->dtlsVerification || d->dtlsVerification == verifier);
         d->dtlsVerification = verifier;
     }
+#endif
 
     bool Manager::messageInitiationEnabled() const { return d->messageInitiationEnabled; }
 

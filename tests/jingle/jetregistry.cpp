@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 // XEP-0391 core is usable without any OMEMO implementation.
-#include <iris/jingle-jet->h>
+#include <iris/jingle-jet.h>
 #include <iris/xmpp_client.h>
 
 #include <QCoreApplication>
