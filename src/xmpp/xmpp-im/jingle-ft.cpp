@@ -557,18 +557,26 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
             lastReason = {};
             lastError  = {};
 
-            if (acceptFile.range().isValid()) {
-                if (acceptFile.range().length) {
-                    bytesLeft = acceptFile.range().length;
+            const auto range = acceptFile.range();
+            const auto size  = acceptFile.size() ? acceptFile.size() : file.size();
+            bytesLeft.reset();
+            if (range.isValid()) {
+                if (size && (range.offset > *size || range.length > *size - range.offset)) {
+                    handleStreamFail(QStringLiteral("invalid file range"));
+                    return;
                 }
+                if (range.length)
+                    bytesLeft = range.length;
+                else if (size)
+                    bytesLeft = *size - range.offset;
             } else {
-                bytesLeft = acceptFile.size();
+                bytesLeft = size;
             }
 
             if (protection && protection->encrypted()) {
                 // The connection wrapper owns the cipher and authentication tag.
                 // FileTransfer deals exclusively in plaintext bytes.
-                if (acceptFile.range().isValid() || streamingMode || !bytesLeft) {
+                if (!bytesLeft) {
                     handleStreamFail(QStringLiteral("this transfer cannot be end-to-end encrypted"));
                     return;
                 }
@@ -591,18 +599,24 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
                         if (bytesLeft) {
                             *bytesLeft -= quint64(size);
                         }
-                        if (bytesLeft && *bytesLeft == 0) {
-                            QPointer<Application> guard(q);
-                            beginPayloadFinishing();
-                            if (guard)
-                                tryFinalizeIncoming();
-                        }
+                        if (bytesLeft && *bytesLeft == 0 && (!protection || protection->authenticated()))
+                            tryFinalizeIncoming();
                     });
+                    // An empty authenticated range (or a separately arriving
+                    // tag) may complete without another plaintext read.
+                    q->connect(connection.data(), &Connection::readyRead, q, [this]() {
+                        if (bytesLeft && *bytesLeft == 0 && (!protection || protection->authenticated()))
+                            tryFinalizeIncoming();
+                    });
+                    q->connect(connection.data(), &ByteStream::connectionClosed, q, [this]() { onConnectionEnded(); });
                 }
                 QPointer<Application> guard(q);
                 setState(State::Active);
                 if (guard)
                     emit q->connectionReady();
+                if (guard && amIReceiver() && bytesLeft && *bytesLeft == 0
+                    && (!protection || protection->authenticated()))
+                    tryFinalizeIncoming();
                 return;
             }
 
@@ -1064,6 +1078,9 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
         // known-size transfer whose advertised payload is still outstanding.
         if (_terminationReason.isValid())
             d->lastReason = _terminationReason;
+        else if (r.condition() == Reason::Success && d->amIReceiver() && d->protection
+                 && d->protection->encrypted() && !d->protection->authenticated())
+            d->lastReason = Reason(Reason::SecurityError, QStringLiteral("session ended before JET authentication"));
         else if (r.condition() == Reason::Success && d->bytesLeft && *d->bytesLeft != 0)
             d->lastReason = Reason(Reason::FailedApplication, QStringLiteral("session ended before file completion"));
         else
