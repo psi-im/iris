@@ -125,10 +125,8 @@ Run startSession(Endpoint &alice, Endpoint &bob, bool proceed, bool requireEndTo
         for (auto content : run.peerSession->contentList())
             if (auto whiteboard = qobject_cast<SXE::Application *>(content))
                 run.remote = whiteboard;
-        if (run.remote) {
-            run.remote->prepare();
+        if (run.remote && run.peerSession->state() == J::State::Created)
             run.peerSession->accept();
-        }
     }
     QObject::disconnect(connection);
     return run;
@@ -324,9 +322,12 @@ void exercise(Endpoint &alice, Endpoint &bob, bool omemo2)
         run.session->terminate(J::Reason::Success);
     pumpUntil(alice, bob, [] { return false; }, 200);
 
-    // A tampered fingerprint is refused.
-    onStanza = [](const Endpoint &, QDomElement &stanza) {
+    // A tampered fingerprint is refused, never retried on an unprotected transport.
+    int replacements = 0;
+    onStanza = [&replacements](const Endpoint &, QDomElement &stanza) {
         const auto jingle = stanza.firstChildElement(QStringLiteral("jingle"));
+        if (jingle.attribute(QStringLiteral("action")) == QLatin1String("transport-replace"))
+            ++replacements;
         if (jingle.attribute(QStringLiteral("action")) != QLatin1String("session-initiate"))
             return;
         const auto payloads = jingle.elementsByTagName(QStringLiteral("payload"));
@@ -342,7 +343,8 @@ void exercise(Endpoint &alice, Endpoint &bob, bool omemo2)
     pumpUntil(alice, bob, [&run] { return !run.session || run.session->state() == J::State::Finished; }, 5000);
     check(!run.peerSession || run.peerSession->state() == J::State::Finished,
           "a tampered fingerprint was allowed to start a transport");
-    check(!synchronized(run.local, run.remote), "tampered DTLS authentication exposed application data");
+    check(!synchronized(run.local, run.remote) && replacements == 0,
+          "tampered DTLS authentication exposed application data or triggered fallback");
     onStanza = nullptr;
     qInfo("OMEMO %s DTLS verification passed", omemo2 ? "2" : "legacy");
 }

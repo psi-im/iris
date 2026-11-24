@@ -1016,7 +1016,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
 
     void Application::prepare()
     {
-        if (_state >= State::Finishing)
+        if (_state >= State::Finishing || _terminationReason.isValid())
             return;
         if (!_transport)
             selectNextTransport();

@@ -1053,6 +1053,8 @@ namespace XMPP { namespace Jingle { namespace SXE {
 
     void Application::prepare()
     {
+        if (_state >= State::Finishing || _terminationReason.isValid())
+            return;
         if (!_transport && _transportSelector->hasMoreTransports()) {
             // The most preferred transport the peer supports; the SXE transport is the fallback below.
             auto transport = _transportSelector->getNextTransport();

@@ -482,17 +482,16 @@ namespace XMPP { namespace Jingle {
                 Reason reason;
                 bool   all = true;
                 for (auto const &c : std::as_const(contentList)) {
-                    if (c->state() < State::Finishing) {
+                    const auto upd = c->evaluateOutgoingUpdate();
+                    const bool rejected = upd.action == Action::ContentRemove || upd.action == Action::ContentReject;
+                    if (c->state() < State::Finishing && !rejected) {
                         all = false;
                         break;
                     }
-
-                    if (c->state() == State::Finishing) {
-                        auto upd = c->evaluateOutgoingUpdate();
-                        if (upd.action == Action::ContentRemove && upd.reason.condition()) {
-                            reason = upd.reason;
-                        }
-                    }
+                    if (rejected && upd.reason.isValid())
+                        reason = upd.reason;
+                    else if (c->state() == State::Finished && c->lastReason().isValid())
+                        reason = c->lastReason();
                 }
                 if (all) {
                     terminateReason = reason;

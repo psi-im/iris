@@ -778,8 +778,8 @@ namespace XMPP { namespace Jingle {
             std::move(ready),
             [this, guard = QPointer<Application>(this), failedTransport = _transport,
              revision = _connectionAttemptRevision]() {
-                if (!guard || _state >= State::Finishing || _connectionAttemptRevision != revision
-                    || (_transport && _transport != failedTransport))
+                if (!guard || _state >= State::Finishing || _terminationReason.isValid()
+                    || _connectionAttemptRevision != revision || (_transport && _transport != failedTransport))
                     return;
                 if (failedTransport) {
                     qDebug("Application::expectSingleConnection: stopping failed %s transport",
@@ -1073,7 +1073,19 @@ namespace XMPP { namespace Jingle {
             return false;
 
         connect(_transport.data(), &Transport::updated, this, &Application::updated);
-        connect(_transport.data(), &Transport::failed, this, [this]() { selectNextTransport(); });
+        connect(_transport.data(), &Transport::failed, this, [this]() {
+            if (!_transport || _terminationReason.isValid() || _state >= State::Finishing)
+                return;
+            const auto reason = _transport->lastReason();
+            // A failed authentication is not a connectivity failure. Trying
+            // another transport here could bypass the rejected peer identity.
+            if (reason.condition() == Reason::SecurityError) {
+                cancelConnectionWaiter();
+                remove(reason.condition(), reason.text());
+                return;
+            }
+            selectNextTransport();
+        });
 
         if (_transport && _transport->state() < State::Finishing && _state >= State::ApprovedToSend) {
             QTimer::singleShot(0, this, [this, transport = _transport]() {
