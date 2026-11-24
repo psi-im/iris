@@ -7,8 +7,9 @@ of the plan).
 
 ## Goal
 
-The application supplies an encryption method and local policy, based on its operation
-(e.g. a published file's download policy). Iris does not own publication access rules
+The application supplies a local protection policy, based on its operation
+(e.g. a published file's download policy), and may explicitly select a method
+or provide a non-binding method preference. Iris does not own publication access rules
 or infer policy from disco alone. The peer's actual offer/answer is distinct from
 both local policy and advertised capabilities. Plain DTLS is not authenticated E2EE.
 
@@ -34,12 +35,21 @@ them. The manager also destroys them before its transport registries.
 OMEMO itself does not depend on Jingle, and applications do not need to
 enable or manage these adapters explicitly.
 
-An application passes its selected method ID to
+An application that explicitly pins a method passes its ID to
 `Jingle::Session::setEncryptionMethod(methodId)` **before** starting the
 negotiation, along with its desired preferred/required E2EE policy. Iris
 creates and holds the associated `EncryptedSession` via the registry,
 and releases it when Jingle terminates. A method that is unregistered
 while the session is active cannot be silently replaced by OMEMO.
+
+For file publications the application instead leaves the method unbound and
+may set `setPreferredEncryptionMethod(methodId)` as a non-binding hint.
+JET selects a compatible registered provider at negotiation time, preferring
+the hint if compatible, and binds the method before starting the key exchange.
+An incoming JET envelope can bind an unspecified method, but cannot replace
+an already selected or authenticated method. Failure after provider selection
+is terminal. Native DTLS remains preferred where supported; its current
+verification adapter is OMEMO.
 
 JET-OMEMO and DTLS verification operate only for an OMEMO-selected (or
 legacy unselected) Jingle session. The SXE message transport uses the

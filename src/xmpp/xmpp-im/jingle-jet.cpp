@@ -124,14 +124,23 @@ namespace XMPP { namespace Jingle { namespace JET {
     {
         if (!manager_ || !session_)
             return nullptr;
-        KeyTransport *transport = nullptr;
-        if (!session_->encryptionMethodId().isEmpty())
-            transport = manager_->d->forMethod(session_->encryptionMethodId());
-        else if (manager_->d->transports.size() == 1)
-            transport = manager_->d->transports.first();
-        return transport && session_->allowsEncryptionMethod(transport->methodId())
-                && transport->canEncrypt(session_->peer())
-            ? transport : nullptr;
+        const auto compatible = [this](KeyTransport *transport) {
+            return transport && session_->allowsEncryptionMethod(transport->methodId())
+                && transport->canEncrypt(session_->peer());
+        };
+        if (!session_->encryptionMethodId().isEmpty()) {
+            auto *transport = manager_->d->forMethod(session_->encryptionMethodId());
+            return compatible(transport) ? transport : nullptr;
+        }
+        auto *preferred = manager_->d->forMethod(session_->preferredEncryptionMethod());
+        if (compatible(preferred))
+            return preferred;
+        // Keep the choice stable even if adapter registration order differs.
+        KeyTransport *selected = nullptr;
+        for (auto *transport : std::as_const(manager_->d->transports))
+            if (compatible(transport) && (!selected || transport->methodId() < selected->methodId()))
+                selected = transport;
+        return selected;
     }
 
     bool Pad::canPrepareOutgoing() const { return outgoingKeyTransport() != nullptr; }
@@ -149,6 +158,10 @@ namespace XMPP { namespace Jingle { namespace JET {
         }
 
         const QString methodId = transport->methodId();
+        if (!session_->ensureEncryptionMethod(methodId)) {
+            done({}, QStringLiteral("JET encryption method could not be bound to the session"));
+            return;
+        }
         QPointer<Pad> guard(this);
         transport->encryptSecret(session_->peer(), [guard, methodId, done](const std::optional<ProtectedSecret> &secret,
                                                                           const QString &error) {
@@ -180,6 +193,10 @@ namespace XMPP { namespace Jingle { namespace JET {
         }
 
         const auto methodId = transport->methodId();
+        if (!session_->ensureEncryptionMethod(methodId)) {
+            done({}, QStringLiteral("JET encryption method could not be bound to the session"));
+            return;
+        }
         QPointer<Pad> guard(this);
         transport->decryptSecret(
             session_->peer(), security,

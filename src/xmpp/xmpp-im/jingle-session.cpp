@@ -228,6 +228,7 @@ namespace XMPP { namespace Jingle {
         Jid     localParty; // that one will be set as initiator/responder if provided
         Session::PeerAuthentication peerAuthentication;
         QString                     encryptionMethodId;
+        QString                     preferredEncryptionMethod;
         QPointer<EncryptedSession>  encryptionSession;
         EncryptionPolicy            encryptionPolicy = EncryptionPolicy::Disabled;
         bool                        waitingAck               = false;
@@ -2932,10 +2933,20 @@ namespace XMPP { namespace Jingle {
 
     QString Session::encryptionMethodId() const { return d->encryptionMethodId; }
 
+    void Session::setPreferredEncryptionMethod(const QString &methodId)
+    {
+        if (d->state == State::Created)
+            d->preferredEncryptionMethod = methodId;
+    }
+
+    QString Session::preferredEncryptionMethod() const { return d->preferredEncryptionMethod; }
+
     EncryptedSession *Session::encryptionSession() const { return d->encryptionSession; }
 
     bool Session::allowsEncryptionMethod(const QString &methodId) const
     {
+        if (d->peerAuthentication.isValid() && d->peerAuthentication.method != methodId)
+            return false;
         return d->encryptionMethodId.isEmpty() || (d->encryptionMethodId == methodId && d->encryptionSession);
     }
 

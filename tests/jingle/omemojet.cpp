@@ -69,7 +69,8 @@ struct Transfer {
 std::unique_ptr<Transfer> send(Endpoint &alice, Endpoint &bob, const QByteArray &data, bool preferred, bool required,
                                const std::function<void(QDomElement &)> &tamper   = {},
                                const QString                            &methodId = OmemoEncryption::methodId(),
-                               const FT::Range &range = {}, bool streaming = false, bool request = false)
+                               const FT::Range &range = {}, bool streaming = false, bool request = false,
+                               const QString &methodHint = {})
 {
     auto t    = std::make_unique<Transfer>();
     t->source = std::make_unique<QBuffer>();
@@ -104,7 +105,7 @@ std::unique_ptr<Transfer> send(Endpoint &alice, Endpoint &bob, const QByteArray 
         file.setRange(range);
 
     t->session = alice.client.jingleManager()->newSession(bob.jid);
-    if (preferred) {
+    if (preferred && !methodId.isEmpty()) {
         const bool registered = t->session->setEncryptionMethod(methodId);
         check(registered == (methodId == OmemoEncryption::methodId()),
               "Jingle method selection did not reflect method availability");
@@ -113,6 +114,7 @@ std::unique_ptr<Transfer> send(Endpoint &alice, Endpoint &bob, const QByteArray 
             check(t->session->encryptionSession() != nullptr && t->session->encryptionSession()->methodId() == methodId,
                   "Jingle did not retain a method-specific encryption session");
     }
+    t->session->setPreferredEncryptionMethod(methodHint);
     t->session->setEncryptionPolicy(required ? J::EncryptionPolicy::Required
         : (preferred ? J::EncryptionPolicy::Preferred : J::EncryptionPolicy::Disabled));
     auto *local = qobject_cast<FT::Application *>(
@@ -258,6 +260,14 @@ int main(int argc, char **argv)
               "the wire did not carry ciphertext with the tag");
         check(t->receiverAuthentication.deviceId == alice.omemo->ownDeviceId(),
               "the receiver did not record the sender's device");
+
+        // A publication policy does not pin its chat encryption method.
+        // An unavailable hint is not a reason to fail or send plaintext when
+        // the peer supports another authenticated method.
+        t = send(alice, bob, data, true, true, {}, QString(), {}, false, false,
+                 QStringLiteral("unavailable-method"));
+        check(t->offered && t->security && t->receivingEncrypted && t->sink->data() == data,
+              "automatic JET selection failed with an unavailable method hint");
 
         // A receiver-driven range uses the same JET connection, even when
         // the receiver consumes bytes directly and defers its receipt.

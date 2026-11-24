@@ -39,6 +39,7 @@ namespace Jingle {
     // class Manager;
     class Application;
     namespace SXE { class Transport; }
+    namespace JET { class Pad; }
 
     // Ordered XEP-0338 group. Multiple groups may have the same semantics.
     struct ContentGroup {
@@ -111,6 +112,10 @@ namespace Jingle {
          */
         bool              setEncryptionMethod(const QString &methodId);
         QString           encryptionMethodId() const;
+        // A hint for automatic negotiation; unlike setEncryptionMethod(), it
+        // never excludes another compatible method or changes a bound session.
+        void setPreferredEncryptionMethod(const QString &methodId);
+        QString preferredEncryptionMethod() const;
         EncryptedSession *encryptionSession() const;
         bool              allowsEncryptionMethod(const QString &methodId) const;
 
@@ -190,6 +195,7 @@ namespace Jingle {
         friend class PublicationManager;
         friend class JTPush;
         friend class SXE::Transport;
+        friend class JET::Pad;
 
         bool ensureEncryptionMethod(const QString &methodId);
         bool startEncryptionSession(const QString &methodId);
