@@ -7,6 +7,12 @@ of the plan).
 
 ## Goal
 
+The application supplies an encryption method and local policy, based on its operation
+(e.g. a published file's download policy). Iris does not own publication access rules
+or infer policy from disco alone. The peer's actual offer/answer is distinct from
+both local policy and advertised capabilities. Plain DTLS is not authenticated E2EE.
+
+
 - A session can be marked as requiring end-to-end encryption (for example a call or a whiteboard
   started from an OMEMO chat, or a file sent from it). This is a local policy, not a wire
   attribute: each side decides what it accepts.
@@ -160,7 +166,7 @@ Conversations `Content.setSecurity()/getSecurity()`, `JingleFileTransferConnecti
   direction wait; without filters nothing changes. A filter error answers an incoming IQ, or fails
   an outgoing one as if the peer had returned it; a refused `session-initiate` or `session-accept`
   ends the session. `MessageInitiation` keeps foreign extensions (`extensions()`, `addExtension()`).
-- `Session::setEndToEndRequired()` is the local policy; `Session::peerAuthentication()` (method,
+- `Session::setEncryptionPolicy()` sets the local policy (Disabled, Preferred, Required); `Session::peerAuthentication()` (method,
   device, identity key, trust level) records who authenticated the peer's DTLS fingerprints.
 - `Jingle::OmemoDtlsVerification` is registered with `Jingle::Manager` as an optional
   DTLS fingerprint service. The ICE transport parses `<transport/>` and recognizes
@@ -191,9 +197,18 @@ Conversations `Content.setSecurity()/getSecurity()`, `JingleFileTransferConnecti
   the requirement fingerprints stay plain; a responder requiring it does not answer a plain
   fingerprint; a tampered fingerprint cannot start DTLS; without a verifier a
   session requiring it sends nothing.
-- `Session::setEndToEndPreferred()` asks for protection where possible without refusing otherwise
-  (a session requiring it prefers it too). Signaling filters can add disco features
-  (`SignalingFilter::discoFeatures()`).
+- Capabilities describe supported mechanisms, not the peer's policy. A protected offer
+  commits the content to that protection. Disabled does not initiate E2EE but accepts
+  compatible protected offers; Preferred permits plaintext only if a compatible
+  mechanism is unavailable before negotiation; Required forbids plaintext.
+  Signaling filters can add disco features (`SignalingFilter::discoFeatures()`).
+- Transport failure disposition is independent of the XEP-0166 reason:
+  `TryNextTransport` permits another compatible candidate; `AbortContent`
+  terminates the content (authentication failures, identity mismatch, or a lost
+  negotiated security mechanism). An authentication failure never triggers plaintext fallback.
+  Failed JET key exchange and failed fingerprint encryption after provider selection are
+  terminal even under Preferred. Ordinary network failure remains retryable, without
+  weakening any previously negotiated protection.
 - `Jingle::JET::Manager` is an always-present Jingle service that registers
   XEP-0391 key-delivery providers and advertises their disco features. It does
   not own Jingle sessions or create OMEMO providers. `JET::Pad` belongs to a

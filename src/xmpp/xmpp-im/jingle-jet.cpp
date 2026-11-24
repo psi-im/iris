@@ -120,6 +120,19 @@ namespace XMPP { namespace Jingle { namespace JET {
         return new Protection(this, owner, contentName);
     }
 
+    bool Pad::canPrepareOutgoing() const
+    {
+        if (!manager_ || !session_)
+            return false;
+        KeyTransport *transport = nullptr;
+        if (!session_->encryptionMethodId().isEmpty())
+            transport = manager_->d->forMethod(session_->encryptionMethodId());
+        else if (manager_->d->transports.size() == 1)
+            transport = manager_->d->transports.first();
+        return transport && session_->allowsEncryptionMethod(transport->methodId())
+            && transport->canEncrypt(session_->peer());
+    }
+
     void Pad::prepareOutgoing(const Done &done)
     {
         if (!manager_ || !session_) {
@@ -243,10 +256,9 @@ namespace XMPP { namespace Jingle { namespace JET {
         }
 
         auto *registry = pad_->manager();
-        if (!registry) {
+        if (!registry || (!protectedIncoming && !pad_->canPrepareOutgoing())) {
+            prepared_ = !mandatory;
             done(mandatory ? QStringLiteral("JET key transport is unavailable") : QString());
-            if (!mandatory)
-                prepared_ = true;
             return;
         }
 
@@ -306,8 +318,10 @@ namespace XMPP { namespace Jingle { namespace JET {
             failure = QStringLiteral("JET key exchange failed");
         }
 
-        if (!mandatory && !secret_)
-            failure.clear(); // preferred encryption may fall back to plaintext
+        // Once a compatible provider has been selected, a failed key exchange
+        // must not be interpreted as lack of capability or silently downgrade.
+        if (!secret_ && failure.isEmpty())
+            failure = QStringLiteral("JET key exchange failed");
         prepared_ = failure.isEmpty();
         auto callback = std::move(done_);
         if (callback)

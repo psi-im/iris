@@ -107,6 +107,7 @@ namespace XMPP { namespace Jingle { namespace JET {
         Protection *createProtection(QObject *owner, const QString &contentName);
 
         using Done = KeyTransport::Done;
+        bool canPrepareOutgoing() const;
         void prepareOutgoing(const Done &done);
         void prepareIncoming(const QDomElement &security, const QString &contentName, const Done &done);
 
