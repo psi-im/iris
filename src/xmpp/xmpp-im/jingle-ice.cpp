@@ -1888,7 +1888,8 @@ namespace XMPP { namespace Jingle { namespace ICE {
                 return true;
             if (!session->checkPeerCaps(OmemoDtlsVerification::directFeature()))
                 return false;
-            const auto *net = static_cast<Pad *>(pad())->d->existingExtensionAssociation(this);
+            const auto *net = d->groupManagedNetwork && d->network
+                ? d->network.data() : static_cast<Pad *>(pad())->d->existingExtensionAssociation(this);
             return net && net->runtime && net->runtime->fingerprintAuthenticated();
         }
         return session->checkPeerCaps(Dtls::FingerPrint::ns())
@@ -1977,7 +1978,8 @@ namespace XMPP { namespace Jingle { namespace ICE {
                 d->inheritedFingerprint = false;
 #ifdef IRIS_ENABLE_OMEMO
                 if (pad()->session()->checkPeerCaps(OmemoDtlsVerification::directFeature())) {
-                    const auto *existing = static_cast<Pad *>(pad())->d->existingExtensionAssociation(this);
+                    const auto *existing = d->groupManagedNetwork && d->network
+                        ? d->network.data() : static_cast<Pad *>(pad())->d->existingExtensionAssociation(this);
                     if (existing && existing->runtime && existing->runtime->fingerprintAuthenticated()
                         && existing->runtime->compatibleRemoteIce(update)
                         && update.fingerprint.hash == *existing->runtime->authenticatedRemoteHash) {

@@ -206,7 +206,17 @@ Conversations `Content.setSecurity()/getSecurity()`, `JingleFileTransferConnecti
   The wrapper handles AES-GCM, the final 16-byte tag, data framing and errors.
   One content key/IV may protect only one stream: transport replacement cannot
   silently reuse that pair. This implementation requires the exact plaintext
-  length and does not offer indefinite-stream or ranged-transfer protection.
+  length. Known-length ranges (including offset-to-end when the size is known)
+  use a fresh content key and IV. Indefinite-length streams are not supported.
+- FileTransfer prefers authenticated native transport encryption when the
+  transport can negotiate it; JET remains the fallback for IBB/S5B and ICE
+  without native authentication. DTLS fingerprint verification uses OMEMO,
+  including direct IQ negotiation with peers advertising the direct feature.
+  BUNDLE followers inherit authentication only from their existing connected
+  association with matching local and remote fingerprints. No per-range
+  OMEMO exchange or JET wrapper is needed in that case.
+  Replacing native protection with a transport requiring JET is rejected
+  until a fresh content negotiation can carry the JET envelope.
 - `Jingle::JetOmemo` implements only the XEP-0396 `JET::KeyTransport` adapter in the format of
   Conversations and Dino:
   - for file-transfer contents it creates in a session that prefers or requires end-to-end
