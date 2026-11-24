@@ -333,10 +333,6 @@ namespace XMPP { namespace Jingle { namespace SXE {
         auto client  = session->manager()->client();
         auto doc     = client->doc();
         if (!d->encryption.isEmpty()) {
-            if (protectionMethod(session, d->encryption).isEmpty()) {
-                qWarning("jingle-sxe: dropping payload: its protection is unavailable");
-                return;
-            }
             // The protected payload travels next to an empty marker that routes the message.
             const auto          copy = d->document().importNode(sxe, true).toElement();
             QPointer<Transport> guard(this);
@@ -344,7 +340,8 @@ namespace XMPP { namespace Jingle { namespace SXE {
                 if (!guard || guard->_state >= State::Finishing)
                     return;
 #ifdef IRIS_ENABLE_OMEMO
-                SxeOmemo::protect(guard->_pad->session(), copy, guard, [guard, copy, finished](const QDomElement &protectedPayload) {
+                SxeOmemo::protect(guard->_pad->session(), copy, guard.data(),
+                                  [guard, copy, finished](const QDomElement &protectedPayload) {
                     if (guard && guard->_state < State::Finishing && !protectedPayload.isNull()) {
                         auto client  = guard->_pad->session()->manager()->client();
                         auto doc     = client->doc();
@@ -398,8 +395,6 @@ namespace XMPP { namespace Jingle { namespace SXE {
             qWarning("jingle-sxe: dropping unprotected payload of a protected session");
             return;
         }
-        if (protectionMethod(_pad->session(), d->encryption).isEmpty())
-            return;
         const auto          copy = d->document().importNode(message, true).toElement();
         const auto          sid  = sxe.attribute(QStringLiteral("session"));
         QPointer<Transport> guard(this);
@@ -407,7 +402,8 @@ namespace XMPP { namespace Jingle { namespace SXE {
             if (!guard || guard->_state >= State::Finishing)
                 return;
 #ifdef IRIS_ENABLE_OMEMO
-            SxeOmemo::unprotect(guard->_pad->session(), from, copy, guard, [guard, sid, from, finished](const QDomElement &inner) {
+            SxeOmemo::unprotect(guard->_pad->session(), from, copy, guard.data(),
+                                [guard, sid, from, finished](const QDomElement &inner) {
                 if (guard && guard->_state < State::Finishing && !inner.isNull() && inner.namespaceURI() == NS
                     && inner.localName() == QLatin1String("sxe") && inner.attribute(QStringLiteral("session")) == sid)
                     emit guard->sxeReceived(inner, from);

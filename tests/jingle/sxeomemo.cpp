@@ -227,6 +227,41 @@ int main(int argc, char **argv)
     check(!run.peerSession && wire.plain == 0 && wire.encryption.isEmpty(),
           "a selected alternative encryption method was silently replaced for SXE");
 
+    // A fresh peer forces the first protected edit to wait for the PEP device list and bundle.
+    Endpoint carol(QStringLiteral("carol"));
+    onStanza = nullptr;
+    check(wait(carol.omemo->setUp(), alice, carol)->success(), "Carol OMEMO setup failed");
+    setPeerFeatures(alice.client, carol.jid, carol.client.jingleManager()->discoFeatures() + omemo2);
+    auto *pending = alice.client.jingleManager()->newSession(carol.jid, QStringLiteral("sxe-unload"));
+    check(pending && pending->setEncryptionMethod(OmemoEncryption::methodId()), "Could not select OMEMO for pending SXE");
+    pending->setEndToEndRequired(true);
+    auto raw = pending->newOutgoingTransport(SXE::NS_TRANSPORT);
+    QPointer<SXE::Transport> transport(qobject_cast<SXE::Transport *>(raw.data()));
+    check(transport, "Could not create SXE message transport");
+    QDomDocument invalid;
+    parseInto(invalid, QStringLiteral("<transport xmlns='urn:xmpp:jingle:transports:sxe' "
+                                     "encryption='urn:test:unsupported'><host>carol@example.test/device</host></transport>"));
+    check(!transport->prepareUpdate(invalid.documentElement()), "Unsupported SXE wire profile was accepted");
+    transport->prepare();
+    check(transport->encryption() == OmemoEncryption::namespaceUri(), "SXE did not negotiate OMEMO 2");
+    QDomDocument edit;
+    parseInto(edit, QStringLiteral("<sxe xmlns='urn:xmpp:sxe:0' session='sxe-unload' id='1'><connect/></sxe>"));
+    transport->sendSxe(edit.documentElement());
+    transport->sendSxe(edit.documentElement());
+    check(pending->encryptionSession()->hasActiveOperations(), "SXE encryption did not wait for remote key material");
+
+    int payloadsAfterUnload = 0;
+    onStanza = [&payloadsAfterUnload](const Endpoint &, QDomElement &stanza) {
+        if (stanza.tagName() == QLatin1String("message")
+            && stanza.firstChildElement(QStringLiteral("sxe")).namespaceURI() == SxeNs)
+            ++payloadsAfterUnload;
+    };
+    alice.client.encryptionManager()->unregisterMethod(alice.omemo);
+    check(!transport || transport->state() == J::State::Finished, "Protected SXE transport survived method unregistration");
+    pump(alice, carol);
+    check(payloadsAfterUnload == 0, "Pending or queued SXE payload escaped after encryption method unregistration");
+    pending->terminate(J::Reason::Success);
+
     onStanza = nullptr;
     QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
     qInfo("SXE OMEMO tests passed");

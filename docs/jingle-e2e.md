@@ -36,12 +36,15 @@ and releases it when Jingle terminates. A method that is unregistered
 while the session is active cannot be silently replaced by OMEMO.
 
 JET-OMEMO and DTLS verification operate only for an OMEMO-selected (or
-legacy unselected) Jingle session. SXE selects its payload protector
-from the registered set by the session's method ID and dispatches
-incoming ciphertext by the negotiated wire-method identifier. Multiple
-SXE protectors can coexist. When E2EE is required, an unavailable or
-mismatched method fails negotiation, and the SXE message transport must
-not transmit unprotected payload.
+legacy unselected) Jingle session. The SXE message transport uses the
+selected Jingle `EncryptedSession` to encrypt/decrypt a synthetic message.
+Its stateless OMEMO 2 adapter preserves the negotiated wire profile and
+extracts the envelope or inner SXE element. No separate registry of
+encryption methods or per-payload encryption sessions is needed. A
+protected offer may bind a previously unspecified method but cannot
+replace a selected one. Unregistration stops protected SXE transports
+and suppresses outstanding payloads. When E2EE is required, an unavailable
+or mismatched method fails negotiation without sending plaintext.
 
 The existing OMEMO element wrapping for JET keys and DTLS fingerprints
 remains method-specific. Binding those element operations directly to

@@ -40,7 +40,8 @@ namespace XMPP { namespace Jingle { namespace SXE {
         void complete(EncryptionJob *job, EncryptedSession *session, QObject *receiver, const SxeOmemo::Done &done,
                       const QString &name, const QString &ns)
         {
-            auto finish = [job, guard = QPointer<EncryptedSession>(session), done, name, ns]() {
+            auto finish = [job, guard = QPointer<EncryptedSession>(session), receiver = QPointer<QObject>(receiver),
+                           done, name, ns]() {
                 QDomElement result;
                 if (guard && !guard->isClosing() && job->success() && !job->metadata().protocolOnly) {
                     for (auto child = job->stanza().firstChildElement(name); !child.isNull();
@@ -55,12 +56,13 @@ namespace XMPP { namespace Jingle { namespace SXE {
                     }
                 }
                 job->deleteLater();
-                done(result);
+                if (receiver)
+                    done(result);
             };
             if (job->isFinished())
                 finish();
             else
-                QObject::connect(job, &EncryptionJob::finished, receiver, finish);
+                QObject::connect(job, &EncryptionJob::finished, job, finish);
         }
     }
 
@@ -125,7 +127,7 @@ namespace XMPP { namespace Jingle { namespace SXE {
         auto wrapper = document.createElement(QStringLiteral("message"));
         wrapper.setAttribute(QStringLiteral("type"), QStringLiteral("chat"));
         wrapper.setAttribute(QStringLiteral("from"), from.full());
-        wrapper.setAttribute(QStringLiteral("to"), session->me().full());
+        wrapper.setAttribute(QStringLiteral("to"), session->manager()->client()->jid().full());
         document.appendChild(wrapper);
         wrapper.appendChild(document.importNode(encrypted, true));
         complete(encryption->decrypt(wrapper), encryption, receiver, done,
