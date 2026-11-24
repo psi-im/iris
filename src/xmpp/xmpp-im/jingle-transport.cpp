@@ -63,14 +63,13 @@ namespace XMPP { namespace Jingle {
 
     Transport::~Transport() { setParent(nullptr); }
 
-    bool Transport::hasIndependentPayloadProtection() const
+    bool Transport::setEncryptionPolicy(EncryptionPolicy policy)
     {
-        if (_applications.isEmpty())
-            return false;
-        for (const auto *app : _applications) {
-            if (!app->hasIndependentPayloadProtection())
-                return false;
-        }
+        if (encryptionPolicy_)
+            return *encryptionPolicy_ == policy;
+        if (_state != State::Created && !(isRemote() && _state == State::Pending))
+            return policy == EncryptionPolicy::Disabled;
+        encryptionPolicy_ = policy;
         return true;
     }
 

@@ -205,7 +205,7 @@ namespace XMPP { namespace Jingle { namespace SXE {
         auto *session = _pad->session();
         if (isLocal()) {
             d->hosts = { session->manager()->client()->jid() };
-            if (d->encryption.isEmpty() && session->isEndToEndPreferred())
+            if (d->encryption.isEmpty() && encryptionPolicy() != EncryptionPolicy::Disabled)
                 d->encryption = preferredProtection(session);
         } else if (d->hosts.isEmpty()) {
             onFinish(Reason::FailedTransport, QStringLiteral("SXE transport without a host"));
@@ -224,7 +224,7 @@ namespace XMPP { namespace Jingle { namespace SXE {
                     if (id == methodId && _state < State::Finishing)
                         onSecurityFailure(QStringLiteral("SXE encryption method was unloaded"));
                 });
-        } else if (session->isEndToEndRequired()) {
+        } else if (encryptionPolicy() == EncryptionPolicy::Required) {
             const auto message = QStringLiteral("Required end-to-end protection is unavailable for SXE");
             if (isLocal() && session->state() == State::ApprovedToSend)
                 onFinish(Reason::SecurityError, message, FailureDisposition::TryNextTransport);
@@ -371,7 +371,7 @@ namespace XMPP { namespace Jingle { namespace SXE {
             });
             return;
         }
-        if (session->isEndToEndRequired()) {
+        if (encryptionPolicy() == EncryptionPolicy::Required) {
             qWarning("jingle-sxe: dropping unprotected payload of a session requiring end-to-end encryption");
             return;
         }
@@ -391,7 +391,7 @@ namespace XMPP { namespace Jingle { namespace SXE {
             return;
         const bool marker = sxe.firstChildElement().isNull();
         if (d->encryption.isEmpty()) {
-            if (!marker && !_pad->session()->isEndToEndRequired())
+            if (!marker && encryptionPolicy() != EncryptionPolicy::Required)
                 emit sxeReceived(sxe, from);
             return;
         }
@@ -1077,6 +1077,10 @@ namespace XMPP { namespace Jingle { namespace SXE {
 
     void Application::prepareTransport()
     {
+        if (!_transport || !_transport->setEncryptionPolicy(encryptionPolicy())) {
+            remove(Reason::SecurityError, QStringLiteral("Transport protection policy is incompatible"));
+            return;
+        }
         d->detachConnection();
         d->attachTransport();
         if (d->messageTransport()) {

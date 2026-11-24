@@ -178,6 +178,13 @@ namespace XMPP { namespace Jingle {
         // closed before making a data channel usable.
         virtual bool supportsAuthenticatedEncryption() const { return false; }
         virtual bool requireAuthenticatedEncryption() { return false; }
+        // Actual authentication of the established association, not peer caps.
+        virtual bool hasAuthenticatedEncryption() const { return false; }
+
+        // The application configures native protection on this logical
+        // transport once, before preparation. It is not a session-wide setting.
+        bool setEncryptionPolicy(EncryptionPolicy policy);
+        EncryptionPolicy encryptionPolicy() const { return encryptionPolicy_.value_or(EncryptionPolicy::Disabled); }
 
         // a component is basically is a subconnection usually with a dedicated IP port. A component may have one or
         // more channels. Components are pretty much generic but channels aren't. Channels give connection objects,
@@ -262,10 +269,6 @@ namespace XMPP { namespace Jingle {
         void stateChanged();
 
     protected:
-        // All associated contents must independently protect their payloads
-        // before native transport authentication can be omitted.
-        bool hasIndependentPayloadProtection() const;
-
         /// Just updates state and signals about the change. No logic is attached to the new state.
         void setState(State newState);
 
@@ -298,6 +301,7 @@ namespace XMPP { namespace Jingle {
 
     private:
         friend class Application;
+        std::optional<EncryptionPolicy> encryptionPolicy_;
         // Non-owning back-references. Several BUNDLE contents may use one transport.
         QSet<Application *> _applications;
         void                associate(Application *);

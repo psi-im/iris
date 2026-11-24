@@ -47,9 +47,6 @@ namespace Jingle {
         QStringList contents;
     };
 
-    // Local preference, independent of the negotiated protection and peer capabilities.
-    enum class EncryptionPolicy { Disabled, Preferred, Required };
-
     class IRIS_EXPORT Session : public QObject {
         Q_OBJECT
     public:
@@ -98,7 +95,8 @@ namespace Jingle {
 
         // Disabled does not initiate E2EE, but accepts a valid protected peer offer.
         // Preferred may choose plaintext only before protection is negotiated.
-        // Required never accepts unprotected content.
+        // Required rejects unprotected content unless the application explicitly
+        // overrides the default. Changing the default is allowed only in Created.
         void setEncryptionPolicy(EncryptionPolicy policy);
         EncryptionPolicy encryptionPolicy() const;
         bool isEndToEndRequired() const { return encryptionPolicy() == EncryptionPolicy::Required; }

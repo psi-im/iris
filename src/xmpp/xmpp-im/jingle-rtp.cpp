@@ -709,6 +709,10 @@ void Application::prepareTransport()
 {
     if (!_transport)
         return;
+    if (!_transport->setEncryptionPolicy(encryptionPolicy())) {
+        remove(Reason::SecurityError, QStringLiteral("Transport protection policy is incompatible"));
+        return;
+    }
 
     if (association_)
         association_->disconnect(this);

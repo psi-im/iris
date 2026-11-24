@@ -800,6 +800,25 @@ namespace XMPP { namespace Jingle {
 
     bool Application::isRemote() const { return _pad->session()->role() != _creator; }
 
+    bool Application::setEncryptionPolicy(std::optional<EncryptionPolicy> policy)
+    {
+        if (_state != State::Created)
+            return false;
+        encryptionPolicy_ = policy;
+        return true;
+    }
+
+    EncryptionPolicy Application::encryptionPolicy() const
+    {
+        return encryptionPolicy_.value_or(_pad->session()->encryptionPolicy());
+    }
+
+    bool Application::canShareTransport(const Transport *transport) const
+    {
+        return allowsSharedTransport() && transport
+            && (encryptionPolicy() != EncryptionPolicy::Required || transport->hasAuthenticatedEncryption());
+    }
+
     bool Application::selectNextTransport(const QPointer<Transport> alikeTransport)
     {
         qDebug("selecting next transport");

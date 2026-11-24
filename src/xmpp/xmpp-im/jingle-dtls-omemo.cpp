@@ -209,7 +209,7 @@ namespace XMPP { namespace Jingle {
                 || (existing.isValid()
                     && (existing.method != authentication.method || existing.deviceId != authentication.deviceId
                         || existing.identityKey != authentication.identityKey))
-                || (current->isEndToEndRequired() && !trusted(authentication.trustLevel))) {
+                || !trusted(authentication.trustLevel)) {
                 done({}, {}, QStringLiteral("The peer's OMEMO identity is not acceptable"));
                 return;
             }

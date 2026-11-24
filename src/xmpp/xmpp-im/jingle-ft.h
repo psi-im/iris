@@ -73,6 +73,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
 
         bool isTransportReplaceEnabled() const override;
         bool allowsSharedTransport() const override { return true; }
+        bool canShareTransport(const Transport *transport) const override;
         void remove(Reason::Condition cond = Reason::Success, const QString &comment = QString()) override;
 
         void setFile(const File &file);
@@ -108,7 +109,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
 
         // Whether this file content has prepared an encrypted JET connection.
         bool isTransportEncrypted() const;
-        bool hasIndependentPayloadProtection() const override { return isTransportEncrypted(); }
+
 
         void            setDevice(QIODevice *dev, bool closeOnFinish = true);
         Connection::Ptr connection() const;

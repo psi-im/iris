@@ -243,7 +243,7 @@ namespace XMPP { namespace Jingle { namespace JET {
             || incomingSecurity_.attribute(QStringLiteral("name")) == contentName_;
     }
 
-    void Protection::prepare(bool outgoing, const Done &done, bool nativeProtection)
+    void Protection::prepare(bool outgoing, EncryptionPolicy policy, const Done &done, bool nativeProtection)
     {
         if (preparing_)
             return;
@@ -257,10 +257,10 @@ namespace XMPP { namespace Jingle { namespace JET {
         }
 
         outgoing_ = outgoing;
-        const auto *session = pad_->session();
+        policy_ = policy;
         const bool protectedIncoming = !incomingSecurity_.isNull();
-        const bool needCrypto = protectedIncoming || (!nativeProtection && outgoing && session->isEndToEndPreferred());
-        const bool mandatory = protectedIncoming || session->isEndToEndRequired();
+        const bool needCrypto = protectedIncoming || (!nativeProtection && outgoing && policy_ != EncryptionPolicy::Disabled);
+        const bool mandatory = protectedIncoming || policy_ == EncryptionPolicy::Required;
 
         if (!needCrypto) {
             prepared_ = true;
@@ -307,7 +307,7 @@ namespace XMPP { namespace Jingle { namespace JET {
         QObject::disconnect(providerDestroyed_);
 
         auto *session = pad_ ? pad_->session() : nullptr;
-        const bool mandatory = !incomingSecurity_.isNull() || (session && session->isEndToEndRequired());
+        const bool mandatory = !incomingSecurity_.isNull() || policy_ == EncryptionPolicy::Required;
         QString failure = error;
 
         if (secret && !session)
@@ -319,7 +319,7 @@ namespace XMPP { namespace Jingle { namespace JET {
                 && (previous.method != auth.method || previous.deviceId != auth.deviceId
                     || previous.identityKey != auth.identityKey)) {
                 failure = QStringLiteral("JET peer identity changed");
-            } else if (session->isEndToEndRequired() && !trusted(auth.trustLevel)) {
+            } else if (policy_ == EncryptionPolicy::Required && !trusted(auth.trustLevel)) {
                 failure = QStringLiteral("JET peer device is not trusted");
             }
         }

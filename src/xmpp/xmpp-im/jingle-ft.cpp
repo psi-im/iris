@@ -886,6 +886,18 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
 
     bool Application::isTransportReplaceEnabled() const { return _state < State::Active; }
 
+    bool Application::canShareTransport(const Transport *transport) const
+    {
+        if (XMPP::Jingle::Application::canShareTransport(transport))
+            return true;
+        if (!transport || d->nativeProtection)
+            return false;
+        // A content using JET can share an association which does not itself
+        // authenticate the peer. Do not upgrade or restart that association.
+        return d->protection->encrypted() || d->protection->hasIncomingSecurity()
+            || (isLocal() && pad()->session()->manager()->jet()->pad(pad()->session())->canPrepareOutgoing());
+    }
+
     void Application::prepareTransport()
     {
         // JET security is negotiated on the content, not transport-replace.
@@ -893,6 +905,11 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
         // replacement that needs JET must negotiate a fresh file content.
         if (d->nativeProtection && (!_transport || !_transport->requireAuthenticatedEncryption())) {
             remove(Reason::SecurityError, QStringLiteral("Replacement transport cannot authenticate the peer"));
+            return;
+        }
+        if (!_transport || !_transport->setEncryptionPolicy(d->nativeProtection ? EncryptionPolicy::Required
+                                                                                : EncryptionPolicy::Disabled)) {
+            remove(Reason::SecurityError, QStringLiteral("Transport protection policy is incompatible"));
             return;
         }
         QPointer<Application> guard(this);
@@ -1024,10 +1041,10 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
             return;
 
         if (!d->protection->hasIncomingSecurity() && !d->protection->prepared()
-            && (isRemote() || pad()->session()->isEndToEndPreferred()) && _transport->supportsAuthenticatedEncryption())
+            && (isRemote() || encryptionPolicy() != EncryptionPolicy::Disabled) && _transport->supportsAuthenticatedEncryption())
             d->nativeProtection = _transport->requireAuthenticatedEncryption();
         QPointer<Application> guard(this);
-        d->protection->prepare(creator() == pad()->session()->role(), [guard](const QString &error) {
+        d->protection->prepare(creator() == pad()->session()->role(), encryptionPolicy(), [guard](const QString &error) {
             if (!guard || guard->_state >= State::Finishing)
                 return;
             if (!error.isEmpty()) {
