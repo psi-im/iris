@@ -228,7 +228,7 @@ target_sources(iris PRIVATE
     xmpp-im/jingle-ft.cpp
     xmpp-im/jingle-jet.cpp
     xmpp-im/jingle-jet-connection.cpp
-    xmpp-im/jingle-jet-preparation.cpp
+    xmpp-im/jingle-jet-cipher.cpp
     xmpp-im/jingle-jet_p.h
     xmpp-im/jingle-rtp-description.cpp
     xmpp-im/jingle-rtp-negotiation.cpp

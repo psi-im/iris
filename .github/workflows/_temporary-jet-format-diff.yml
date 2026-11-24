@@ -23,4 +23,4 @@ jobs:
           fi
           git clang-format-18 --binary clang-format-18 4a705e8793fe96b9a37f889fd3d6e495f11cadda || test -n "$(git diff --name-only)"
           git diff --check
-          git diff -- src/xmpp/xmpp-im/jingle-jet.h src/xmpp/xmpp-im/jingle-jet-preparation.cpp src/xmpp/xmpp-im/jingle-jet-connection.h src/xmpp/xmpp-im/jingle-jet-connection.cpp src/xmpp/xmpp-im/jingle-ft.cpp src/xmpp/xmpp-im/jingle-ft.h src/xmpp/xmpp-im/jingle.cpp src/xmpp/xmpp-im/jingle.h src/xmpp/xmpp-im/jingle-jet-omemo.cpp src/xmpp/xmpp-im/jingle-jet-omemo.h tests/jingle/jetconnection.cpp tests/jingle/jetregistry.cpp
+          git diff -- src/xmpp/xmpp-im/jingle-jet.h src/xmpp/xmpp-im/jingle-jet.cpp src/xmpp/xmpp-im/jingle-jet-cipher.cpp src/xmpp/xmpp-im/jingle-jet-connection.h src/xmpp/xmpp-im/jingle-jet-connection.cpp src/xmpp/xmpp-im/jingle-ft.cpp src/xmpp/xmpp-im/jingle-ft.h src/xmpp/xmpp-im/jingle.cpp src/xmpp/xmpp-im/jingle.h src/xmpp/xmpp-im/jingle-jet-omemo.cpp src/xmpp/xmpp-im/jingle-jet-omemo.h tests/jingle/jetconnection.cpp tests/jingle/jetregistry.cpp
