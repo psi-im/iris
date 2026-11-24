@@ -755,6 +755,19 @@ namespace XMPP { namespace Jingle {
                     return true;
                 }
             } else {
+                // A local initial content can fail before it is announced
+                // (for example, mandatory encryption cannot be negotiated).
+                // Finished applications have no outgoing update, so waiting
+                // for ContentAdd would strand the unannounced session forever.
+                for (const auto &c : std::as_const(contentList)) {
+                    if (c->state() != State::Finished)
+                        continue;
+                    terminateReason = c->lastReason();
+                    if (!terminateReason.isValid())
+                        terminateReason = Reason(Reason::FailedApplication);
+                    setSessionFinished();
+                    return true;
+                }
                 for (const auto &c : std::as_const(contentList)) {
                     auto out = c->evaluateOutgoingUpdate();
                     if (out.action == Action::ContentRemove) {
