@@ -60,6 +60,7 @@ namespace Jingle { namespace ICE {
         TransportFeatures           features() const override;
         bool                        supportsSharedTransport() const override { return true; }
         bool                        supportsAuthenticatedEncryption() const override;
+        bool setEncryptionPolicy(EncryptionPolicy policy) override { return configureEncryptionPolicy(policy); }
         bool                        requireAuthenticatedEncryption() override;
         bool                        hasAuthenticatedEncryption() const override;
         int                         maxSupportedChannelsPerComponent(TransportFeatures features) const override;

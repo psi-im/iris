@@ -173,7 +173,9 @@ Conversations `Content.setSecurity()/getSecurity()`, `JingleFileTransferConnecti
 - `Jingle::SignalingFilter` (registered with `Manager::addSignalingFilter()`) rewrites incoming and
   outgoing `<jingle/>` elements asynchronously and adds extensions to outgoing XEP-0353
   messages. While a filter works on an IQ of a session, later IQs of that session in the same
-  direction wait; without filters nothing changes. A filter error answers an incoming IQ, or fails
+  direction wait; without filters nothing changes. The manager does not
+  inspect content XML for particular encryption mechanisms: applications
+  and transports enforce the selected content policy before payload I/O. A filter error answers an incoming IQ, or fails
   an outgoing one as if the peer had returned it; a refused `session-initiate` or `session-accept`
   ends the session. `MessageInitiation` keeps foreign extensions (`extensions()`, `addExtension()`).
 - `Session::setEncryptionPolicy()` sets the local policy (Disabled, Preferred, Required); `Session::peerAuthentication()` (method,

@@ -183,7 +183,7 @@ namespace XMPP { namespace Jingle {
 
         // The application configures native protection on this logical
         // transport once, before preparation. It is not a session-wide setting.
-        bool setEncryptionPolicy(EncryptionPolicy policy);
+        virtual bool setEncryptionPolicy(EncryptionPolicy policy);
         EncryptionPolicy encryptionPolicy() const { return encryptionPolicy_.value_or(EncryptionPolicy::Disabled); }
 
         // a component is basically is a subconnection usually with a dedicated IP port. A component may have one or
@@ -269,6 +269,10 @@ namespace XMPP { namespace Jingle {
         void stateChanged();
 
     protected:
+        // Only transports that actually implement native protection may
+        // accept Required. Reuse this storage/immutability check in overrides.
+        bool configureEncryptionPolicy(EncryptionPolicy policy);
+
         /// Just updates state and signals about the change. No logic is attached to the new state.
         void setState(State newState);
 

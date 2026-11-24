@@ -65,6 +65,11 @@ namespace XMPP { namespace Jingle {
 
     bool Transport::setEncryptionPolicy(EncryptionPolicy policy)
     {
+        return policy != EncryptionPolicy::Required && configureEncryptionPolicy(policy);
+    }
+
+    bool Transport::configureEncryptionPolicy(EncryptionPolicy policy)
+    {
         if (encryptionPolicy_)
             return *encryptionPolicy_ == policy;
         if (_state != State::Created && !(isRemote() && _state == State::Pending))
