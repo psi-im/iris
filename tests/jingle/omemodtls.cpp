@@ -8,7 +8,7 @@
 
 #include <iris/jingle-ice.h>
 #include <iris/jingle-ft.h>
-#include <iris/jingle-ibb.h>
+#include <iris/xmpp-im/jingle-ibb.h>
 #include <iris/jingle-jet.h>
 #include <QBuffer>
 #include <iris/jingle-dtls-omemo.h>
