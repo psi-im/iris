@@ -7,7 +7,7 @@
 #undef main
 
 #include <iris/jingle-ice.h>
-#include <iris/jingle-omemo-verification.h>
+#include <iris/jingle-dtls-omemo.h>
 #include <iris/jingle-session.h>
 #include <iris/jingle-sxe-omemo.h>
 #include <iris/tcpportreserver.h>

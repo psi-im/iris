@@ -7,7 +7,7 @@
 #include "omemoelement.cpp"
 #undef main
 
-#include <iris/jingle-omemo-verification.h>
+#include <iris/jingle-dtls-omemo.h>
 #include <iris/jingle-session.h>
 #include <iris/jingle-sxe-omemo.h>
 #include <iris/xmpp-im/jingle-sxe.h>

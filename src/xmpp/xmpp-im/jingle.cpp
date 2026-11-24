@@ -26,7 +26,7 @@
 #include "jingle-ft.h"
 #include "jingle-ice.h"
 #include "jingle-jet.h"
-#include "jingle-omemo-verification.h"
+#include "jingle-dtls-omemo.h"
 #include "jingle-session.h"
 #include "xmpp-im/xmpp_hash.h"
 #include "xmpp/jid/jid.h"

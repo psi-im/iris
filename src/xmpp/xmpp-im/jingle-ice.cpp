@@ -28,7 +28,7 @@
 #include "jingle-ice-pad_p.h"
 #include "jingle-ice-udp.h"
 #include "jingle-ice.h"
-#include "jingle-omemo-verification.h"
+#include "jingle-dtls-omemo.h"
 
 #include "dtls.h"
 #include "ice176.h"

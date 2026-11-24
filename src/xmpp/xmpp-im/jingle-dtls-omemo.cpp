@@ -1,5 +1,5 @@
 /*
- * jingle-omemo-verification.cpp - OMEMO-verified DTLS fingerprints in Jingle
+ * jingle-dtls-omemo.cpp - OMEMO-verified DTLS fingerprints in Jingle
  * Copyright (C) 2026  Sergey Ilinykh
  *
  * This library is free software; you can redistribute it and/or
@@ -17,7 +17,7 @@
  *
  */
 
-#include "jingle-omemo-verification.h"
+#include "jingle-dtls-omemo.h"
 
 #include "xmpp_client.h"
 #include "xmpp_encryption.h"

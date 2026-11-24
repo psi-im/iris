@@ -1,5 +1,5 @@
 /*
- * jingle-omemo-verification.h - OMEMO-verified DTLS fingerprints in Jingle
+ * jingle-dtls-omemo.h - OMEMO-verified DTLS fingerprints in Jingle
  * Copyright (C) 2026  Sergey Ilinykh
  *
  * This library is free software; you can redistribute it and/or
@@ -17,8 +17,8 @@
  *
  */
 
-#ifndef JINGLE_OMEMO_VERIFICATION_H
-#define JINGLE_OMEMO_VERIFICATION_H
+#ifndef JINGLE_DTLS_OMEMO_H
+#define JINGLE_DTLS_OMEMO_H
 
 #include <iris/iris_export.h>
 #include <iris/xmpp-im/jingle-session.h>
@@ -67,4 +67,4 @@ namespace Jingle {
 }
 }
 
-#endif // JINGLE_OMEMO_VERIFICATION_H
+#endif // JINGLE_DTLS_OMEMO_H
