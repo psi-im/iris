@@ -170,6 +170,13 @@ namespace XMPP { namespace Jingle {
         // this capability and Application::allowsSharedTransport().
         virtual bool supportsSharedTransport() const { return false; }
 
+        // Native peer-authenticated encryption for the selected transport.
+        // A positive capability is a negotiation option, not proof of an
+        // authenticated connection. Once required, the transport must fail
+        // closed before making a data channel usable.
+        virtual bool supportsAuthenticatedEncryption() const { return false; }
+        virtual bool requireAuthenticatedEncryption() { return false; }
+
         // a component is basically is a subconnection usually with a dedicated IP port. A component may have one or
         // more channels. Components are pretty much generic but channels aren't. Channels give connection objects,
         // while components are rather indexes.

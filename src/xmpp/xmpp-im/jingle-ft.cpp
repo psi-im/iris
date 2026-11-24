@@ -177,6 +177,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
         QTimer                            *finalizeTimer = nullptr;
         FileHasher                        *hasher        = nullptr;
         QPointer<JET::Protection> protection;
+        bool nativeProtection = false;
 
         bool writeToConnection(const QByteArray &data)
         {
@@ -887,6 +888,13 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
 
     void Application::prepareTransport()
     {
+        // JET security is negotiated on the content, not transport-replace.
+        // Do not replace native encryption with a plaintext transport. A
+        // replacement that needs JET must negotiate a fresh file content.
+        if (d->nativeProtection && (!_transport || !_transport->requireAuthenticatedEncryption())) {
+            remove(Reason::SecurityError, QStringLiteral("Replacement transport cannot authenticate the peer"));
+            return;
+        }
         QPointer<Application> guard(this);
         const auto            expected = _transport;
         expectSingleConnection(TransportFeature::Reliable | TransportFeature::DataOriented | TransportFeature::Ordered,
@@ -1015,6 +1023,9 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
         if (!_transport)
             return;
 
+        if (!d->protection->hasIncomingSecurity() && !d->protection->prepared()
+            && (isRemote() || pad()->session()->isEndToEndPreferred()) && _transport->supportsAuthenticatedEncryption())
+            d->nativeProtection = _transport->requireAuthenticatedEncryption();
         QPointer<Application> guard(this);
         d->protection->prepare(creator() == pad()->session()->role(), [guard](const QString &error) {
             if (!guard || guard->_state >= State::Finishing)
@@ -1026,7 +1037,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
             guard->d->setState(State::ApprovedToSend);
             if (guard)
                 guard->prepareTransport();
-        });
+        }, d->nativeProtection);
     }
 
     void Application::start()

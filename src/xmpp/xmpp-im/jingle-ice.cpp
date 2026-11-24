@@ -1009,6 +1009,8 @@ namespace XMPP { namespace Jingle { namespace ICE {
         bool                      deferredPrepare             = false;
         bool                      deferredStart               = false;
         bool                      verifiedRemoteFingerprint   = false;
+        bool                      receivedProtectedFingerprint = false;
+        bool                      nativeProtectionRequired = false;
         bool                      outgoingFingerprintBusy     = false;
         quint64                   outgoingFingerprintRevision = 0;
         QDomDocument              fingerprintDocument;
@@ -1853,8 +1855,35 @@ namespace XMPP { namespace Jingle { namespace ICE {
         return true;
     }
 
+    bool Transport::supportsAuthenticatedEncryption() const
+    {
+#if defined(IRIS_ENABLE_OMEMO) && defined(JINGLE_SCTP)
+        auto *session = pad()->session();
+        auto *verification = session->manager()->dtlsVerification();
+        if (!verification || !Dtls::isSupported() || !session->allowsEncryptionMethod(OmemoDtlsVerification::methodId()))
+            return false;
+        if (isRemote())
+            return d->receivedProtectedFingerprint;
+        return session->checkPeerCaps(Dtls::FingerPrint::ns())
+            && (verification->peerDevice(session->peer(), session->sid()).has_value()
+                || session->checkPeerCaps(OmemoDtlsVerification::directFeature()));
+#else
+        return false;
+#endif
+    }
+
+    bool Transport::requireAuthenticatedEncryption()
+    {
+        if (!supportsAuthenticatedEncryption())
+            return false;
+        d->nativeProtectionRequired = true;
+        return true;
+    }
+
     bool Transport::requiresVerifiedFingerprint() const
     {
+        if (d->nativeProtectionRequired)
+            return true;
         auto *session = pad()->session();
         if (!session->isEndToEndRequired())
             return false;
@@ -1988,7 +2017,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
             return;
         auto      *session   = pad()->session();
         const bool required  = requiresVerifiedFingerprint();
-        const bool preferred = session->isEndToEndPreferred();
+        const bool preferred = session->isEndToEndPreferred() || d->nativeProtectionRequired;
         d->protectedOutgoingFingerprint.clear();
         if (!preferred) {
             emit updated();
@@ -1998,7 +2027,8 @@ namespace XMPP { namespace Jingle { namespace ICE {
         auto      *verification = session->manager()->dtlsVerification();
         const auto device
             = verification ? verification->peerDevice(session->peer(), session->sid()) : std::optional<quint32> {};
-        if (!verification || !session->allowsEncryptionMethod(OmemoDtlsVerification::methodId()) || !device) {
+        const bool direct = d->nativeProtectionRequired && session->checkPeerCaps(OmemoDtlsVerification::directFeature());
+        if (!verification || !session->allowsEncryptionMethod(OmemoDtlsVerification::methodId()) || (!device && !direct)) {
             if (required)
                 onFinish(Reason::SecurityError, QStringLiteral("No OMEMO device available for DTLS verification"));
             else
@@ -2061,7 +2091,7 @@ namespace XMPP { namespace Jingle { namespace ICE {
                     guard->d->deferredStart = false;
                     guard->start();
                 }
-            });
+            }, direct);
 #endif
     }
 
@@ -2141,9 +2171,15 @@ namespace XMPP { namespace Jingle { namespace ICE {
             d->deferredStart = true;
             return;
         }
-        if (requiresVerifiedFingerprint() && !d->verifiedRemoteFingerprint) {
-            onFinish(Reason::SecurityError, QStringLiteral("DTLS peer fingerprint was not verified"));
-            return;
+        if (requiresVerifiedFingerprint()) {
+            const auto auth = pad()->session()->peerAuthentication();
+            const auto trust = EncryptionTrustLevel(auth.trustLevel);
+            if (!d->verifiedRemoteFingerprint || !auth.isValid()
+                || (trust != EncryptionTrustLevel::AutomaticallyTrusted && trust != EncryptionTrustLevel::ManuallyTrusted
+                    && trust != EncryptionTrustLevel::Authenticated)) {
+                onFinish(Reason::SecurityError, QStringLiteral("DTLS peer fingerprint was not verified and trusted"));
+                return;
+            }
         }
         if (!d->network || !d->network->ice) {
             onFinish(Reason::FailedTransport, QStringLiteral("ICE transport has not been prepared"));
@@ -2222,6 +2258,8 @@ namespace XMPP { namespace Jingle { namespace ICE {
         // The XML is already structurally validated; cryptography is content-owned.
         const auto network       = QPointer<IceConnection>(d->network);
         const auto iceGeneration = network ? network->generation.iceGeneration : 0;
+        if (!prepared->element.protectedFingerprint.isNull())
+            d->receivedProtectedFingerprint = true;
         d->remoteUpdates.append({ std::move(prepared->element), network, iceGeneration, bool(network) });
         if (d->remoteUpdates.size() == 1 && !d->remoteUpdateBusy) {
             QTimer::singleShot(0, this, [this]() {

@@ -216,7 +216,7 @@ namespace XMPP { namespace Jingle { namespace JET {
             || incomingSecurity_.attribute(QStringLiteral("name")) == contentName_;
     }
 
-    void Protection::prepare(bool outgoing, const Done &done)
+    void Protection::prepare(bool outgoing, const Done &done, bool nativeProtection)
     {
         if (preparing_)
             return;
@@ -232,12 +232,13 @@ namespace XMPP { namespace Jingle { namespace JET {
         outgoing_ = outgoing;
         const auto *session = pad_->session();
         const bool protectedIncoming = !incomingSecurity_.isNull();
-        const bool needCrypto = outgoing ? session->isEndToEndPreferred() : protectedIncoming;
+        const bool needCrypto = protectedIncoming || (!nativeProtection && outgoing && session->isEndToEndPreferred());
         const bool mandatory = protectedIncoming || session->isEndToEndRequired();
 
         if (!needCrypto) {
             prepared_ = true;
-            done(!outgoing && mandatory ? QStringLiteral("Incoming offer has no JET security") : QString());
+            done(!nativeProtection && !outgoing && mandatory ? QStringLiteral("Incoming offer has no JET security")
+                                                               : QString());
             return;
         }
 

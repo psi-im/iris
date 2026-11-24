@@ -1178,6 +1178,10 @@ namespace XMPP { namespace Jingle {
             ret += filter->discoFeatures();
         if (auto *jet = d->jet.data())
             ret += jet->discoFeatures();
+#ifdef IRIS_ENABLE_OMEMO
+        if (dtlsVerification())
+            ret += OmemoDtlsVerification::directFeature();
+#endif
         ret.removeDuplicates();
         return ret;
     }

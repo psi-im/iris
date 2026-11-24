@@ -128,7 +128,8 @@ namespace XMPP { namespace Jingle { namespace JET {
         ~Protection() override;
 
         bool setIncomingContent(const QDomElement &content);
-        void prepare(bool outgoing, const Done &done);
+        void prepare(bool outgoing, const Done &done, bool nativeProtection = false);
+        bool hasIncomingSecurity() const { return !incomingSecurity_.isNull(); }
         bool prepared() const { return prepared_; }
         bool encrypted() const { return secret_.has_value(); }
         bool authenticated() const;
