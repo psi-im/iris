@@ -1039,6 +1039,7 @@ namespace XMPP { namespace Jingle { namespace FileTransfer {
             selectNextTransport();
         if (!_transport)
             return;
+        lockEncryptionPolicy();
 
         if (!d->protection->hasIncomingSecurity() && !d->protection->prepared()
             && (isRemote() || encryptionPolicy() != EncryptionPolicy::Disabled) && _transport->supportsAuthenticatedEncryption())

@@ -626,6 +626,7 @@ void Application::prepare()
         return;
     if (!_transport && !selectNextTransport())
         return;
+    lockEncryptionPolicy();
     auto pad   = static_cast<Pad *>(_pad);
     auto media = pad->mediaSession();
     if (!media) {

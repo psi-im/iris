@@ -802,7 +802,7 @@ namespace XMPP { namespace Jingle {
 
     bool Application::setEncryptionPolicy(std::optional<EncryptionPolicy> policy)
     {
-        if (_state != State::Created)
+        if (_state != State::Created || encryptionPolicyLocked_)
             return false;
         encryptionPolicy_ = policy;
         return true;
@@ -814,6 +814,14 @@ namespace XMPP { namespace Jingle {
             return *encryptionPolicy_;
         const auto *session = _pad ? _pad->session() : nullptr;
         return session ? session->encryptionPolicy() : EncryptionPolicy::Disabled;
+    }
+
+    void Application::lockEncryptionPolicy()
+    {
+        if (!encryptionPolicyLocked_) {
+            encryptionPolicy_ = encryptionPolicy();
+            encryptionPolicyLocked_ = true;
+        }
     }
 
     bool Application::canShareTransport(const Transport *transport) const

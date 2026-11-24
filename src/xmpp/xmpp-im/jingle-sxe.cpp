@@ -1071,6 +1071,7 @@ namespace XMPP { namespace Jingle { namespace SXE {
             remove(Reason::FailedTransport, QStringLiteral("no SXE transport"));
             return;
         }
+        lockEncryptionPolicy();
         setState(State::ApprovedToSend);
         prepareTransport();
     }

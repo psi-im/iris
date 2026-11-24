@@ -296,6 +296,9 @@ namespace XMPP { namespace Jingle {
         bool incomingTransportReject();
 
     protected:
+        // Snapshot the effective policy before asynchronous preparation starts.
+        void lockEncryptionPolicy();
+
         /**
          * @brief wraps transport update so transport can be safely-deleted before callback is triggered
          */
@@ -392,6 +395,7 @@ namespace XMPP { namespace Jingle {
     private:
         friend class Session;
         std::optional<EncryptionPolicy> encryptionPolicy_;
+        bool encryptionPolicyLocked_ = false;
         // After the losing IQ and winning group update settle.
         bool retryContentAdd();
         friend class ConnectionWaiter;

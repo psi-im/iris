@@ -1993,6 +1993,18 @@ namespace XMPP { namespace Jingle { namespace ICE {
             return;
         }
 
+        // Do not upgrade a running shared association as a side effect of
+        // authenticating a newly offered content. This is independent of
+        // whether that content is accepted or later rejected.
+        const auto *existing = d->groupManagedNetwork && d->network
+            ? d->network.data() : static_cast<Pad *>(pad())->d->existingExtensionAssociation(this);
+        if (existing && existing->runtime && !existing->components.isEmpty()
+            && existing->components[0].dtls && existing->components[0].dtls->isConnected()
+            && !existing->runtime->fingerprintAuthenticated()) {
+            onSecurityFailure(QStringLiteral("Cannot authenticate an already established BUNDLE association"));
+            return;
+        }
+
         d->remoteUpdateBusy = true;
         auto *verification  = pad()->session()->manager()->dtlsVerification();
         if (!verification) {
