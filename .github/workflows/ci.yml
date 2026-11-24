@@ -77,15 +77,15 @@ jobs:
           cmake --build build --parallel
           cmake --install build
 
-      - name: Test MUC lifecycle and OMEMO self echo
+      - name: Test MUC and Jingle OMEMO integration
         if: matrix.name == 'qt6-qca3-omemo'
         shell: bash
         run: |
           # Enable tests after the normal library build, avoiding a build
           # of every regression binary as part of the default build target.
           cmake -S . -B build -DIRIS_BUILD_TESTS=ON
-          cmake --build build --parallel --target iris_muc_lifecycle_test iris_muc_omemo_test
-          ctest --test-dir build --output-on-failure -R '^(iris_muc_lifecycle|iris_muc_omemo)$'
+          cmake --build build --parallel --target iris_muc_lifecycle_test iris_muc_omemo_test omemo_jet_test omemo_dtls_test
+          ctest --test-dir build --output-on-failure -R '^(iris_muc_lifecycle|iris_muc_omemo|omemo_jet|omemo_dtls)$'
 
       - name: Compile installed CMake consumer
         shell: bash
