@@ -8,8 +8,8 @@
 
 #include <iris/jingle-ft.h>
 #include <iris/jingle-jet-omemo.h>
-#include <iris/jingle-omemo.h>
 #include <iris/jingle-session.h>
+#include <iris/jingle-sxe-omemo.h>
 #include <iris/xmpp-im/jingle-ibb.h>
 #include <iris/xmpp_caps.h>
 #include <iris/xmpp_hash.h>
@@ -158,19 +158,27 @@ int main(int argc, char **argv)
         auto setUp = wait(endpoint->omemo->setUp(), alice, bob);
         check(setUp->success(), "OMEMO was not set up");
     }
-    // OMEMO itself does not install any Jingle adapters.
-    check(!alice.client.jingleManager()->dtlsVerification()
-              && !alice.client.jingleManager()->discoFeatures().contains(J::JetOmemo::ns()),
-          "OMEMO registered Jingle adapters without opt-in");
-    J::enableOmemoEncryption(alice.client.jingleManager(), alice.omemo);
-    J::enableOmemoEncryption(bob.client.jingleManager(), bob.omemo);
-    const auto beforeDuplicateEnable = alice.client.jingleManager()->discoFeatures();
-    auto *verification = alice.client.jingleManager()->dtlsVerification();
-    J::enableOmemoEncryption(alice.client.jingleManager(), alice.omemo);
-    check(verification && alice.client.jingleManager()->dtlsVerification() == verification,
-          "Duplicate registration replaced the DTLS verification service");
-    check(alice.client.jingleManager()->discoFeatures() == beforeDuplicateEnable,
-          "Enabling Jingle encryption twice changed its advertised capabilities");
+    // Registering the encryption method automatically installs all Jingle adapters.
+    auto *manager = alice.client.jingleManager();
+    auto *registry = alice.client.encryptionManager();
+    auto *sxe = J::SXE::TransportManager::of(manager);
+    check(manager->dtlsVerification() && bob.client.jingleManager()->dtlsVerification()
+              && sxe && sxe->payloadProtector(OmemoEncryption::methodId()),
+          "OMEMO registration did not install Jingle adapters");
+    const auto features = manager->discoFeatures();
+    auto *verification = manager->dtlsVerification();
+    check(!registry->registerMethod(alice.omemo) && manager->dtlsVerification() == verification
+              && manager->discoFeatures() == features,
+          "Duplicate method registration changed Jingle adapters");
+
+    // Explicit unregistration must retire adapters even while the method is alive.
+    registry->unregisterMethod(alice.omemo);
+    check(!manager->dtlsVerification() && !sxe->payloadProtector(OmemoEncryption::methodId())
+              && !manager->discoFeatures().contains(J::JetOmemo::ns()),
+          "Jingle adapters survived method unregistration");
+    check(registry->registerMethod(alice.omemo) && manager->dtlsVerification()
+              && sxe->payloadProtector(OmemoEncryption::methodId()) && manager->discoFeatures() == features,
+          "Re-registering OMEMO did not restore Jingle adapters");
     if (!alice.client.jingleManager()->discoFeatures().contains(J::JetOmemo::ns())) {
         qInfo("JET-OMEMO tests skipped: no legacy OMEMO or AES-GCM/CTR in QCA");
         pep.clear();
@@ -251,8 +259,8 @@ int main(int argc, char **argv)
     // even if a Jingle session remains alive in the manager.
     delete alice.omemo;
     alice.omemo = nullptr;
-    check(!alice.client.jingleManager()->dtlsVerification()
-              && !alice.client.jingleManager()->discoFeatures().contains(J::JetOmemo::ns()),
+    check(!manager->dtlsVerification() && !sxe->payloadProtector(OmemoEncryption::methodId())
+              && !manager->discoFeatures().contains(J::JetOmemo::ns()),
           "Jingle encryption adapter survived its method");
     qInfo("JET-OMEMO tests passed");
     pep.clear();

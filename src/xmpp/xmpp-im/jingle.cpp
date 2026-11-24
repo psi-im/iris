@@ -36,6 +36,13 @@
 #include "xmpp_task.h"
 #include "xmpp_xmlcommon.h"
 
+#ifdef IRIS_ENABLE_OMEMO
+#include "jingle-jet-omemo.h"
+#include "jingle-sxe-omemo.h"
+#include "xmpp_encryption.h"
+#include "xmpp_omemo.h"
+#endif
+
 #include <QDateTime>
 #include <QDebug>
 #include <QDomDocument>
@@ -612,6 +619,9 @@ namespace XMPP { namespace Jingle {
         std::unique_ptr<RTP::Manager>         rtpManager;
         QPointer<JET::Manager>                jet;
         QPointer<OmemoDtlsVerification>       dtlsVerification;
+#ifdef IRIS_ENABLE_OMEMO
+        QObject *omemoAdapters = nullptr;
+#endif
         bool                                  messageInitiationEnabled = false;
         int                                   maxSessions              = -1; // no limit
 
@@ -736,6 +746,27 @@ namespace XMPP { namespace Jingle {
         registerApplication(d->rtpManager.get());
         d->jet = new JET::Manager(this);
 
+#ifdef IRIS_ENABLE_OMEMO
+        auto *encryption = client->encryptionManager();
+        connect(encryption, &EncryptionManager::methodRegistered, this, [this, encryption](const QString &id) {
+            if (id != OmemoEncryption::methodId() || d->omemoAdapters || d->shuttingDown)
+                return;
+            auto *omemo = qobject_cast<OmemoEncryption *>(encryption->method(id));
+            if (!omemo)
+                return;
+            d->omemoAdapters = new QObject(this);
+            new JetOmemo(this, omemo, d->omemoAdapters);
+            new SXE::SxeOmemo(this, omemo, d->omemoAdapters);
+            new OmemoDtlsVerification(this, omemo, d->omemoAdapters);
+        });
+        connect(encryption, &EncryptionManager::methodUnregistered, this, [this](const QString &id) {
+            if (id == OmemoEncryption::methodId()) {
+                delete d->omemoAdapters;
+                d->omemoAdapters = nullptr;
+            }
+        });
+#endif
+
         connect(d->client, &Client::messageReceived, this, [this](const Message &message) {
             // Carbons wrap the protocol message in a forwarding envelope. JMI
             // belongs to the effective inner chat message.
@@ -756,7 +787,15 @@ namespace XMPP { namespace Jingle {
 
     Manager::~Manager()
     {
+#ifdef IRIS_ENABLE_OMEMO
+        disconnect(d->client->encryptionManager(), nullptr, this, nullptr);
+#endif
         shutdown();
+#ifdef IRIS_ENABLE_OMEMO
+        // Unregister adapters while the JET and SXE registries are still alive.
+        delete d->omemoAdapters;
+        d->omemoAdapters = nullptr;
+#endif
         for (auto &m : d->transportManagers)
             m.second->setJingleManager(nullptr);
         for (auto &m : d->applicationManagers)
