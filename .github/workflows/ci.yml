@@ -77,15 +77,124 @@ jobs:
           cmake --build build --parallel
           cmake --install build
 
-      - name: Test MUC lifecycle and OMEMO self echo
+      - name: Test MUC and Jingle OMEMO integration
         if: matrix.name == 'qt6-qca3-omemo'
         shell: bash
         run: |
           # Enable tests after the normal library build, avoiding a build
           # of every regression binary as part of the default build target.
           cmake -S . -B build -DIRIS_BUILD_TESTS=ON
-          cmake --build build --parallel --target iris_muc_lifecycle_test iris_muc_omemo_test
-          ctest --test-dir build --output-on-failure -R '^(iris_muc_lifecycle|iris_muc_omemo)$'
+          cmake --build build --parallel --target iris_muc_lifecycle_test iris_muc_omemo_test omemo_jet_test omemo_dtls_test
+          ctest --test-dir build --output-on-failure -R '^(iris_muc_lifecycle|iris_muc_omemo|omemo_jet|omemo_dtls)
+
+      - name: Compile installed CMake consumer
+        shell: bash
+        run: |
+          mkdir consumer
+          cat > consumer/CMakeLists.txt <<'CMAKE'
+          cmake_minimum_required(VERSION 3.16)
+          project(iris_consumer LANGUAGES CXX)
+          find_package(Iris CONFIG REQUIRED)
+          add_executable(iris-consumer main.cpp)
+          target_link_libraries(iris-consumer PRIVATE Iris::Iris)
+          CMAKE
+          cat > consumer/main.cpp <<'CPP'
+          #include <iris/jid/jid.h>
+          #include <iris/irisnet/noncore/remotenameprovider.h>
+          int main()
+          {
+              XMPP::Jid jid(QStringLiteral("ci@example.org"));
+              return jid.isValid() && XMPP::RemoteNameProvider::isSupported() ? 0 : 1;
+          }
+          CPP
+          cmake -S consumer -B consumer-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="$PWD/sdk"
+          cmake --build consumer-build
+          LD_LIBRARY_PATH="$PWD/sdk/lib:$PWD/sdk/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}" \
+            ./consumer-build/iris-consumer
+
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows-x64
+          - os: macos-15
+            platform: macos-arm64
+          - os: macos-15-intel
+            platform: macos-x86_64
+    runs-on: ${{ matrix.os }}
+    name: Desktop (${{ matrix.platform }})
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build, install and smoke-test Iris
+        uses: ./.github/actions/build-iris-desktop
+        with:
+          qt-version: ${{ env.QT_VERSION }}
+          platform: ${{ matrix.platform }}
+          install-prefix: ${{ github.workspace }}/sdk
+
+  android:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - abi: arm64-v8a
+            qt_arch: android_arm64_v8a
+          - abi: x86_64
+            qt_arch: android_x86_64
+    name: Android (${{ matrix.abi }})
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build and install Iris
+        id: build-iris
+        uses: ./.github/actions/build-iris-android
+        with:
+          qt-version: ${{ env.ANDROID_QT_VERSION }}
+          qt-arch: ${{ matrix.qt_arch }}
+          abi: ${{ matrix.abi }}
+          ndk-version: ${{ env.ANDROID_NDK_VERSION }}
+          android-api: ${{ env.ANDROID_API }}
+          install-prefix: ${{ github.workspace }}/sdk
+
+      - name: Compile installed CMake consumer
+        shell: bash
+        env:
+          ANDROID_NDK_ROOT: ${{ steps.build-iris.outputs.ndk-path }}
+        run: |
+          mkdir consumer
+          cat > consumer/CMakeLists.txt <<'CMAKE'
+          cmake_minimum_required(VERSION 3.16)
+          project(iris_consumer LANGUAGES CXX)
+          find_package(Iris CONFIG REQUIRED)
+          add_library(iris-consumer SHARED main.cpp)
+          target_link_libraries(iris-consumer PRIVATE Iris::Iris)
+          CMAKE
+          cat > consumer/main.cpp <<'CPP'
+          #include <iris/jid/jid.h>
+          extern "C" int iris_consumer_smoke()
+          {
+              XMPP::Jid jid(QStringLiteral("ci@example.org"));
+              return jid.isValid() ? 0 : 1;
+          }
+          CPP
+          qt_cmake=$(find "$QT_ROOT_DIR" -type f -name qt-cmake -print -quit)
+          "$qt_cmake" -S consumer -B consumer-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DANDROID_PLATFORM="android-$ANDROID_API" \
+            "-DIris_DIR=$PWD/sdk/lib/cmake/Iris" \
+            "-DQca3-qt6_DIR=$PWD/qca-sdk/lib/cmake/Qca3-qt6"
+          cmake --build consumer-build --parallel
+
 
       - name: Compile installed CMake consumer
         shell: bash
