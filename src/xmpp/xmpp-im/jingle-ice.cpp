@@ -2064,7 +2064,8 @@ namespace XMPP { namespace Jingle { namespace ICE {
             return;
         auto      *session   = pad()->session();
         const bool required  = requiresVerifiedFingerprint();
-        const bool preferred = session->isEndToEndPreferred() || d->nativeProtectionRequired;
+        const bool preferred = session->isEndToEndPreferred() || d->nativeProtectionRequired
+            || d->verifiedRemoteHash.has_value();
         d->protectedOutgoingFingerprint.clear();
         if (d->groupManagedNetwork && d->network && d->network->runtime
             && d->network->runtime->fingerprintAuthenticated()

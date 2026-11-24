@@ -415,7 +415,7 @@ namespace XMPP { namespace Jingle {
     Application::Update Application::evaluateOutgoingUpdate()
     {
         _update = { Action::NoAction, Reason() };
-        if (_state == State::Finished || _state == State::Created
+        if (_state == State::Finished || (_state == State::Created && !_terminationReason.isValid())
             || _pendingTransportReplace == PendingTransportReplace::NeedAck)
             return _update;
 

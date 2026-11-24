@@ -310,6 +310,7 @@ int main(int argc, char **argv)
                 security.at(0).toElement().setAttribute(QStringLiteral("cipher"), QStringLiteral("invalid-cipher"));
         });
         check(t->offered && t->wire.isEmpty() && !t->receivingEncrypted
+                  && t->receivingState == J::State::Finished
                   && t->receivingReason.condition() == J::Reason::SecurityError,
               "Invalid JET envelope was accepted or a transfer was started");
 

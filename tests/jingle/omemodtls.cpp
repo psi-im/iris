@@ -96,10 +96,11 @@ Run startSession(Endpoint &alice, Endpoint &bob, bool proceed, bool requireEndTo
 {
     Run        run;
     auto       connection = QObject::connect(bob.client.jingleManager(), &J::Manager::incomingSession, &bob.client,
-                                             [&run, peerRequires](J::Session *session) {
+                                             [&run, peerRequires, proceed](J::Session *session) {
                                            run.peerSession = session;
                                            check(session->setEncryptionMethod(OmemoEncryption::methodId()),
                                                  "Incoming DTLS session could not select OMEMO");
+                                           session->setEndToEndPreferred(proceed);
                                            session->setEndToEndRequired(peerRequires);
                                        });
     const auto sid = QStringLiteral("omemo-dtls-") + QString::number(QRandomGenerator::global()->bounded(1000000));
@@ -111,6 +112,7 @@ Run startSession(Endpoint &alice, Endpoint &bob, bool proceed, bool requireEndTo
     run.session = alice.client.jingleManager()->newSession(bob.jid, sid);
     check(run.session->setEncryptionMethod(OmemoEncryption::methodId()),
           "Outgoing DTLS session could not select OMEMO");
+    run.session->setEndToEndPreferred(proceed);
     run.session->setEndToEndRequired(requireEndToEnd);
     run.local = qobject_cast<SXE::Application *>(run.session->newContent(SXE::NS_SVG_WHITEBOARD));
     check(run.local, "whiteboard content was not created");
