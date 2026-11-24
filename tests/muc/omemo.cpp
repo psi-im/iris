@@ -4,6 +4,74 @@
 #include <iris/xmpp_message.h>
 
 namespace {
+// A resolved conversation must not round-trip into Psi's contact lookup for
+// every subsequent stanza. Psi selects and reuses its contact-owned session;
+// Iris does not cache contact sessions or look them up by JID.
+void exerciseHostOwnedIncomingSessions(Endpoint &alice, Endpoint &bob)
+{
+    QStringList received;
+    int         failures = 0;
+    QObject::connect(&bob.client, &Client::messageReceived, &bob.client, [&](const Message &m) {
+        if (m.type() == Message::Type::Chat)
+            received.append(m.body());
+    });
+    QObject::connect(&bob.client, &Client::stanzaDecryptionFailed, &bob.client,
+                     [&](const QString &, const Jid &, EncryptionJob::Error, const QString &,
+                         const EncryptionMetadata &) { ++failures; });
+
+    const auto encrypted = [&](const QString &body) {
+        QDomDocument doc;
+        auto         message = doc.createElementNS(QStringLiteral("jabber:client"), QStringLiteral("message"));
+        doc.appendChild(message);
+        message.setAttribute(QStringLiteral("from"), alice.jid.full());
+        message.setAttribute(QStringLiteral("to"), bob.jid.full());
+        message.setAttribute(QStringLiteral("type"), QStringLiteral("chat"));
+        auto bodyElement = doc.createElementNS(QStringLiteral("jabber:client"), QStringLiteral("body"));
+        bodyElement.appendChild(doc.createTextNode(body));
+        message.appendChild(bodyElement);
+        EncryptionContext context;
+        context.recipients = { bob.jid.bare() };
+        context.options.insert(QStringLiteral("omemoProtocol"), QStringLiteral("omemo2"));
+        auto *session = alice.client.encryptionManager()->startSession(OmemoEncryption::methodId(),
+                                                                       EncryptionMethod::XmppStanza, context);
+        check(session != nullptr, "Cannot create direct OMEMO sender session");
+        auto *job = session->encrypt(message);
+        session->close();
+        wait(job, alice, bob);
+        check(job->success(), "Cannot encrypt direct OMEMO routing test stanza");
+        QDomDocument wire;
+        wire.appendChild(wire.importNode(job->stanza(), true));
+        return wire;
+    };
+
+    const auto deliver = [&](const QString &body, int expected) {
+        auto wire = encrypted(body);
+        bob.stream.inject(wire.documentElement());
+        for (int i = 0; i < 30 && received.size() < expected; ++i)
+            pump(alice, bob);
+        check(received.size() == expected && received.last() == body && failures == 0,
+              "Explicit incoming decryption or normal message delivery failed");
+    };
+
+    const int initialHandled  = bob.incomingHandled;
+    const int initialSessions = bob.incomingSessionsCreated;
+    deliver(QStringLiteral("first protected message"), 1);
+    check(bob.incomingHandled == initialHandled + 1 && bob.incomingSessionsCreated == initialSessions + 1,
+          "First stanza did not create a host-owned session");
+    deliver(QStringLiteral("second protected message"), 2);
+    check(bob.incomingHandled == initialHandled + 2 && bob.incomingSessionsCreated == initialSessions + 1,
+          "The host did not reuse its session for a second stanza");
+
+    for (auto session : std::as_const(bob.conversationSessions))
+        if (session)
+            session->close();
+    bob.conversationSessions.clear();
+    deliver(QStringLiteral("third protected message"), 3);
+    check(bob.incomingHandled == initialHandled + 3 && bob.incomingSessionsCreated == initialSessions + 2,
+          "The host reused a retired session");
+    qInfo("OMEMO host-owned incoming session routing passed");
+}
+
 void exerciseMuc(Endpoint &alice, Endpoint &bob)
 {
     const Jid room(QStringLiteral("garden@conference.example.test"));
@@ -23,8 +91,12 @@ void exerciseMuc(Endpoint &alice, Endpoint &bob)
         EncryptionContext send;
         send.recipients = { bob.jid.bare() };
         send.options.insert(QStringLiteral("omemoProtocol"), QStringLiteral("omemo2"));
-        auto job = wait(alice.client.encryptionManager()->encrypt(OmemoEncryption::methodId(), stanza, send),
-                        alice, bob);
+        auto *session = alice.client.encryptionManager()->startSession(OmemoEncryption::methodId(),
+                                                                       EncryptionMethod::XmppStanza, send);
+        check(session != nullptr, "Cannot create OMEMO sender session");
+        auto *job = session->encrypt(stanza);
+        session->close();
+        wait(job, alice, bob);
         check(job->success(), "MUC OMEMO 2 encryption failed");
 
         QDomDocument incomingDoc;
@@ -37,13 +109,21 @@ void exerciseMuc(Endpoint &alice, Endpoint &bob)
 
     QDomDocument incomingDoc = encryptMessage();
     auto incoming = incomingDoc.documentElement();
-    auto unknown = wait(bob.client.encryptionManager()->decrypt(incoming), alice, bob);
+    const auto   decrypt     = [&](const QDomElement &stanza, const EncryptionContext &context) {
+        auto *session = bob.client.encryptionManager()->startSession(OmemoEncryption::methodId(),
+                                                                           EncryptionMethod::XmppStanza, context);
+        check(session != nullptr, "Cannot create OMEMO receiver session");
+        auto *job = session->decrypt(stanza);
+        session->close();
+        return wait(job, alice, bob);
+    };
+    auto *unknown = decrypt(incoming, {});
     check(!unknown->success() && unknown->error() == EncryptionJob::Error::AuthenticationFailed,
           "MUC ciphertext without a real sender mapping was accepted");
 
     EncryptionContext receive;
     receive.options.insert(QStringLiteral("mucRealSender"), alice.jid.bare());
-    auto opened = wait(bob.client.encryptionManager()->decrypt(incoming, receive), alice, bob);
+    auto *opened = decrypt(incoming, receive);
     check(opened->success(), "MUC message with authenticated real sender failed");
     check(opened->metadata().sender.bare() == alice.jid.bare()
               && opened->stanza().attribute(QStringLiteral("from")) == occupant.full()
@@ -55,7 +135,7 @@ void exerciseMuc(Endpoint &alice, Endpoint &bob)
     auto wrongRoomDoc = encryptMessage();
     auto wrongRoom = wrongRoomDoc.documentElement();
     wrongRoom.setAttribute(QStringLiteral("from"), QStringLiteral("other@conference.example.test/Alice"));
-    auto roomAttack = wait(bob.client.encryptionManager()->decrypt(wrongRoom, receive), alice, bob);
+    auto *roomAttack = decrypt(wrongRoom, receive);
     check(!roomAttack->success() && roomAttack->error() == EncryptionJob::Error::AuthenticationFailed,
           "MUC SCE <to/> did not bind ciphertext to the original room");
 
@@ -163,6 +243,7 @@ int main(int argc, char **argv)
         check(setUp->success() && endpoint->omemo->isReady(), "OMEMO setup failed");
     }
     if (alice.omemo->supportedProtocols().testFlag(OmemoProtocol::Omemo2)) {
+        exerciseHostOwnedIncomingSessions(alice, bob);
         exerciseMuc(alice, bob);
         exerciseMucSelfEcho(alice, bob);
     } else {

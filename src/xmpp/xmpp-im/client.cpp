@@ -150,6 +150,8 @@ public:
     Jingle::Manager          *jingleManager            = nullptr;
     MucManager              *mucManager               = nullptr;
     EncryptionManager       *encryptionManager         = nullptr;
+    Client::IncomingEncryptedStanzaHandler incomingEncryptedStanzaHandler;
+    QSet<EncryptionJob *>                  pendingIncomingDecryptionJobs;
     const EncryptionMetadata *currentEncryptionMetadata = nullptr;
     JT_PushMessage           *pushMessage               = nullptr;
 };
@@ -428,8 +430,18 @@ void Client::close(bool)
         d->stream->close();
         d->stream = nullptr;
     }
+    cancelPendingDecryptionJobs();
     emit disconnected();
     cleanup(); // TODO wait till stream writes all data to the socket
+}
+
+void Client::cancelPendingDecryptionJobs()
+{
+    // Each stanza has an independent job; disconnect cancels them all.
+    // Destroy the jobs now, not in a later event-loop iteration.
+    auto pending = std::move(d->pendingIncomingDecryptionJobs);
+    d->pendingIncomingDecryptionJobs.clear();
+    qDeleteAll(pending);
 }
 
 void Client::cleanup()
@@ -460,6 +472,7 @@ void Client::streamError(int)
     // error(e);
 
     // if(!e.isWarning()) {
+    cancelPendingDecryptionJobs();
     emit disconnected();
     cleanup();
     //}
@@ -540,6 +553,19 @@ Task *Client::rootTask() { return d->root; }
 
 QDomDocument *Client::doc() const { return &d->doc; }
 
+void Client::setIncomingEncryptedStanzaHandler(IncomingEncryptedStanzaHandler handler)
+{
+    d->incomingEncryptedStanzaHandler = std::move(handler);
+}
+
+static EncryptionJob *missingEncryptionSession(EncryptionManager *registry, const QString &methodId)
+{
+    auto *job = new EncryptionJob(registry);
+    job->fail(EncryptionJob::Error::NoSession,
+              QStringLiteral("Cannot start an encryption session for method %1").arg(methodId));
+    return job;
+}
+
 void Client::distribute(const QDomElement &x)
 {
     static QString fromAttr(QStringLiteral("from"));
@@ -586,10 +612,18 @@ void Client::distribute(const QDomElement &x)
             }
             context.options.insert(QStringLiteral("mucRealSender"), real.bare());
         }
-        auto              job      = d->encryptionManager->decrypt(x, context);
-        const QString     methodId = method->id();
-        const Jid         peer(x.attribute(QStringLiteral("from")));
-        auto              finish = [this, job, methodId, peer]() {
+        const Jid      peer(x.attribute(QStringLiteral("from")));
+        const auto     purpose = x.tagName() != QLatin1String("message") ? EncryptionSessionPurpose::Protocol
+                : x.attribute(QStringLiteral("type")) == QLatin1String("groupchat") ? EncryptionSessionPurpose::Groupchat
+                                                                                    : EncryptionSessionPurpose::Message;
+        EncryptionJob *job     = d->incomingEncryptedStanzaHandler
+                ? d->incomingEncryptedStanzaHandler(x, method->id(), context, purpose)
+                : nullptr;
+        if (!job)
+            job = missingEncryptionSession(d->encryptionManager, method->id());
+        const QString methodId = method->id();
+        auto          finish   = [this, job, methodId, peer]() {
+            d->pendingIncomingDecryptionJobs.remove(job);
             if (job->success()) {
                 distributeDecrypted(job->stanza(), &job->metadata());
             } else {
@@ -598,10 +632,13 @@ void Client::distribute(const QDomElement &x)
             }
             job->deleteLater();
         };
-        if (job->isFinished())
+        if (job->isFinished()) {
             finish();
-        else
+        } else {
+            d->pendingIncomingDecryptionJobs.insert(job);
+            connect(job, &QObject::destroyed, this, [this, job] { d->pendingIncomingDecryptionJobs.remove(job); });
             connect(job, &EncryptionJob::finished, this, finish);
+        }
         return;
     }
 
@@ -624,15 +661,20 @@ bool Client::distributeEncryptedCarbon(const QDomElement &x)
     if (!method)
         return false;
 
-    EncryptionContext context;
-    context.options.insert(QStringLiteral("forwardedCarbon"), true);
-    auto              job      = d->encryptionManager->decrypt(forwarded, context);
-    const QString     methodId = method->id();
-    const QDomElement original = x;
     const Jid         forwardedFrom(forwarded.attribute(QStringLiteral("from")));
     const Jid         forwardedTo(forwarded.attribute(QStringLiteral("to")));
-    const Jid         peer   = forwardedFrom.bare() == jid().bare() ? forwardedTo : forwardedFrom;
-    auto              finish = [this, job, methodId, original, peer]() {
+    const Jid         peer = forwardedFrom.bare() == jid().bare() ? forwardedTo : forwardedFrom;
+    EncryptionContext context;
+    context.options.insert(QStringLiteral("forwardedCarbon"), true);
+    EncryptionJob *job = d->incomingEncryptedStanzaHandler
+        ? d->incomingEncryptedStanzaHandler(forwarded, method->id(), context, EncryptionSessionPurpose::Carbon)
+        : nullptr;
+    if (!job)
+        job = missingEncryptionSession(d->encryptionManager, method->id());
+    const QString     methodId = method->id();
+    const QDomElement original = x;
+    auto              finish   = [this, job, methodId, original, peer]() {
+        d->pendingIncomingDecryptionJobs.remove(job);
         if (!job->success()) {
             debug(
                 QStringLiteral("Client: %1 forwarded carbon decryption failed: %2").arg(methodId, job->errorString()));
@@ -679,10 +721,13 @@ bool Client::distributeEncryptedCarbon(const QDomElement &x)
         distributeDecrypted(carbon, &job->metadata());
         job->deleteLater();
     };
-    if (job->isFinished())
+    if (job->isFinished()) {
         finish();
-    else
+    } else {
+        d->pendingIncomingDecryptionJobs.insert(job);
+        connect(job, &QObject::destroyed, this, [this, job] { d->pendingIncomingDecryptionJobs.remove(job); });
         connect(job, &EncryptionJob::finished, this, finish);
+    }
     return true;
 }
 
@@ -771,32 +816,28 @@ void Client::send(const QString &str)
 EncryptionJob *Client::sendEncrypted(const QDomElement &stanza, const QString &methodId,
                                      const EncryptionContext &context)
 {
-    QDomDocument original;
-    if (stanza.attribute(QStringLiteral("type")) == QLatin1String("groupchat"))
-        original.appendChild(original.importNode(stanza, true));
-    auto job    = d->encryptionManager->encrypt(methodId, stanza, context);
-    auto finish = [this, job, original, methodId]() {
-        if (job->success()) {
-            d->mucManager->rememberEncryptedEcho(original.documentElement(), job->stanza(), methodId);
-            send(job->stanza());
-        } else {
-            debug(QStringLiteral("Client: outgoing stanza encryption failed: %1").arg(job->errorString()));
-        }
-    };
-    if (job->isFinished())
-        finish();
-    else
-        connect(job, &EncryptionJob::finished, this, finish);
+    // A method-only call is explicitly transient. Conversation and Jingle
+    // owners pass their own session when they need it to survive an operation.
+    auto *session = d->encryptionManager->startSession(methodId, EncryptionMethod::XmppStanza, context);
+    if (!session)
+        return missingEncryptionSession(d->encryptionManager, methodId);
+    auto *job = sendEncrypted(stanza, session, context);
+    session->close();
     return job;
 }
 
-EncryptionJob *Client::sendEncrypted(const QDomElement &stanza, EncryptedSession *session)
+EncryptionJob *Client::sendEncrypted(const QDomElement &stanza, EncryptedSession *session,
+                                     const EncryptionContext &operation)
 {
     QDomDocument original;
     if (stanza.attribute(QStringLiteral("type")) == QLatin1String("groupchat"))
         original.appendChild(original.importNode(stanza, true));
     const QString methodId = session ? session->methodId() : QString();
-    auto job    = d->encryptionManager->encrypt(session, stanza);
+    auto         *job      = session ? session->encrypt(stanza, operation) : nullptr;
+    if (!job) {
+        job = new EncryptionJob(d->encryptionManager);
+        job->fail(EncryptionJob::Error::NoSession, QStringLiteral("Encryption session is unavailable"));
+    }
     auto finish = [this, job, original, methodId]() {
         if (job->success()) {
             d->mucManager->rememberEncryptedEcho(original.documentElement(), job->stanza(), methodId);

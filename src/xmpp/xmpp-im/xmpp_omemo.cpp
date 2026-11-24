@@ -2499,9 +2499,8 @@ public:
     {
     }
 
-    EncryptionJob *encrypt(const QDomElement &xml) override
+    EncryptionJob *doEncrypt(const QDomElement &xml, const EncryptionContext &context) override
     {
-        const auto &context = this->context();
         auto        job     = new EncryptionJob(this);
         auto        d       = method_->d.get();
         if (!d->ready) {
@@ -2523,16 +2522,16 @@ public:
         const bool legacyFallback = *protocolValue == OmemoProtocol::Omemo2 && !context.replyTo
             && !context.options.contains(QLatin1String(OmemoProtocolOption))
             && d->supportedProtocols.testFlag(OmemoProtocol::Legacy) && localName(xml) == QLatin1String("message");
-        encryptWith(xml, *protocolValue, legacyFallback, job);
+        encryptWith(xml, *protocolValue, legacyFallback, context, job);
         return job;
     }
 
     // With @a legacyFallback an OMEMO 2 message is encrypted with legacy OMEMO instead when that reaches more of
     // the recipients' devices: a server keeping one item per PEP node holds only the OMEMO 2 bundle published
     // last by an account's devices, while legacy OMEMO keeps a node per device.
-    void encryptWith(const QDomElement &xml, OmemoProtocol protocol, bool legacyFallback, EncryptionJob *job)
+    void encryptWith(const QDomElement &xml, OmemoProtocol protocol, bool legacyFallback,
+                     const EncryptionContext &context, EncryptionJob *job)
     {
-        const auto &context = this->context();
         auto        d       = method_->d.get();
         if (protocol == OmemoProtocol::Legacy && localName(xml) != QLatin1String("message")) {
             job->fail(EncryptionJob::Error::Unsupported, QStringLiteral("Legacy OMEMO supports message stanzas only"));
@@ -2603,7 +2602,7 @@ public:
                 d->ensureSessions(
                     targets, protocol, 0, true,
                     [this, guardedJob, preparedOuter, plaintext, legacyHasPayload, owners, protocol, legacyFallback,
-                     targets, inputDocument,
+                     targets, context, inputDocument,
                      stanza](bool sessionsOk, EncryptionJob::Error sessionError, const QString &sessionErrorString,
                              QList<QPair<QString, uint32_t>> readyTargets, const QStringList &skippedTargets) {
                         if (!guardedJob)
@@ -2631,7 +2630,7 @@ public:
                                 qInfo("OMEMO: device(s) without an OMEMO 2 bundle are reachable with legacy OMEMO; "
                                       "encrypting with legacy OMEMO");
                                 Q_UNUSED(inputDocument) // keeps the stanza's document alive
-                                encryptWith(stanza, OmemoProtocol::Legacy, false, guardedJob);
+                                encryptWith(stanza, OmemoProtocol::Legacy, false, context, guardedJob);
                                 return;
                             }
                         }
@@ -2795,7 +2794,7 @@ public:
             });
     }
 
-    EncryptionJob *decrypt(const QDomElement &xml) override
+    EncryptionJob *doDecrypt(const QDomElement &xml, const EncryptionContext &context) override
     {
         auto job = new EncryptionJob(this);
         auto d   = method_->d.get();
@@ -2832,7 +2831,7 @@ public:
         }
         Jid sender = outerSender;
         if (isMuc) {
-            sender = Jid(context().options.value(QStringLiteral("mucRealSender")).toString());
+            sender = Jid(context.options.value(QStringLiteral("mucRealSender")).toString());
             if (outerSender.resource().isEmpty() || !sender.isValid() || sender.node().isEmpty()
                 || !sender.resource().isEmpty()) {
                 job->fail(EncryptionJob::Error::AuthenticationFailed,
@@ -3083,7 +3082,7 @@ public:
 
         if (protocol == OmemoProtocol::Omemo2) {
             const bool heartbeatRequired = firstForRatchet && messageCounter >= 53;
-            if (!context().isArchiveReplay() && (keyExchange || heartbeatRequired)) {
+            if (!context.isArchiveReplay() && (keyExchange || heartbeatRequired)) {
                 QTimer::singleShot(0, method_, [method = method_, sender, senderDevice]() {
                     auto ack = method->sendEmptyMessage(sender.bare(), senderDevice);
                     if (!ack->success() && ack->isFinished())
@@ -3199,6 +3198,23 @@ bool OmemoEncryption::canDecrypt(const QDomElement &stanza) const
 {
     const auto encrypted = findOmemoElement(stanza);
     return encrypted && d->supportedProtocols.testFlag(encrypted->protocol);
+}
+
+EncryptionMethod::Availability OmemoEncryption::availability(const Jid &peer) const
+{
+    if (supportedProtocols() == OmemoProtocols())
+        return Availability::Unavailable;
+    if (!peer.resource().isEmpty() && preferredProtocolFor(peer))
+        return Availability::Available;
+
+    // Missing caps information does not mean the recipient lacks OMEMO.
+    // A cached active PEP device is sufficient to confirm availability.
+    const auto supported = supportedProtocols();
+    for (const auto &device : devices(peer)) {
+        if (device.active && (device.protocols & supported) != OmemoProtocols())
+            return Availability::Available;
+    }
+    return Availability::Unknown;
 }
 
 OmemoProtocols OmemoEncryption::supportedProtocols() const { return d->supportedProtocols; }
@@ -4013,9 +4029,13 @@ EncryptionJob *OmemoEncryption::encryptElement(const Jid &recipient, OmemoProtoc
         wrapper.appendChild(wrapperDocument.importNode(content, true));
     }
 
-    auto session = new OmemoEncryptedSession(this, context);
+    auto *session = startSession(XmppStanza, context);
+    if (!session) {
+        job->fail(EncryptionJob::Error::NoSession, QStringLiteral("Could not create OMEMO element session"));
+        return job;
+    }
     session->setParent(job);
-    auto inner  = session->encrypt(wrapper);
+    auto *inner  = session->encrypt(wrapper);
     auto finish = [job, inner, protocol]() {
         const auto encrypted
             = inner->success() ? inner->stanza().firstChildElement(QStringLiteral("encrypted")) : QDomElement();
@@ -4048,9 +4068,13 @@ EncryptionJob *OmemoEncryption::decryptElement(const Jid &sender, const QDomElem
     wrapper.appendChild(wrapperDocument.importNode(encrypted, true));
     wrapperDocument.appendChild(wrapper);
 
-    auto session = new OmemoEncryptedSession(this, {});
+    auto *session = startSession(XmppStanza, {});
+    if (!session) {
+        job->fail(EncryptionJob::Error::NoSession, QStringLiteral("Could not create OMEMO element session"));
+        return job;
+    }
     session->setParent(job);
-    auto inner  = session->decrypt(wrapper);
+    auto *inner  = session->decrypt(wrapper);
     auto finish = [job, inner]() {
         if (!inner->success()) {
             job->fail(inner->error(), inner->errorString(), inner->metadata());
