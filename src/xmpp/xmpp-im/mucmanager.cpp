@@ -22,25 +22,42 @@ void writeCanonicalNode(QDataStream &out, const QDomNode &node)
     if (node.isElement()) {
         const auto element = node.toElement();
         const auto local = element.localName().isEmpty() ? element.tagName() : element.localName();
-        out << quint8(1) << element.namespaceURI() << local;
+        // Encode the XML values, not QString's internal null/empty state.
+        out << quint8(1) << element.namespaceURI().toUtf8() << local.toUtf8();
         QMap<QString, QString> attrs;
         const auto attributes = element.attributes();
         for (int i = 0; i < attributes.count(); ++i) {
             const auto attr = attributes.item(i).toAttr();
-            if (attr.name() == QLatin1String("xmlns") || attr.prefix() == QLatin1String("xmlns"))
+            if (attr.name() == QLatin1String("xmlns") || attr.prefix() == QLatin1String("xmlns")
+                || attr.name().startsWith(QLatin1String("xmlns:"))
+                || attr.namespaceURI() == QLatin1String("http://www.w3.org/2000/xmlns/"))
                 continue;
             const auto localAttr = attr.localName().isEmpty() ? attr.name() : attr.localName();
             attrs.insert(attr.namespaceURI() + QChar(0x1f) + localAttr, attr.value());
         }
         out << quint32(attrs.size());
         for (auto it = attrs.cbegin(); it != attrs.cend(); ++it)
-            out << it.key() << it.value();
+            out << it.key().toUtf8() << (it.value().isEmpty() ? QByteArray("") : it.value().toUtf8());
+
+        // The stream parser can split a single XML character-data run into
+        // several DOM nodes. Pretty-printing can also introduce whitespace
+        // between OMEMO's element-only containers. Neither changes ciphertext.
+        QString text;
+        const bool hasElements = !element.firstChildElement().isNull();
+        const auto flushText = [&]() {
+            if (!text.isEmpty() && (!hasElements || !text.trimmed().isEmpty()))
+                out << quint8(2) << text.toUtf8();
+            text.clear();
+        };
         for (auto child = element.firstChild(); !child.isNull(); child = child.nextSibling()) {
-            if (child.isElement())
+            if (child.isElement()) {
+                flushText();
                 writeCanonicalNode(out, child);
-            else if (child.isText() || child.isCDATASection())
-                out << quint8(2) << child.nodeValue();
+            } else if (child.isText() || child.isCDATASection()) {
+                text += child.nodeValue();
+            }
         }
+        flushText();
         out << quint8(0);
     }
 }
