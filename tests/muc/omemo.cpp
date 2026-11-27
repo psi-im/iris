@@ -209,7 +209,7 @@ void exerciseMucSelfEcho(Endpoint &alice, Endpoint &bob)
     // sender's DOM. MUC services may add formatting or namespace prefixes.
     QDomDocument parsed;
 #if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
-    check(bool(parsed.setContent(echoed.toByteArray(2), QDomDocument::ParseOption::UseNamespaceProcessing
+    check(bool(parsed.setContent(echoed.toByteArray(2), QDomDocument::ParseOptions(QDomDocument::ParseOption::UseNamespaceProcessing)
                        | QDomDocument::ParseOption::PreserveSpacingOnlyNodes)),
           "Cannot parse serialized MUC echo");
 #else
