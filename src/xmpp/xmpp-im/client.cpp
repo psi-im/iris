@@ -578,9 +578,16 @@ void Client::distribute(const QDomElement &x)
     }
 
     if (auto method = d->encryptionManager->methodForStanza(x)) {
-        // Reconcile our own reflected MUC message by occupant and message ID.
-        if (method->id() == QLatin1String("omemo")
-            && x.attribute(QStringLiteral("type")) == QLatin1String("groupchat")) {
+        const bool groupchat = x.attribute(QStringLiteral("type")) == QLatin1String("groupchat");
+        const Jid occupant(x.attribute(QStringLiteral("from")));
+        const Jid room(occupant.bare());
+        const auto delays = childElementsByTagNameNS(x, QStringLiteral("urn:xmpp:delay"), QStringLiteral("delay"));
+        const auto delay = delays.size() == 1 ? delays.at(0).toElement() : QDomElement();
+        const bool archiveReplay = groupchat && d->mucManager->acceptsMessage(occupant)
+            && delay.attribute(QStringLiteral("from")) == room.bare()
+            && QDateTime::fromString(delay.attribute(QStringLiteral("stamp")), Qt::ISODate).isValid();
+        // Reconcile live reflected messages only, not historical deliveries.
+        if (!archiveReplay && method->id() == QLatin1String("omemo") && groupchat) {
             auto echo = d->mucManager->resolveEncryptedEcho(x, method->id());
             switch (echo.disposition) {
             case MucManager::EchoDisposition::Delivered:
@@ -593,12 +600,19 @@ void Client::distribute(const QDomElement &x)
             }
         }
         EncryptionContext context;
-        if (x.attribute(QStringLiteral("type")) == QLatin1String("groupchat")) {
-            const Jid occupant(x.attribute(QStringLiteral("from")));
-            // Incoming MUC 'from' is room/nick, never the cryptographic
-            // sender. Use only a current real JID supplied by MUC presence.
-            // Never infer an identity from the nick or from an old room join.
-            const Jid real = d->mucManager->realJid(occupant);
+        if (groupchat && method->groupchatRequirements().testFlag(EncryptionMethod::NonAnonymous)) {
+            // Historical nicknames must not be resolved against the current roster.
+            Jid real;
+            if (archiveReplay) {
+                const auto ns = QStringLiteral("http://jabber.org/protocol/muc#user");
+                const auto users = childElementsByTagNameNS(x, ns, QStringLiteral("x"));
+                const auto items = users.size() == 1
+                    ? childElementsByTagNameNS(users.at(0).toElement(), ns, QStringLiteral("item")) : XDomNodeList();
+                if (items.size() == 1)
+                    real = Jid(items.at(0).toElement().attribute(QStringLiteral("jid")));
+            } else {
+                real = d->mucManager->realJid(occupant);
+            }
             if (!real.isValid() || real.node().isEmpty()) {
                 emit stanzaDecryptionFailed(method->id(), occupant, EncryptionJob::Error::AuthenticationFailed,
                                            QStringLiteral("No authenticated real JID for MUC sender %1")
@@ -607,6 +621,8 @@ void Client::distribute(const QDomElement &x)
             }
             context.options.insert(QStringLiteral("mucRealSender"), real.bare());
         }
+        if (archiveReplay)
+            context.setArchiveReplay();
         const Jid      peer(x.attribute(QStringLiteral("from")));
         const auto     purpose = x.tagName() != QLatin1String("message") ? EncryptionSessionPurpose::Protocol
                 : x.attribute(QStringLiteral("type")) == QLatin1String("groupchat") ? EncryptionSessionPurpose::Groupchat
@@ -617,13 +633,16 @@ void Client::distribute(const QDomElement &x)
         if (!job)
             job = missingEncryptionSession(d->encryptionManager, method->id());
         const QString methodId = method->id();
-        auto          finish   = [this, job, methodId, peer]() {
+        auto          finish   = [this, job, methodId, peer, archiveReplay]() {
             d->pendingIncomingDecryptionJobs.remove(job);
+            auto metadata = job->metadata();
+            if (archiveReplay)
+                metadata.details.insert(QStringLiteral("archiveReplay"), true);
             if (job->success()) {
-                distributeDecrypted(job->stanza(), &job->metadata());
+                distributeDecrypted(job->stanza(), &metadata);
             } else {
                 debug(QStringLiteral("Client: %1 stanza decryption failed: %2").arg(methodId, job->errorString()));
-                emit stanzaDecryptionFailed(methodId, peer, job->error(), job->errorString(), job->metadata());
+                emit stanzaDecryptionFailed(methodId, peer, job->error(), job->errorString(), metadata);
             }
             job->deleteLater();
         };
