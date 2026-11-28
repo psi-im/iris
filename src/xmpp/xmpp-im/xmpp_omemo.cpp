@@ -1496,13 +1496,7 @@ public:
             }
         }
         data.devices.insert(bare, next);
-        // An empty or missing PEP list may be published later without a
-        // notification reaching us (e.g. a MUC member outside our roster).
-        // Re-query on the next operation instead of caching absence forever.
-        if (activeIds.isEmpty())
-            fetchedDeviceLists.remove(fetchedListKey(bare, protocol));
-        else
-            fetchedDeviceLists.insert(fetchedListKey(bare, protocol));
+        fetchedDeviceLists.insert(fetchedListKey(bare, protocol));
         for (const auto id : changedIds) {
             if (fullyRemovedIds.contains(id))
                 emit q->deviceRemoved(Jid(bare), id);
@@ -2295,15 +2289,16 @@ public:
         }
         const auto target = targets.at(index);
         if (data.ownDevice && target.first == client->jid().bare() && target.second == data.ownDevice->id) {
-            ensureSessions(targets, protocol, index + 1, skipUnusableBundles, callback, readyTargets, skippedTargets, trustError);
+            ensureSessions(targets, protocol, index + 1, skipUnusableBundles, callback, readyTargets,
+                           skippedTargets, trustError);
             return;
         }
         if (protocol == OmemoProtocol::Omemo2 && ambiguousPins.contains(target)
             && hasSession(target.first, target.second, protocol)) {
             // Check the pin against the device's own bundle; without one, keep the session as it was.
             fetchBundle(target.first, target.second, protocol, false,
-                        [this, targets, protocol, index, skipUnusableBundles, callback, readyTargets, skippedTargets, trustError,
-                         target](bool, EncryptionJob::Error, const QString &) {
+                        [this, targets, protocol, index, skipUnusableBundles, callback, readyTargets, skippedTargets,
+                         trustError, target](bool, EncryptionJob::Error, const QString &) {
                             ambiguousPins.remove(target);
                             ensureSessions(targets, protocol, index, skipUnusableBundles, callback, readyTargets,
                                            skippedTargets, trustError);
@@ -2321,7 +2316,8 @@ public:
                 return;
             }
             if (trustError.isEmpty())
-                trustError = QStringLiteral("An existing %1 OMEMO session is not trusted by policy").arg(protocolName(protocol));
+                trustError = QStringLiteral("An existing %1 OMEMO session is not trusted by policy")
+                                 .arg(protocolName(protocol));
             ensureSessions(targets, protocol, index + 1, skipUnusableBundles, callback, readyTargets, skippedTargets,
                            trustError);
             return;

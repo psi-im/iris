@@ -368,14 +368,7 @@ void exerciseGroupchatTrustDiscovery()
     auto *session = sender.client.encryptionManager()->startSession(
         OmemoEncryption::methodId(), EncryptionMethod::XmppStanza | EncryptionMethod::Groupchat, context);
     check(session != nullptr, "Cannot create groupchat trust test session");
-    // A missing list must not permanently poison the recipient cache.
-    // The PEP fixture deliberately sends no event when the list reappears.
-    const auto secondList = pep[second.jid.bare()].take(OmemoEncryption::devicesNode());
     auto *job = wait(session->encrypt(message.toStanza(&sender.client.stream()).element()), sender, first);
-    check(!job->success() && job->error() == EncryptionJob::Error::NoRecipients,
-          "Missing member device list must prevent groupchat encryption");
-    pep[second.jid.bare()].insert(OmemoEncryption::devicesNode(), secondList);
-    job = wait(session->encrypt(message.toStanza(&sender.client.stream()).element()), sender, first);
     check(!job->success() && job->error() == EncryptionJob::Error::UntrustedIdentity,
           "Unknown recipients must prevent encryption");
     for (const auto *recipient : { &first, &second }) {

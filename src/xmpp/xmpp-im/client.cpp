@@ -645,13 +645,9 @@ void Client::distribute(const QDomElement &x)
             // authenticated local projection before requiring a sender JID
             // for actual decryption. Never infer the historical JID from nick.
             if ((!real.isValid() || real.node().isEmpty()) && !archiveReplay) {
-                EncryptionMetadata metadata;
-                if (archiveReplay)
-                    metadata.details.insert(QStringLiteral("archiveReplay"), true);
                 emit stanzaDecryptionFailed(method->id(), occupant, EncryptionJob::Error::AuthenticationFailed,
                                            QStringLiteral("No authenticated real JID for MUC sender %1")
-                                               .arg(occupant.full()), metadata);
-                deliverFailure(method->id(), EncryptionJob::Error::AuthenticationFailed, metadata);
+                                               .arg(occupant.full()), {});
                 return;
             }
             if (real.isValid() && !real.node().isEmpty())
