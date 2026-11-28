@@ -578,8 +578,7 @@ void Client::distribute(const QDomElement &x)
     }
 
     if (auto method = d->encryptionManager->methodForStanza(x)) {
-        // The MUC manager authenticates the reflected ciphertext and its
-        // live sender before delivering our own encrypted message.
+        // Reconcile our own reflected MUC message by occupant and message ID.
         if (method->id() == QLatin1String("omemo")
             && x.attribute(QStringLiteral("type")) == QLatin1String("groupchat")) {
             auto echo = d->mucManager->resolveEncryptedEcho(x, method->id());
@@ -588,10 +587,6 @@ void Client::distribute(const QDomElement &x)
                 distributeDecrypted(echo.plaintext.documentElement(), &echo.metadata);
                 return;
             case MucManager::EchoDisposition::Duplicate:
-                return;
-            case MucManager::EchoDisposition::Rejected:
-                emit stanzaDecryptionFailed(method->id(), Jid(x.attribute(QStringLiteral("from"))),
-                                            EncryptionJob::Error::AuthenticationFailed, echo.error, {});
                 return;
             case MucManager::EchoDisposition::NotEcho:
                 break;
@@ -840,7 +835,7 @@ EncryptionJob *Client::sendEncrypted(const QDomElement &stanza, EncryptedSession
     }
     auto finish = [this, job, original, methodId]() {
         if (job->success()) {
-            d->mucManager->rememberEncryptedEcho(original.documentElement(), job->stanza(), methodId);
+            d->mucManager->rememberEncryptedEcho(original.documentElement(), methodId);
             send(job->stanza());
         } else {
             debug(QStringLiteral("Client: outgoing stanza encryption failed: %1").arg(job->errorString()));

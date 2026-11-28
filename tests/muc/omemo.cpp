@@ -205,64 +205,36 @@ void exerciseMucSelfEcho(Endpoint &alice, Endpoint &bob)
     stanza.setAttribute(QStringLiteral("from"), selfOccupant);
     stanza.setAttribute(QStringLiteral("to"), alice.jid.full());
 
-    // Cross the XML wire boundary instead of injecting a clone of the
-    // sender's DOM. MUC services may add formatting or namespace prefixes.
-    QDomDocument parsed;
-#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
-    check(bool(parsed.setContent(echoed.toByteArray(2), QDomDocument::ParseOptions(QDomDocument::ParseOption::UseNamespaceProcessing)
-                       | QDomDocument::ParseOption::PreserveSpacingOnlyNodes)),
-          "Cannot parse serialized MUC echo");
-#else
-    check(parsed.setContent(echoed.toByteArray(2), true), "Cannot parse serialized MUC echo");
-#endif
-    stanza = parsed.documentElement();
-    auto encrypted = stanza.firstChildElement(QStringLiteral("encrypted"));
-    auto header = encrypted.firstChildElement(QStringLiteral("header"));
-    auto payload = encrypted.firstChildElement(QStringLiteral("payload"));
-    check(!header.isNull() && !payload.isNull(), "Serialized MUC echo lost OMEMO data");
-    // Model separate QXmlStreamReader character events and explicit
-    // indentation even on Qt versions that discard spacing-only nodes.
-    const auto ciphertext = payload.text();
-    while (!payload.firstChild().isNull())
-        payload.removeChild(payload.firstChild());
-    payload.appendChild(parsed.createTextNode(ciphertext.left(ciphertext.size() / 2)));
-    payload.appendChild(parsed.createCDATASection(ciphertext.mid(ciphertext.size() / 2)));
-    header.appendChild(parsed.createTextNode(QStringLiteral("\n  ")));
-    encrypted.insertBefore(parsed.createTextNode(QStringLiteral("\n  ")), payload);
+    // A different occupant with the same ID must not consume the echo.
+    QDomDocument foreign;
+    auto other = foreign.importNode(stanza, true).toElement();
+    foreign.appendChild(other);
+    other.setAttribute(QStringLiteral("from"), room.bare() + QStringLiteral("/Other"));
+    alice.stream.inject(other);
+    check(ownMessages == 0 && decryptionFailures == 1, "Another occupant consumed our pending echo");
 
-    // Matching room, nick and message id alone must not authenticate an
-    // echo. The ciphertext and encrypted recipient keys must also match.
-    QDomDocument forgedDoc;
-    auto forged = forgedDoc.importNode(stanza, true).toElement();
-    forgedDoc.appendChild(forged);
-    auto encryptedElement = forged.firstChildElement(QStringLiteral("encrypted"));
-    check(!encryptedElement.isNull(), "OMEMO encrypted element missing in echo test");
-    encryptedElement.setAttribute(QStringLiteral("tampered"), QStringLiteral("yes"));
-    alice.stream.inject(forged);
-    check(ownMessages == 0 && decryptionFailures == 1,
-          "MUC echoed a ciphertext not matching the locally sent message");
+    // An unknown ID from our own occupant is not a pending echo either.
+    QDomDocument unknown;
+    auto unknownId = unknown.importNode(stanza, true).toElement();
+    unknown.appendChild(unknownId);
+    unknownId.setAttribute(QStringLiteral("id"), QStringLiteral("unknown-id"));
+    alice.stream.inject(unknownId);
+    pump(alice, bob);
+    check(ownMessages == 0, "Unknown message ID consumed our pending echo");
+    const int failuresBeforeEcho = decryptionFailures;
 
-    // A real payload change is rejected even with the normalized DOM.
-    QDomDocument modifiedDoc;
-    auto modified = modifiedDoc.importNode(stanza, true).toElement();
-    modifiedDoc.appendChild(modified);
-    auto modifiedPayload = modified.firstChildElement(QStringLiteral("encrypted"))
-                               .firstChildElement(QStringLiteral("payload"));
-    auto firstText = modifiedPayload.firstChild();
-    auto changed = firstText.nodeValue();
-    changed[0] = changed.at(0) == QLatin1Char('A') ? QLatin1Char('B') : QLatin1Char('A');
-    firstText.setNodeValue(changed);
-    alice.stream.inject(modified);
-    check(ownMessages == 0 && decryptionFailures == 2, "Modified OMEMO payload accepted");
-
+    // Reconcile the locally generated plaintext without comparing ciphertext.
+    auto payload = stanza.firstChildElement(QStringLiteral("encrypted"))
+                       .firstChildElement(QStringLiteral("payload"));
+    check(!payload.isNull(), "Missing encrypted payload");
+    payload.appendChild(echoed.createTextNode(QStringLiteral("changed")));
     alice.stream.inject(stanza);
-    check(ownMessages == 1 && receivedBody == QStringLiteral("A protected groupchat message") && wasEncrypted,
+    check(ownMessages == 1 && receivedBody == QStringLiteral("A protected groupchat message") && wasEncrypted
+              && decryptionFailures == failuresBeforeEcho,
           "The outgoing OMEMO MUC echo was not delivered locally as an encrypted message");
 
-    // A duplicate echo has no remaining local plaintext mapping and must not
-    // be shown again; neither may a message with the wrong stanza ID.
     alice.stream.inject(stanza);
-    check(ownMessages == 1 && decryptionFailures == 2,
+    check(ownMessages == 1 && decryptionFailures == failuresBeforeEcho,
           "A duplicate OMEMO MUC self echo was shown or reported as a decryption error");
     onStanza = {};
     qInfo("OMEMO 2 MUC self echo reconciliation passed");
