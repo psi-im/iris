@@ -217,6 +217,27 @@ void exerciseMuc(Endpoint &alice, Endpoint &bob)
         pump(alice, bob);
     check(receivedFailure, "Failed MUC history was not delivered with a safe local failure status");
 
+    // Real servers can omit the historical muc#user element from join
+    // history. The host must still get a chance to restore cached plaintext.
+    // This fixture has no history cache, so actual decryption must fail.
+    auto noIdentityDoc = encryptMessage();
+    auto noIdentity = noIdentityDoc.documentElement();
+    noIdentity.setAttribute(QStringLiteral("id"), QStringLiteral("history-without-real-jid"));
+    noIdentity.appendChild(noIdentityDoc.importNode(delay, true));
+    bool missingIdentityFailed = false;
+    QObject::connect(&bob.client, &Client::messageReceived, &observation, [&](const Message &message) {
+        if (message.id() == QStringLiteral("history-without-real-jid"))
+            missingIdentityFailed = message.spooled() && message.body().isEmpty()
+                && message.decryptionFailure() == Message::DecryptionFailure::Failed;
+    });
+    const int handledBeforeReplay = bob.incomingHandled;
+    bob.stream.inject(noIdentity);
+    for (int i = 0; i < 30 && !missingIdentityFailed; ++i)
+        pump(alice, bob);
+    check(bob.incomingHandled == handledBeforeReplay + 1,
+          "Missing historical JID prevented the host's history lookup");
+    check(missingIdentityFailed, "Historical decryption without a real sender must fail closed");
+
     qInfo("OMEMO 2 authenticated MUC sender, room binding and join history passed");
 }
 

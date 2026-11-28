@@ -640,7 +640,11 @@ void Client::distribute(const QDomElement &x)
             } else {
                 real = d->mucManager->realJid(occupant);
             }
-            if (!real.isValid() || real.node().isEmpty()) {
+            // A room's join history may omit muc#user, even for a
+            // non-anonymous room. Let the application restore a previously
+            // authenticated local projection before requiring a sender JID
+            // for actual decryption. Never infer the historical JID from nick.
+            if ((!real.isValid() || real.node().isEmpty()) && !archiveReplay) {
                 EncryptionMetadata metadata;
                 if (archiveReplay)
                     metadata.details.insert(QStringLiteral("archiveReplay"), true);
@@ -650,7 +654,8 @@ void Client::distribute(const QDomElement &x)
                 deliverFailure(method->id(), EncryptionJob::Error::AuthenticationFailed, metadata);
                 return;
             }
-            context.options.insert(QStringLiteral("mucRealSender"), real.bare());
+            if (real.isValid() && !real.node().isEmpty())
+                context.options.insert(QStringLiteral("mucRealSender"), real.bare());
         }
         if (archiveReplay)
             context.setArchiveReplay();
