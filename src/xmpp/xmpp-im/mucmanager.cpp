@@ -28,9 +28,7 @@ void writeCanonicalNode(QDataStream &out, const QDomNode &node)
         const auto attributes = element.attributes();
         for (int i = 0; i < attributes.count(); ++i) {
             const auto attr = attributes.item(i).toAttr();
-            if (attr.name() == QLatin1String("xmlns") || attr.prefix() == QLatin1String("xmlns")
-                || attr.name().startsWith(QLatin1String("xmlns:"))
-                || attr.namespaceURI() == QLatin1String("http://www.w3.org/2000/xmlns/"))
+            if (attr.name() == QLatin1String("xmlns") || attr.prefix() == QLatin1String("xmlns"))
                 continue;
             const auto localAttr = attr.localName().isEmpty() ? attr.name() : attr.localName();
             attrs.insert(attr.namespaceURI() + QChar(0x1f) + localAttr, attr.value());
