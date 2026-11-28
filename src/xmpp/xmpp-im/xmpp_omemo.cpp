@@ -2512,14 +2512,24 @@ public:
             return job;
         }
 
-        QString    protocolError;
-        const auto protocolValue = d->selectProtocol(xml, context, &protocolError);
+        const bool groupchat = xml.attribute(QStringLiteral("type")) == QLatin1String("groupchat");
+        if (groupchat && context.recipients.isEmpty()) {
+            job->fail(EncryptionJob::Error::NoRecipients, QStringLiteral("OMEMO groupchat requires member JIDs"));
+            return job;
+        }
+        QString protocolError;
+        auto protocolValue = groupchat
+            ? (d->supportedProtocols.testFlag(OmemoProtocol::Omemo2)
+                   ? std::optional<OmemoProtocol>(OmemoProtocol::Omemo2) : std::nullopt)
+            : d->selectProtocol(xml, context, &protocolError);
+        if (groupchat && !protocolValue)
+            protocolError = QStringLiteral("OMEMO groupchat requires OMEMO 2");
         if (!protocolValue) {
             job->fail(EncryptionJob::Error::Unsupported, protocolError);
             return job;
         }
         // A wire profile chosen explicitly (a reply, the caller's option) is kept.
-        const bool legacyFallback = *protocolValue == OmemoProtocol::Omemo2 && !context.replyTo
+        const bool legacyFallback = !groupchat && *protocolValue == OmemoProtocol::Omemo2 && !context.replyTo
             && !context.options.contains(QLatin1String(OmemoProtocolOption))
             && d->supportedProtocols.testFlag(OmemoProtocol::Legacy) && localName(xml) == QLatin1String("message");
         encryptWith(xml, *protocolValue, legacyFallback, context, job);
@@ -3175,10 +3185,18 @@ OmemoEncryption::~OmemoEncryption() = default;
 
 QString                        OmemoEncryption::id() const { return methodId(); }
 QString                        OmemoEncryption::name() const { return QStringLiteral("OMEMO"); }
-EncryptionMethod::Capabilities OmemoEncryption::capabilities() const { return XmppStanza; }
+EncryptionMethod::Capabilities OmemoEncryption::capabilities() const
+{
+    return supportedProtocols().testFlag(OmemoProtocol::Omemo2) ? XmppStanza | Groupchat : Capabilities(XmppStanza);
+}
+
+EncryptionMethod::GroupchatRequirements OmemoEncryption::groupchatRequirements() const
+{
+    return MembersOnly | NonAnonymous | MemberJids;
+}
 EncryptedSession              *OmemoEncryption::startSession(Capabilities caps, const EncryptionContext &context)
 {
-    if (!caps.testFlag(XmppStanza))
+    if (!caps.testFlag(XmppStanza) || (caps & capabilities()) != caps)
         return nullptr;
     return new OmemoEncryptedSession(this, context);
 }

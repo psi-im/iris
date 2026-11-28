@@ -90,14 +90,15 @@ void exerciseMuc(Endpoint &alice, Endpoint &bob)
 
         EncryptionContext send;
         send.recipients = { bob.jid.bare() };
-        send.options.insert(QStringLiteral("omemoProtocol"), QStringLiteral("omemo2"));
         auto *session = alice.client.encryptionManager()->startSession(OmemoEncryption::methodId(),
-                                                                       EncryptionMethod::XmppStanza, send);
+                                                                       EncryptionMethod::XmppStanza | EncryptionMethod::Groupchat, send);
         check(session != nullptr, "Cannot create OMEMO sender session");
         auto *job = session->encrypt(stanza);
         session->close();
         wait(job, alice, bob);
         check(job->success(), "MUC OMEMO 2 encryption failed");
+        check(job->metadata().details.value(QStringLiteral("omemoProtocol")).toString() == QStringLiteral("omemo2"),
+              "Groupchat encryption did not select OMEMO 2 automatically");
 
         QDomDocument incomingDoc;
         auto incoming = incomingDoc.importNode(job->stanza(), true).toElement();
@@ -260,7 +261,13 @@ int main(int argc, char **argv)
         auto setUp = wait(endpoint->omemo->setUp(), alice, bob);
         check(setUp->success() && endpoint->omemo->isReady(), "OMEMO setup failed");
     }
-    if (alice.omemo->supportedProtocols().testFlag(OmemoProtocol::Omemo2)) {
+    const bool modern = alice.omemo->supportedProtocols().testFlag(OmemoProtocol::Omemo2);
+    check(alice.omemo->capabilities().testFlag(EncryptionMethod::Groupchat) == modern,
+          "Groupchat capability must depend on OMEMO 2 support");
+    if (modern) {
+        check(alice.omemo->groupchatRequirements() == (EncryptionMethod::MembersOnly | EncryptionMethod::NonAnonymous
+                                                       | EncryptionMethod::MemberJids),
+              "Incorrect OMEMO groupchat requirements");
         exerciseHostOwnedIncomingSessions(alice, bob);
         exerciseMuc(alice, bob);
         exerciseMucSelfEcho(alice, bob);
