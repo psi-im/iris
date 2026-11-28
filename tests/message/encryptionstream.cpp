@@ -311,13 +311,16 @@ static void exercisePendingIncomingCancellation()
     }
 
     injectHistory(QStringLiteral("obsolete"), QStringLiteral("Alice"), QStringLiteral("2026-01-01T00:00:03Z"));
-    check(method.pending.size() == 5 && method.pending.last().job,
-          "Could not start a pending archive decryption before disconnect");
-    QPointer<EncryptionJob> obsolete = method.pending.last().job;
+    inject(QStringLiteral("obsolete-direct"));
+    check(method.pending.size() == 6 && method.pending.at(4).job && method.pending.at(5).job,
+          "Could not start pending archive and direct decryptions before disconnect");
+    QPointer<EncryptionJob> obsoleteArchive = method.pending.at(4).job;
+    QPointer<EncryptionJob> obsoleteDirect = method.pending.at(5).job;
     client.close();
     QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
-    check(obsolete.isNull() && delivered == 4 && failed.size() == 2 && diagnostics.size() == 2,
-          "Disconnect did not cancel the pending archive decryption job");
+    check(obsoleteArchive.isNull() && obsoleteDirect.isNull() && delivered == 4
+              && failed.size() == 2 && diagnostics.size() == 2,
+          "Disconnect did not cancel pending direct and archive decryption jobs");
 }
 
 static EncryptionJob *await(EncryptionJob *job)
