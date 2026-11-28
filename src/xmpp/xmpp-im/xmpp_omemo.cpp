@@ -2276,26 +2276,31 @@ public:
                         bool                                    skipUnusableBundles,
                         const std::function<void(bool, EncryptionJob::Error, QString, QList<QPair<QString, uint32_t>>,
                                                  QStringList)> &callback,
-                        QList<QPair<QString, uint32_t>> readyTargets = {}, QStringList skippedTargets = {})
+                        QList<QPair<QString, uint32_t>> readyTargets = {}, QStringList skippedTargets = {},
+                        QString trustError = {})
     {
         if (index >= targets.size()) {
-            callback(true, EncryptionJob::Error::None, {}, readyTargets, skippedTargets);
+            // Discover every pending identity before asking the host for a
+            // trust decision. No stanza may be sent with incomplete trust.
+            const bool trusted = trustError.isEmpty();
+            callback(trusted, trusted ? EncryptionJob::Error::None : EncryptionJob::Error::UntrustedIdentity,
+                     trustError, readyTargets, skippedTargets);
             return;
         }
         const auto target = targets.at(index);
         if (data.ownDevice && target.first == client->jid().bare() && target.second == data.ownDevice->id) {
-            ensureSessions(targets, protocol, index + 1, skipUnusableBundles, callback, readyTargets, skippedTargets);
+            ensureSessions(targets, protocol, index + 1, skipUnusableBundles, callback, readyTargets, skippedTargets, trustError);
             return;
         }
         if (protocol == OmemoProtocol::Omemo2 && ambiguousPins.contains(target)
             && hasSession(target.first, target.second, protocol)) {
             // Check the pin against the device's own bundle; without one, keep the session as it was.
             fetchBundle(target.first, target.second, protocol, false,
-                        [this, targets, protocol, index, skipUnusableBundles, callback, readyTargets, skippedTargets,
+                        [this, targets, protocol, index, skipUnusableBundles, callback, readyTargets, skippedTargets, trustError,
                          target](bool, EncryptionJob::Error, const QString &) {
                             ambiguousPins.remove(target);
                             ensureSessions(targets, protocol, index, skipUnusableBundles, callback, readyTargets,
-                                           skippedTargets);
+                                           skippedTargets, trustError);
                         });
             return;
         }
@@ -2306,27 +2311,34 @@ public:
             if (!wire.isEmpty() && identityAccepted(target.first, wire)) {
                 readyTargets.append(target);
                 ensureSessions(targets, protocol, index + 1, skipUnusableBundles, callback, readyTargets,
-                               skippedTargets);
+                               skippedTargets, trustError);
                 return;
             }
-            callback(
-                false, EncryptionJob::Error::UntrustedIdentity,
-                QStringLiteral("An existing %1 OMEMO session is not trusted by policy").arg(protocolName(protocol)),
-                readyTargets, skippedTargets);
+            if (trustError.isEmpty())
+                trustError = QStringLiteral("An existing %1 OMEMO session is not trusted by policy").arg(protocolName(protocol));
+            ensureSessions(targets, protocol, index + 1, skipUnusableBundles, callback, readyTargets, skippedTargets,
+                           trustError);
             return;
         }
         fetchBundle(
             target.first, target.second, protocol, true,
-            [this, targets, protocol, index, skipUnusableBundles, callback, readyTargets, skippedTargets,
+            [this, targets, protocol, index, skipUnusableBundles, callback, readyTargets, skippedTargets, trustError,
              target](bool ok, EncryptionJob::Error jobError, const QString &error) mutable {
                 if (!ok) {
+                    if (jobError == EncryptionJob::Error::UntrustedIdentity) {
+                        if (trustError.isEmpty())
+                            trustError = error;
+                        ensureSessions(targets, protocol, index + 1, skipUnusableBundles, callback, readyTargets,
+                                       skippedTargets, trustError);
+                        return;
+                    }
                     // A stale device id without a bundle cannot receive a new OMEMO session.  It is safe to omit
                     // it from this stanza as long as every logical remote recipient still has another target.
                     if (skipUnusableBundles && jobError == EncryptionJob::Error::ProtocolError) {
                         skippedTargets.append(
                             QStringLiteral("%1/%2: %3").arg(target.first, QString::number(target.second), error));
                         ensureSessions(targets, protocol, index + 1, skipUnusableBundles, callback, readyTargets,
-                                       skippedTargets);
+                                       skippedTargets, trustError);
                         return;
                     }
                     callback(false, jobError, error, readyTargets, skippedTargets);
@@ -2334,7 +2346,7 @@ public:
                 }
                 readyTargets.append(target);
                 ensureSessions(targets, protocol, index + 1, skipUnusableBundles, callback, readyTargets,
-                               skippedTargets);
+                               skippedTargets, trustError);
             });
     }
 

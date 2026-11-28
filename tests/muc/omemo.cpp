@@ -346,6 +346,47 @@ void exerciseMucSelfEcho(Endpoint &alice, Endpoint &bob)
     onStanza = {};
     qInfo("OMEMO 2 MUC self echo reconciliation passed");
 }
+// A first send to multiple unknown recipients must discover all identities
+// before the application asks for trust, rather than failing one at a time.
+void exerciseGroupchatTrustDiscovery()
+{
+    Endpoint sender(QStringLiteral("trust-sender"));
+    Endpoint first(QStringLiteral("trust-first"));
+    Endpoint second(QStringLiteral("trust-second"));
+    for (auto *endpoint : { &sender, &first, &second }) {
+        auto *job = wait(endpoint->omemo->setUp(), *endpoint, sender);
+        check(job->success(), "OMEMO setup for trust discovery failed");
+    }
+    sender.omemo->setNewIdentityTrustLevel(EncryptionTrustLevel::Undecided);
+    sender.omemo->setAcceptedSessionBuildingTrustLevels(EncryptionTrustLevel::ManuallyTrusted);
+    const Jid room(QStringLiteral("trust@conference.example.test"));
+    Message message(room);
+    message.setType(Message::Type::Groupchat);
+    message.setBody(QStringLiteral("Trust discovery"));
+    EncryptionContext context;
+    context.recipients = { first.jid.bare(), second.jid.bare() };
+    auto *session = sender.client.encryptionManager()->startSession(
+        OmemoEncryption::methodId(), EncryptionMethod::XmppStanza | EncryptionMethod::Groupchat, context);
+    check(session != nullptr, "Cannot create groupchat trust test session");
+    auto *job = wait(session->encrypt(message.toStanza(&sender.client.stream()).element()), sender, first);
+    check(!job->success() && job->error() == EncryptionJob::Error::UntrustedIdentity,
+          "Unknown recipients must prevent encryption");
+    for (const auto *recipient : { &first, &second }) {
+        bool discovered = false;
+        for (const auto &device : sender.omemo->devices(recipient->jid)) {
+            if (device.protocol != OmemoProtocol::Omemo2 || device.identityKey.isEmpty())
+                continue;
+            discovered = true;
+            check(device.trust == EncryptionTrustLevel::Undecided, "Discovery silently trusted a device");
+            check(sender.omemo->setTrustLevel(device.owner, device.identityKey, EncryptionTrustLevel::ManuallyTrusted),
+                  "Could not approve discovered identity");
+        }
+        check(discovered, "First encryption attempt did not discover every recipient identity");
+    }
+    job = wait(session->encrypt(message.toStanza(&sender.client.stream()).element()), sender, first);
+    check(job->success(), "Groupchat encryption failed after approving all discovered identities");
+    session->close();
+}
 } // namespace
 
 int main(int argc, char **argv)
@@ -369,6 +410,7 @@ int main(int argc, char **argv)
         exerciseHostOwnedIncomingSessions(alice, bob);
         exerciseMuc(alice, bob);
         exerciseMucSelfEcho(alice, bob);
+        exerciseGroupchatTrustDiscovery();
     } else {
         qInfo("OMEMO MUC tests skipped: OMEMO 2 unavailable");
     }
