@@ -3,6 +3,7 @@
 #include <iris/xmpp_client.h>
 #include <iris/xmpp_clientstream.h>
 #include <iris/xmpp_encryption.h>
+#include <iris/xmpp_message.h>
 
 #include <QCoreApplication>
 #include <QDebug>
