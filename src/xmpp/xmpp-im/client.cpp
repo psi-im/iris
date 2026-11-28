@@ -586,6 +586,33 @@ void Client::distribute(const QDomElement &x)
         const bool archiveReplay = groupchat && d->mucManager->acceptsMessage(occupant)
             && delay.attribute(QStringLiteral("from")) == room.bare()
             && QDateTime::fromString(delay.attribute(QStringLiteral("stamp")), Qt::ISODate).isValid();
+        // Deliver failed historical messages with their original identity,
+        // but never dispatch unauthenticated body, references or extensions.
+        const auto deliverFailure = [this, x, archiveReplay](const QString &methodId, EncryptionJob::Error error,
+                                                             const EncryptionMetadata &metadata) {
+            if (!archiveReplay || error == EncryptionJob::Error::Cancelled
+                || (methodId == QLatin1String("omemo")
+                    && metadata.details.value(QStringLiteral("signalError")).toInt() == -1001))
+                return;
+            Message envelope;
+            if (!envelope.fromStanza(Stanza::fromXml(x)) || !d->mucManager->acceptsMessage(envelope.from()))
+                return;
+            Message failed(envelope.to());
+            failed.setFrom(envelope.from());
+            failed.setType(Message::Type::Groupchat);
+            failed.setTimeStamp(envelope.timeStamp());
+            failed.setSpooled(true);
+            failed.setId(envelope.id());
+            failed.setOriginId(envelope.originId());
+            failed.setStanzaIds(envelope.stanzaIds());
+            failed.setOccupantId(envelope.occupantId());
+            failed.setProcessingHints(envelope.processingHints());
+            failed.setWasEncrypted(true);
+            failed.setEncryptionProtocol(methodId);
+            failed.setDecryptionFailure(error == EncryptionJob::Error::NoRecipients
+                ? Message::DecryptionFailure::NotForThisDevice : Message::DecryptionFailure::Failed);
+            emit messageReceived(failed);
+        };
         // Reconcile live reflected messages only, not historical deliveries.
         if (!archiveReplay && method->id() == QLatin1String("omemo") && groupchat) {
             auto echo = d->mucManager->resolveEncryptedEcho(x, method->id());
@@ -614,9 +641,13 @@ void Client::distribute(const QDomElement &x)
                 real = d->mucManager->realJid(occupant);
             }
             if (!real.isValid() || real.node().isEmpty()) {
+                EncryptionMetadata metadata;
+                if (archiveReplay)
+                    metadata.details.insert(QStringLiteral("archiveReplay"), true);
                 emit stanzaDecryptionFailed(method->id(), occupant, EncryptionJob::Error::AuthenticationFailed,
                                            QStringLiteral("No authenticated real JID for MUC sender %1")
-                                               .arg(occupant.full()), {});
+                                               .arg(occupant.full()), metadata);
+                deliverFailure(method->id(), EncryptionJob::Error::AuthenticationFailed, metadata);
                 return;
             }
             context.options.insert(QStringLiteral("mucRealSender"), real.bare());
@@ -633,7 +664,7 @@ void Client::distribute(const QDomElement &x)
         if (!job)
             job = missingEncryptionSession(d->encryptionManager, method->id());
         const QString methodId = method->id();
-        auto          finish   = [this, job, methodId, peer, archiveReplay]() {
+        auto          finish   = [this, job, methodId, peer, archiveReplay, deliverFailure]() {
             d->pendingIncomingDecryptionJobs.remove(job);
             auto metadata = job->metadata();
             if (archiveReplay)
@@ -643,6 +674,7 @@ void Client::distribute(const QDomElement &x)
             } else {
                 debug(QStringLiteral("Client: %1 stanza decryption failed: %2").arg(methodId, job->errorString()));
                 emit stanzaDecryptionFailed(methodId, peer, job->error(), job->errorString(), metadata);
+                deliverFailure(methodId, job->error(), metadata);
             }
             job->deleteLater();
         };
