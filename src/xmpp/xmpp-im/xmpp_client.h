@@ -219,8 +219,12 @@ signals:
     void xmlIncoming(const QString &);
     void xmlOutgoing(const QString &);
     void stanzaElementOutgoing(QDomElement &);
+    // The original received envelope and operation context are available to
+    // the host for error handling or persistent history, never as plaintext.
+    // Carbon failures retain the validated outer forwarding envelope.
     void stanzaDecryptionFailed(const QString &methodId, const Jid &peer, EncryptionJob::Error errorCode,
-                                const QString &error, const EncryptionMetadata &metadata);
+                                const QString &error, const EncryptionMetadata &metadata,
+                                const QDomElement &stanza, const EncryptionContext &context);
     void groupChatJoined(const Jid &);
     void groupChatLeft(const Jid &);
     void groupChatPresence(const Jid &, const Status &);

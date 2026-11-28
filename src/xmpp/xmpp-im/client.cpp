@@ -602,7 +602,7 @@ void Client::distribute(const QDomElement &x)
             if (!real.isValid() || real.node().isEmpty()) {
                 emit stanzaDecryptionFailed(method->id(), occupant, EncryptionJob::Error::AuthenticationFailed,
                                            QStringLiteral("No authenticated real JID for MUC sender %1")
-                                               .arg(occupant.full()), {});
+                                               .arg(occupant.full()), {}, x, context);
                 return;
             }
             context.options.insert(QStringLiteral("mucRealSender"), real.bare());
@@ -617,13 +617,17 @@ void Client::distribute(const QDomElement &x)
         if (!job)
             job = missingEncryptionSession(d->encryptionManager, method->id());
         const QString methodId = method->id();
-        auto          finish   = [this, job, methodId, peer]() {
+        // Keep the input document alive until asynchronous completion on Qt5
+        // as well as Qt6. No additional copy of the encrypted payload is needed.
+        const auto originalDocument = x.ownerDocument();
+        auto finish = [this, job, methodId, peer, x, context, originalDocument]() {
+            Q_UNUSED(originalDocument);
             d->pendingIncomingDecryptionJobs.remove(job);
             if (job->success()) {
                 distributeDecrypted(job->stanza(), &job->metadata());
             } else {
                 debug(QStringLiteral("Client: %1 stanza decryption failed: %2").arg(methodId, job->errorString()));
-                emit stanzaDecryptionFailed(methodId, peer, job->error(), job->errorString(), job->metadata());
+                emit stanzaDecryptionFailed(methodId, peer, job->error(), job->errorString(), job->metadata(), x, context);
             }
             job->deleteLater();
         };
@@ -668,12 +672,15 @@ bool Client::distributeEncryptedCarbon(const QDomElement &x)
         job = missingEncryptionSession(d->encryptionManager, method->id());
     const QString     methodId = method->id();
     const QDomElement original = x;
-    auto              finish   = [this, job, methodId, original, peer]() {
+    const auto originalDocument = original.ownerDocument();
+    auto finish = [this, job, methodId, original, peer, context, originalDocument]() {
+        Q_UNUSED(originalDocument);
         d->pendingIncomingDecryptionJobs.remove(job);
         if (!job->success()) {
             debug(
                 QStringLiteral("Client: %1 forwarded carbon decryption failed: %2").arg(methodId, job->errorString()));
-            emit stanzaDecryptionFailed(methodId, peer, job->error(), job->errorString(), job->metadata());
+            emit stanzaDecryptionFailed(methodId, peer, job->error(), job->errorString(), job->metadata(), original,
+                                        context);
 
             // A carbon may carry a human-readable fallback body. Preserve it
             // instead of silently discarding the whole forwarded message, but

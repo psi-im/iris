@@ -189,13 +189,29 @@ static void exercisePendingIncomingCancellation()
         return job;
     });
     int delivered = 0;
+    int failures = 0;
+    QString failedId;
     QObject::connect(&client, &Client::messageReceived, &client, [&](const Message &) { ++delivered; });
+    QObject::connect(&client, &Client::stanzaDecryptionFailed, &client,
+                     [&](const QString &methodId, const Jid &peer, EncryptionJob::Error error,
+                         const QString &, const EncryptionMetadata &, const QDomElement &stanza,
+                         const EncryptionContext &) {
+        check(methodId == method.id() && peer.bare() == QStringLiteral("alice@example.test")
+                  && error == EncryptionJob::Error::NoSession,
+              "Wrong decryption failure identity or reason");
+        check(stanza.firstChildElement(QStringLiteral("encrypted")).namespaceURI()
+                  == QStringLiteral("urn:psi:test:deferred-incoming"),
+              "Original ciphertext missing from decryption failure");
+        failedId = stanza.attribute(QStringLiteral("id"));
+        ++failures;
+    });
 
     const auto inject = [&](const QString &body) {
         QDomDocument doc;
         auto         message = doc.createElementNS(QStringLiteral("jabber:client"), QStringLiteral("message"));
         doc.appendChild(message);
         message.setAttribute(QStringLiteral("type"), QStringLiteral("chat"));
+        message.setAttribute(QStringLiteral("id"), body);
         message.setAttribute(QStringLiteral("from"), QStringLiteral("alice@example.test/desktop"));
         message.setAttribute(QStringLiteral("to"), QStringLiteral("bob@example.test/device"));
         auto encrypted
@@ -217,13 +233,22 @@ static void exercisePendingIncomingCancellation()
     }
     check(delivered == 2, "Both incoming decrypt operations must deliver");
 
+    // The input document has gone out of scope before the job fails.
+    // The host must receive the correct original encrypted stanza, not an
+    // empty job result or a later message.
+    inject(QStringLiteral("failed"));
     inject(QStringLiteral("obsolete"));
-    check(method.pending.size() == 3 && method.pending.last().job,
+    check(method.pending.size() == 4 && method.pending.at(2).job, "Missing failed decryption job");
+    method.pending.at(2).job->fail(EncryptionJob::Error::NoSession, QStringLiteral("Missing ratchet"));
+    check(failures == 1 && failedId == QStringLiteral("failed") && delivered == 2,
+          "Decryption failure lost the original message or delivered it as plaintext");
+    check(method.pending.size() == 4 && method.pending.last().job,
           "Could not start a pending decryption before disconnect");
     QPointer<EncryptionJob> obsolete = method.pending.last().job;
     client.close();
     QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
-    check(obsolete.isNull() && delivered == 2, "Disconnect did not cancel the pending decryption job");
+    check(obsolete.isNull() && delivered == 2 && failures == 1,
+          "Disconnect did not cancel the pending decryption job");
 }
 
 static EncryptionJob *await(EncryptionJob *job)
