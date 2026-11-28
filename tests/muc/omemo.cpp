@@ -190,6 +190,33 @@ void exerciseMuc(Endpoint &alice, Endpoint &bob)
         pump(alice, bob);
     check(receivedHistory, "Room-delayed OMEMO history did not use the historical sender/replay context");
 
+    // A historical message not encrypted for this device must retain its
+    // sender, time and ID, but must not expose an unauthenticated fallback body.
+    auto missingKeyDoc = encryptMessage();
+    auto missingKey = missingKeyDoc.documentElement();
+    missingKey.setAttribute(QStringLiteral("id"), QStringLiteral("unavailable-history"));
+    missingKey.appendChild(missingKeyDoc.importNode(historyUser, true));
+    missingKey.appendChild(missingKeyDoc.importNode(delay, true));
+    auto header = missingKey.firstChildElement(QStringLiteral("encrypted"))
+                          .firstChildElement(QStringLiteral("header"));
+    for (auto keys = header.firstChildElement(QStringLiteral("keys")); !keys.isNull();
+         keys = header.firstChildElement(QStringLiteral("keys")))
+        header.removeChild(keys);
+    auto fallback = missingKeyDoc.createElement(QStringLiteral("body"));
+    fallback.appendChild(missingKeyDoc.createTextNode(QStringLiteral("untrusted fallback")));
+    missingKey.appendChild(fallback);
+    bool receivedFailure = false;
+    QObject::connect(&bob.client, &Client::messageReceived, &observation, [&](const Message &message) {
+        if (message.id() == QStringLiteral("unavailable-history"))
+            receivedFailure = message.from() == occupant && message.spooled() && message.wasEncrypted()
+                && message.body().isEmpty()
+                && message.decryptionFailure() == Message::DecryptionFailure::NotForThisDevice;
+    });
+    bob.stream.inject(missingKey);
+    for (int i = 0; i < 30 && !receivedFailure; ++i)
+        pump(alice, bob);
+    check(receivedFailure, "Failed MUC history was not delivered with a safe local failure status");
+
     qInfo("OMEMO 2 authenticated MUC sender, room binding and join history passed");
 }
 
