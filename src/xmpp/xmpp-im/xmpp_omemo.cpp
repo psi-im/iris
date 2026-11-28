@@ -1496,7 +1496,13 @@ public:
             }
         }
         data.devices.insert(bare, next);
-        fetchedDeviceLists.insert(fetchedListKey(bare, protocol));
+        // An empty or missing PEP list may be published later without a
+        // notification reaching us (e.g. a MUC member outside our roster).
+        // Re-query on the next operation instead of caching absence forever.
+        if (activeIds.isEmpty())
+            fetchedDeviceLists.remove(fetchedListKey(bare, protocol));
+        else
+            fetchedDeviceLists.insert(fetchedListKey(bare, protocol));
         for (const auto id : changedIds) {
             if (fullyRemovedIds.contains(id))
                 emit q->deviceRemoved(Jid(bare), id);
