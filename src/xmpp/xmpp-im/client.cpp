@@ -588,8 +588,11 @@ void Client::distribute(const QDomElement &x)
             && QDateTime::fromString(delay.attribute(QStringLiteral("stamp")), Qt::ISODate).isValid();
         // Deliver failed historical messages with their original identity,
         // but never dispatch unauthenticated body, references or extensions.
-        const auto deliverFailure = [this, x, archiveReplay](const QString &methodId, EncryptionJob::Error error,
-                                                             const EncryptionMetadata &metadata) {
+        // Retain the owner document until the asynchronous job completes.
+        const auto deliverFailure = [this, x, archiveReplay, document = x.ownerDocument()](
+                                        const QString &methodId, EncryptionJob::Error error,
+                                        const EncryptionMetadata &metadata) {
+            Q_UNUSED(document);
             if (!archiveReplay || error == EncryptionJob::Error::Cancelled
                 || (methodId == QLatin1String("omemo")
                     && metadata.details.value(QStringLiteral("signalError")).toInt() == -1001))
