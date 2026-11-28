@@ -140,7 +140,57 @@ void exerciseMuc(Endpoint &alice, Endpoint &bob)
     check(!roomAttack->success() && roomAttack->error() == EncryptionJob::Error::AuthenticationFailed,
           "MUC SCE <to/> did not bind ciphertext to the original room");
 
-    qInfo("OMEMO 2 authenticated MUC sender and room binding passed");
+    // The room can return history from a sender who is no longer present.
+    // Use the historical muc#user identity, not the current nick mapping.
+    check(bob.client.groupChatJoin(room.domain(), room.node(), QStringLiteral("Bob")), "Could not join test MUC");
+    QDomDocument presenceDoc;
+    auto presence = presenceDoc.createElementNS(QStringLiteral("jabber:client"), QStringLiteral("presence"));
+    presenceDoc.appendChild(presence);
+    presence.setAttribute(QStringLiteral("from"), room.bare() + QStringLiteral("/Bob"));
+    auto presenceUser = presenceDoc.createElementNS(QStringLiteral("http://jabber.org/protocol/muc#user"),
+                                                     QStringLiteral("x"));
+    auto selfItem = presenceDoc.createElementNS(QStringLiteral("http://jabber.org/protocol/muc#user"),
+                                                 QStringLiteral("item"));
+    selfItem.setAttribute(QStringLiteral("jid"), bob.jid.full());
+    selfItem.setAttribute(QStringLiteral("affiliation"), QStringLiteral("member"));
+    selfItem.setAttribute(QStringLiteral("role"), QStringLiteral("participant"));
+    presenceUser.appendChild(selfItem);
+    auto selfStatus = presenceDoc.createElementNS(QStringLiteral("http://jabber.org/protocol/muc#user"),
+                                                   QStringLiteral("status"));
+    selfStatus.setAttribute(QStringLiteral("code"), QStringLiteral("110"));
+    presenceUser.appendChild(selfStatus);
+    presence.appendChild(presenceUser);
+    bob.stream.inject(presence);
+
+    auto delayedDoc = encryptMessage();
+    auto delayed = delayedDoc.documentElement();
+    auto historyUser = delayedDoc.createElementNS(QStringLiteral("http://jabber.org/protocol/muc#user"),
+                                                   QStringLiteral("x"));
+    auto historyItem = delayedDoc.createElementNS(QStringLiteral("http://jabber.org/protocol/muc#user"),
+                                                   QStringLiteral("item"));
+    historyItem.setAttribute(QStringLiteral("jid"), alice.jid.bare());
+    historyUser.appendChild(historyItem);
+    delayed.appendChild(historyUser);
+    auto delay = delayedDoc.createElementNS(QStringLiteral("urn:xmpp:delay"), QStringLiteral("delay"));
+    delay.setAttribute(QStringLiteral("from"), room.bare());
+    delay.setAttribute(QStringLiteral("stamp"), QStringLiteral("2026-01-01T00:00:00Z"));
+    delayed.appendChild(delay);
+
+    QObject observation;
+    bool receivedHistory = false;
+    QObject::connect(&bob.client, &Client::messageReceived, &observation, [&](const Message &message) {
+        const auto *metadata = bob.client.currentEncryptionMetadata();
+        if (message.type() == Message::Type::Groupchat && message.from() == occupant) {
+            receivedHistory = message.wasEncrypted() && message.body() == QStringLiteral("Private MUC message")
+                && metadata && metadata->details.value(QStringLiteral("archiveReplay")).toBool();
+        }
+    });
+    bob.stream.inject(delayed);
+    for (int i = 0; i < 30 && !receivedHistory; ++i)
+        pump(alice, bob);
+    check(receivedHistory, "Room-delayed OMEMO history did not use the historical sender/replay context");
+
+    qInfo("OMEMO 2 authenticated MUC sender, room binding and join history passed");
 }
 
 void exerciseMucSelfEcho(Endpoint &alice, Endpoint &bob)
