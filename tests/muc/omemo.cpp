@@ -169,11 +169,13 @@ void exerciseMucSelfEcho(Endpoint &alice, Endpoint &bob)
                      [&](const QString &, const Jid &, EncryptionJob::Error, const QString &,
                          const EncryptionMetadata &) { ++decryptionFailures; });
     QString receivedBody;
+    QString receivedArchiveId;
     bool wasEncrypted = false;
     QObject::connect(&alice.client, &Client::messageReceived, &alice.client, [&](const Message &m) {
         if (m.type() == Message::Type::Groupchat) {
             ++ownMessages;
             receivedBody = m.body();
+            receivedArchiveId = m.stanzaId(room).id;
             wasEncrypted = m.wasEncrypted();
         }
     });
@@ -198,12 +200,17 @@ void exerciseMucSelfEcho(Endpoint &alice, Endpoint &bob)
     // stream queue. The onStanza hook runs when pump() drains that queue.
     pump(alice, bob);
     check(!captured.documentElement().isNull(), "The encrypted groupchat stanza was not emitted");
+    check(ownMessages == 0, "Local send completed before the room confirmed delivery");
 
     QDomDocument echoed;
     auto stanza = echoed.importNode(captured.documentElement(), true).toElement();
     echoed.appendChild(stanza);
     stanza.setAttribute(QStringLiteral("from"), selfOccupant);
     stanza.setAttribute(QStringLiteral("to"), alice.jid.full());
+    auto archiveId = echoed.createElementNS(QStringLiteral("urn:xmpp:sid:0"), QStringLiteral("stanza-id"));
+    archiveId.setAttribute(QStringLiteral("by"), room.bare());
+    archiveId.setAttribute(QStringLiteral("id"), QStringLiteral("room-archive-id"));
+    stanza.appendChild(archiveId);
 
     // A different occupant with the same ID must not consume the echo.
     QDomDocument foreign;
@@ -230,8 +237,9 @@ void exerciseMucSelfEcho(Endpoint &alice, Endpoint &bob)
     payload.appendChild(echoed.createTextNode(QStringLiteral("changed")));
     alice.stream.inject(stanza);
     check(ownMessages == 1 && receivedBody == QStringLiteral("A protected groupchat message") && wasEncrypted
+              && receivedArchiveId == QStringLiteral("room-archive-id")
               && decryptionFailures == failuresBeforeEcho,
-          "The outgoing OMEMO MUC echo was not delivered locally as an encrypted message");
+          "The outgoing OMEMO MUC echo was not delivered with the room's archive ID");
 
     alice.stream.inject(stanza);
     check(ownMessages == 1 && decryptionFailures == failuresBeforeEcho,
